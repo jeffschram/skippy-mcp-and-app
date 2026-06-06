@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "pnpm --filter @skippy/shared build && pnpm --filter @skippy/mcp-server build && next build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --passWithNoTests",
     "lint": "tsc -p tsconfig.json --noEmit"
