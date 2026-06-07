@@ -116,6 +116,12 @@ export const ensureViewer = mutationGeneric({
         llmProviderMode: "none",
         linkEnrichmentEnabled: false,
         notificationsEnabled: false,
+        notificationPreferences: {
+          urgentEnabled: true,
+          pendingActionEnabled: true,
+          focusSummaryEnabled: false,
+          dailyDigestEnabled: false,
+        },
         embeddingProviderMode: "none",
         createdAt: now,
         updatedAt: now,

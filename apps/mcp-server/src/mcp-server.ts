@@ -21,6 +21,15 @@ const relationshipTypeValues = [
   "spawned_from",
 ] as const;
 
+const entityReviewTypeValues = [
+  "general",
+  "stale_check",
+  "priority_update",
+  "blocker_check",
+  "follow_up",
+  "status_check",
+] as const;
+
 const skippyInstructions = [
   "Skippy is a second-brain MCP for submitting useful structured knowledge into a human-reviewed Convex brain.",
   "When a user first connects or asks what Skippy can do, offer the skippy_intro prompt/message if the harness supports MCP prompts.",
@@ -141,14 +150,19 @@ function reviewUrl(path: string) {
 
 function candidateConfirmation(input: CandidateObjectInput, result: unknown) {
   const resultRecord = objectResult(result);
+  const duplicate = resultRecord.duplicate === true;
   return {
-    status: "submitted_for_review",
+    status: resultRecord.status ?? (duplicate ? "duplicate_pending" : "submitted_for_review"),
     entityType: input.candidateEntityType,
     title: payloadTitle(input.candidateEntityType, input.candidatePayload),
     triageItemId: resultRecord.triageItemId,
     sourceRefIds: resultRecord.sourceRefIds,
+    duplicate,
+    candidateFingerprint: resultRecord.candidateFingerprint,
     reviewUrl: reviewUrl("/triage"),
-    nextAction: "Review, approve, correct, merge, reclassify, or reject this candidate in Skippy.",
+    nextAction: duplicate
+      ? "This candidate already has a pending review item in Skippy."
+      : "Review, approve, correct, merge, reclassify, or reject this candidate in Skippy.",
   };
 }
 
@@ -175,6 +189,57 @@ function taskDoneConfirmation(result: unknown) {
     taskId: resultRecord.taskId,
     pendingActionId: resultRecord.pendingActionId,
     reviewUrl: reviewUrl("/projects"),
+  };
+}
+
+function taskInProgressConfirmation(result: unknown) {
+  const resultRecord = objectResult(result);
+  return {
+    status: "in_progress",
+    entityType: "task",
+    taskId: resultRecord.taskId,
+    startedAt: resultRecord.startedAt,
+    startedBy: resultRecord.startedBy,
+    reviewUrl: reviewUrl("/projects"),
+    nextAction: "Skippy now shows this task as in progress while the harness works on it.",
+  };
+}
+
+function pendingActionsConfirmation(input: { status?: string }, result: unknown) {
+  const pendingActions = Array.isArray(result) ? result : [];
+  return {
+    status: "listed",
+    entityType: "pending_action",
+    filterStatus: input.status,
+    count: pendingActions.length,
+    pendingActions,
+    reviewUrl: reviewUrl("/actions"),
+  };
+}
+
+function pendingActionResultConfirmation(
+  input: {
+    pendingActionId: string;
+    status: "sent" | "failed" | "completed";
+    executionProvider?: string;
+    externalMessageId?: string;
+    error?: string;
+  },
+  result: unknown,
+) {
+  const resultRecord = objectResult(result);
+  return {
+    status: input.status,
+    entityType: "pending_action",
+    pendingActionId: resultRecord.pendingActionId ?? input.pendingActionId,
+    executionProvider: input.executionProvider,
+    externalMessageId: input.externalMessageId,
+    error: input.error,
+    reviewUrl: reviewUrl("/actions"),
+    nextAction:
+      input.status === "failed"
+        ? "Review the failure in Skippy before retrying or taking another external action."
+        : "Execution result recorded in Skippy.",
   };
 }
 
@@ -322,6 +387,27 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     async () => toolResult(await tools.summarizeFocus()),
+  );
+
+  server.registerTool(
+    "refresh_focus_summary",
+    {
+      title: "Refresh focus summary",
+      description:
+        "Generate and store a fresh Skippy focus summary from accepted entities using the configured internal AI provider and embedding ranking. Use when the user asks what to focus on now or wants the dashboard refreshed.",
+      annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      inputSchema: z.object({
+        generatedAt: z.number().optional().describe("Epoch milliseconds to record as the generation time. Defaults to now."),
+        validUntil: z.number().optional().describe("Optional epoch milliseconds after which this summary should be considered stale."),
+        policyVersion: z.string().optional().describe("Optional policy/ranking version. Defaults to skippy-focus-summary-v1."),
+      }),
+    },
+    async (args) =>
+      toolResult(
+        await tools.refreshFocusSummary(
+          stripUndefined(args) as Parameters<typeof tools.refreshFocusSummary>[0],
+        ),
+      ),
   );
 
   server.registerTool(
@@ -509,8 +595,67 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
         status: z.string().optional().describe("Optional status filter such as pending, approved, rejected, sent, failed, or completed."),
       }),
     },
+    async (args) => {
+      const input = stripUndefined(args) as { status?: string };
+      return toolResult(pendingActionsConfirmation(input, await tools.listPendingActions(input)));
+    },
+  );
+
+  server.registerTool(
+    "record_entity_review",
+    {
+      title: "Record accepted entity review",
+      description:
+        "Record a review of an accepted Skippy entity during an existing-knowledge review run. Use for stale checks, changed priority, blockers, follow-ups, or status review. This updates safe fields such as task/project priority and valid status values, attaches source refs as evidence, and records an audit activity.",
+      annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: true },
+      inputSchema: z.object({
+        entityRef: entityRefSchema.describe("Accepted Skippy entity to review."),
+        reviewType: z.enum(entityReviewTypeValues).describe("Kind of review performed."),
+        reviewSummary: z.string().describe("Concise audit summary of what changed or what was checked."),
+        reviewedBy: z.string().optional().describe("Harness/user identifier for audit logging."),
+        status: z.string().optional().describe("Optional new status. Applied only when valid for this entity type."),
+        confidence: z.number().min(0).max(1).optional().describe("Optional confidence for this reviewed entity."),
+        priorityScore: z.number().min(0).max(1).optional().describe("Optional task/project priority score."),
+        urgencyScore: z.number().min(0).max(1).optional().describe("Optional task/project urgency score."),
+        importanceScore: z.number().min(0).max(1).optional().describe("Optional task/project importance score."),
+        priorityReason: z.string().optional().describe("Short reason for priority/urgency changes."),
+        priorityComputedAt: z.number().optional().describe("Epoch milliseconds when priority was computed."),
+        priorityPolicyVersion: z.string().optional().describe("Optional review/ranking policy version."),
+        sourceRefs: z.array(sourceRefSchema).optional().describe("Evidence source refs discovered during the review."),
+        sourceRefIds: z.array(z.string()).optional().describe("Existing source ref IDs to attach as evidence."),
+      }),
+    },
     async (args) =>
-      toolResult(await tools.listPendingActions(stripUndefined(args) as { status?: string })),
+      toolResult(
+        await tools.recordEntityReview(
+          stripUndefined(args) as Parameters<typeof tools.recordEntityReview>[0],
+        ),
+      ),
+  );
+
+  server.registerTool(
+    "mark_task_in_progress",
+    {
+      title: "Mark task in progress",
+      description:
+        "Mark an accepted Skippy task as in progress when a harness starts working on it. Use this before doing meaningful work on a task so the project board reflects active work.",
+      annotations: { destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: z.object({
+        taskId: z.string().describe("Accepted task entity ID."),
+        startedBy: z.string().optional().describe("Harness/user identifier that started work."),
+      }),
+    },
+    async (args) =>
+      toolResult(
+        taskInProgressConfirmation(
+          await tools.markTaskInProgress(
+            stripUndefined(args) as {
+              taskId: string;
+              startedBy?: string;
+            },
+          ),
+        ),
+      ),
   );
 
   server.registerTool(
@@ -522,7 +667,11 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
       annotations: { destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: z.object({
         taskId: z.string().describe("Accepted task entity ID."),
-        completedBy: z.string().optional().describe("Who completed it; usually user, harness, or system name."),
+        completedBy: z
+          .string()
+          .optional()
+          .describe("Optional harness/user label for chat context. This is not persisted as a Convex user ID."),
+        completedByUserId: z.string().optional().describe("Optional Convex user ID to store as the completion actor."),
         externalReminderSourceRefId: z
           .string()
           .optional()
@@ -536,6 +685,7 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
             stripUndefined(args) as {
               taskId: string;
               completedBy?: string;
+              completedByUserId?: string;
               externalReminderSourceRefId?: string;
             },
           ),
@@ -558,18 +708,16 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
         error: z.string().optional().describe("Failure summary when status is failed."),
       }),
     },
-    async (args) =>
-      toolResult(
-        await tools.recordPendingActionResult(
-          stripUndefined(args) as {
-            pendingActionId: string;
-            status: "sent" | "failed" | "completed";
-            executionProvider?: string;
-            externalMessageId?: string;
-            error?: string;
-          },
-        ),
-      ),
+    async (args) => {
+      const input = stripUndefined(args) as {
+        pendingActionId: string;
+        status: "sent" | "failed" | "completed";
+        executionProvider?: string;
+        externalMessageId?: string;
+        error?: string;
+      };
+      return toolResult(pendingActionResultConfirmation(input, await tools.recordPendingActionResult(input)));
+    },
   );
 
   server.registerTool(
@@ -606,6 +754,29 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
             objectsUpdated?: number;
             errors?: string[];
             metadata?: unknown;
+          },
+        ),
+      ),
+  );
+
+  server.registerTool(
+    "dispatch_notifications",
+    {
+      title: "Dispatch notifications",
+      description:
+        "Build and send approval-gated browser push notifications for urgent tasks and pending actions. Use dryRun first to preview candidates without sending.",
+      annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: true },
+      inputSchema: z.object({
+        dryRun: z.boolean().optional().describe("When true, return notification candidates without sending web push messages."),
+        limit: z.number().min(1).max(25).optional().describe("Maximum notification candidates to consider."),
+      }),
+    },
+    async (args) =>
+      toolResult(
+        await tools.dispatchNotifications(
+          stripUndefined(args) as {
+            dryRun?: boolean;
+            limit?: number;
           },
         ),
       ),

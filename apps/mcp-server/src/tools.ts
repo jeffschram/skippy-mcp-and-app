@@ -1,4 +1,11 @@
 import {
+  DEFAULT_OPENAI_EMBEDDING_MODEL,
+  type AiProviderConfig,
+  type SynthesisContextItem,
+  createEmbeddingClient,
+  createLlmClient,
+} from "@skippy/ai";
+import {
   type CandidateObjectInput,
   type EntityRef,
   type EntityType,
@@ -8,6 +15,47 @@ import {
   type SourceRefInput,
   normalizeCandidateObject,
 } from "@skippy/shared";
+import webPush from "web-push";
+
+type AiContextRecord = {
+  config?: {
+    llmProviderMode?: AiProviderConfig["mode"];
+    routineModel?: string;
+    synthesisModel?: string;
+    embeddingProviderMode?: string;
+    embeddingModel?: string;
+  } | null;
+  focusSummary?: FocusSummary | null;
+  projects?: Array<Record<string, any>>;
+  tasks?: Array<Record<string, any>>;
+  people?: Array<Record<string, any>>;
+  companies?: Array<Record<string, any>>;
+  links?: Array<Record<string, any>>;
+  notes?: Array<Record<string, any>>;
+  embeddings?: EntityEmbeddingRecord[];
+};
+
+type NotificationDispatchContext = {
+  config?: {
+    notificationsEnabled?: boolean;
+    notificationPreferences?: Record<string, any>;
+  } | null;
+  pushSubscriptions?: Array<Record<string, any>>;
+  tasks?: Array<Record<string, any>>;
+  pendingActions?: Array<Record<string, any>>;
+  recentDeliveries?: Array<Record<string, any>>;
+};
+
+type EntityEmbeddingRecord = {
+  _id?: string;
+  entityRef: EntityRef;
+  canonicalText: string;
+  textHash: string;
+  embedding: number[];
+  embeddingProvider: string;
+  embeddingModel: string;
+  embeddingVersion?: string;
+};
 
 export type SkippyClient = {
   submitCandidateObject(brainInstanceId: string, input: CandidateObjectInput): Promise<unknown>;
@@ -36,12 +84,30 @@ export type SkippyClient = {
   addSourceRef(brainInstanceId: string, sourceRef: SourceRefInput): Promise<unknown>;
   linkEntities(brainInstanceId: string, relationship: RelationshipInput): Promise<unknown>;
   getLatestFocusSummary(brainInstanceId: string): Promise<FocusSummary | null>;
+  getAiContext(brainInstanceId: string): Promise<unknown>;
+  upsertEntityEmbedding(
+    brainInstanceId: string,
+    embedding: {
+      entityRef: EntityRef;
+      canonicalText: string;
+      textHash: string;
+      embedding: number[];
+      embeddingProvider: string;
+      embeddingModel: string;
+      embeddingVersion?: string;
+    },
+  ): Promise<unknown>;
   upsertFocusSummary(brainInstanceId: string, summary: FocusSummary): Promise<unknown>;
   listPendingActions(brainInstanceId: string, status?: PendingActionStatus | string): Promise<unknown>;
+  markTaskInProgress(
+    brainInstanceId: string,
+    taskId: string,
+    startedBy?: string,
+  ): Promise<unknown>;
   markTaskDone(
     brainInstanceId: string,
     taskId: string,
-    completedBy?: string,
+    completedByUserId?: string,
     externalReminderSourceRefId?: string,
   ): Promise<unknown>;
   recordPendingActionResult(
@@ -53,6 +119,7 @@ export type SkippyClient = {
       error?: string;
     },
   ): Promise<unknown>;
+  recordEntityReview(brainInstanceId: string, review: EntityReviewInput): Promise<unknown>;
   recordIngestionRun(
     brainInstanceId: string,
     run: {
@@ -68,9 +135,314 @@ export type SkippyClient = {
       metadata?: unknown;
     },
   ): Promise<unknown>;
+  getNotificationDispatchContext(brainInstanceId: string): Promise<unknown>;
+  recordNotificationDelivery(
+    brainInstanceId: string,
+    delivery: {
+      pushSubscriptionId?: string;
+      dedupeKey: string;
+      notificationType: string;
+      title: string;
+      body: string;
+      url?: string;
+      status: "sent" | "failed" | "skipped";
+      error?: string;
+    },
+  ): Promise<unknown>;
 };
 
 export type SkippyToolHandlers = ReturnType<typeof createSkippyToolHandlers>;
+
+type FocusSummaryRefreshInput = {
+  generatedAt?: number;
+  validUntil?: number;
+  policyVersion?: string;
+};
+
+type EntityReviewInput = {
+  entityRef: EntityRef;
+  reviewType: "general" | "stale_check" | "priority_update" | "blocker_check" | "follow_up" | "status_check";
+  reviewSummary: string;
+  reviewedBy?: string;
+  status?: string;
+  confidence?: number;
+  priorityScore?: number;
+  urgencyScore?: number;
+  importanceScore?: number;
+  priorityReason?: string;
+  priorityComputedAt?: number;
+  priorityPolicyVersion?: string;
+  sourceRefIds?: string[];
+  sourceRefs?: SourceRefInput[];
+};
+
+type NotificationCandidate = {
+  dedupeKey: string;
+  notificationType: string;
+  title: string;
+  body: string;
+  url: string;
+};
+
+function itemSummary(item: Record<string, any>) {
+  return item.summary ?? item.description ?? item.priorityReason ?? item.body ?? item.notes ?? item.relationshipContext;
+}
+
+function contextItemsFromEntityList(
+  entityType: EntityType,
+  items: Array<Record<string, any>> | undefined,
+): SynthesisContextItem[] {
+  return (items ?? []).map((item) => ({
+    entityRef: { entityType, entityId: item._id },
+    title: item.title ?? item.name ?? item.url ?? item.body ?? "Untitled",
+    summary: itemSummary(item),
+    reason: item.priorityReason ?? item.reviewReason ?? item.status,
+  }));
+}
+
+function synthesisItems(context: AiContextRecord): SynthesisContextItem[] {
+  const focusItems =
+    context.focusSummary?.topItems?.map((item) => ({
+      entityRef: item.entityRef,
+      title: `${item.entityRef.entityType}:${item.entityRef.entityId}`,
+      summary: item.reason,
+      reason: "Latest focus summary item",
+    })) ?? [];
+
+  return [
+    ...focusItems,
+    ...contextItemsFromEntityList("project", context.projects),
+    ...contextItemsFromEntityList("task", context.tasks),
+    ...contextItemsFromEntityList("person", context.people),
+    ...contextItemsFromEntityList("company", context.companies),
+    ...contextItemsFromEntityList("link", context.links),
+    ...contextItemsFromEntityList("note", context.notes),
+  ].slice(0, 80);
+}
+
+function textForEmbedding(item: SynthesisContextItem) {
+  return [item.title, item.summary, item.reason, item.entityRef ? `${item.entityRef.entityType}:${item.entityRef.entityId}` : undefined]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function textHash(text: string) {
+  let hash = 2166136261;
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+
+  return (hash >>> 0).toString(16);
+}
+
+function entityRefKey(entityRef: EntityRef) {
+  return `${entityRef.entityType}:${entityRef.entityId}`;
+}
+
+function cosineSimilarity(left: number[], right: number[]) {
+  const length = Math.min(left.length, right.length);
+  let dot = 0;
+  let leftMagnitude = 0;
+  let rightMagnitude = 0;
+  for (let index = 0; index < length; index += 1) {
+    const leftValue = left[index] ?? 0;
+    const rightValue = right[index] ?? 0;
+    dot += leftValue * rightValue;
+    leftMagnitude += leftValue * leftValue;
+    rightMagnitude += rightValue * rightValue;
+  }
+
+  if (leftMagnitude === 0 || rightMagnitude === 0) {
+    return 0;
+  }
+
+  return dot / (Math.sqrt(leftMagnitude) * Math.sqrt(rightMagnitude));
+}
+
+async function rankContextItemsWithEmbeddings(
+  config: AiProviderConfig,
+  query: string,
+  items: SynthesisContextItem[],
+  persistedEmbeddings: EntityEmbeddingRecord[] | undefined,
+  client: SkippyClient,
+  brainInstanceId: string,
+) {
+  if (config.embeddingProvider !== "openai" || items.length === 0) {
+    return { items };
+  }
+
+  const embeddingProvider = "openai";
+  const embeddingModel = config.embeddingModel ?? DEFAULT_OPENAI_EMBEDDING_MODEL;
+  const embeddingsByEntity = new Map(
+    (persistedEmbeddings ?? [])
+      .filter(
+        (embedding) =>
+          embedding.embeddingProvider === embeddingProvider &&
+          embedding.embeddingModel === embeddingModel,
+      )
+      .map((embedding) => [entityRefKey(embedding.entityRef), embedding]),
+  );
+  const embeddableItems = items
+    .filter((item) => item.entityRef)
+    .map((item) => ({ item, text: textForEmbedding(item) }))
+    .filter((item) => item.text.trim())
+    .slice(0, 50);
+
+  if (embeddableItems.length === 0) {
+    return { items };
+  }
+
+  const embeddingClient = createEmbeddingClient(config);
+  const queryEmbedding = await embeddingClient.embed({
+    entityRef: { entityType: "knowledgeObject", entityId: "ask-query" },
+    text: query,
+    textHash: textHash(query),
+  });
+  const cachedEmbeddings = new Map<string, number[]>();
+  const missingEmbeddingRequests = embeddableItems
+    .map(({ item, text }) => {
+      const entityRef = item.entityRef!;
+      const hash = textHash(text);
+      const persistedEmbedding = embeddingsByEntity.get(entityRefKey(entityRef));
+      if (persistedEmbedding?.textHash === hash && Array.isArray(persistedEmbedding.embedding)) {
+        cachedEmbeddings.set(entityRefKey(entityRef), persistedEmbedding.embedding);
+        return null;
+      }
+
+      return {
+        entityRef,
+        text,
+        textHash: hash,
+      };
+    })
+    .filter((request): request is { entityRef: EntityRef; text: string; textHash: string } => request !== null);
+  const generatedEmbeddings = missingEmbeddingRequests.length
+    ? embeddingClient.embedMany
+      ? await embeddingClient.embedMany(missingEmbeddingRequests)
+      : await Promise.all(missingEmbeddingRequests.map((request) => embeddingClient.embed(request)))
+    : [];
+  const generatedEmbeddingsByEntity = new Map<string, number[]>();
+  await Promise.all(
+    generatedEmbeddings.map(async (embedding, index) => {
+      const request = missingEmbeddingRequests[index];
+      if (!request) {
+        return;
+      }
+      generatedEmbeddingsByEntity.set(entityRefKey(request.entityRef), embedding.embedding);
+      const persistedEmbedding: Parameters<SkippyClient["upsertEntityEmbedding"]>[1] = {
+        entityRef: request.entityRef,
+        canonicalText: request.text,
+        textHash: request.textHash,
+        embedding: embedding.embedding,
+        embeddingProvider: embedding.provider,
+        embeddingModel: embedding.model,
+      };
+      await client.upsertEntityEmbedding(brainInstanceId, persistedEmbedding);
+    }),
+  );
+  const rankedItems = embeddableItems
+    .map(({ item }) => {
+      const entityRef = item.entityRef!;
+      const embedding =
+        cachedEmbeddings.get(entityRefKey(entityRef)) ?? generatedEmbeddingsByEntity.get(entityRefKey(entityRef)) ?? [];
+      return {
+        item,
+        score: cosineSimilarity(queryEmbedding.embedding, embedding),
+      };
+    })
+    .sort((left, right) => right.score - left.score);
+  const rankedSet = new Set(rankedItems.map(({ item }) => item));
+  const unrankedItems = items.filter((item) => !rankedSet.has(item));
+
+  return {
+    items: [...rankedItems.map(({ item }) => item), ...unrankedItems].slice(0, 30),
+    embeddingRanking: {
+      provider: queryEmbedding.provider,
+      model: queryEmbedding.model,
+      rankedItemCount: rankedItems.length,
+      cachedItemCount: cachedEmbeddings.size,
+      generatedItemCount: generatedEmbeddings.length,
+      topScore: rankedItems[0]?.score,
+    },
+  };
+}
+
+function aiConfigFromContext(context: AiContextRecord): AiProviderConfig {
+  const config: AiProviderConfig = {
+    mode: context.config?.llmProviderMode ?? "none",
+  };
+
+  if (context.config?.routineModel) {
+    config.routineModel = context.config.routineModel;
+  }
+  if (context.config?.synthesisModel) {
+    config.synthesisModel = context.config.synthesisModel;
+  }
+  if (context.config?.embeddingProviderMode) {
+    config.embeddingProvider = context.config.embeddingProviderMode;
+  }
+  if (context.config?.embeddingModel) {
+    config.embeddingModel = context.config.embeddingModel;
+  }
+
+  return config;
+}
+
+function environmentValue(...names: string[]) {
+  const env = (globalThis as typeof globalThis & { process?: { env?: Record<string, string | undefined> } }).process?.env;
+  return names.map((name) => env?.[name]).find(Boolean);
+}
+
+function notificationCandidates(context: NotificationDispatchContext, limit: number): NotificationCandidate[] {
+  const preferences = context.config?.notificationPreferences ?? {};
+  const minPriorityScore = typeof preferences.minPriorityScore === "number" ? preferences.minPriorityScore : 0.7;
+  const candidates: NotificationCandidate[] = [];
+
+  if (preferences.urgentEnabled !== false) {
+    for (const task of context.tasks ?? []) {
+      if (task.status === "done" || task.status === "cancelled") {
+        continue;
+      }
+      const priorityScore = typeof task.priorityScore === "number" ? task.priorityScore : 0;
+      if (priorityScore >= minPriorityScore) {
+        candidates.push({
+          dedupeKey: `urgent_task:${task._id}:${task.updatedAt ?? task.priorityComputedAt ?? task.createdAt ?? ""}`,
+          notificationType: "urgent_task",
+          title: "Skippy: urgent task",
+          body: task.title ?? "An urgent task needs attention.",
+          url: "/projects",
+        });
+      }
+    }
+  }
+
+  if (preferences.pendingActionEnabled !== false) {
+    for (const action of context.pendingActions ?? []) {
+      candidates.push({
+        dedupeKey: `pending_action:${action._id}:${action.updatedAt ?? action.createdAt ?? ""}`,
+        notificationType: "pending_action",
+        title: "Skippy: action needs approval",
+        body: action.subject ?? action.actionType ?? "A pending action needs review.",
+        url: "/pending-actions",
+      });
+    }
+  }
+
+  return candidates.slice(0, limit);
+}
+
+function configureWebPush() {
+  const publicKey = environmentValue("SKIPPY_VAPID_PUBLIC_KEY", "NEXT_PUBLIC_VAPID_PUBLIC_KEY", "VAPID_PUBLIC_KEY");
+  const privateKey = environmentValue("SKIPPY_VAPID_PRIVATE_KEY", "VAPID_PRIVATE_KEY");
+  const subject = environmentValue("SKIPPY_VAPID_SUBJECT", "VAPID_SUBJECT") ?? "mailto:admin@example.com";
+  if (!publicKey || !privateKey) {
+    return false;
+  }
+
+  webPush.setVapidDetails(subject, publicKey, privateKey);
+  return true;
+}
 
 export function createSkippyToolHandlers(client: SkippyClient, brainInstanceId: string) {
   return {
@@ -99,17 +471,132 @@ export function createSkippyToolHandlers(client: SkippyClient, brainInstanceId: 
         throw new Error("query is required");
       }
 
-      const focusSummary = await client.getLatestFocusSummary(brainInstanceId);
+      const context = (await client.getAiContext(brainInstanceId)) as AiContextRecord;
+      const focusSummary = context.focusSummary ?? null;
+      const config = aiConfigFromContext(context);
+      let contextItems = synthesisItems(context);
+      let embeddingRanking: Awaited<ReturnType<typeof rankContextItemsWithEmbeddings>>["embeddingRanking"];
+      let embeddingError: string | undefined;
+
+      try {
+        const ranked = await rankContextItemsWithEmbeddings(
+          config,
+          normalizedQuery,
+          contextItems,
+          context.embeddings,
+          client,
+          brainInstanceId,
+        );
+        contextItems = ranked.items;
+        embeddingRanking = ranked.embeddingRanking;
+      } catch (error) {
+        embeddingError = error instanceof Error ? error.message : "Unknown embedding ranking error";
+      }
+
+      if (config.mode === "openai") {
+        try {
+          const result = await createLlmClient(config).synthesize({
+            query: normalizedQuery,
+            context: contextItems,
+            policyVersion: "skippy-mcp-ask-v1",
+          });
+
+          return {
+            answer: result.answer,
+            query: normalizedQuery,
+            citedItems: result.citedItems,
+            usage: result.usage,
+            embeddingRanking,
+            embeddingError,
+            focusSummary,
+          };
+        } catch (error) {
+          return {
+            answer: "OpenAI synthesis is configured, but the request failed. Returning structured context instead.",
+            query: normalizedQuery,
+            error: error instanceof Error ? error.message : "Unknown OpenAI synthesis error",
+            contextItems,
+            embeddingRanking,
+            embeddingError,
+            focusSummary,
+          };
+        }
+      }
+
       return {
         answer:
           "Internal synthesis is not configured yet. Returning structured context that may help the harness answer.",
         query: normalizedQuery,
+        contextItems,
+        embeddingRanking,
+        embeddingError,
         focusSummary,
       };
     },
 
     async summarizeFocus() {
       return await client.getLatestFocusSummary(brainInstanceId);
+    },
+
+    async refreshFocusSummary(input: FocusSummaryRefreshInput = {}) {
+      const context = (await client.getAiContext(brainInstanceId)) as AiContextRecord;
+      const config = aiConfigFromContext(context);
+      let contextItems = synthesisItems(context);
+      let embeddingRanking: Awaited<ReturnType<typeof rankContextItemsWithEmbeddings>>["embeddingRanking"];
+      let embeddingError: string | undefined;
+
+      try {
+        const ranked = await rankContextItemsWithEmbeddings(
+          config,
+          "What should the user focus on now?",
+          contextItems,
+          context.embeddings,
+          client,
+          brainInstanceId,
+        );
+        contextItems = ranked.items;
+        embeddingRanking = ranked.embeddingRanking;
+      } catch (error) {
+        embeddingError = error instanceof Error ? error.message : "Unknown embedding ranking error";
+      }
+
+      if (config.mode !== "openai") {
+        return {
+          status: "not_configured",
+          message: "Internal focus summary generation requires llmProviderMode=openai.",
+          contextItems,
+          embeddingRanking,
+          embeddingError,
+        };
+      }
+
+      const policyVersion = input.policyVersion ?? "skippy-focus-summary-v1";
+      const generatedAt = input.generatedAt ?? Date.now();
+      const focusSummary = await createLlmClient(config).generateFocusSummary({
+        items: contextItems,
+        generatedAt,
+        policyVersion,
+      });
+      const summaryToStore: FocusSummary = {
+        ...focusSummary,
+      };
+
+      if (input.validUntil) {
+        summaryToStore.validUntil = input.validUntil;
+      }
+      if (!summaryToStore.policyVersion) {
+        summaryToStore.policyVersion = policyVersion;
+      }
+
+      const result = await client.upsertFocusSummary(brainInstanceId, summaryToStore);
+
+      return {
+        status: "generated",
+        result,
+        focusSummary: summaryToStore,
+        embeddingRanking,
+        embeddingError,
+      };
     },
 
     async submitCandidateObject(input: CandidateObjectInput) {
@@ -170,15 +657,24 @@ export function createSkippyToolHandlers(client: SkippyClient, brainInstanceId: 
       return await client.listPendingActions(brainInstanceId, input.status);
     },
 
+    async markTaskInProgress(input: { taskId: string; startedBy?: string }) {
+      return await client.markTaskInProgress(
+        brainInstanceId,
+        input.taskId,
+        input.startedBy ?? "skippy_mcp",
+      );
+    },
+
     async markTaskDone(input: {
       taskId: string;
       completedBy?: string;
+      completedByUserId?: string;
       externalReminderSourceRefId?: string;
     }) {
       return await client.markTaskDone(
         brainInstanceId,
         input.taskId,
-        input.completedBy,
+        input.completedByUserId,
         input.externalReminderSourceRefId,
       );
     },
@@ -193,8 +689,117 @@ export function createSkippyToolHandlers(client: SkippyClient, brainInstanceId: 
       return await client.recordPendingActionResult(input.pendingActionId, input);
     },
 
+    async recordEntityReview(input: EntityReviewInput) {
+      const reviewSummary = input.reviewSummary.trim();
+      if (!reviewSummary) {
+        throw new Error("reviewSummary is required");
+      }
+
+      return await client.recordEntityReview(brainInstanceId, {
+        ...input,
+        reviewSummary,
+        reviewedBy: input.reviewedBy ?? "skippy_mcp",
+        priorityComputedAt: input.priorityComputedAt ?? Date.now(),
+      });
+    },
+
     async recordIngestionRun(input: Parameters<SkippyClient["recordIngestionRun"]>[1]) {
       return await client.recordIngestionRun(brainInstanceId, input);
+    },
+
+    async dispatchNotifications(input: { dryRun?: boolean; limit?: number } = {}) {
+      const limit = input.limit ?? 10;
+      const context = (await client.getNotificationDispatchContext(brainInstanceId)) as NotificationDispatchContext;
+      const candidates = notificationCandidates(context, limit);
+      const recentDedupeKeys = new Set(
+        (context.recentDeliveries ?? [])
+          .filter((delivery) => delivery.status === "sent" || delivery.status === "skipped")
+          .map((delivery) => delivery.dedupeKey),
+      );
+      const pendingCandidates = candidates.filter((candidate) => !recentDedupeKeys.has(candidate.dedupeKey));
+      const subscriptions = (context.pushSubscriptions ?? []).filter((subscription) => subscription.enabled && !subscription.revokedAt);
+
+      if (!context.config?.notificationsEnabled) {
+        return {
+          status: "disabled",
+          candidateCount: candidates.length,
+          dispatchCount: 0,
+          message: "Notifications are disabled for this brain.",
+        };
+      }
+
+      if (input.dryRun) {
+        return {
+          status: "dry_run",
+          candidateCount: candidates.length,
+          dispatchCount: pendingCandidates.length * subscriptions.length,
+          candidates: pendingCandidates,
+          subscriptionCount: subscriptions.length,
+        };
+      }
+
+      if (subscriptions.length === 0) {
+        return {
+          status: "no_targets",
+          candidateCount: candidates.length,
+          dispatchCount: 0,
+          message: "No active push subscriptions are stored.",
+        };
+      }
+
+      if (!configureWebPush()) {
+        return {
+          status: "not_configured",
+          candidateCount: candidates.length,
+          dispatchCount: 0,
+          message: "VAPID public/private keys are required to send browser push notifications.",
+        };
+      }
+
+      let sentCount = 0;
+      let failedCount = 0;
+      for (const candidate of pendingCandidates) {
+        for (const subscription of subscriptions) {
+          try {
+            await webPush.sendNotification(
+              {
+                endpoint: subscription.endpoint,
+                keys: {
+                  p256dh: subscription.p256dh,
+                  auth: subscription.auth,
+                },
+              },
+              JSON.stringify({
+                title: candidate.title,
+                body: candidate.body,
+                url: candidate.url,
+              }),
+            );
+            sentCount += 1;
+            await client.recordNotificationDelivery(brainInstanceId, {
+              pushSubscriptionId: subscription._id,
+              ...candidate,
+              status: "sent",
+            });
+          } catch (error) {
+            failedCount += 1;
+            await client.recordNotificationDelivery(brainInstanceId, {
+              pushSubscriptionId: subscription._id,
+              ...candidate,
+              status: "failed",
+              error: error instanceof Error ? error.message : "Unknown push dispatch error",
+            });
+          }
+        }
+      }
+
+      return {
+        status: failedCount ? "partial" : "sent",
+        candidateCount: candidates.length,
+        sentCount,
+        failedCount,
+        subscriptionCount: subscriptions.length,
+      };
     },
   };
 }

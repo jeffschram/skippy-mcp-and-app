@@ -1,6 +1,13 @@
 import { mutationGeneric, queryGeneric } from "convex/server";
 import { v } from "convex/values";
-import { normalizeAcceptedEntityPayload } from "@skippy/shared";
+import {
+  GOAL_STATUSES,
+  LINK_STATUSES,
+  PROJECT_STATUSES,
+  TASK_STATUSES,
+  candidateFingerprint,
+  normalizeAcceptedEntityPayload,
+} from "@skippy/shared";
 import { requireOwnedBrain } from "./auth";
 
 const entityType = v.union(
@@ -18,6 +25,17 @@ const entityRef = v.object({
   entityType,
   entityId: v.string(),
 });
+
+const entityEmbeddingInput = {
+  brainInstanceId: v.id("brainInstances"),
+  entityRef,
+  canonicalText: v.string(),
+  textHash: v.string(),
+  embedding: v.array(v.float64()),
+  embeddingProvider: v.string(),
+  embeddingModel: v.string(),
+  embeddingVersion: v.optional(v.string()),
+};
 
 const sourceRefInput = v.object({
   sourceSystem: v.string(),
@@ -43,6 +61,15 @@ const priorityArgs = {
   priorityPolicyVersion: v.optional(v.string()),
 };
 
+const entityReviewType = v.union(
+  v.literal("general"),
+  v.literal("stale_check"),
+  v.literal("priority_update"),
+  v.literal("blocker_check"),
+  v.literal("follow_up"),
+  v.literal("status_check"),
+);
+
 const candidatePayload = v.any();
 
 const entityTableByType = {
@@ -55,6 +82,25 @@ const entityTableByType = {
   link: "links",
   knowledgeObject: "knowledgeObjects",
 } as const;
+
+function statusAllowedForEntity(entityTypeName: keyof typeof entityTableByType, status: string | undefined) {
+  if (!status) {
+    return undefined;
+  }
+
+  switch (entityTypeName) {
+    case "goal":
+      return (GOAL_STATUSES as readonly string[]).includes(status) ? status : undefined;
+    case "project":
+      return (PROJECT_STATUSES as readonly string[]).includes(status) ? status : undefined;
+    case "task":
+      return (TASK_STATUSES as readonly string[]).includes(status) ? status : undefined;
+    case "link":
+      return (LINK_STATUSES as readonly string[]).includes(status) ? status : undefined;
+    default:
+      return undefined;
+  }
+}
 
 async function createAcceptedEntity(
   db: any,
@@ -171,6 +217,15 @@ export const submitCandidateObject = mutationGeneric({
   },
   handler: async ({ db }, args) => {
     const now = Date.now();
+    const normalizedPayload = normalizeAcceptedEntityPayload(args.candidateEntityType, args.candidatePayload);
+    const fingerprint = candidateFingerprint(args.candidateEntityType, normalizedPayload);
+    const existingPendingItem = await db
+      .query("triageItems")
+      .withIndex("by_brain_fingerprint", (q) => q.eq("brainInstanceId", args.brainInstanceId))
+      .filter((q) =>
+        q.and(q.eq(q.field("candidateFingerprint"), fingerprint), q.eq(q.field("status"), "pending")),
+      )
+      .first();
     const sourceRefIds = [...(args.sourceRefIds ?? [])];
 
     for (const sourceRef of args.sourceRefs ?? []) {
@@ -184,10 +239,40 @@ export const submitCandidateObject = mutationGeneric({
       );
     }
 
+    if (existingPendingItem) {
+      const mergedSourceRefIds = Array.from(new Set([...(existingPendingItem.sourceRefIds ?? []), ...sourceRefIds]));
+      await db.patch(existingPendingItem._id, {
+        sourceRefIds: mergedSourceRefIds,
+        updatedAt: now,
+      });
+
+      await db.insert("activityEvents", {
+        brainInstanceId: args.brainInstanceId,
+        activityType: "candidate_duplicate_detected",
+        actorType: "harness",
+        timestamp: now,
+        summary: `Duplicate suggested ${args.candidateEntityType} matched an existing pending triage item.`,
+        metadata: {
+          triageItemId: existingPendingItem._id,
+          candidateFingerprint: fingerprint,
+        },
+        sourceRefIds,
+      });
+
+      return {
+        triageItemId: existingPendingItem._id,
+        sourceRefIds: mergedSourceRefIds,
+        duplicate: true,
+        status: "duplicate_pending",
+        candidateFingerprint: fingerprint,
+      };
+    }
+
     const triageItemId = await db.insert("triageItems", {
       brainInstanceId: args.brainInstanceId,
       candidateEntityType: args.candidateEntityType,
-      candidatePayload: args.candidatePayload,
+      candidatePayload: normalizedPayload,
+      candidateFingerprint: fingerprint,
       status: "pending",
       confidence: args.confidence,
       reviewReason: args.reviewReason,
@@ -202,11 +287,11 @@ export const submitCandidateObject = mutationGeneric({
       actorType: "harness",
       timestamp: now,
       summary: `Suggested ${args.candidateEntityType} submitted for triage.`,
-      metadata: { triageItemId },
+      metadata: { triageItemId, candidateFingerprint: fingerprint },
       sourceRefIds,
     });
 
-    return { triageItemId, sourceRefIds };
+    return { triageItemId, sourceRefIds, duplicate: false, status: "submitted_for_review", candidateFingerprint: fingerprint };
   },
 });
 
@@ -527,6 +612,78 @@ export const contactsForViewer = queryGeneric({
   },
 });
 
+export const acceptedEntityOptionsForViewer = queryGeneric({
+  args: {},
+  handler: async (ctx) => {
+    const { brain } = await requireOwnedBrain(ctx);
+    const acceptedFilter = (q: any) =>
+      q.and(q.eq(q.field("brainInstanceId"), brain._id), q.eq(q.field("processingState"), "accepted"));
+    const goals = await ctx.db.query("goals").filter(acceptedFilter).take(50);
+    const projects = await ctx.db.query("projects").filter(acceptedFilter).take(50);
+    const tasks = await ctx.db.query("tasks").filter(acceptedFilter).take(100);
+    const notes = await ctx.db.query("notes").filter(acceptedFilter).take(50);
+    const people = await ctx.db.query("people").filter(acceptedFilter).take(50);
+    const companies = await ctx.db.query("companies").filter(acceptedFilter).take(50);
+    const links = await ctx.db.query("links").filter(acceptedFilter).take(50);
+    const knowledgeObjects = await ctx.db.query("knowledgeObjects").filter(acceptedFilter).take(50);
+
+    return [
+      ...goals.map((goal) => ({
+        entityType: "goal",
+        entityId: goal._id,
+        title: goal.title,
+        summary: goal.description,
+        status: goal.status,
+      })),
+      ...projects.map((project) => ({
+        entityType: "project",
+        entityId: project._id,
+        title: project.title,
+        summary: project.summary,
+        status: project.status,
+      })),
+      ...tasks.map((task) => ({
+        entityType: "task",
+        entityId: task._id,
+        title: task.title,
+        summary: task.description,
+        status: task.status,
+      })),
+      ...notes.map((note) => ({
+        entityType: "note",
+        entityId: note._id,
+        title: note.title ?? note.body.slice(0, 80),
+        summary: note.body,
+      })),
+      ...people.map((person) => ({
+        entityType: "person",
+        entityId: person._id,
+        title: person.name,
+        summary: [person.relationshipContext, person.notes, ...(person.emails ?? [])].filter(Boolean).join(" "),
+      })),
+      ...companies.map((company) => ({
+        entityType: "company",
+        entityId: company._id,
+        title: company.name,
+        summary: [company.domain, company.website, company.notes].filter(Boolean).join(" "),
+      })),
+      ...links.map((link) => ({
+        entityType: "link",
+        entityId: link._id,
+        title: link.title ?? link.url,
+        summary: [link.summary, link.whyItMatters, link.url].filter(Boolean).join(" "),
+        status: link.status,
+      })),
+      ...knowledgeObjects.map((object) => ({
+        entityType: "knowledgeObject",
+        entityId: object._id,
+        title: object.title,
+        summary: [object.objectType, object.summary].filter(Boolean).join(" "),
+      })),
+    ];
+  },
+});
+
 export const triageForViewer = queryGeneric({
   args: {},
   handler: async (ctx) => {
@@ -546,6 +703,80 @@ export const pendingActionsForViewer = queryGeneric({
       .query("pendingActions")
       .filter((q) => q.eq(q.field("brainInstanceId"), brain._id))
       .collect();
+  },
+});
+
+export const reviewPendingActionForViewer = mutationGeneric({
+  args: {
+    pendingActionId: v.id("pendingActions"),
+    action: v.union(v.literal("approve"), v.literal("reject"), v.literal("revise")),
+    approvalNotes: v.optional(v.string()),
+    recipients: v.optional(v.any()),
+    subject: v.optional(v.string()),
+    body: v.optional(v.string()),
+    messageBody: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const { user, brain } = await requireOwnedBrain(ctx);
+    const pendingAction = await ctx.db.get(args.pendingActionId);
+    if (!pendingAction || pendingAction.brainInstanceId !== brain._id) {
+      throw new Error("pending action not found");
+    }
+    if (pendingAction.status === "sent" || pendingAction.status === "completed") {
+      throw new Error("completed pending actions cannot be reviewed");
+    }
+
+    const now = Date.now();
+    const patch: Record<string, unknown> = {
+      updatedAt: now,
+    };
+    let activityType = "pending_action_revised";
+    let summary = "Pending action revised.";
+
+    if (args.action === "approve") {
+      patch.status = "approved";
+      patch.approvedBy = user._id;
+      patch.approvedAt = now;
+      patch.approvalNotes = args.approvalNotes;
+      activityType = "pending_action_approved";
+      summary = `Pending action approved: ${pendingAction.actionType}`;
+    } else if (args.action === "reject") {
+      patch.status = "rejected";
+      patch.approvalNotes = args.approvalNotes;
+      activityType = "pending_action_rejected";
+      summary = `Pending action rejected: ${pendingAction.actionType}`;
+    } else {
+      patch.status = "pending_approval";
+      patch.approvalNotes = args.approvalNotes;
+      if (args.recipients !== undefined) patch.recipients = args.recipients;
+      if (args.subject !== undefined) patch.subject = args.subject;
+      if (args.body !== undefined) patch.body = args.body;
+      if (args.messageBody !== undefined) patch.messageBody = args.messageBody;
+      summary = `Pending action revised: ${pendingAction.actionType}`;
+    }
+
+    await ctx.db.patch(args.pendingActionId, patch);
+
+    await ctx.db.insert("activityEvents", {
+      brainInstanceId: brain._id,
+      activityType,
+      actorType: "user",
+      actorId: user._id,
+      timestamp: now,
+      summary,
+      pendingActionId: args.pendingActionId,
+      metadata: {
+        action: args.action,
+        approvalNotes: args.approvalNotes,
+      },
+      sourceRefIds: pendingAction.sourceRefIds,
+    });
+
+    return {
+      pendingActionId: args.pendingActionId,
+      status: patch.status,
+      action: args.action,
+    };
   },
 });
 
@@ -600,6 +831,52 @@ export const markTaskDone = mutationGeneric({
     });
 
     return { taskId: args.taskId, pendingActionId };
+  },
+});
+
+export const markTaskInProgress = mutationGeneric({
+  args: {
+    brainInstanceId: v.id("brainInstances"),
+    taskId: v.id("tasks"),
+    startedBy: v.optional(v.string()),
+  },
+  handler: async ({ db }, args) => {
+    const task = await db.get(args.taskId);
+    if (!task || task.brainInstanceId !== args.brainInstanceId) {
+      throw new Error("task not found for brain instance");
+    }
+    if (task.processingState !== "accepted") {
+      throw new Error("only accepted tasks can be marked in progress");
+    }
+    if (task.status === "done" || task.status === "cancelled") {
+      throw new Error("done or cancelled tasks cannot be marked in progress");
+    }
+
+    const now = Date.now();
+    const startedAt = task.startedAt ?? now;
+    await db.patch(args.taskId, {
+      status: "in_progress",
+      startedAt,
+      startedBy: args.startedBy,
+      updatedAt: now,
+    });
+
+    await db.insert("activityEvents", {
+      brainInstanceId: args.brainInstanceId,
+      entityRef: { entityType: "task", entityId: args.taskId },
+      activityType: "task_marked_in_progress",
+      actorType: "harness",
+      actorId: args.startedBy,
+      timestamp: now,
+      summary: `Task marked in progress: ${task.title}`,
+    });
+
+    return {
+      taskId: args.taskId,
+      status: "in_progress",
+      startedAt,
+      startedBy: args.startedBy,
+    };
   },
 });
 
@@ -844,6 +1121,110 @@ export const getLatestFocusSummary = queryGeneric({
   },
 });
 
+export const aiContextForBrain = queryGeneric({
+  args: {
+    brainInstanceId: v.id("brainInstances"),
+  },
+  handler: async ({ db }, { brainInstanceId }) => {
+    const config = await db
+      .query("brainConfigs")
+      .filter((q) => q.eq(q.field("brainInstanceId"), brainInstanceId))
+      .first();
+    const focusSummary = await db
+      .query("focusSummaries")
+      .filter((q) => q.eq(q.field("brainInstanceId"), brainInstanceId))
+      .order("desc")
+      .first();
+    const projects = await db
+      .query("projects")
+      .filter((q) =>
+        q.and(q.eq(q.field("brainInstanceId"), brainInstanceId), q.eq(q.field("processingState"), "accepted")),
+      )
+      .take(20);
+    const tasks = await db
+      .query("tasks")
+      .filter((q) =>
+        q.and(q.eq(q.field("brainInstanceId"), brainInstanceId), q.eq(q.field("processingState"), "accepted")),
+      )
+      .take(30);
+    const people = await db
+      .query("people")
+      .filter((q) =>
+        q.and(q.eq(q.field("brainInstanceId"), brainInstanceId), q.eq(q.field("processingState"), "accepted")),
+      )
+      .take(20);
+    const companies = await db
+      .query("companies")
+      .filter((q) =>
+        q.and(q.eq(q.field("brainInstanceId"), brainInstanceId), q.eq(q.field("processingState"), "accepted")),
+      )
+      .take(20);
+    const links = await db
+      .query("links")
+      .filter((q) =>
+        q.and(q.eq(q.field("brainInstanceId"), brainInstanceId), q.eq(q.field("processingState"), "accepted")),
+      )
+      .take(20);
+    const notes = await db
+      .query("notes")
+      .filter((q) =>
+        q.and(q.eq(q.field("brainInstanceId"), brainInstanceId), q.eq(q.field("processingState"), "accepted")),
+      )
+      .take(20);
+    const embeddings = await db
+      .query("entityEmbeddings")
+      .withIndex("by_brain", (q) => q.eq("brainInstanceId", brainInstanceId))
+      .take(200);
+
+    return { config, focusSummary, projects, tasks, people, companies, links, notes, embeddings };
+  },
+});
+
+export const upsertEntityEmbedding = mutationGeneric({
+  args: entityEmbeddingInput,
+  handler: async ({ db }, args) => {
+    const entityTable = entityTableByType[args.entityRef.entityType as keyof typeof entityTableByType];
+    const entity = entityTable ? await (db as any).get(args.entityRef.entityId) : null;
+    if (!entity || entity.brainInstanceId !== args.brainInstanceId) {
+      throw new Error("entity not found for brain instance");
+    }
+
+    const now = Date.now();
+    const existing = await db
+      .query("entityEmbeddings")
+      .withIndex("by_brain", (q) => q.eq("brainInstanceId", args.brainInstanceId))
+      .filter((q) =>
+        q.and(
+          q.eq(q.field("entityRef.entityType"), args.entityRef.entityType),
+          q.eq(q.field("entityRef.entityId"), args.entityRef.entityId),
+          q.eq(q.field("embeddingProvider"), args.embeddingProvider),
+          q.eq(q.field("embeddingModel"), args.embeddingModel),
+        ),
+      )
+      .first();
+
+    if (existing) {
+      await db.patch(existing._id, {
+        canonicalText: args.canonicalText,
+        textHash: args.textHash,
+        embedding: args.embedding,
+        embeddingVersion: args.embeddingVersion,
+        updatedAt: now,
+      });
+
+      return { embeddingId: existing._id, status: "updated" };
+    }
+
+    const embeddingId = await db.insert("entityEmbeddings", {
+      ...args,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    return { embeddingId, status: "created" };
+  },
+});
+
 export const upsertFocusSummary = mutationGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
@@ -947,6 +1328,117 @@ export const recordPendingActionResult = mutationGeneric({
     });
 
     return { pendingActionId: args.pendingActionId };
+  },
+});
+
+export const recordEntityReview = mutationGeneric({
+  args: {
+    brainInstanceId: v.id("brainInstances"),
+    entityRef,
+    reviewType: entityReviewType,
+    reviewSummary: v.string(),
+    reviewedBy: v.optional(v.string()),
+    status: v.optional(v.string()),
+    confidence: v.optional(v.number()),
+    sourceRefIds: v.optional(v.array(v.id("sourceRefs"))),
+    sourceRefs: v.optional(v.array(sourceRefInput)),
+    ...priorityArgs,
+  },
+  handler: async ({ db }, args) => {
+    const entityTypeName = args.entityRef.entityType as keyof typeof entityTableByType;
+    const entityTable = entityTableByType[entityTypeName];
+    const entity = entityTable ? await (db as any).get(args.entityRef.entityId) : null;
+    if (!entity || entity.brainInstanceId !== args.brainInstanceId) {
+      throw new Error("entity not found for brain instance");
+    }
+    if (entity.processingState !== "accepted") {
+      throw new Error("only accepted entities can be reviewed");
+    }
+
+    const now = Date.now();
+    const sourceRefIds = [...(args.sourceRefIds ?? [])];
+    for (const sourceRef of args.sourceRefs ?? []) {
+      sourceRefIds.push(
+        await db.insert("sourceRefs", {
+          brainInstanceId: args.brainInstanceId,
+          ...sourceRef,
+          createdAt: now,
+          updatedAt: now,
+        }),
+      );
+    }
+
+    const patch: Record<string, unknown> = {
+      updatedAt: now,
+      reviewReason: args.reviewSummary,
+    };
+    if (typeof args.confidence === "number") {
+      patch.confidence = args.confidence;
+    }
+
+    const allowedStatus = statusAllowedForEntity(entityTypeName, args.status);
+    if (allowedStatus) {
+      patch.status = allowedStatus;
+    }
+
+    if (entityTypeName === "task" || entityTypeName === "project") {
+      for (const field of [
+        "priorityScore",
+        "urgencyScore",
+        "importanceScore",
+        "priorityReason",
+        "priorityComputedAt",
+        "priorityPolicyVersion",
+      ] as const) {
+        if (args[field] !== undefined) {
+          patch[field] = args[field];
+        }
+      }
+    }
+
+    await (db as any).patch(args.entityRef.entityId, patch);
+
+    for (const sourceRefId of sourceRefIds) {
+      await db.insert("entitySourceRefs", {
+        brainInstanceId: args.brainInstanceId,
+        entityRef: args.entityRef,
+        sourceRefId,
+        relationship: "evidence_for",
+        createdAt: now,
+      });
+    }
+
+    const activityId = await db.insert("activityEvents", {
+      brainInstanceId: args.brainInstanceId,
+      entityRef: args.entityRef,
+      activityType: "entity_reviewed",
+      actorType: "harness",
+      actorId: args.reviewedBy,
+      timestamp: now,
+      summary: args.reviewSummary,
+      metadata: {
+        reviewType: args.reviewType,
+        status: allowedStatus,
+        requestedStatus: args.status,
+        priorityScore: args.priorityScore,
+        urgencyScore: args.urgencyScore,
+        importanceScore: args.importanceScore,
+        priorityReason: args.priorityReason,
+        ignoredStatus: args.status && !allowedStatus ? args.status : undefined,
+      },
+      sourceRefIds,
+    });
+
+    return {
+      status: "review_recorded",
+      entityRef: args.entityRef,
+      activityId,
+      sourceRefIds,
+      applied: {
+        status: allowedStatus,
+        priorityUpdated: entityTypeName === "task" || entityTypeName === "project",
+      },
+    };
   },
 });
 
