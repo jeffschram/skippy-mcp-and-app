@@ -35,12 +35,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <div className="app-shell">
       <header className="topbar">
         <div className="topbar-inner">
-          <Link className="brand" href="/">
-            <span className="brand-mark">
-              <Brain size={19} aria-hidden />
-            </span>
-            <span>Skippy</span>
-          </Link>
           <nav className="nav" aria-label="Primary">
             {navItems.map((item) => (
               <Link key={item.href} href={item.href}>
@@ -49,7 +43,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               </Link>
             ))}
           </nav>
-          {isLiveConfigured() ? <AuthStatus /> : <span className="badge">Static preview</span>}
+          {isLiveConfigured() ? (
+            <AuthStatus />
+          ) : (
+            <span className="badge">Static preview</span>
+          )}
         </div>
       </header>
       <main className="page">{children}</main>

@@ -12,9 +12,9 @@ Development has moved from scaffold into a working foundation across Phases 1-8:
 - Convex has an auth config scaffold for Clerk JWTs.
 - The MCP package has transport-independent handlers, stdio wiring, and a Streamable HTTP remote handler.
 - The web package is a Next/PWA app shell that uses static preview data without env vars and switches to live Clerk/Convex queries when configured.
-- `@skippy/ai` has provider abstractions plus explicit disabled clients for LLM and embeddings.
+- `@skippy/ai` has provider abstractions, disabled fallback clients, OpenAI LLM/embedding adapters, Anthropic and OpenRouter LLM adapters, and a local OpenAI-compatible LLM adapter hook.
 
-The system is still not production-ready. Convex deployment env is configured, `convex/_generated` bindings have been generated, and Clerk auth provider settings are wired for the dev deployment. Full provider adapters for OpenAI/Anthropic/OpenRouter/local models are not implemented. Authorization is improved for viewer-scoped web flows, but older MCP-oriented functions still accept `brainInstanceId` and rely on token-to-brain routing.
+The system is still not production-ready. Convex deployment env is configured, `convex/_generated` bindings have been generated, and Clerk auth provider settings are wired for the dev deployment. Core OpenAI AI/embedding flows and additional LLM provider adapters are implemented, but production operations, broad authorization tests, notification delivery, and generated Convex API adoption still need work. Authorization is improved for viewer-scoped web flows, but older MCP-oriented functions still accept `brainInstanceId` and rely on token-to-brain routing.
 
 Most recent development batch:
 
@@ -23,7 +23,8 @@ Most recent development batch:
 - Created a repository Skill at `skills/skippy-harness` with harness ingestion judgment, tool choice, privacy/source-reference rules, confirmation language, and entity mapping reference.
 - Replaced raw JSON-first triage correction with typed per-entity review fields for common Skippy entity types.
 - Active project task queries now hide `done` and `cancelled` tasks.
-- Marked the corresponding four tasks done in the live `Skippy MCP and APP` project.
+- Added task in-progress tracking, pending-action approval/revision UX, OpenAI embeddings/semantic retrieval, OpenAI focus summaries, Anthropic/OpenRouter/local LLM provider adapters, triage merge-target suggestions, notification preferences, push subscription storage, notification dispatch, remote MCP authorization tests, an MCP ingestion-to-triage smoke test, and generated Convex API usage in the web app.
+- Marked the corresponding tasks done in the live `Skippy MCP and APP` project.
 
 ## Completed work
 
@@ -89,8 +90,12 @@ Implemented:
 Current behavior:
 
 - `mode: "none"` returns disabled clients with explicit fallback behavior.
-- Non-`none` providers throw clear “adapter not installed yet” errors.
-- Live OpenAI/Anthropic/OpenRouter/local adapters are not implemented yet.
+- `mode: "openai"` uses the OpenAI Responses API for synthesis/focus summaries.
+- `mode: "anthropic"` uses the Anthropic Messages API for synthesis/focus summaries.
+- `mode: "openrouter"` uses OpenRouter chat completions for synthesis/focus summaries.
+- `mode: "local"` calls an OpenAI-compatible local chat completions endpoint when `SKIPPY_LOCAL_AI_BASE_URL` or `LOCAL_AI_BASE_URL` is configured.
+- `embeddingProvider: "openai"` uses OpenAI embeddings with batch support.
+- Unsupported providers still throw clear “adapter not installed yet” errors.
 
 ### `convex`
 
@@ -320,17 +325,45 @@ Created `skills/skippy-harness` with `SKILL.md`, `agents/openai.yaml`, and `refe
 
 Improved the live triage card from raw JSON editing to typed correction fields by entity type. Supported editors include task, project, goal, note, person, company, link, and knowledge object forms, while preserving approve, correct, reclassify, merge, and reject actions. Verified with a temporary task candidate and rejected the smoke-test candidate afterward. Follow-up: add stronger validation/errors, existing-entity merge lookup, source-ref display, and E2E tests.
 
+### Entity matching and merge assistance
+
+Added a viewer-scoped accepted-entity options query and candidate-aware text-overlap scoring in the triage UI. Merge review now uses a target picker grouped into suggested matches and other accepted records for the selected entity type, instead of requiring raw ID entry. Verified with a temporary project candidate that suggested the existing `Skippy MCP and APP` project, then rejected the smoke-test candidate.
+
 ### Pending actions
 
-Pending-action result recording exists, but web approve/reject/revise flows still need real controls.
+Pending-action result recording exists and the web Actions page now supports approve, reject, and revise controls for drafted/pending/failed external actions. Approved/sent/completed/rejected actions render status-specific read-only copy.
 
 ### AI provider adapters
 
-Interfaces and disabled clients exist. Provider adapters for OpenAI, Anthropic, OpenRouter, and local runtimes remain future work.
+Implemented OpenAI synthesis/focus adapters, OpenAI embeddings, Anthropic synthesis/focus adapters, OpenRouter synthesis/focus adapters, and a local OpenAI-compatible synthesis/focus adapter hook. Tests cover the provider request shapes and disabled behavior.
 
 ### Embedding workflows
 
-Embedding config/schema/interfaces exist. No embedding generation, canonical text hashing workflow, or semantic retrieval is implemented yet.
+Embedding config/schema/interfaces exist. The MCP `ask` and `refresh_focus_summary` paths now canonicalize accepted entities, hash canonical text, generate/store missing OpenAI embeddings, reuse cached embeddings, and rank context semantically before synthesis.
+
+### Task progress tracking
+
+Accepted tasks can now be marked `in_progress` by harnesses through `mark_task_in_progress`, preserving `startedAt` and `startedBy`. The Projects page displays an in-progress indicator and actor label.
+
+### Notifications
+
+Settings now stores notification preferences on the brain config and active browser push subscriptions in Convex. The web Settings page can request browser permission, register `/sw.js`, save subscriptions when a public VAPID key is configured, and disable stored subscriptions. The MCP server exposes `dispatch_notifications`, which builds urgent-task and pending-action candidates, dedupes recent deliveries, sends through Web Push when VAPID secrets are configured, and records delivery attempts. Verified with a dry-run MCP smoke call against the local endpoint.
+
+### Authorization and MCP token tests
+
+Added MCP remote transport tests that mock Convex and the streamable HTTP transport. Coverage verifies that remote requests authenticate the bearer token before constructing a brain-scoped server, pass Convex auth through when configured, and stop before server creation when token authentication fails.
+
+### Ingestion and triage E2E smoke
+
+Added `pnpm mcp:smoke:ingestion-triage`, which connects to the remote MCP endpoint, submits a temporary note candidate through `submit_candidate_object`, verifies it appears in pending triage via Convex, and rejects the temporary item for cleanup. Verified locally against `http://127.0.0.1:3000/api/mcp`.
+
+### Generated Convex APIs
+
+The web app now imports `api` from `convex/_generated/api` instead of rebuilding function references with `makeFunctionReference`. This surfaced and fixed several loose mutation call boundaries in live UI components. The MCP package still uses explicit function references because its current TypeScript `rootDir` and package boundary intentionally do not include the Convex app; moving that layer should be done through a shared generated-api package or a deliberate package boundary change.
+
+### Production environment
+
+Added `pnpm prod:check` and `DEPLOYMENT.md`. The checker validates required environment values and can smoke-test the deployed MCP endpoint when `SKIPPY_MCP_URL` and `SKIPPY_MCP_TOKEN` are set. Local required env checks pass. The deployed endpoint at `https://skippy.jeffschram.dev/api/mcp` is reachable, but its tool list is older than the current local code and does not yet include newer tools such as `mark_task_in_progress` or `dispatch_notifications`; redeploy current code to Vercel before considering production fully current. VAPID keys remain optional but missing, so browser push dispatch is configured in code but not fully send-capable in the current environment.
 
 ## Git status at time of progress note
 

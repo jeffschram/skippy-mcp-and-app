@@ -44,6 +44,22 @@ const priorityMetadata = {
 
 const sourceRefIds = v.optional(v.array(v.id("sourceRefs")));
 
+const notificationPreferences = v.object({
+  urgentEnabled: v.boolean(),
+  pendingActionEnabled: v.boolean(),
+  focusSummaryEnabled: v.boolean(),
+  dailyDigestEnabled: v.boolean(),
+  minPriorityScore: v.optional(v.number()),
+  quietHours: v.optional(
+    v.object({
+      enabled: v.boolean(),
+      start: v.string(),
+      end: v.string(),
+      timezone: v.string(),
+    }),
+  ),
+});
+
 export default defineSchema({
   users: defineTable({
     authProvider: v.literal("clerk"),
@@ -76,6 +92,7 @@ export default defineSchema({
     autonomyThreshold: v.optional(v.number()),
     linkEnrichmentEnabled: v.boolean(),
     notificationsEnabled: v.boolean(),
+    notificationPreferences: v.optional(notificationPreferences),
     embeddingProviderMode: v.optional(v.string()),
     embeddingModel: v.optional(v.string()),
     featureToggles: v.optional(v.any()),
@@ -133,6 +150,8 @@ export default defineSchema({
       v.literal("cancelled"),
     ),
     dueAt: v.optional(v.number()),
+    startedAt: v.optional(v.number()),
+    startedBy: v.optional(v.string()),
     completedAt: v.optional(v.number()),
     ...priorityMetadata,
     createdAt: v.number(),
@@ -282,6 +301,7 @@ export default defineSchema({
     brainInstanceId: v.id("brainInstances"),
     candidateEntityType: entityType,
     candidateEntityId: v.optional(v.string()),
+    candidateFingerprint: v.optional(v.string()),
     candidatePayload: v.any(),
     status: v.union(
       v.literal("pending"),
@@ -299,6 +319,7 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_brain_status", ["brainInstanceId", "status"])
+    .index("by_brain_fingerprint", ["brainInstanceId", "candidateFingerprint"])
     .index("by_candidate", ["brainInstanceId", "candidateEntityType", "candidateEntityId"]),
 
   focusSummaries: defineTable({
@@ -426,15 +447,70 @@ export default defineSchema({
     .index("by_brain", ["brainInstanceId"])
     .index("by_token_hash", ["tokenHash"]),
 
+  pushSubscriptions: defineTable({
+    brainInstanceId: v.id("brainInstances"),
+    userId: v.id("users"),
+    endpoint: v.string(),
+    p256dh: v.string(),
+    auth: v.string(),
+    expirationTime: v.optional(v.number()),
+    userAgent: v.optional(v.string()),
+    permissionState: v.optional(
+      v.union(v.literal("granted"), v.literal("denied"), v.literal("prompt"), v.literal("unsupported")),
+    ),
+    enabled: v.boolean(),
+    revokedAt: v.optional(v.number()),
+    lastSeenAt: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_brain", ["brainInstanceId"])
+    .index("by_user", ["userId"])
+    .index("by_brain_endpoint", ["brainInstanceId", "endpoint"]),
+
+  notificationDeliveries: defineTable({
+    brainInstanceId: v.id("brainInstances"),
+    pushSubscriptionId: v.optional(v.id("pushSubscriptions")),
+    dedupeKey: v.string(),
+    notificationType: v.string(),
+    title: v.string(),
+    body: v.string(),
+    url: v.optional(v.string()),
+    status: v.union(v.literal("sent"), v.literal("failed"), v.literal("skipped")),
+    error: v.optional(v.string()),
+    sentAt: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_brain_created", ["brainInstanceId", "createdAt"])
+    .index("by_brain_dedupe", ["brainInstanceId", "dedupeKey"]),
+
   entityEmbeddings: defineTable({
     brainInstanceId: v.id("brainInstances"),
     entityRef,
+    canonicalText: v.string(),
     textHash: v.string(),
+    embedding: v.array(v.float64()),
     embeddingProvider: v.string(),
     embeddingModel: v.string(),
     embeddingVersion: v.optional(v.string()),
     createdAt: v.number(),
-  }).index("by_brain_entity", ["brainInstanceId", "entityRef.entityType", "entityRef.entityId"]),
+    updatedAt: v.number(),
+  })
+    .index("by_brain", ["brainInstanceId"])
+    .index("by_brain_entity", ["brainInstanceId", "entityRef.entityType", "entityRef.entityId"])
+    .index("by_brain_entity_provider", [
+      "brainInstanceId",
+      "entityRef.entityType",
+      "entityRef.entityId",
+      "embeddingProvider",
+      "embeddingModel",
+    ])
+    .vectorIndex("by_brain_embedding", {
+      vectorField: "embedding",
+      dimensions: 1536,
+      filterFields: ["brainInstanceId", "embeddingProvider", "embeddingModel"],
+    }),
 
   aiProcessingRuns: defineTable({
     brainInstanceId: v.id("brainInstances"),

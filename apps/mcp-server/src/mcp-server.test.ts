@@ -4,8 +4,8 @@ import { describe, expect, it } from "vitest";
 import { createMcpServer } from "./mcp-server";
 import type { SkippyClient } from "./tools";
 
-function createFakeClient(): SkippyClient {
-  return {
+function createFakeClient(overrides: Partial<SkippyClient> = {}): SkippyClient {
+  const client: SkippyClient = {
     submitCandidateObject: async () => ({ triageItemId: "triage_123", sourceRefIds: ["source_123"] }),
     createProjectDirect: async (_brainInstanceId, input) => ({
       status: "created",
@@ -23,12 +23,41 @@ function createFakeClient(): SkippyClient {
     addSourceRef: async () => ({ ok: true }),
     linkEntities: async () => ({ ok: true }),
     getLatestFocusSummary: async () => null,
+    getAiContext: async () => ({
+      config: { llmProviderMode: "none" },
+      focusSummary: null,
+      projects: [],
+      tasks: [],
+      people: [],
+      companies: [],
+      links: [],
+      notes: [],
+      embeddings: [],
+    }),
+    upsertEntityEmbedding: async () => ({ ok: true }),
     upsertFocusSummary: async () => ({ ok: true }),
     listPendingActions: async () => [],
+    markTaskInProgress: async (_brainInstanceId, taskId, startedBy) => ({
+      taskId,
+      status: "in_progress",
+      startedAt: 1780850000000,
+      startedBy,
+    }),
     markTaskDone: async (_brainInstanceId, taskId) => ({ taskId }),
     recordPendingActionResult: async () => ({ ok: true }),
+    recordEntityReview: async () => ({ ok: true }),
     recordIngestionRun: async () => ({ ok: true }),
+    getNotificationDispatchContext: async () => ({
+      config: { notificationsEnabled: false },
+      pushSubscriptions: [],
+      tasks: [],
+      pendingActions: [],
+      recentDeliveries: [],
+    }),
+    recordNotificationDelivery: async () => ({ ok: true }),
   };
+
+  return { ...client, ...overrides };
 }
 
 function textResult(result: Awaited<ReturnType<Client["callTool"]>>) {
@@ -58,6 +87,10 @@ describe("Skippy MCP manifest", () => {
       const createTask = tools.find((tool) => tool.name === "create_task");
       const capture = tools.find((tool) => tool.name === "capture");
       const ask = tools.find((tool) => tool.name === "ask");
+      const refreshFocusSummary = tools.find((tool) => tool.name === "refresh_focus_summary");
+      const recordEntityReview = tools.find((tool) => tool.name === "record_entity_review");
+      const markTaskInProgress = tools.find((tool) => tool.name === "mark_task_in_progress");
+      const dispatchNotifications = tools.find((tool) => tool.name === "dispatch_notifications");
 
       expect(submitCandidate?.description).toContain("Primary ingestion tool");
       expect(submitCandidate?.description).toContain("Do not use it to mark knowledge accepted");
@@ -65,6 +98,10 @@ describe("Skippy MCP manifest", () => {
       expect(createTask?.description).toContain("only when the user explicitly asks");
       expect(capture?.description).toContain("Creates a note candidate in triage");
       expect(ask?.annotations?.readOnlyHint).toBe(true);
+      expect(refreshFocusSummary?.description).toContain("Generate and store");
+      expect(recordEntityReview?.description).toContain("Record a review of an accepted Skippy entity");
+      expect(markTaskInProgress?.description).toContain("when a harness starts working");
+      expect(dispatchNotifications?.description).toContain("Use dryRun first");
 
       const prompts = await client.listPrompts();
       expect(prompts.prompts.find((prompt) => prompt.name === "skippy_intro")?.description).toContain(
@@ -140,6 +177,22 @@ describe("Skippy MCP manifest", () => {
         reviewUrl: "http://127.0.0.1:3000/projects",
       });
 
+      const inProgressResult = await client.callTool({
+        name: "mark_task_in_progress",
+        arguments: {
+          taskId: "task_123",
+          startedBy: "codex",
+        },
+      });
+
+      expect(textResult(inProgressResult)).toMatchObject({
+        status: "in_progress",
+        entityType: "task",
+        taskId: "task_123",
+        startedBy: "codex",
+        reviewUrl: "http://127.0.0.1:3000/projects",
+      });
+
       const doneResult = await client.callTool({
         name: "mark_task_done",
         arguments: {
@@ -152,6 +205,103 @@ describe("Skippy MCP manifest", () => {
         entityType: "task",
         taskId: "task_123",
         reviewUrl: "http://127.0.0.1:3000/projects",
+      });
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
+  it("returns chat-friendly confirmations for pending action listing and result recording", async () => {
+    const listCalls: Array<{ brainInstanceId: string; status?: string }> = [];
+    const recordCalls: Array<{
+      pendingActionId: string;
+      result: {
+        status: "sent" | "failed" | "completed";
+        executionProvider?: string;
+        externalMessageId?: string;
+        error?: string;
+      };
+    }> = [];
+    const server = createMcpServer(
+      createFakeClient({
+        listPendingActions: async (brainInstanceId, status) => {
+          listCalls.push(status === undefined ? { brainInstanceId } : { brainInstanceId, status });
+          return [
+            {
+              _id: "pending_action_123",
+              actionType: "send_email",
+              status: "approved",
+              recipients: ["pat@example.com"],
+              subject: "Follow up",
+            },
+          ];
+        },
+        recordPendingActionResult: async (pendingActionId, result) => {
+          recordCalls.push({ pendingActionId, result });
+          return { pendingActionId };
+        },
+      }),
+      "brain_123",
+    );
+    const client = new Client({ name: "pending-action-confirmation-test", version: "0.1.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    try {
+      await server.connect(serverTransport);
+      await client.connect(clientTransport);
+
+      const listResult = await client.callTool({
+        name: "list_pending_actions",
+        arguments: { status: "approved" },
+      });
+
+      expect(listCalls).toEqual([{ brainInstanceId: "brain_123", status: "approved" }]);
+      expect(textResult(listResult)).toMatchObject({
+        status: "listed",
+        entityType: "pending_action",
+        filterStatus: "approved",
+        count: 1,
+        pendingActions: [
+          {
+            _id: "pending_action_123",
+            actionType: "send_email",
+            status: "approved",
+            subject: "Follow up",
+          },
+        ],
+        reviewUrl: "http://127.0.0.1:3000/actions",
+      });
+
+      const recordResult = await client.callTool({
+        name: "record_pending_action_result",
+        arguments: {
+          pendingActionId: "pending_action_123",
+          status: "sent",
+          executionProvider: "gmail",
+          externalMessageId: "gmail_message_123",
+        },
+      });
+
+      expect(recordCalls).toEqual([
+        {
+          pendingActionId: "pending_action_123",
+          result: {
+            pendingActionId: "pending_action_123",
+            status: "sent",
+            executionProvider: "gmail",
+            externalMessageId: "gmail_message_123",
+          },
+        },
+      ]);
+      expect(textResult(recordResult)).toMatchObject({
+        status: "sent",
+        entityType: "pending_action",
+        pendingActionId: "pending_action_123",
+        executionProvider: "gmail",
+        externalMessageId: "gmail_message_123",
+        reviewUrl: "http://127.0.0.1:3000/actions",
+        nextAction: "Execution result recorded in Skippy.",
       });
     } finally {
       await client.close();

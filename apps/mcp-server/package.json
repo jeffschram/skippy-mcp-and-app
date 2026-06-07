@@ -23,12 +23,19 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --passWithNoTests",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "smoke:remote": "node scripts/smoke-remote-mcp.mjs"
+    "smoke:remote": "node scripts/smoke-remote-mcp.mjs",
+    "prod:check": "node scripts/check-production-env.mjs",
+    "smoke:ingestion-triage": "node scripts/smoke-ingestion-triage.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "@skippy/ai": "workspace:*",
     "@skippy/shared": "workspace:*",
     "convex": "^1.40.0",
+    "web-push": "^3.6.7",
     "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/web-push": "^3.6.4"
   }
 }

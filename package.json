@@ -10,9 +10,11 @@
   "scripts": {
     "build": "pnpm -r --sort build",
     "test": "pnpm --filter @skippy/shared build && pnpm -r --sort test",
-    "typecheck": "pnpm --filter @skippy/shared build && pnpm --filter @skippy/mcp-server build && pnpm -r --sort typecheck && pnpm convex:typecheck",
+    "typecheck": "pnpm --filter @skippy/shared build && pnpm --filter @skippy/ai build && pnpm --filter @skippy/mcp-server build && pnpm -r --sort typecheck && pnpm convex:typecheck",
     "convex:typecheck": "tsc -p convex/tsconfig.json --noEmit",
     "mcp:smoke": "pnpm --filter @skippy/mcp-server smoke:remote",
+    "mcp:smoke:ingestion-triage": "pnpm --filter @skippy/mcp-server smoke:ingestion-triage",
+    "prod:check": "pnpm --filter @skippy/mcp-server prod:check",
     "lint": "pnpm -r lint",
     "check": "pnpm typecheck && pnpm test"
   },

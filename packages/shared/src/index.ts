@@ -169,6 +169,8 @@ export type TaskInput = PriorityMetadata & {
   processingState?: ProcessingState;
   status?: TaskStatus;
   dueAt?: number;
+  startedAt?: number;
+  startedBy?: string;
   completedAt?: number;
 };
 
@@ -590,4 +592,52 @@ export function normalizeAcceptedEntityPayload<T extends EntityType>(
         properties: asRecord(payload.properties ?? payload),
       }) as EntityInputMap[T];
   }
+}
+
+function canonicalFingerprintValue(value: unknown): unknown {
+  if (typeof value === "string") {
+    return value.trim().toLocaleLowerCase();
+  }
+
+  if (typeof value === "number" || typeof value === "boolean" || value === null) {
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    return value.map(canonicalFingerprintValue);
+  }
+
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .filter(([, childValue]) => childValue !== undefined)
+        .sort(([leftKey], [rightKey]) => leftKey.localeCompare(rightKey))
+        .map(([key, childValue]) => [key, canonicalFingerprintValue(childValue)]),
+    );
+  }
+
+  return undefined;
+}
+
+function fingerprintHash(text: string) {
+  let hash = 2166136261;
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
+export function canonicalCandidatePayload<T extends EntityType>(
+  entityType: T,
+  rawPayload: unknown,
+): EntityInputMap[T] {
+  return normalizeAcceptedEntityPayload(entityType, rawPayload);
+}
+
+export function candidateFingerprint(entityType: EntityType, rawPayload: unknown): string {
+  const canonicalPayload = canonicalCandidatePayload(entityType, rawPayload);
+  const canonicalText = JSON.stringify(canonicalFingerprintValue(canonicalPayload));
+  return `${entityType}:${fingerprintHash(canonicalText)}`;
 }

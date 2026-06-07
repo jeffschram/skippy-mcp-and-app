@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  candidateFingerprint,
   normalizeAcceptedEntityPayload,
   normalizeCandidateObject,
   normalizeConfidence,
@@ -87,5 +88,20 @@ describe("candidate object normalization", () => {
       notes: "Invoice sender.",
       relationshipLabel: "vendor",
     });
+  });
+
+  it("builds stable fingerprints from normalized accepted payloads", () => {
+    expect(
+      candidateFingerprint("task", {
+        title: "  Fix schema mapping ",
+        dueDate: "2026-06-10",
+        unsupportedField: "ignored",
+      }),
+    ).toBe(
+      candidateFingerprint("task", {
+        title: "fix schema mapping",
+        dueAt: Date.parse("2026-06-10"),
+      }),
+    );
   });
 });
