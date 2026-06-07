@@ -10,6 +10,7 @@ import {
   Contact,
   Home,
   Inbox,
+  Info,
   LinkIcon,
   MessageSquareText,
   Settings,
@@ -28,6 +29,7 @@ export const navItems = [
   { href: "/triage", label: "Triage", icon: Inbox },
   { href: "/pending-actions", label: "Actions", icon: ShieldCheck },
   { href: "/settings", label: "Settings", icon: Settings },
+  { href: "/about", label: "About", icon: Info },
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
