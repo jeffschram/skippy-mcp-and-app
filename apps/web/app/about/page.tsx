@@ -8,10 +8,10 @@ const mcpCapabilities = [
     badge: "Direct",
   },
   {
-    title: "Submit knowledge for review",
+    title: "Ingest important source-backed knowledge",
     detail:
-      "Email, calendar, messages, links, notes, people, companies, goals, projects, and tasks can be submitted as triage candidates with source references.",
-    badge: "Triage",
+      "Email, calendar, messages, links, notes, people, companies, goals, projects, and tasks can be written directly when they clear your importance rubric.",
+    badge: "Rubric",
   },
   {
     title: "Link and merge entities",
@@ -57,22 +57,22 @@ const connectionSteps = [
   {
     title: "Ask the harness to use Skippy",
     detail:
-      "The harness discovers Skippy tools automatically, then chooses direct create, triage, review, retrieval, or notification tools based on your request.",
+      "The harness discovers Skippy tools automatically, reads your importance rubric, then decides what to store, ignore, retrieve, or ask you to review.",
   },
 ];
 
 export default function AboutPage() {
   return (
     <AppShell>
-      <PageHeader eyebrow="About" title="Skippy is an MCP server and a review app for your personal operating context." />
+      <PageHeader eyebrow="About" title="Skippy is an MCP server and app for your personal operating context." />
 
       <div className="grid">
         <section className="card section span-7">
           <h2>What Skippy is</h2>
           <p className="muted">
             Skippy gives AI harnesses a shared place to store useful personal context without turning every
-            inference into permanent knowledge. The MCP server is the interface harnesses connect to. The web app
-            is where you review, correct, configure, and monitor what Skippy knows.
+            source item into permanent knowledge. The MCP server is the interface harnesses connect to. The web app
+            is where you see focus, projects, tasks, actions, settings, and the importance rubric that guides what Skippy keeps.
           </p>
           <div className="item-list">
             <article className="item">
@@ -82,8 +82,8 @@ export default function AboutPage() {
               <div>
                 <p className="item-title">MCP server</p>
                 <p className="item-meta">
-                  Exposes tools that let connected AI clients create tasks, submit candidates, fetch context,
-                  generate summaries, and report action results.
+                  Exposes tools that let connected AI clients read your rubric, ingest accepted objects, create tasks,
+                  fetch context, generate summaries, and report action results.
                 </p>
               </div>
               <span className="badge blue">Tools</span>
@@ -95,7 +95,7 @@ export default function AboutPage() {
               <div>
                 <p className="item-title">Web app</p>
                 <p className="item-meta">
-                  Shows accepted projects, active tasks, contacts, triage suggestions, pending actions, settings,
+                  Shows accepted projects, active tasks, contacts, fallback review items, pending actions, settings,
                   tokens, notification preferences, and live Convex data.
                 </p>
               </div>
@@ -145,9 +145,10 @@ export default function AboutPage() {
           <h2>How the pieces work together</h2>
           <p className="muted">
             A harness reads the MCP tool descriptions, decides when Skippy is relevant, and calls the appropriate
-            tool. Explicit instructions can become accepted projects or tasks immediately. Inferred information from
-            Gmail, Calendar, messages, links, or other sources should usually enter triage first. Convex stores the
-            data, Clerk protects the app, and this web UI gives you the final say over what becomes durable context.
+            tool. Source-derived information should be compared against your importance rubric. When the harness can
+            explain why something matters, it writes an accepted object directly with source references and a concise
+            rubric decision. If the decision is unclear, Skippy can still hold it for review. Convex stores the data,
+            Clerk protects the app, and this web UI lets you tune the rules as your judgment evolves.
           </p>
         </section>
       </div>

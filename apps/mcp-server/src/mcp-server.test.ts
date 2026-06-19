@@ -7,6 +7,13 @@ import type { SkippyClient } from "./tools";
 function createFakeClient(overrides: Partial<SkippyClient> = {}): SkippyClient {
   const client: SkippyClient = {
     submitCandidateObject: async () => ({ triageItemId: "triage_123", sourceRefIds: ["source_123"] }),
+    ingestObject: async (_brainInstanceId, input) => ({
+      status: "accepted",
+      entityType: input.candidateEntityType,
+      entityId: "entity_123",
+      title: "Accepted item",
+      rubricDecision: input.rubricDecision,
+    }),
     createProjectDirect: async (_brainInstanceId, input) => ({
       status: "created",
       entityType: "project",
@@ -47,6 +54,15 @@ function createFakeClient(overrides: Partial<SkippyClient> = {}): SkippyClient {
     recordPendingActionResult: async () => ({ ok: true }),
     recordEntityReview: async () => ({ ok: true }),
     recordIngestionRun: async () => ({ ok: true }),
+    updateSourceSyncStatus: async () => ({ ok: true }),
+    getOperatingRules: async () => [],
+    getEffectiveRubric: async () => ({
+      manualRubric: "",
+      goals: [],
+      activeProjects: [],
+      favoriteContacts: [],
+      renderedText: "",
+    }),
     getNotificationDispatchContext: async () => ({
       config: { notificationsEnabled: false },
       pushSubscriptions: [],
@@ -71,7 +87,7 @@ function textResult(result: Awaited<ReturnType<Client["callTool"]>>) {
 }
 
 describe("Skippy MCP manifest", () => {
-  it("teaches harnesses the Skippy triage-first workflow", async () => {
+  it("teaches harnesses the Skippy rubric-first workflow", async () => {
     const server = createMcpServer(createFakeClient(), "brain_123");
     const client = new Client({ name: "manifest-test", version: "0.1.0" });
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -80,9 +96,10 @@ describe("Skippy MCP manifest", () => {
       await server.connect(serverTransport);
       await client.connect(clientTransport);
 
-      expect(client.getInstructions()).toContain("triage-safe writes");
+      expect(client.getInstructions()).toContain("importance rubric");
 
       const { tools } = await client.listTools();
+      const ingestObject = tools.find((tool) => tool.name === "ingest_object");
       const submitCandidate = tools.find((tool) => tool.name === "submit_candidate_object");
       const createTask = tools.find((tool) => tool.name === "create_task");
       const capture = tools.find((tool) => tool.name === "capture");
@@ -92,11 +109,12 @@ describe("Skippy MCP manifest", () => {
       const markTaskInProgress = tools.find((tool) => tool.name === "mark_task_in_progress");
       const dispatchNotifications = tools.find((tool) => tool.name === "dispatch_notifications");
 
-      expect(submitCandidate?.description).toContain("Primary ingestion tool");
-      expect(submitCandidate?.description).toContain("Do not use it to mark knowledge accepted");
+      expect(ingestObject?.description).toContain("importance rubric");
+      expect(ingestObject?.inputSchema.properties?.rubricDecision).toBeDefined();
+      expect(submitCandidate?.description).toContain("Legacy fallback");
       expect(submitCandidate?.inputSchema.properties?.reviewReason).toBeDefined();
-      expect(createTask?.description).toContain("only when the user explicitly asks");
-      expect(capture?.description).toContain("Creates a note candidate in triage");
+      expect(createTask?.description).toContain("when the user explicitly asks");
+      expect(capture?.description).toContain("accepted note directly");
       expect(ask?.annotations?.readOnlyHint).toBe(true);
       expect(refreshFocusSummary?.description).toContain("Generate and store");
       expect(recordEntityReview?.description).toContain("Record a review of an accepted Skippy entity");
@@ -120,7 +138,7 @@ describe("Skippy MCP manifest", () => {
     }
   });
 
-  it("returns chat-friendly confirmations for triage candidate submissions", async () => {
+  it("returns chat-friendly confirmations for direct accepted ingestion", async () => {
     const server = createMcpServer(createFakeClient(), "brain_123");
     const client = new Client({ name: "confirmation-test", version: "0.1.0" });
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -130,20 +148,22 @@ describe("Skippy MCP manifest", () => {
       await client.connect(clientTransport);
 
       const result = await client.callTool({
-        name: "submit_candidate_object",
+        name: "ingest_object",
         arguments: {
           candidateEntityType: "task",
           candidatePayload: { title: "Fix schema mapping", dueDate: "2026-06-10" },
+          rubricDecision: "Active project task with concrete implementation value.",
           confidence: 0.9,
         },
       });
 
       expect(textResult(result)).toMatchObject({
-        status: "submitted_for_review",
+        status: "accepted",
         entityType: "task",
-        title: "Fix schema mapping",
-        triageItemId: "triage_123",
-        reviewUrl: "http://127.0.0.1:3000/triage",
+        title: "Accepted item",
+        entityId: "entity_123",
+        rubricDecision: "Active project task with concrete implementation value.",
+        reviewUrl: "http://127.0.0.1:3000/projects",
       });
     } finally {
       await client.close();

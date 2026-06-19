@@ -247,7 +247,7 @@ export function createOpenAiLlmClient(config: AiProviderConfig, options?: AiClie
         body: JSON.stringify({
           model,
           instructions:
-            "Write a concise Skippy focus summary using only the supplied context. Keep it to 2 short sentences. Name the most important next move first, then mention the supporting items. Do not produce a roadmap or long paragraph.",
+            "Write a concise Skippy focus summary using only the supplied context. Return 3-5 short markdown bullet lines. Put the most important next move first, then supporting items. Do not produce a roadmap or paragraph.",
           input: contextText(request.items) || "No context available.",
         }),
       });
@@ -318,7 +318,7 @@ export function createAnthropicLlmClient(config: AiProviderConfig, options?: AiC
 
     async generateFocusSummary(request) {
       const result = await createMessage(
-        "Write a concise Skippy focus summary using only the supplied context. Keep it to 2 short sentences. Name the most important next move first, then mention the supporting items. Do not produce a roadmap or long paragraph.",
+        "Write a concise Skippy focus summary using only the supplied context. Return 3-5 short markdown bullet lines. Put the most important next move first, then supporting items. Do not produce a roadmap or paragraph.",
         contextText(request.items) || "No context available.",
         "focus_summary",
         request.policyVersion,
@@ -395,7 +395,7 @@ function createChatCompletionLlmClient({
 
     async generateFocusSummary(request) {
       const result = await createChat(
-        "Write a concise Skippy focus summary using only the supplied context. Keep it to 2 short sentences. Name the most important next move first, then mention the supporting items. Do not produce a roadmap or long paragraph.",
+        "Write a concise Skippy focus summary using only the supplied context. Return 3-5 short markdown bullet lines. Put the most important next move first, then supporting items. Do not produce a roadmap or paragraph.",
         contextText(request.items) || "No context available.",
         "focus_summary",
         request.policyVersion,

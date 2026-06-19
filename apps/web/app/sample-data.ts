@@ -5,9 +5,9 @@ export const focusItems = [
     badge: "Follow-up",
   },
   {
-    title: "Review low-confidence project suggestions",
-    reason: "Four items are waiting in triage before they enter the trusted graph.",
-    badge: "Triage",
+    title: "Tune the importance rubric",
+    reason: "A few unclear signals need a decision before Skippy learns how to handle similar items next time.",
+    badge: "Review",
   },
   {
     title: "Finish task completion sync policy",
@@ -21,7 +21,7 @@ export const projects = [
     title: "Skippy MCP and PWA",
     summary: "Canonical second-brain backend, MCP ingest surface, and focused review app.",
     status: "in progress",
-    tasks: ["Wire Convex schema", "Submit candidate objects", "Build triage review"],
+    tasks: ["Wire Convex schema", "Ingest accepted objects", "Tune importance rubric"],
   },
   {
     title: "Home operations refresh",

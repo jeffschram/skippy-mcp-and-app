@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useConvexAuth, useMutation, useQuery } from "convex/react";
 import { api } from "../lib/skippy-api";
@@ -35,9 +36,9 @@ function useViewerReady() {
   return Boolean(viewer?.brain);
 }
 
-function titleForTriage(item: AnyRecord) {
+function titleForReviewItem(item: AnyRecord) {
   const payload = item.candidatePayload ?? {};
-  return payload.title ?? payload.name ?? payload.url ?? payload.body ?? "Untitled suggestion";
+  return payload.title ?? payload.name ?? payload.url ?? payload.body ?? "Untitled signal";
 }
 
 function textValue(...values: unknown[]) {
@@ -136,7 +137,7 @@ function overlapScore(left: string, right: string) {
 
 function candidateMatchText(item: AnyRecord, payload: AnyRecord) {
   return [
-    titleForTriage(item),
+    titleForReviewItem(item),
     payload.title,
     payload.name,
     payload.email,
@@ -181,9 +182,220 @@ function formatDate(value?: number) {
   }).format(value);
 }
 
+function splitTopLevelList(value: string) {
+  const items: string[] = [];
+  let current = "";
+  let depth = 0;
+
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index];
+    if (character === "(") {
+      depth += 1;
+    }
+    if (character === ")" && depth > 0) {
+      depth -= 1;
+    }
+
+    const nextCharacter = value[index + 1];
+    if (character === "," && depth === 0 && !/\d/.test(nextCharacter ?? "")) {
+      if (current.trim()) {
+        items.push(current.trim());
+      }
+      current = "";
+      continue;
+    }
+
+    current += character;
+  }
+
+  if (current.trim()) {
+    items.push(current.trim());
+  }
+
+  return items.map((item) => item.replace(/^and\s+/i, "").trim()).filter(Boolean);
+}
+
+function focusSummaryBullets(summaryText: string | undefined) {
+  if (!summaryText?.trim()) {
+    return ["No stored focus summary yet. A harness can generate one through the MCP."];
+  }
+
+  const trimmed = summaryText.trim();
+  const markdownBullets = trimmed
+    .split(/\n+/)
+    .map((line) => line.replace(/^[-*]\s+|^\d+\.\s+/, "").trim())
+    .filter(Boolean);
+  if (markdownBullets.length > 1) {
+    return markdownBullets;
+  }
+
+  const [primaryText = "", supportingText] = trimmed.split(/\s+Supporting items:\s+/i);
+  const bullets: string[] = [];
+  const primaryParts = primaryText.split(/:\s+/);
+  if (primaryParts.length > 1) {
+    bullets.push((primaryParts[0] ?? "").replace(/\.$/, "."));
+    bullets.push(...primaryParts.slice(1).join(": ").split(/\s+and\s+/i).map((item) => item.trim()));
+  } else {
+    bullets.push(primaryText);
+  }
+
+  if (supportingText) {
+    bullets.push(...splitTopLevelList(supportingText.replace(/\.$/, "")));
+  }
+
+  return bullets
+    .map((bullet) => bullet.replace(/\.$/, "").trim())
+    .filter(Boolean)
+    .map((bullet) => `${bullet[0]?.toUpperCase() ?? ""}${bullet.slice(1)}.`);
+}
+
+function isGenericFocusLead(value: string) {
+  return /^(prioritize|focus on|focus|handle|work through|stay on top of|review today's|today's)\b/i.test(
+    value.replace(/\.$/, "").trim(),
+  );
+}
+
+function joinHeadingParts(parts: string[]) {
+  if (parts.length <= 1) {
+    return parts[0] ?? "Current focus";
+  }
+  if (parts.length === 2) {
+    return `${parts[0]} and ${parts[1]}`;
+  }
+  return `${parts.slice(0, -1).join(", ")}, and ${parts[parts.length - 1]}`;
+}
+
+function focusCategoryForBullet(value: string) {
+  const text = value.toLowerCase();
+  if (/(amazon|usps|deliver|shipment|package)/.test(text)) {
+    return "deliveries";
+  }
+  if (/(subscription|prime video|mgm\+|trial|renewal)/.test(text)) {
+    return "subscriptions";
+  }
+  if (/(chase|card statement|credit card|refund|bill|payment|balance|auto-pay|spend)/.test(text)) {
+    return "finance";
+  }
+  if (/(skippy|mcp|convex|pwa|web app|roadmap|build)/.test(text)) {
+    return "Skippy build";
+  }
+  if (/(calendar|meeting|appointment|call)/.test(text)) {
+    return "calendar";
+  }
+  if (/(email|reply|follow up|follow-up)/.test(text)) {
+    return "follow-ups";
+  }
+  return undefined;
+}
+
+type FocusCategory = NonNullable<ReturnType<typeof focusCategoryForBullet>>;
+
+function focusSummaryPresentation(bullets: string[]) {
+  const [firstBullet = "Current focus", ...remainingBullets] = bullets;
+  const firstIsGeneric = isGenericFocusLead(firstBullet);
+  const details = firstIsGeneric ? remainingBullets : remainingBullets.length ? remainingBullets : bullets;
+  const categoryOrder: FocusCategory[] = ["deliveries", "subscriptions", "finance", "Skippy build", "calendar", "follow-ups"];
+  const categoryLabels = Array.from(
+    new Set(details.map(focusCategoryForBullet).filter((label): label is FocusCategory => Boolean(label))),
+  )
+    .sort((left, right) => categoryOrder.indexOf(left) - categoryOrder.indexOf(right))
+    .slice(0, 4);
+
+  if (categoryLabels.length >= 2) {
+    return {
+      heading: `Today: ${joinHeadingParts(categoryLabels)}.`,
+      details,
+    };
+  }
+
+  if (firstIsGeneric && details[0]) {
+    return {
+      heading: details[0],
+      details: details.slice(1),
+    };
+  }
+
+  return {
+    heading: firstBullet,
+    details: remainingBullets,
+  };
+}
+
+function focusItemKey(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 120);
+}
+
+function activeSourceSyncStatus(statuses: AnyRecord[] | undefined) {
+  const running = (statuses ?? [])
+    .filter((status) => status.status === "running")
+    .sort((left, right) => (right.lastHeartbeatAt ?? right.updatedAt ?? 0) - (left.lastHeartbeatAt ?? left.updatedAt ?? 0));
+  return running[0] ?? null;
+}
+
 export function LiveHomeContent() {
   const viewerReady = useViewerReady();
   const data = useQuery(api.knowledge.dashboardForViewer, viewerReady ? {} : "skip") as AnyRecord | undefined;
+  const recordFocusItemAction = useMutation(api.knowledge.recordFocusItemActionForViewer);
+  const createTaskFromFocusItem = useMutation(api.knowledge.createTaskFromFocusItemForViewer);
+  const [busyFocusItemKey, setBusyFocusItemKey] = useState<string | null>(null);
+  const focusBullets = useMemo(() => focusSummaryBullets(data?.focusSummary?.summaryText), [data?.focusSummary?.summaryText]);
+  const { heading: focusHeading, details: focusDetails } = useMemo(
+    () => focusSummaryPresentation(focusBullets),
+    [focusBullets],
+  );
+  const sourceSyncStatus = useMemo(() => activeSourceSyncStatus(data?.sourceSyncStatuses), [data?.sourceSyncStatuses]);
+  const focusActionByKey = useMemo(() => {
+    const lookup = new Map<string, AnyRecord>();
+    for (const action of data?.focusItemActions ?? []) {
+      lookup.set(action.itemKey, action);
+    }
+    return lookup;
+  }, [data?.focusItemActions]);
+  const visibleFocusDetails = useMemo(
+    () =>
+      focusDetails
+        .map((text) => ({ text, itemKey: focusItemKey(text) }))
+        .filter((item) => !focusActionByKey.has(item.itemKey)),
+    [focusActionByKey, focusDetails],
+  );
+  const unclearSignalCount = data?.triageItems.length ?? 0;
+  const pendingActionCount = data?.pendingActions.length ?? 0;
+  const hasDecisionQueueItems = unclearSignalCount > 0 || pendingActionCount > 0;
+  const recordFocusAction = async (item: { text: string; itemKey: string }, action: "dismissed" | "done") => {
+    if (!data?.focusSummary?._id) {
+      return;
+    }
+    setBusyFocusItemKey(item.itemKey);
+    try {
+      await recordFocusItemAction({
+        focusSummaryId: data.focusSummary._id,
+        itemKey: item.itemKey,
+        itemText: item.text,
+        action,
+      } as any);
+    } finally {
+      setBusyFocusItemKey(null);
+    }
+  };
+  const promoteFocusItemToTask = async (item: { text: string; itemKey: string }) => {
+    if (!data?.focusSummary?._id) {
+      return;
+    }
+    setBusyFocusItemKey(item.itemKey);
+    try {
+      await createTaskFromFocusItem({
+        focusSummaryId: data.focusSummary._id,
+        itemKey: item.itemKey,
+        itemText: item.text,
+      } as any);
+    } finally {
+      setBusyFocusItemKey(null);
+    }
+  };
 
   return (
     <LiveGate>
@@ -194,59 +406,97 @@ export function LiveHomeContent() {
         </section>
       ) : (
         <div className="grid">
-          <section className="card section span-8 focus-summary">
+          <section className={`card section ${hasDecisionQueueItems ? "span-8" : "span-12"} focus-summary`}>
             <div>
-              <h2>Current focus</h2>
-              <p>
-                {data.focusSummary?.summaryText ??
-                  "No stored focus summary yet. A harness can generate one through the MCP."}
-              </p>
+              <div className="focus-summary-head">
+                <p className="eyebrow">Now</p>
+                {sourceSyncStatus ? (
+                  <span className="sync-status-pill" title={sourceSyncStatus.message ?? "Source sync is running"}>
+                    <icons.RefreshCw size={14} aria-hidden />
+                    Updating
+                  </span>
+                ) : null}
+              </div>
+              {sourceSyncStatus ? (
+                <p className="sync-status-copy">
+                  {sourceSyncStatus.message ??
+                    `Checking ${(sourceSyncStatus.sourceSystemsChecked ?? []).join(", ") || "connected sources"}.`}
+                </p>
+              ) : null}
+              <h1 className="focus-heading">{focusHeading}</h1>
+              {visibleFocusDetails.length ? (
+                <ul className="focus-summary-list">
+                  {visibleFocusDetails.map((item) => (
+                    <li key={item.itemKey}>
+                      <span>{item.text}</span>
+                      <span className="focus-item-actions">
+                        <button
+                          className="icon-button"
+                          type="button"
+                          title="Dismiss from focus"
+                          aria-label={`Dismiss ${item.text}`}
+                          disabled={busyFocusItemKey === item.itemKey}
+                          onClick={() => void recordFocusAction(item, "dismissed")}
+                        >
+                          <icons.X size={16} aria-hidden />
+                        </button>
+                        <button
+                          className="text-button compact"
+                          type="button"
+                          title="Turn into task"
+                          disabled={busyFocusItemKey === item.itemKey}
+                          onClick={() => void promoteFocusItemToTask(item)}
+                        >
+                          Task
+                        </button>
+                        <button
+                          className="icon-button"
+                          type="button"
+                          title="Already done"
+                          aria-label={`Mark ${item.text} already done`}
+                          disabled={busyFocusItemKey === item.itemKey}
+                          onClick={() => void recordFocusAction(item, "done")}
+                        >
+                          <icons.Check size={16} aria-hidden />
+                        </button>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
             </div>
           </section>
-          <section className="span-4 section">
-            <h2>Review queue</h2>
-            <div className="item-list">
-              <div className="item">
-                <span className="item-icon">
-                  <icons.Archive size={17} aria-hidden />
-                </span>
-                <div>
-                  <p className="item-title">{data.triageItems.length} suggestions</p>
-                  <p className="item-meta">Awaiting triage review.</p>
-                </div>
-                <span className="badge gold">Triage</span>
-              </div>
-              <div className="item">
-                <span className="item-icon">
-                  <icons.MessageSquareText size={17} aria-hidden />
-                </span>
-                <div>
-                  <p className="item-title">{data.pendingActions.length} pending actions</p>
-                  <p className="item-meta">External effects stay separated until reviewed.</p>
-                </div>
-                <span className="badge red">Approval</span>
-              </div>
-            </div>
-          </section>
-          <section className="span-12">
-            <h2>Top items</h2>
-            <div className="item-list">
-              {(data.focusSummary?.topItems?.length ? data.focusSummary.topItems : data.tasks).map(
-                (item: AnyRecord) => (
-                  <article className="item" key={item._id ?? item.reason ?? item.title}>
+          {hasDecisionQueueItems ? (
+            <section className="span-4 section">
+              <h2>Decision queue</h2>
+              <div className="item-list">
+                {unclearSignalCount > 0 ? (
+                  <div className="item">
                     <span className="item-icon">
-                      <icons.CircleCheck size={17} aria-hidden />
+                      <icons.Archive size={17} aria-hidden />
                     </span>
                     <div>
-                      <p className="item-title">{item.title ?? item.entityRef?.entityType ?? "Focus item"}</p>
-                      <p className="item-meta">{item.reason ?? item.priorityReason ?? item.status ?? "Accepted task"}</p>
+                      <p className="item-title">{unclearSignalCount} unclear signals</p>
+                      <p className="item-meta">Fallback items that need a rubric decision.</p>
                     </div>
-                    <span className="badge blue">{item.priorityScore ?? item.status ?? "Focus"}</span>
-                  </article>
-                ),
-              )}
-            </div>
-          </section>
+                    <span className="badge gold">Review</span>
+                  </div>
+                ) : null}
+                {pendingActionCount > 0 ? (
+                  <div className="item">
+                    <span className="item-icon">
+                      <icons.MessageSquareText size={17} aria-hidden />
+                    </span>
+                    <div>
+                      <p className="item-title">{pendingActionCount} pending actions</p>
+                      <p className="item-meta">External effects stay separated until reviewed.</p>
+                    </div>
+                    <span className="badge red">Approval</span>
+                  </div>
+                ) : null}
+              </div>
+            </section>
+          ) : null}
         </div>
       )}
     </LiveGate>
@@ -256,14 +506,14 @@ export function LiveHomeContent() {
 export function LiveProjectsContent() {
   const viewerReady = useViewerReady();
   const data = useQuery(api.knowledge.projectsAndTasksForViewer, viewerReady ? {} : "skip") as AnyRecord | undefined;
-  const markDoneMutation = useMutation(api.knowledge.markTaskDoneForViewer);
-  const markDone = async (args: AnyRecord) => markDoneMutation({ taskId: args.taskId as any });
-  const tasksByProject = useMemo(() => {
-    const grouped = new Map<string, AnyRecord[]>();
+  const taskCountByProject = useMemo(() => {
+    const counts = new Map<string, number>();
     for (const task of data?.tasks ?? []) {
-      grouped.set(task.projectId ?? "unassigned", [...(grouped.get(task.projectId ?? "unassigned") ?? []), task]);
+      if (task.projectId) {
+        counts.set(task.projectId, (counts.get(task.projectId) ?? 0) + 1);
+      }
     }
-    return grouped;
+    return counts;
   }, [data?.tasks]);
 
   return (
@@ -272,25 +522,113 @@ export function LiveProjectsContent() {
         <section className="card section">
           <h2>Loading projects</h2>
         </section>
+      ) : data.projects.length === 0 ? (
+        <p className="muted">No accepted projects yet.</p>
+      ) : (
+        <div className="item-list">
+          {data.projects.map((project: AnyRecord) => (
+            <ProjectRow
+              key={project._id}
+              href={`/projects/${project._id}`}
+              project={project}
+              taskCount={taskCountByProject.get(project._id) ?? 0}
+            />
+          ))}
+        </div>
+      )}
+    </LiveGate>
+  );
+}
+
+function ProjectRow({ href, project, taskCount }: { href: string; project: AnyRecord; taskCount: number }) {
+  return (
+    <Link className="item project-row" href={href}>
+      <span className="item-icon">
+        <icons.BriefcaseBusiness size={17} aria-hidden />
+      </span>
+      <div>
+        <p className="item-title">{project.title}</p>
+        <p className="item-meta">
+          {project.summary ?? "No summary yet."}
+          {" · "}
+          {taskCount} open task{taskCount === 1 ? "" : "s"}
+        </p>
+      </div>
+      <span className="project-row-side">
+        <span className="badge blue">{project.status}</span>
+        <icons.ChevronRight size={18} aria-hidden />
+      </span>
+    </Link>
+  );
+}
+
+export function LiveProjectDetailContent({ projectId }: { projectId: string }) {
+  const viewerReady = useViewerReady();
+  const data = useQuery(api.knowledge.projectsAndTasksForViewer, viewerReady ? {} : "skip") as AnyRecord | undefined;
+  const markDoneMutation = useMutation(api.knowledge.markTaskDoneForViewer);
+  const markDone = async (args: AnyRecord) => markDoneMutation({ taskId: args.taskId as any });
+  const project = useMemo(
+    () => data?.projects?.find((candidate: AnyRecord) => candidate._id === projectId),
+    [data?.projects, projectId],
+  );
+  const tasks = useMemo(
+    () => (data?.tasks ?? []).filter((task: AnyRecord) => task.projectId === projectId),
+    [data?.tasks, projectId],
+  );
+
+  return (
+    <LiveGate>
+      {!data ? (
+        <section className="card section">
+          <h2>Loading project</h2>
+        </section>
+      ) : !project ? (
+        <section className="card section">
+          <h2>Project not found</h2>
+          <p className="muted">
+            This project may have been removed. <Link href="/projects">Back to projects</Link>.
+          </p>
+        </section>
       ) : (
         <div className="grid">
-          {data.projects.map((project: AnyRecord) => (
-            <section className="card section span-6" key={project._id}>
-              <div className="settings-row">
-                <div>
-                  <h2>{project.title}</h2>
-                  <p className="muted">{project.summary ?? "No summary yet."}</p>
-                </div>
-                <span className="badge blue">{project.status}</span>
+          <section className="card section span-12">
+            <div className="settings-row">
+              <div>
+                <h2>{project.title}</h2>
+                <p className="muted">{project.summary ?? "No summary yet."}</p>
               </div>
-              <TaskList tasks={tasksByProject.get(project._id) ?? []} markDone={markDone} />
-            </section>
-          ))}
-          <section className="card section span-6">
-            <h2>Unassigned tasks</h2>
-            <TaskList tasks={tasksByProject.get("unassigned") ?? []} markDone={markDone} />
+              <span className="badge blue">{project.status}</span>
+            </div>
+            {project.priorityReason ? <p className="muted">{project.priorityReason}</p> : null}
+          </section>
+          <section className="card section span-12">
+            <h2>Tasks</h2>
+            <TaskList tasks={tasks} markDone={markDone} />
           </section>
         </div>
+      )}
+    </LiveGate>
+  );
+}
+
+export function LiveTasksContent() {
+  const viewerReady = useViewerReady();
+  const data = useQuery(api.knowledge.projectsAndTasksForViewer, viewerReady ? {} : "skip") as AnyRecord | undefined;
+  const markDoneMutation = useMutation(api.knowledge.markTaskDoneForViewer);
+  const markDone = async (args: AnyRecord) => markDoneMutation({ taskId: args.taskId as any });
+  const unassignedTasks = useMemo(
+    () => (data?.tasks ?? []).filter((task: AnyRecord) => !task.projectId),
+    [data?.tasks],
+  );
+
+  return (
+    <LiveGate>
+      {!data ? (
+        <section className="card section">
+          <h2>Loading tasks</h2>
+        </section>
+      ) : (
+        <TaskList tasks={unassignedTasks} markDone={markDone} />
       )}
     </LiveGate>
   );
@@ -336,9 +674,122 @@ function TaskList({ tasks, markDone }: { tasks: AnyRecord[]; markDone: (args: An
   );
 }
 
+export function LiveGoalsContent() {
+  const viewerReady = useViewerReady();
+  const data = useQuery(api.knowledge.goalsForViewer, viewerReady ? {} : "skip") as AnyRecord | undefined;
+  const createGoal = useMutation(api.knowledge.createGoalForViewer);
+  const [newTitle, setNewTitle] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const addGoal = async () => {
+    const title = newTitle.trim();
+    if (!title) {
+      return;
+    }
+    setBusy(true);
+    try {
+      await createGoal({ title } as any);
+      setNewTitle("");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <LiveGate>
+      {!data ? (
+        <section className="card section">
+          <h2>Loading goals</h2>
+        </section>
+      ) : (
+        <div className="grid">
+          <section className="card section span-12">
+            <h2>Add a goal</h2>
+            <div className="toolbar">
+              <input
+                className="input"
+                placeholder="New goal title"
+                value={newTitle}
+                onChange={(event) => setNewTitle(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    void addGoal();
+                  }
+                }}
+              />
+              <button className="text-button" type="button" disabled={busy || !newTitle.trim()} onClick={() => void addGoal()}>
+                Add goal
+              </button>
+            </div>
+          </section>
+          <section className="span-12">
+            {data.goals.length === 0 ? (
+              <p className="muted">No goals yet. Add one above; active goals feed the importance rubric.</p>
+            ) : (
+              <div className="item-list">
+                {data.goals.map((goal: AnyRecord) => (
+                  <GoalRow key={goal._id} goal={goal} />
+                ))}
+              </div>
+            )}
+          </section>
+        </div>
+      )}
+    </LiveGate>
+  );
+}
+
+function GoalRow({ goal }: { goal: AnyRecord }) {
+  const updateGoal = useMutation(api.knowledge.updateGoalForViewer);
+  const save = (patch: AnyRecord) => void updateGoal({ goalId: goal._id, ...patch } as any);
+
+  return (
+    <article className="item">
+      <span className={`item-icon ${goal.status === "achieved" ? "is-active" : ""}`}>
+        <icons.Target size={17} aria-hidden />
+      </span>
+      <div className="form-grid compact-form">
+        <input
+          className="input"
+          defaultValue={goal.title}
+          onBlur={(event) => {
+            const value = event.target.value.trim();
+            if (value && value !== goal.title) {
+              save({ title: value });
+            }
+          }}
+        />
+        <textarea
+          className="textarea"
+          placeholder="Description"
+          defaultValue={goal.description ?? ""}
+          onBlur={(event) => {
+            if (event.target.value !== (goal.description ?? "")) {
+              save({ description: event.target.value });
+            }
+          }}
+        />
+      </div>
+      <label className="field">
+        <span>Status</span>
+        <select className="select" defaultValue={goal.status} onChange={(event) => save({ status: event.target.value })}>
+          {(statusOptions.goal ?? []).map((statusValue) => (
+            <option key={statusValue} value={statusValue}>
+              {statusValue}
+            </option>
+          ))}
+        </select>
+      </label>
+    </article>
+  );
+}
+
 export function LiveContactsContent() {
   const viewerReady = useViewerReady();
   const data = useQuery(api.knowledge.contactsForViewer, viewerReady ? {} : "skip") as AnyRecord | undefined;
+  const setFavorite = useMutation(api.knowledge.setContactFavoriteForViewer);
+  const toggleFavorite = (personId: string, favorite: boolean) =>
+    void setFavorite({ personId: personId as any, favorite });
 
   return (
     <LiveGate>
@@ -348,7 +799,13 @@ export function LiveContactsContent() {
         </section>
       ) : (
         <div className="split-list">
-          <ContactList title="People" items={data.people} icon="UserRound" labelField="name" />
+          <ContactList
+            title="People"
+            items={data.people}
+            icon="UserRound"
+            labelField="name"
+            onToggleFavorite={toggleFavorite}
+          />
           <ContactList title="Companies" items={data.companies} icon="LinkIcon" labelField="name" />
         </div>
       )}
@@ -361,11 +818,13 @@ function ContactList({
   items,
   icon,
   labelField,
+  onToggleFavorite,
 }: {
   title: string;
   items: AnyRecord[];
   icon: "UserRound" | "LinkIcon";
   labelField: string;
+  onToggleFavorite?: (id: string, favorite: boolean) => void;
 }) {
   const Icon = icons[icon];
   return (
@@ -382,7 +841,21 @@ function ContactList({
               <p className="item-title">{item[labelField]}</p>
               <p className="item-meta">{item.relationshipContext ?? item.notes ?? item.domain ?? "Accepted"}</p>
             </div>
-            <span className="badge">{item.relationshipLabel ?? item.roleTitle ?? "Contact"}</span>
+            <span className="project-row-side">
+              {onToggleFavorite ? (
+                <button
+                  className={`icon-button ${item.favorite ? "is-favorite" : ""}`}
+                  type="button"
+                  title={item.favorite ? "Unfavorite contact" : "Favorite contact"}
+                  aria-pressed={Boolean(item.favorite)}
+                  aria-label={`${item.favorite ? "Unfavorite" : "Favorite"} ${item[labelField]}`}
+                  onClick={() => onToggleFavorite(item._id, !item.favorite)}
+                >
+                  <icons.Star size={17} fill={item.favorite ? "currentColor" : "none"} aria-hidden />
+                </button>
+              ) : null}
+              <span className="badge">{item.relationshipLabel ?? item.roleTitle ?? "Contact"}</span>
+            </span>
           </article>
         ))}
       </div>
@@ -399,11 +872,11 @@ export function LiveTriageContent() {
     <LiveGate>
       {!items || !entityOptions ? (
         <section className="card section">
-          <h2>Loading triage</h2>
+          <h2>Loading review items</h2>
         </section>
       ) : (
         <div className="item-list">
-          {items.length === 0 ? <p className="muted">No pending suggestions.</p> : null}
+          {items.length === 0 ? <p className="muted">No unclear signals need review.</p> : null}
           {items.map((item) => (
             <TriageItem key={item._id} item={item} entityOptions={entityOptions} />
           ))}
@@ -457,9 +930,9 @@ function TriageItem({ item, entityOptions }: { item: AnyRecord; entityOptions: A
       </span>
       <div className="form-grid">
         <div>
-          <p className="item-title">{titleForTriage(item)}</p>
+          <p className="item-title">{titleForReviewItem(item)}</p>
           <p className="item-meta">
-            {item.candidateEntityType} candidate
+            {item.candidateEntityType} signal
             {item.confidence ? `, confidence ${Math.round(item.confidence * 100)}%` : ""}
           </p>
         </div>
@@ -503,12 +976,12 @@ function TriageItem({ item, entityOptions }: { item: AnyRecord; entityOptions: A
           </label>
         </div>
       </div>
-      <div className="toolbar" aria-label={`Review actions for ${titleForTriage(item)}`}>
+      <div className="toolbar" aria-label={`Review actions for ${titleForReviewItem(item)}`}>
         <button
           className="icon-button"
           type="button"
           title="Approve as-is"
-          aria-label={`Approve ${titleForTriage(item)} as-is`}
+          aria-label={`Approve ${titleForReviewItem(item)} as-is`}
           onClick={() => void submit("approve")}
         >
           <icons.Check size={17} aria-hidden />
@@ -517,7 +990,7 @@ function TriageItem({ item, entityOptions }: { item: AnyRecord; entityOptions: A
           className="icon-button"
           type="button"
           title="Approve with edited payload"
-          aria-label={`Approve ${titleForTriage(item)} with edited payload`}
+          aria-label={`Approve ${titleForReviewItem(item)} with edited payload`}
           onClick={() => void submit("correct")}
         >
           <icons.CircleCheck size={17} aria-hidden />
@@ -526,7 +999,7 @@ function TriageItem({ item, entityOptions }: { item: AnyRecord; entityOptions: A
           className="icon-button"
           type="button"
           title="Reclassify to selected target type"
-          aria-label={`Reclassify ${titleForTriage(item)} to selected target type`}
+          aria-label={`Reclassify ${titleForReviewItem(item)} to selected target type`}
           onClick={() => void submit("reclassify")}
         >
           <icons.Shuffle size={17} aria-hidden />
@@ -535,7 +1008,7 @@ function TriageItem({ item, entityOptions }: { item: AnyRecord; entityOptions: A
           className="icon-button"
           type="button"
           title="Merge into target ID"
-          aria-label={`Merge ${titleForTriage(item)} into target ID`}
+          aria-label={`Merge ${titleForReviewItem(item)} into target ID`}
           disabled={!mergeTargetId}
           onClick={() => void submit("merge")}
         >
@@ -544,8 +1017,8 @@ function TriageItem({ item, entityOptions }: { item: AnyRecord; entityOptions: A
         <button
           className="icon-button"
           type="button"
-          title="Reject candidate"
-          aria-label={`Reject ${titleForTriage(item)}`}
+          title="Reject signal"
+          aria-label={`Reject ${titleForReviewItem(item)}`}
           onClick={() => void submit("reject")}
         >
           <icons.X size={17} aria-hidden />
@@ -915,6 +1388,13 @@ const defaultNotificationPreferences = {
   },
 };
 
+const defaultImportanceRubric = [
+  "Create or update Skippy knowledge when an item is actionable, deadline-bearing, financially/security relevant, relationship-building, tied to an active project/goal, or clearly useful for future recall.",
+  "Ignore newsletters, one-time login codes, routine receipts, promotions, social notifications, and FYI updates unless they affect money, access, commitments, relationships, or current focus.",
+  "Prefer direct accepted ingestion with source references when the harness can explain why the item clears this rubric.",
+  "Record a concise rubricDecision for each direct ingestion so Skippy can learn what mattered.",
+].join("\n");
+
 function base64UrlToUint8Array(value: string) {
   const padding = "=".repeat((4 - (value.length % 4)) % 4);
   const base64 = `${value}${padding}`.replace(/-/g, "+").replace(/_/g, "/");
@@ -922,12 +1402,50 @@ function base64UrlToUint8Array(value: string) {
   return Uint8Array.from([...raw].map((character) => character.charCodeAt(0)));
 }
 
+function RubricContextGroup({
+  label,
+  href,
+  items,
+  empty,
+}: {
+  label: string;
+  href: string;
+  items: string[];
+  empty: string;
+}) {
+  return (
+    <div className="rubric-group">
+      <div className="settings-row">
+        <h3>{label}</h3>
+        <Link className="text-button compact" href={href}>
+          Manage
+        </Link>
+      </div>
+      {items.length === 0 ? (
+        <p className="muted">{empty}</p>
+      ) : (
+        <div className="toolbar">
+          {items.map((item) => (
+            <span className="badge blue" key={item}>
+              {item}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function LiveSettingsContent() {
   const viewerReady = useViewerReady();
   const data = useQuery(api.settings.getSettings, viewerReady ? {} : "skip") as AnyRecord | undefined;
+  const effectiveRubric = useQuery(api.settings.getEffectiveRubricForViewer, viewerReady ? {} : "skip") as
+    | AnyRecord
+    | undefined;
   const updateConfig = useMutation(api.settings.updateConfig);
   const upsertPushSubscription = useMutation(api.settings.upsertPushSubscription);
   const disablePushSubscription = useMutation(api.settings.disablePushSubscription);
+  const upsertOperatingRule = useMutation(api.settings.upsertOperatingRule);
   const createToken = useMutation(api.mcpTokens.create);
   const revokeToken = useMutation(api.mcpTokens.revoke);
   const [label, setLabel] = useState("Local harness");
@@ -945,6 +1463,72 @@ export function LiveSettingsContent() {
         </section>
       ) : (
         <div className="grid">
+          <section className="card section span-7">
+            <h2>Importance policy</h2>
+            <p className="muted">
+              Your stable, hand-written rubric. Harnesses combine this with live context (goals, in-progress projects,
+              favorited contacts) to decide what belongs in Skippy. Items that clear the bar are written directly into
+              accepted knowledge with source references and a short decision note.
+            </p>
+            <label className="field">
+              <span>Policy text</span>
+              <textarea
+                className="textarea"
+                key={
+                  data.operatingRules?.find(
+                    (rule: AnyRecord) => rule.scope === "importance" && rule.ruleType === "default",
+                  )?.updatedAt ?? "default"
+                }
+                defaultValue={
+                  data.operatingRules?.find(
+                    (rule: AnyRecord) => rule.scope === "importance" && rule.ruleType === "default",
+                  )?.ruleText ?? defaultImportanceRubric
+                }
+                onBlur={(event) =>
+                  void upsertOperatingRule({
+                    scope: "importance",
+                    ruleType: "default",
+                    ruleText: event.target.value,
+                    source: "explicit_user_setting",
+                    enabled: true,
+                    confidence: 1,
+                  } as any)
+                }
+              />
+            </label>
+          </section>
+          <section className="card section span-5">
+            <h2>Effective rubric</h2>
+            <p className="muted">What harnesses receive from get_importance_rubric — your policy plus live context.</p>
+            {!effectiveRubric ? (
+              <p className="muted">Composing…</p>
+            ) : (
+              <div className="form-grid">
+                <RubricContextGroup
+                  label="Active goals"
+                  href="/goals"
+                  items={effectiveRubric.goals.map((goal: AnyRecord) => goal.title)}
+                  empty="No active goals."
+                />
+                <RubricContextGroup
+                  label="In-progress projects"
+                  href="/projects"
+                  items={effectiveRubric.activeProjects.map((project: AnyRecord) => project.title)}
+                  empty="No in-progress projects."
+                />
+                <RubricContextGroup
+                  label="Favorited contacts"
+                  href="/contacts"
+                  items={effectiveRubric.favoriteContacts.map((contact: AnyRecord) => contact.name)}
+                  empty="No favorited contacts."
+                />
+                <details className="rubric-rendered">
+                  <summary>Preview composed text</summary>
+                  <pre className="code rubric-rendered-text">{effectiveRubric.renderedText}</pre>
+                </details>
+              </div>
+            )}
+          </section>
           <section className="card section span-6">
             <h2>Brain settings</h2>
             <div className="form-grid">
