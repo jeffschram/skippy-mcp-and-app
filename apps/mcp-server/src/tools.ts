@@ -59,6 +59,10 @@ type EntityEmbeddingRecord = {
 
 export type SkippyClient = {
   submitCandidateObject(brainInstanceId: string, input: CandidateObjectInput): Promise<unknown>;
+  ingestObject(
+    brainInstanceId: string,
+    input: CandidateObjectInput & { rubricDecision: string },
+  ): Promise<unknown>;
   createProjectDirect(
     brainInstanceId: string,
     input: {
@@ -135,6 +139,23 @@ export type SkippyClient = {
       metadata?: unknown;
     },
   ): Promise<unknown>;
+  updateSourceSyncStatus(
+    brainInstanceId: string,
+    status: {
+      statusKey?: string;
+      harness: string;
+      status: "idle" | "running" | "completed" | "failed";
+      message?: string;
+      sourceSystemsChecked: string[];
+      startedAt?: number;
+      completedAt?: number;
+      lastHeartbeatAt?: number;
+      errors?: string[];
+      metadata?: unknown;
+    },
+  ): Promise<unknown>;
+  getOperatingRules(brainInstanceId: string, scope?: string): Promise<unknown>;
+  getEffectiveRubric(brainInstanceId: string): Promise<unknown>;
   getNotificationDispatchContext(brainInstanceId: string): Promise<unknown>;
   recordNotificationDelivery(
     brainInstanceId: string,
@@ -188,29 +209,46 @@ function itemSummary(item: Record<string, any>) {
   return item.summary ?? item.description ?? item.priorityReason ?? item.body ?? item.notes ?? item.relationshipContext;
 }
 
+function isActiveFocusItem(entityType: EntityType, item: Record<string, any>) {
+  if (item.processingState && item.processingState !== "accepted") {
+    return false;
+  }
+
+  if (entityType === "task") {
+    return item.status !== "done" && item.status !== "cancelled";
+  }
+
+  if (entityType === "project") {
+    return item.status !== "completed" && item.status !== "cancelled";
+  }
+
+  if (entityType === "goal") {
+    return item.status !== "achieved" && item.status !== "abandoned";
+  }
+
+  if (entityType === "link") {
+    return item.status !== "discarded";
+  }
+
+  return true;
+}
+
 function contextItemsFromEntityList(
   entityType: EntityType,
   items: Array<Record<string, any>> | undefined,
 ): SynthesisContextItem[] {
-  return (items ?? []).map((item) => ({
-    entityRef: { entityType, entityId: item._id },
-    title: item.title ?? item.name ?? item.url ?? item.body ?? "Untitled",
-    summary: itemSummary(item),
-    reason: item.priorityReason ?? item.reviewReason ?? item.status,
-  }));
+  return (items ?? [])
+    .filter((item) => isActiveFocusItem(entityType, item))
+    .map((item) => ({
+      entityRef: { entityType, entityId: item._id },
+      title: item.title ?? item.name ?? item.url ?? item.body ?? "Untitled",
+      summary: itemSummary(item),
+      reason: item.priorityReason ?? item.reviewReason ?? item.status,
+    }));
 }
 
 function synthesisItems(context: AiContextRecord): SynthesisContextItem[] {
-  const focusItems =
-    context.focusSummary?.topItems?.map((item) => ({
-      entityRef: item.entityRef,
-      title: `${item.entityRef.entityType}:${item.entityRef.entityId}`,
-      summary: item.reason,
-      reason: "Latest focus summary item",
-    })) ?? [];
-
   return [
-    ...focusItems,
     ...contextItemsFromEntityList("project", context.projects),
     ...contextItemsFromEntityList("task", context.tasks),
     ...contextItemsFromEntityList("person", context.people),
@@ -462,7 +500,10 @@ export function createSkippyToolHandlers(client: SkippyClient, brainInstanceId: 
         candidate.sourceRefs = [input.sourceRef];
       }
 
-      return await client.submitCandidateObject(brainInstanceId, candidate);
+      return await client.ingestObject(brainInstanceId, {
+        ...candidate,
+        rubricDecision: "Explicit user capture request.",
+      });
     },
 
     async ask(input: { query: string }) {
@@ -538,6 +579,10 @@ export function createSkippyToolHandlers(client: SkippyClient, brainInstanceId: 
       return await client.getLatestFocusSummary(brainInstanceId);
     },
 
+    async getImportanceRubric() {
+      return await client.getEffectiveRubric(brainInstanceId);
+    },
+
     async refreshFocusSummary(input: FocusSummaryRefreshInput = {}) {
       const context = (await client.getAiContext(brainInstanceId)) as AiContextRecord;
       const config = aiConfigFromContext(context);
@@ -604,6 +649,14 @@ export function createSkippyToolHandlers(client: SkippyClient, brainInstanceId: 
       return await client.submitCandidateObject(brainInstanceId, normalizedInput);
     },
 
+    async ingestObject(input: CandidateObjectInput & { rubricDecision: string }) {
+      const normalizedInput = normalizeCandidateObject(input);
+      return await client.ingestObject(brainInstanceId, {
+        ...normalizedInput,
+        rubricDecision: input.rubricDecision,
+      });
+    },
+
     async createProjectDirect(input: Parameters<SkippyClient["createProjectDirect"]>[1]) {
       const title = input.title.trim();
       if (!title) {
@@ -631,14 +684,15 @@ export function createSkippyToolHandlers(client: SkippyClient, brainInstanceId: 
     },
 
     async upsertEntity<T extends EntityType>(entityType: T, payload: CandidateObjectInput<T>["candidatePayload"]) {
-      return await client.submitCandidateObject(
-        brainInstanceId,
-        normalizeCandidateObject({
-          candidateEntityType: entityType,
-          candidatePayload: payload,
-          reviewReason: `Submitted through structured ${entityType} MCP tool.`,
-        }),
-      );
+      const normalizedInput = normalizeCandidateObject({
+        candidateEntityType: entityType,
+        candidatePayload: payload,
+        reviewReason: `Submitted through structured ${entityType} MCP tool.`,
+      });
+      return await client.ingestObject(brainInstanceId, {
+        ...normalizedInput,
+        rubricDecision: `Structured ${entityType} submitted through an MCP convenience tool; harness judged it worth storing under the importance rubric.`,
+      });
     },
 
     async addSourceRef(input: SourceRefInput) {
@@ -705,6 +759,10 @@ export function createSkippyToolHandlers(client: SkippyClient, brainInstanceId: 
 
     async recordIngestionRun(input: Parameters<SkippyClient["recordIngestionRun"]>[1]) {
       return await client.recordIngestionRun(brainInstanceId, input);
+    },
+
+    async updateSourceSyncStatus(input: Parameters<SkippyClient["updateSourceSyncStatus"]>[1]) {
+      return await client.updateSourceSyncStatus(brainInstanceId, input);
     },
 
     async dispatchNotifications(input: { dryRun?: boolean; limit?: number } = {}) {

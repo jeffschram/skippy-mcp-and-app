@@ -7,7 +7,7 @@ export default function TriagePage() {
   if (isLiveConfigured()) {
     return (
       <AppShell>
-        <PageHeader eyebrow="Triage" title="Suggested knowledge awaiting review." />
+        <PageHeader eyebrow="Review" title="Unclear signals needing a decision." />
         <LiveTriageContent />
       </AppShell>
     );
@@ -15,7 +15,7 @@ export default function TriagePage() {
 
   return (
     <AppShell>
-      <PageHeader eyebrow="Triage" title="Suggested knowledge awaiting review." />
+      <PageHeader eyebrow="Review" title="Unclear signals needing a decision." />
       <div className="item-list">
         {triageItems.map((item) => (
           <article className="item" key={item.title}>
@@ -25,7 +25,7 @@ export default function TriagePage() {
             <div>
               <p className="item-title">{item.title}</p>
               <p className="item-meta">
-                {item.type} candidate, confidence {item.confidence}
+                {item.type} signal, confidence {item.confidence}
               </p>
             </div>
             <div className="toolbar">

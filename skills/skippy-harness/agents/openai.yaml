@@ -1,4 +1,4 @@
 interface:
   display_name: "Skippy Harness"
   short_description: "Use Skippy MCP well from AI harnesses."
-  default_prompt: "Use Skippy MCP to capture, triage, and reference useful source-backed knowledge."
+  default_prompt: "Use Skippy MCP to apply the user's importance rubric, ingest useful source-backed knowledge, and reference accepted context."

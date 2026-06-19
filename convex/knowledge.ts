@@ -102,6 +102,37 @@ function statusAllowedForEntity(entityTypeName: keyof typeof entityTableByType, 
   }
 }
 
+function normalizedTaskMatchText(value: string | undefined) {
+  return (value ?? "")
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/\b(incoming|the|a|an|to|and|or|whether|keep|decide|review|track|incoming)\b/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function taskTitleLooksDuplicate(left: string, right: string) {
+  const normalizedLeft = normalizedTaskMatchText(left);
+  const normalizedRight = normalizedTaskMatchText(right);
+  if (!normalizedLeft || !normalizedRight) {
+    return false;
+  }
+  if (normalizedLeft.includes(normalizedRight) || normalizedRight.includes(normalizedLeft)) {
+    return true;
+  }
+
+  const leftWords = new Set(normalizedLeft.split(" "));
+  const rightWords = new Set(normalizedRight.split(" "));
+  let overlap = 0;
+  for (const word of leftWords) {
+    if (rightWords.has(word)) {
+      overlap += 1;
+    }
+  }
+  return overlap / Math.max(leftWords.size, rightWords.size) >= 0.55 || overlap / Math.min(leftWords.size, rightWords.size) >= 0.75;
+}
+
 async function createAcceptedEntity(
   db: any,
   triageItem: any,
@@ -135,6 +166,75 @@ async function createAcceptedEntity(
   }
 
   return { entityRef: { entityType: entityTypeName, entityId }, sourceRefIds, normalizedPayload };
+}
+
+async function insertSourceRefs(db: any, brainInstanceId: any, sourceRefs: any[] | undefined, now: number) {
+  const sourceRefIds = [];
+  for (const sourceRef of sourceRefs ?? []) {
+    sourceRefIds.push(
+      await db.insert("sourceRefs", {
+        brainInstanceId,
+        ...sourceRef,
+        createdAt: now,
+        updatedAt: now,
+      }),
+    );
+  }
+  return sourceRefIds;
+}
+
+async function cancelDuplicateFocusCreatedTasks(db: any, brainInstanceId: any, actorId?: string) {
+  const now = Date.now();
+  const activeTasks = (
+    await db
+      .query("tasks")
+      .withIndex("by_brain_state", (q: any) => q.eq("brainInstanceId", brainInstanceId))
+      .filter((q: any) => q.eq(q.field("processingState"), "accepted"))
+      .take(200)
+  ).filter((task: any) => task.status !== "done" && task.status !== "cancelled");
+  const focusCreatedTasks = activeTasks.filter(
+    (task: any) => task.description === "Created from a Home focus bullet." || task.priorityReason === "Promoted from current focus.",
+  );
+  const ordinaryTasks = activeTasks.filter((task: any) => !focusCreatedTasks.some((focusTask: any) => focusTask._id === task._id));
+  const cancelled: Array<{ duplicateTaskId: string; keptTaskId: string; title: string }> = [];
+
+  for (const focusTask of focusCreatedTasks) {
+    const matchingTask = ordinaryTasks.find((task: any) => taskTitleLooksDuplicate(focusTask.title, task.title));
+    if (!matchingTask) {
+      continue;
+    }
+
+    await db.patch(focusTask._id, {
+      status: "cancelled",
+      updatedAt: now,
+    });
+    const focusActions = await db
+      .query("focusItemActions")
+      .withIndex("by_brain_item", (q: any) => q.eq("brainInstanceId", brainInstanceId))
+      .filter((q: any) => q.eq(q.field("taskId"), focusTask._id))
+      .collect();
+    for (const action of focusActions) {
+      await db.patch(action._id, {
+        taskId: matchingTask._id,
+        updatedAt: now,
+      });
+    }
+
+    await db.insert("activityEvents", {
+      brainInstanceId,
+      entityRef: { entityType: "task", entityId: focusTask._id },
+      activityType: "duplicate_focus_task_cancelled",
+      actorType: actorId ? "user" : "system",
+      actorId,
+      timestamp: now,
+      summary: `Cancelled duplicate focus-created task: ${focusTask.title}`,
+      metadata: { keptTaskId: matchingTask._id, keptTitle: matchingTask.title },
+    });
+
+    cancelled.push({ duplicateTaskId: focusTask._id, keptTaskId: matchingTask._id, title: focusTask.title });
+  }
+
+  return { status: "completed", cancelledCount: cancelled.length, cancelled };
 }
 
 export const addSourceRef = mutationGeneric({
@@ -292,6 +392,74 @@ export const submitCandidateObject = mutationGeneric({
     });
 
     return { triageItemId, sourceRefIds, duplicate: false, status: "submitted_for_review", candidateFingerprint: fingerprint };
+  },
+});
+
+export const ingestObject = mutationGeneric({
+  args: {
+    brainInstanceId: v.id("brainInstances"),
+    candidateEntityType: entityType,
+    candidatePayload,
+    confidence: v.optional(v.number()),
+    reviewReason: v.optional(v.string()),
+    rubricDecision: v.string(),
+    sourceRefIds: v.optional(v.array(v.id("sourceRefs"))),
+    sourceRefs: v.optional(v.array(sourceRefInput)),
+  },
+  handler: async ({ db }, args) => {
+    const now = Date.now();
+    const entityTypeName = args.candidateEntityType as keyof typeof entityTableByType;
+    const normalizedPayload = normalizeAcceptedEntityPayload(entityTypeName, args.candidatePayload);
+    const displayPayload = normalizedPayload as Record<string, any>;
+    const sourceRefIds = [
+      ...(args.sourceRefIds ?? []),
+      ...(await insertSourceRefs(db, args.brainInstanceId, args.sourceRefs, now)),
+    ];
+    const entityDocument = {
+      ...normalizedPayload,
+      brainInstanceId: args.brainInstanceId,
+      processingState: "accepted",
+      confidence: args.confidence,
+      reviewReason: args.reviewReason ?? args.rubricDecision,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const tableName = entityTableByType[entityTypeName];
+    const entityId = await db.insert(tableName, entityDocument);
+    const acceptedEntityRef = { entityType: entityTypeName, entityId };
+
+    for (const sourceRefId of sourceRefIds) {
+      await db.insert("entitySourceRefs", {
+        brainInstanceId: args.brainInstanceId,
+        entityRef: acceptedEntityRef,
+        sourceRefId,
+        relationship: "created_from",
+        createdAt: now,
+      });
+    }
+
+    await db.insert("activityEvents", {
+      brainInstanceId: args.brainInstanceId,
+      entityRef: acceptedEntityRef,
+      activityType: "object_ingested",
+      actorType: "harness",
+      timestamp: now,
+      summary: `Ingested ${entityTypeName} directly by importance rubric.`,
+      metadata: {
+        rubricDecision: args.rubricDecision,
+        candidateFingerprint: candidateFingerprint(entityTypeName, normalizedPayload),
+      },
+      sourceRefIds,
+    });
+
+    return {
+      status: "accepted",
+      entityType: entityTypeName,
+      entityId,
+      title: displayPayload.title ?? displayPayload.name ?? displayPayload.url ?? displayPayload.body,
+      sourceRefIds,
+      rubricDecision: args.rubricDecision,
+    };
   },
 });
 
@@ -528,11 +696,20 @@ export const dashboardForViewer = queryGeneric({
   args: {},
   handler: async (ctx) => {
     const { brain } = await requireOwnedBrain(ctx);
+    const acceptedFilter = (q: any) =>
+      q.and(q.eq(q.field("brainInstanceId"), brain._id), q.eq(q.field("processingState"), "accepted"));
     const focusSummary = await ctx.db
       .query("focusSummaries")
       .filter((q) => q.eq(q.field("brainInstanceId"), brain._id))
       .order("desc")
       .first();
+    const focusItemActions = focusSummary
+      ? await ctx.db
+          .query("focusItemActions")
+          .withIndex("by_brain_focus", (q) => q.eq("brainInstanceId", brain._id))
+          .filter((q) => q.eq(q.field("focusSummaryId"), focusSummary._id))
+          .collect()
+      : [];
     const triageItems = await ctx.db
       .query("triageItems")
       .filter((q) => q.and(q.eq(q.field("brainInstanceId"), brain._id), q.eq(q.field("status"), "pending")))
@@ -543,14 +720,224 @@ export const dashboardForViewer = queryGeneric({
         q.and(q.eq(q.field("brainInstanceId"), brain._id), q.eq(q.field("status"), "pending_approval")),
       )
       .take(20);
-    const tasks = await ctx.db
+    const projects = (
+      await ctx.db
+        .query("projects")
+        .filter(acceptedFilter)
+        .take(20)
+    ).filter((project) => project.status !== "completed" && project.status !== "cancelled");
+    const tasks = (
+      await ctx.db
       .query("tasks")
-      .filter((q) =>
-        q.and(q.eq(q.field("brainInstanceId"), brain._id), q.eq(q.field("processingState"), "accepted")),
-      )
-      .take(20);
+        .filter(acceptedFilter)
+        .take(20)
+    ).filter((task) => task.status !== "done" && task.status !== "cancelled");
+    const people = await ctx.db.query("people").filter(acceptedFilter).take(20);
+    const companies = await ctx.db.query("companies").filter(acceptedFilter).take(20);
+    const links = (
+      await ctx.db.query("links").filter(acceptedFilter).take(20)
+    ).filter((link) => link.status !== "discarded");
+    const notes = await ctx.db.query("notes").filter(acceptedFilter).take(20);
+    const sourceSyncStatuses = await ctx.db
+      .query("sourceSyncStatuses")
+      .withIndex("by_brain_key", (q) => q.eq("brainInstanceId", brain._id))
+      .collect();
 
-    return { brain, focusSummary, triageItems, pendingActions, tasks };
+    return {
+      brain,
+      focusSummary,
+      focusItemActions,
+      sourceSyncStatuses,
+      triageItems,
+      pendingActions,
+      projects,
+      tasks,
+      people,
+      companies,
+      links,
+      notes,
+    };
+  },
+});
+
+export const recordFocusItemActionForViewer = mutationGeneric({
+  args: {
+    focusSummaryId: v.id("focusSummaries"),
+    itemKey: v.string(),
+    itemText: v.string(),
+    action: v.union(v.literal("dismissed"), v.literal("done")),
+  },
+  handler: async (ctx, args) => {
+    const { user, brain } = await requireOwnedBrain(ctx);
+    const focusSummary = await ctx.db.get(args.focusSummaryId);
+    if (!focusSummary || focusSummary.brainInstanceId !== brain._id) {
+      throw new Error("focus summary not found");
+    }
+
+    const now = Date.now();
+    const existing = await ctx.db
+      .query("focusItemActions")
+      .withIndex("by_brain_item", (q) => q.eq("brainInstanceId", brain._id))
+      .filter((q) => q.eq(q.field("itemKey"), args.itemKey))
+      .filter((q) => q.eq(q.field("focusSummaryId"), args.focusSummaryId))
+      .first();
+    const patch = {
+      itemText: args.itemText,
+      action: args.action,
+      actorUserId: user._id,
+      updatedAt: now,
+    };
+
+    const focusItemActionId = existing
+      ? (await ctx.db.patch(existing._id, patch), existing._id)
+      : await ctx.db.insert("focusItemActions", {
+          brainInstanceId: brain._id,
+          focusSummaryId: args.focusSummaryId,
+          itemKey: args.itemKey,
+          ...patch,
+          createdAt: now,
+        });
+
+    await ctx.db.insert("activityEvents", {
+      brainInstanceId: brain._id,
+      activityType: args.action === "dismissed" ? "focus_item_dismissed" : "focus_item_marked_done",
+      actorType: "user",
+      actorId: user._id,
+      timestamp: now,
+      summary: `${args.action === "dismissed" ? "Dismissed" : "Marked handled"} focus item: ${args.itemText}`,
+      focusSummaryId: args.focusSummaryId,
+      metadata: { focusItemActionId, itemKey: args.itemKey },
+    });
+
+    return { focusItemActionId, status: args.action };
+  },
+});
+
+export const createTaskFromFocusItemForViewer = mutationGeneric({
+  args: {
+    focusSummaryId: v.id("focusSummaries"),
+    itemKey: v.string(),
+    itemText: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const { user, brain } = await requireOwnedBrain(ctx);
+    const focusSummary = await ctx.db.get(args.focusSummaryId);
+    if (!focusSummary || focusSummary.brainInstanceId !== brain._id) {
+      throw new Error("focus summary not found");
+    }
+
+    const title = args.itemText.replace(/\.$/, "").trim();
+    if (!title) {
+      throw new Error("focus item text is required");
+    }
+
+    const now = Date.now();
+    const existing = await ctx.db
+      .query("focusItemActions")
+      .withIndex("by_brain_item", (q) => q.eq("brainInstanceId", brain._id))
+      .filter((q) => q.eq(q.field("itemKey"), args.itemKey))
+      .filter((q) =>
+        q.and(q.eq(q.field("focusSummaryId"), args.focusSummaryId), q.eq(q.field("action"), "task_created")),
+      )
+      .first();
+    if (existing?.taskId) {
+      const existingTask = await ctx.db.get(existing.taskId);
+      return {
+        focusItemActionId: existing._id,
+        taskId: existing.taskId,
+        title: existingTask?.title ?? title,
+        status: "already_created",
+      };
+    }
+
+    const activeTasks = (
+      await ctx.db
+        .query("tasks")
+        .withIndex("by_brain_state", (q) => q.eq("brainInstanceId", brain._id))
+        .filter((q) => q.eq(q.field("processingState"), "accepted"))
+        .take(100)
+    ).filter((task) => task.status !== "done" && task.status !== "cancelled");
+    const matchingTask = activeTasks.find((task) => taskTitleLooksDuplicate(title, task.title));
+    if (matchingTask) {
+      const focusItemActionId = await ctx.db.insert("focusItemActions", {
+        brainInstanceId: brain._id,
+        focusSummaryId: args.focusSummaryId,
+        itemKey: args.itemKey,
+        itemText: args.itemText,
+        action: "task_created",
+        taskId: matchingTask._id,
+        actorUserId: user._id,
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      await ctx.db.insert("activityEvents", {
+        brainInstanceId: brain._id,
+        entityRef: { entityType: "task", entityId: matchingTask._id },
+        activityType: "focus_item_linked_to_existing_task",
+        actorType: "user",
+        actorId: user._id,
+        timestamp: now,
+        summary: `Focus item linked to existing task: ${matchingTask.title}`,
+        focusSummaryId: args.focusSummaryId,
+        metadata: { focusItemActionId, itemKey: args.itemKey, requestedTitle: title },
+      });
+
+      return { focusItemActionId, taskId: matchingTask._id, title: matchingTask.title, status: "linked_existing" };
+    }
+
+    const taskId = await ctx.db.insert("tasks", {
+      brainInstanceId: brain._id,
+      title,
+      description: "Created from a Home focus bullet.",
+      status: "todo",
+      priorityReason: "Promoted from current focus.",
+      processingState: "accepted",
+      createdAt: now,
+      updatedAt: now,
+    });
+    const focusItemActionId = await ctx.db.insert("focusItemActions", {
+      brainInstanceId: brain._id,
+      focusSummaryId: args.focusSummaryId,
+      itemKey: args.itemKey,
+      itemText: args.itemText,
+      action: "task_created",
+      taskId,
+      actorUserId: user._id,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    await ctx.db.insert("activityEvents", {
+      brainInstanceId: brain._id,
+      entityRef: { entityType: "task", entityId: taskId },
+      activityType: "task_created_from_focus_item",
+      actorType: "user",
+      actorId: user._id,
+      timestamp: now,
+      summary: `Task created from focus item: ${title}`,
+      focusSummaryId: args.focusSummaryId,
+      metadata: { focusItemActionId, itemKey: args.itemKey },
+    });
+
+    return { focusItemActionId, taskId, title, status: "created" };
+  },
+});
+
+export const cancelDuplicateFocusTasksForViewer = mutationGeneric({
+  args: {},
+  handler: async (ctx) => {
+    const { user, brain } = await requireOwnedBrain(ctx);
+    return await cancelDuplicateFocusCreatedTasks(ctx.db, brain._id, user._id);
+  },
+});
+
+export const cancelDuplicateFocusTasks = mutationGeneric({
+  args: {
+    brainInstanceId: v.id("brainInstances"),
+  },
+  handler: async ({ db }, args) => {
+    return await cancelDuplicateFocusCreatedTasks(db, args.brainInstanceId);
   },
 });
 
@@ -609,6 +996,138 @@ export const contactsForViewer = queryGeneric({
       .collect();
 
     return { brain, people, companies };
+  },
+});
+
+const goalStatusValidator = v.union(
+  v.literal("active"),
+  v.literal("paused"),
+  v.literal("achieved"),
+  v.literal("abandoned"),
+);
+
+export const goalsForViewer = queryGeneric({
+  args: {},
+  handler: async (ctx) => {
+    const { brain } = await requireOwnedBrain(ctx);
+    const goals = await ctx.db
+      .query("goals")
+      .filter((q) =>
+        q.and(q.eq(q.field("brainInstanceId"), brain._id), q.eq(q.field("processingState"), "accepted")),
+      )
+      .collect();
+
+    return { brain, goals };
+  },
+});
+
+export const createGoalForViewer = mutationGeneric({
+  args: {
+    title: v.string(),
+    description: v.optional(v.string()),
+    status: v.optional(goalStatusValidator),
+  },
+  handler: async (ctx, args) => {
+    const { user, brain } = await requireOwnedBrain(ctx);
+    const title = args.title.trim();
+    if (!title) {
+      throw new Error("goal title is required");
+    }
+    const now = Date.now();
+    const goalId = await ctx.db.insert("goals", {
+      brainInstanceId: brain._id,
+      title,
+      description: args.description?.trim() || undefined,
+      status: args.status ?? "active",
+      processingState: "accepted",
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    await ctx.db.insert("activityEvents", {
+      brainInstanceId: brain._id,
+      entityRef: { entityType: "goal", entityId: goalId },
+      activityType: "goal_created",
+      actorType: "user",
+      actorId: user._id,
+      timestamp: now,
+      summary: `Goal created: ${title}`,
+    });
+
+    return { goalId, status: "created" };
+  },
+});
+
+export const updateGoalForViewer = mutationGeneric({
+  args: {
+    goalId: v.id("goals"),
+    title: v.optional(v.string()),
+    description: v.optional(v.string()),
+    status: v.optional(goalStatusValidator),
+  },
+  handler: async (ctx, args) => {
+    const { user, brain } = await requireOwnedBrain(ctx);
+    const goal = await ctx.db.get(args.goalId);
+    if (!goal || goal.brainInstanceId !== brain._id) {
+      throw new Error("goal not found");
+    }
+    const now = Date.now();
+    const patch: Record<string, unknown> = { updatedAt: now };
+    if (args.title !== undefined) {
+      const title = args.title.trim();
+      if (!title) {
+        throw new Error("goal title cannot be empty");
+      }
+      patch.title = title;
+    }
+    if (args.description !== undefined) {
+      patch.description = args.description.trim() || undefined;
+    }
+    if (args.status !== undefined) {
+      patch.status = args.status;
+    }
+
+    await ctx.db.patch(args.goalId, patch);
+
+    await ctx.db.insert("activityEvents", {
+      brainInstanceId: brain._id,
+      entityRef: { entityType: "goal", entityId: args.goalId },
+      activityType: "goal_updated",
+      actorType: "user",
+      actorId: user._id,
+      timestamp: now,
+      summary: `Goal updated: ${patch.title ?? goal.title}`,
+    });
+
+    return { goalId: args.goalId, status: "updated" };
+  },
+});
+
+export const setContactFavoriteForViewer = mutationGeneric({
+  args: {
+    personId: v.id("people"),
+    favorite: v.boolean(),
+  },
+  handler: async (ctx, args) => {
+    const { user, brain } = await requireOwnedBrain(ctx);
+    const person = await ctx.db.get(args.personId);
+    if (!person || person.brainInstanceId !== brain._id) {
+      throw new Error("person not found");
+    }
+    const now = Date.now();
+    await ctx.db.patch(args.personId, { favorite: args.favorite, updatedAt: now });
+
+    await ctx.db.insert("activityEvents", {
+      brainInstanceId: brain._id,
+      entityRef: { entityType: "person", entityId: args.personId },
+      activityType: args.favorite ? "contact_favorited" : "contact_unfavorited",
+      actorType: "user",
+      actorId: user._id,
+      timestamp: now,
+      summary: `${args.favorite ? "Favorited" : "Unfavorited"} contact: ${person.name}`,
+    });
+
+    return { personId: args.personId, favorite: args.favorite };
   },
 });
 
@@ -831,6 +1350,52 @@ export const markTaskDone = mutationGeneric({
     });
 
     return { taskId: args.taskId, pendingActionId };
+  },
+});
+
+export const createContactDirect = mutationGeneric({
+  args: {
+    brainInstanceId: v.id("brainInstances"),
+    name: v.string(),
+    emails: v.optional(v.array(v.string())),
+    phoneNumbers: v.optional(v.array(v.string())),
+    relationshipContext: v.optional(v.string()),
+    roleTitle: v.optional(v.string()),
+    notes: v.optional(v.string()),
+    favorite: v.optional(v.boolean()),
+    createdBy: v.optional(v.string()),
+  },
+  handler: async ({ db }, args) => {
+    const name = args.name.trim();
+    if (!name) {
+      throw new Error("contact name is required");
+    }
+    const now = Date.now();
+    const personId = await db.insert("people", {
+      brainInstanceId: args.brainInstanceId,
+      name,
+      emails: args.emails?.length ? args.emails : undefined,
+      phoneNumbers: args.phoneNumbers?.length ? args.phoneNumbers : undefined,
+      relationshipContext: args.relationshipContext,
+      roleTitle: args.roleTitle,
+      notes: args.notes,
+      favorite: args.favorite ?? undefined,
+      processingState: "accepted",
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    await db.insert("activityEvents", {
+      brainInstanceId: args.brainInstanceId,
+      entityRef: { entityType: "person", entityId: personId },
+      activityType: "contact_created_direct",
+      actorType: "harness",
+      actorId: args.createdBy,
+      timestamp: now,
+      summary: `Contact created directly: ${name}`,
+    });
+
+    return { status: "created", entityType: "person", personId, name, favorite: args.favorite ?? false };
   },
 });
 
@@ -1461,5 +2026,55 @@ export const recordIngestionRun = mutationGeneric({
       ...args,
       startedAt: args.startedAt ?? Date.now(),
     });
+  },
+});
+
+export const updateSourceSyncStatus = mutationGeneric({
+  args: {
+    brainInstanceId: v.id("brainInstances"),
+    statusKey: v.optional(v.string()),
+    harness: v.string(),
+    status: v.union(v.literal("idle"), v.literal("running"), v.literal("completed"), v.literal("failed")),
+    message: v.optional(v.string()),
+    sourceSystemsChecked: v.array(v.string()),
+    startedAt: v.optional(v.number()),
+    completedAt: v.optional(v.number()),
+    lastHeartbeatAt: v.optional(v.number()),
+    errors: v.optional(v.array(v.string())),
+    metadata: v.optional(v.any()),
+  },
+  handler: async ({ db }, args) => {
+    const now = Date.now();
+    const statusKey = args.statusKey ?? "source-sync";
+    const existing = await db
+      .query("sourceSyncStatuses")
+      .withIndex("by_brain_key", (q) => q.eq("brainInstanceId", args.brainInstanceId))
+      .filter((q) => q.eq(q.field("statusKey"), statusKey))
+      .first();
+    const patch = {
+      harness: args.harness,
+      status: args.status,
+      message: args.message,
+      sourceSystemsChecked: args.sourceSystemsChecked,
+      startedAt: args.startedAt ?? (args.status === "running" ? now : existing?.startedAt),
+      completedAt: args.completedAt ?? (args.status === "completed" || args.status === "failed" ? now : undefined),
+      lastHeartbeatAt: args.lastHeartbeatAt ?? now,
+      errors: args.errors,
+      metadata: args.metadata,
+      updatedAt: now,
+    };
+
+    if (existing) {
+      await db.patch(existing._id, patch);
+      return { statusSyncId: existing._id, status: args.status, statusKey };
+    }
+
+    const statusSyncId = await db.insert("sourceSyncStatuses", {
+      brainInstanceId: args.brainInstanceId,
+      statusKey,
+      ...patch,
+      createdAt: now,
+    });
+    return { statusSyncId, status: args.status, statusKey };
   },
 });

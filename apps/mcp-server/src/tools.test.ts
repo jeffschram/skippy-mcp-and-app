@@ -14,6 +14,7 @@ function createFakeClient(): { client: SkippyClient; calls: Array<{ name: string
     client: {
       submitCandidateObject: (brainInstanceId, input) =>
         record("submitCandidateObject", brainInstanceId, input),
+      ingestObject: (brainInstanceId, input) => record("ingestObject", brainInstanceId, input),
       createProjectDirect: (brainInstanceId, input) => record("createProjectDirect", brainInstanceId, input),
       createTaskDirect: (brainInstanceId, input) => record("createTaskDirect", brainInstanceId, input),
       addSourceRef: (brainInstanceId, sourceRef) => record("addSourceRef", brainInstanceId, sourceRef),
@@ -43,6 +44,9 @@ function createFakeClient(): { client: SkippyClient; calls: Array<{ name: string
       recordEntityReview: (brainInstanceId, review) =>
         record("recordEntityReview", brainInstanceId, review),
       recordIngestionRun: (brainInstanceId, run) => record("recordIngestionRun", brainInstanceId, run),
+      updateSourceSyncStatus: (brainInstanceId, status) => record("updateSourceSyncStatus", brainInstanceId, status),
+      getOperatingRules: (brainInstanceId, scope) => record("getOperatingRules", brainInstanceId, scope),
+      getEffectiveRubric: (brainInstanceId) => record("getEffectiveRubric", brainInstanceId),
       getNotificationDispatchContext: (brainInstanceId) => record("getNotificationDispatchContext", brainInstanceId),
       recordNotificationDelivery: (brainInstanceId, delivery) =>
         record("recordNotificationDelivery", brainInstanceId, delivery),
@@ -51,19 +55,20 @@ function createFakeClient(): { client: SkippyClient; calls: Array<{ name: string
 }
 
 describe("Skippy MCP tool handlers", () => {
-  it("captures natural language as a suggested note candidate", async () => {
+  it("captures natural language as an accepted note", async () => {
     const { client, calls } = createFakeClient();
     const tools = createSkippyToolHandlers(client, "brain_123");
 
     await tools.capture({ text: "  Remember this thought  " });
 
     expect(calls[0]).toMatchObject({
-      name: "submitCandidateObject",
+      name: "ingestObject",
       args: [
         "brain_123",
         {
           candidateEntityType: "note",
           candidatePayload: { body: "Remember this thought" },
+          rubricDecision: "Explicit user capture request.",
         },
       ],
     });
@@ -82,6 +87,29 @@ describe("Skippy MCP tool handlers", () => {
     expect(calls[0]?.args[1]).toMatchObject({
       candidatePayload: { title: "Call Pat" },
       confidence: 0.8,
+    });
+  });
+
+  it("ingests accepted objects with rubric decisions", async () => {
+    const { client, calls } = createFakeClient();
+    const tools = createSkippyToolHandlers(client, "brain_123");
+
+    await tools.ingestObject({
+      candidateEntityType: "task",
+      candidatePayload: { title: "  Pay bill  " },
+      rubricDecision: "Money-related task with a concrete obligation.",
+    });
+
+    expect(calls[0]).toMatchObject({
+      name: "ingestObject",
+      args: [
+        "brain_123",
+        {
+          candidateEntityType: "task",
+          candidatePayload: { title: "Pay bill" },
+          rubricDecision: "Money-related task with a concrete obligation.",
+        },
+      ],
     });
   });
 

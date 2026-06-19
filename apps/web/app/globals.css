@@ -235,12 +235,103 @@ p {
   border-left: 4px solid var(--blue);
 }
 
-.focus-summary p {
+.focus-summary-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.focus-summary-head .eyebrow {
+  margin-bottom: 0;
+}
+
+.sync-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 26px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #e5eef5;
+  color: var(--blue);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.sync-status-pill svg {
+  animation: sync-spin 1.2s linear infinite;
+}
+
+.sync-status-copy {
+  max-width: 680px;
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+@keyframes sync-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.focus-heading {
+  max-width: 760px;
+  margin-bottom: 18px;
+  font-size: clamp(28px, 4vw, 44px);
+  line-height: 1.08;
+}
+
+.focus-summary p:not(.eyebrow),
+.focus-summary-list {
   max-width: 680px;
   margin-bottom: 0;
   color: var(--ink);
   font-size: 20px;
   line-height: 1.42;
+}
+
+.focus-summary-list {
+  display: grid;
+  gap: 12px;
+  padding-left: 1.15em;
+}
+
+.focus-summary-list li {
+  padding-left: 2px;
+}
+
+.focus-summary-list li::marker {
+  color: var(--green);
+}
+
+.focus-summary-list li > span:first-child {
+  margin-right: 10px;
+}
+
+.focus-item-actions {
+  display: inline-flex;
+  gap: 6px;
+  vertical-align: middle;
+}
+
+.focus-item-actions .icon-button,
+.focus-item-actions .text-button {
+  min-height: 30px;
+  height: 30px;
+}
+
+.focus-item-actions .icon-button {
+  width: 30px;
+}
+
+.text-button.compact {
+  min-height: 30px;
+  padding: 0 9px;
+  font-size: 13px;
 }
 
 .item-list {
@@ -261,6 +352,49 @@ p {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--panel-strong);
+}
+
+.project-row {
+  align-items: center;
+  color: inherit;
+  text-decoration: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.project-row:hover {
+  border-color: var(--blue);
+  box-shadow: var(--shadow);
+}
+
+.project-row-side {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted);
+}
+
+.icon-button.is-favorite {
+  border-color: var(--gold);
+  background: #f5ead7;
+  color: var(--gold);
+}
+
+.rubric-group {
+  display: grid;
+  gap: 8px;
+}
+
+.rubric-rendered summary {
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.rubric-rendered-text {
+  margin-top: 8px;
+  max-height: 280px;
+  overflow: auto;
+  white-space: pre-wrap;
 }
 
 .item-icon {

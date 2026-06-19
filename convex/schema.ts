@@ -179,6 +179,7 @@ export default defineSchema({
     roleTitle: v.optional(v.string()),
     relationshipContext: v.optional(v.string()),
     notes: v.optional(v.string()),
+    favorite: v.optional(v.boolean()),
     ...processingMetadata,
     createdAt: v.number(),
     updatedAt: v.number(),
@@ -341,6 +342,20 @@ export default defineSchema({
     createdAt: v.number(),
   }).index("by_brain_generated", ["brainInstanceId", "generatedAt"]),
 
+  focusItemActions: defineTable({
+    brainInstanceId: v.id("brainInstances"),
+    focusSummaryId: v.id("focusSummaries"),
+    itemKey: v.string(),
+    itemText: v.string(),
+    action: v.union(v.literal("dismissed"), v.literal("done"), v.literal("task_created")),
+    taskId: v.optional(v.id("tasks")),
+    actorUserId: v.id("users"),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_brain_focus", ["brainInstanceId", "focusSummaryId"])
+    .index("by_brain_item", ["brainInstanceId", "itemKey"]),
+
   pendingActions: defineTable({
     brainInstanceId: v.id("brainInstances"),
     actionType: v.string(),
@@ -384,6 +399,24 @@ export default defineSchema({
     errors: v.optional(v.array(v.string())),
     metadata: v.optional(v.any()),
   }).index("by_brain_started", ["brainInstanceId", "startedAt"]),
+
+  sourceSyncStatuses: defineTable({
+    brainInstanceId: v.id("brainInstances"),
+    statusKey: v.string(),
+    harness: v.string(),
+    status: v.union(v.literal("idle"), v.literal("running"), v.literal("completed"), v.literal("failed")),
+    message: v.optional(v.string()),
+    sourceSystemsChecked: v.array(v.string()),
+    startedAt: v.optional(v.number()),
+    completedAt: v.optional(v.number()),
+    lastHeartbeatAt: v.optional(v.number()),
+    errors: v.optional(v.array(v.string())),
+    metadata: v.optional(v.any()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_brain_key", ["brainInstanceId", "statusKey"])
+    .index("by_brain_status", ["brainInstanceId", "status"]),
 
   activityEvents: defineTable({
     brainInstanceId: v.id("brainInstances"),

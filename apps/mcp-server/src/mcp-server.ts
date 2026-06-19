@@ -31,12 +31,14 @@ const entityReviewTypeValues = [
 ] as const;
 
 const skippyInstructions = [
-  "Skippy is a second-brain MCP for submitting useful structured knowledge into a human-reviewed Convex brain.",
+  "Skippy is a second-brain MCP for submitting useful structured knowledge into a Convex brain.",
   "When a user first connects or asks what Skippy can do, offer the skippy_intro prompt/message if the harness supports MCP prompts.",
-  "Default to triage-safe writes: submit candidate objects with confidence, reviewReason, and sourceRefs rather than assuming facts are accepted.",
-  "Extract useful objects, not raw dumps. Prefer task, project, person, company, link, note, goal, or knowledgeObject candidates.",
+  "Use the user's evolving importance rubric. Directly ingest source-backed objects when they are actionable, deadline-bearing, relationship-building, decision-relevant, financially/security relevant, or clearly useful later.",
+  "For direct ingestion, call ingest_object and include a concise rubricDecision explaining why the item clears the importance bar.",
+  "Use submit_candidate_object only as a legacy fallback when the harness cannot decide whether the item belongs in Skippy.",
+  "Extract useful objects, not raw dumps. Prefer task, project, person, company, link, note, goal, or knowledgeObject records.",
   "Include lightweight sourceRefs whenever possible: sourceSystem, messageId/threadId/eventId, timestamp, participants, URL/deepLink, summary, and a short excerpt.",
-  "Avoid storing full raw emails, full calendar descriptions, or unnecessary private text. Store concise summaries and the fields needed for user review.",
+  "Avoid storing full raw emails, full calendar descriptions, or unnecessary private text. Store concise summaries and fields needed for future retrieval/focus.",
   "For noisy sources, submit only items that are actionable, relationship-building, deadline-bearing, decision-relevant, or clearly useful later.",
   "Use pending actions only for external side effects that need separate approval/execution. Do not send email, edit calendars, or mark source systems changed through Skippy.",
   "Use ask/summarize_focus/list_pending_actions for retrieval. Internal AI synthesis may be disabled, so expect structured context rather than polished answers.",
@@ -60,7 +62,7 @@ function buildIntroMessage() {
     "I can help by:",
     "- Reading connected sources through this harness, such as email, calendar, reminders, messages, links, or conversation context when you grant access.",
     "- Extracting useful tasks, projects, people, companies, links, notes, goals, and knowledge objects.",
-    "- Sending source-backed candidates to Skippy triage for your review instead of silently accepting them.",
+    "- Applying your importance rubric and writing source-backed items directly into Skippy when they clear the bar.",
     "- Including provenance like message IDs, event IDs, timestamps, participants, links, summaries, and short excerpts.",
     "- Answering from existing Skippy context with `ask` and `summarize_focus`.",
     "- Tracking approved external actions separately from knowledge so side effects stay reviewable.",
@@ -69,9 +71,9 @@ function buildIntroMessage() {
     "- \"Check my recent email and calendar and submit anything important to Skippy.\"",
     "- \"Capture this thought in Skippy.\"",
     "- \"What should I focus on today?\"",
-    "- \"Turn this thread into tasks and people/companies for review.\"",
+    "- \"Turn this thread into tasks and people/companies if it clears my Skippy rubric.\"",
     "",
-    `You can review and approve candidates in the Skippy app: ${appUrl}`,
+    `You can review current focus, projects, tasks, actions, and settings in the Skippy app: ${appUrl}`,
   ].join("\n");
 }
 
@@ -94,7 +96,7 @@ const sourceRefSchema = z.object({
 
 const entityRefSchema = z.object({
   entityType: z.enum(entityTypeValues).describe("Accepted Skippy entity type."),
-  entityId: z.string().describe("Existing accepted entity ID, not a triage item ID."),
+  entityId: z.string().describe("Existing accepted entity ID, not a fallback review item ID."),
 });
 
 const focusTopItemSchema = z.object({
@@ -163,6 +165,19 @@ function candidateConfirmation(input: CandidateObjectInput, result: unknown) {
     nextAction: duplicate
       ? "This candidate already has a pending review item in Skippy."
       : "Review, approve, correct, merge, reclassify, or reject this candidate in Skippy.",
+  };
+}
+
+function ingestConfirmation(input: CandidateObjectInput & { rubricDecision: string }, result: unknown) {
+  const resultRecord = objectResult(result);
+  return {
+    status: resultRecord.status ?? "accepted",
+    entityType: resultRecord.entityType ?? input.candidateEntityType,
+    title: resultRecord.title ?? payloadTitle(input.candidateEntityType, input.candidatePayload),
+    entityId: resultRecord.entityId,
+    sourceRefIds: resultRecord.sourceRefIds,
+    rubricDecision: resultRecord.rubricDecision ?? input.rubricDecision,
+    reviewUrl: reviewUrl("/projects"),
   };
 }
 
@@ -338,7 +353,7 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
     {
       title: "Capture free-form knowledge",
       description:
-        "Use for quick free-form capture when you cannot confidently structure the source yet. Creates a note candidate in triage; it does not become accepted knowledge until the user reviews it. Prefer submit_candidate_object or upsert_* when you can extract a typed task, project, person, company, link, goal, or knowledge object.",
+        "Use for explicit user capture or quick free-form knowledge. Creates an accepted note directly with source provenance when available. Prefer ingest_object when you can extract a typed task, project, person, company, link, goal, or knowledge object.",
       annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: true },
       inputSchema: z.object({
         text: z
@@ -350,16 +365,17 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
     async (args) => {
       const input = stripUndefined(args) as { text: string; sourceRef?: SourceRefInput };
       const result = await tools.capture(input);
-      const candidate: CandidateObjectInput<"note"> = {
+      const candidate: CandidateObjectInput<"note"> & { rubricDecision: string } = {
         candidateEntityType: "note",
-        candidatePayload: { body: input.text },
+        candidatePayload: { body: input.text.trim() },
+        rubricDecision: "Explicit user capture request.",
       };
       if (input.sourceRef) {
         candidate.sourceRefs = [input.sourceRef];
       }
 
       return toolResult(
-        candidateConfirmation(candidate, result),
+        ingestConfirmation(candidate, result),
       );
     },
   );
@@ -390,6 +406,17 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
   );
 
   server.registerTool(
+    "get_importance_rubric",
+    {
+      title: "Get importance rubric",
+      description:
+        "Read the user's current effective Skippy importance rubric: their manual policy text plus live context (active goals, in-progress projects, and favorited contacts whose email/calendar/messages should be treated as high-signal). Use this before source ingestion when deciding what belongs in Skippy and what should be ignored. Read renderedText for the full composed guidance.",
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    async () => toolResult(await tools.getImportanceRubric()),
+  );
+
+  server.registerTool(
     "refresh_focus_summary",
     {
       title: "Refresh focus summary",
@@ -411,16 +438,45 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
   );
 
   server.registerTool(
-    "submit_candidate_object",
+    "ingest_object",
     {
-      title: "Submit candidate object",
+      title: "Ingest accepted object",
       description:
-        "Primary ingestion tool for source-derived knowledge. Submit one structured candidate to triage with type, payload, confidence, reviewReason, and sourceRefs. Use this instead of raw capture when you can identify a task, project, person, company, link, note, goal, or knowledgeObject. Do not use it to mark knowledge accepted; user review happens in the app.",
+        "Primary write tool for source-derived knowledge under the user's importance rubric. Use when the harness can explain why the item is worth storing. Creates an accepted Skippy object directly; does not create a fallback review item. Include sourceRefs and a concise rubricDecision.",
       annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: true },
       inputSchema: z.object({
         candidateEntityType: z
           .enum(entityTypeValues)
-          .describe("The entity type this candidate should become if the user approves it."),
+          .describe("The entity type to store directly in accepted Skippy knowledge."),
+        candidatePayload: jsonObjectSchema.describe(
+          "Structured fields. Examples: task {title,status,dueDate,sourceSummary,priorityReason}; person {name,email,relationshipLabel}; link {title,url,summary}; note {title,body}.",
+        ),
+        rubricDecision: z
+          .string()
+          .describe("Why this clears the user's importance rubric. Mention the signal: deadline, money, relationship, commitment, focus relevance, security, etc."),
+        confidence: z.number().min(0).max(1).optional().describe("Confidence from 0 to 1."),
+        reviewReason: z.string().optional().describe("Optional human-readable reasoning or caveat."),
+        sourceRefs: z.array(sourceRefSchema).optional().describe("Lightweight provenance records."),
+        sourceRefIds: z.array(z.string()).optional().describe("Existing source reference IDs."),
+      }),
+    },
+    async (args) => {
+      const input = stripUndefined(args) as CandidateObjectInput & { rubricDecision: string };
+      return toolResult(ingestConfirmation(input, await tools.ingestObject(input)));
+    },
+  );
+
+  server.registerTool(
+    "submit_candidate_object",
+    {
+      title: "Submit candidate object",
+      description:
+        "Legacy fallback for source-derived knowledge when the harness cannot decide whether it clears the user's importance rubric. Prefer ingest_object for important source-backed objects.",
+      annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: true },
+      inputSchema: z.object({
+        candidateEntityType: z
+          .enum(entityTypeValues)
+          .describe("The entity type this candidate may become if later accepted."),
         candidatePayload: jsonObjectSchema.describe(
           "Structured candidate fields. Examples: task {title,status,dueDate,sourceSummary}; person {name,email,relationshipLabel}; link {title,url,summary}; note {body}.",
         ),
@@ -429,7 +485,7 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
           .min(0)
           .max(1)
           .optional()
-          .describe("Confidence from 0 to 1. Lower confidence is fine; triage is for review."),
+          .describe("Confidence from 0 to 1."),
         reviewReason: z
           .string()
           .optional()
@@ -455,7 +511,7 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
     {
       title: "Create accepted project",
       description:
-        "Directly create an accepted project only when the user explicitly asks to create/add a project. Do not use this for inferred email/calendar/source ingestion; use submit_candidate_object for triage-safe inferred knowledge.",
+        "Directly create an accepted project when the user explicitly asks to create/add a project. For source-derived project knowledge, prefer ingest_object with a rubricDecision and sourceRefs.",
       annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: false },
       inputSchema: z.object({
         title: z.string().describe("Project title from the user's explicit instruction."),
@@ -484,7 +540,7 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
     {
       title: "Create accepted task",
       description:
-        "Directly create an accepted task only when the user explicitly asks to create/add a task. Optionally assign it to an accepted project by projectId. Do not use this for inferred source ingestion; use submit_candidate_object for triage.",
+        "Directly create an accepted task when the user explicitly asks to create/add a task. Optionally assign it to an accepted project by projectId. For source-derived tasks, prefer ingest_object with a rubricDecision and sourceRefs.",
       annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: false },
       inputSchema: z.object({
         title: z.string().describe("Task title from the user's explicit instruction."),
@@ -513,20 +569,19 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
       `upsert_${entityType}`,
       {
         title: `Submit ${entityType}`,
-        description: `Convenience ingestion tool for a single ${entityType} candidate. This still writes to triage, not directly to accepted knowledge. Include only useful structured fields and prefer sourceSummary/sourceRefs when the payload came from email, calendar, reminders, messages, links, or another external source.`,
+        description: `Convenience ingestion tool for a single accepted ${entityType}. This writes directly to accepted knowledge, so use it only when the item clearly clears the user's importance rubric. Prefer ingest_object when you can include sourceRefs and a specific rubricDecision.`,
         annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: true },
         inputSchema: jsonObjectSchema,
       },
       async (args) => {
         const candidatePayload = stripUndefined(args) as CandidateObjectInput<typeof entityType>["candidatePayload"];
+        const input = {
+          candidateEntityType: entityType,
+          candidatePayload,
+          rubricDecision: `Structured ${entityType} submitted through an MCP convenience tool; harness judged it worth storing under the importance rubric.`,
+        } as CandidateObjectInput & { rubricDecision: string };
         return toolResult(
-          candidateConfirmation(
-            {
-              candidateEntityType: entityType,
-              candidatePayload,
-            } as CandidateObjectInput,
-            await tools.upsertEntity(entityType, candidatePayload),
-          ),
+          ingestConfirmation(input, await tools.upsertEntity(entityType, candidatePayload)),
         );
       },
     );
@@ -537,7 +592,7 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
     {
       title: "Add source reference",
       description:
-        "Store reusable lightweight provenance without creating a candidate object. Prefer inline sourceRefs on submit_candidate_object when submitting a single candidate. Do not store full raw source bodies.",
+        "Store reusable lightweight provenance without creating an accepted object. Prefer inline sourceRefs on ingest_object when storing a single source-backed object. Do not store full raw source bodies.",
       annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: true },
       inputSchema: sourceRefSchema,
     },
@@ -549,7 +604,7 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
     {
       title: "Link entities",
       description:
-        "Create a relationship between accepted Skippy entities only. Use after entities are accepted and you know their entity IDs; do not link triage item IDs. Relationships should be meaningful, sourced where possible, and confidence-rated when inferred.",
+        "Create a relationship between accepted Skippy entities only. Use after entities are accepted and you know their entity IDs; do not link fallback review item IDs. Relationships should be meaningful, sourced where possible, and confidence-rated when inferred.",
       annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: false },
       inputSchema: z.object({
         from: entityRefSchema.describe("Source accepted entity."),
@@ -570,7 +625,7 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
     {
       title: "Generate focus summary",
       description:
-        "Store a synthesized focus summary for the user-facing dashboard. Use accepted entities and current context; do not invent tasks or entities here. If you discover new items while summarizing, submit them separately as candidates.",
+        "Store a synthesized focus summary for the user-facing dashboard. Use accepted entities and current context; do not invent tasks or entities here. If you discover new important items while summarizing, ingest them separately with sourceRefs and a rubricDecision.",
       annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: false },
       inputSchema: z.object({
         generatedAt: z.number().describe("Epoch milliseconds when this summary was generated."),
@@ -721,6 +776,45 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
   );
 
   server.registerTool(
+    "update_source_sync_status",
+    {
+      title: "Update source sync status",
+      description:
+        "Update the live source-ingestion status shown on the Skippy Home NOW area. Call with status=running before reading sources, heartbeat while long work continues, and completed or failed before ending the run.",
+      annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: true },
+      inputSchema: z.object({
+        statusKey: z.string().optional().describe("Stable key for this status row, e.g. google-and-imessage. Defaults to source-sync."),
+        harness: z.string().describe("Harness or automation name, e.g. codex_automation, chatgpt, claude, hermes."),
+        status: z.enum(["idle", "running", "completed", "failed"]).describe("Current lifecycle state."),
+        message: z.string().optional().describe("Short human-facing status message for the Home NOW area."),
+        sourceSystemsChecked: z.array(z.string()).describe("Sources in scope, e.g. gmail, calendar, imessage."),
+        startedAt: z.number().optional().describe("Epoch milliseconds when this run started."),
+        completedAt: z.number().optional().describe("Epoch milliseconds when this run completed or failed."),
+        lastHeartbeatAt: z.number().optional().describe("Epoch milliseconds for long-running heartbeat updates."),
+        errors: z.array(z.string()).optional().describe("Short error summaries; avoid secrets or raw source payloads."),
+        metadata: z.unknown().optional().describe("Small JSON metadata object for audit/debugging. Avoid secrets and raw source dumps."),
+      }),
+    },
+    async (args) =>
+      toolResult(
+        await tools.updateSourceSyncStatus(
+          stripUndefined(args) as {
+            statusKey?: string;
+            harness: string;
+            status: "idle" | "running" | "completed" | "failed";
+            message?: string;
+            sourceSystemsChecked: string[];
+            startedAt?: number;
+            completedAt?: number;
+            lastHeartbeatAt?: number;
+            errors?: string[];
+            metadata?: unknown;
+          },
+        ),
+      ),
+  );
+
+  server.registerTool(
     "record_ingestion_run",
     {
       title: "Record ingestion run",
@@ -733,7 +827,7 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
         sourceSystemsChecked: z.array(z.string()).describe("Sources checked, e.g. gmail, calendar, apple_reminders."),
         startedAt: z.number().optional().describe("Epoch milliseconds when the run started."),
         completedAt: z.number().optional().describe("Epoch milliseconds when the run completed."),
-        candidatesSubmitted: z.number().optional().describe("Number of triage candidates submitted."),
+        candidatesSubmitted: z.number().optional().describe("Legacy count of fallback review items submitted."),
         objectsCreated: z.number().optional().describe("Number of accepted objects created, if known."),
         objectsUpdated: z.number().optional().describe("Number of accepted objects updated, if known."),
         errors: z.array(z.string()).optional().describe("Short error summaries; avoid secrets or raw source payloads."),

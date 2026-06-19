@@ -8,7 +8,7 @@ Development has moved from scaffold into a working foundation across Phases 1-8:
 
 - TypeScript monorepo tooling is in place.
 - `@skippy/shared` contains the core domain vocabulary and normalization helpers.
-- Convex has a real schema, authenticated viewer bootstrap, viewer-scoped queries, triage review mutations, settings, token management, and AI-run metadata.
+- Convex has a real schema, authenticated viewer bootstrap, viewer-scoped queries, legacy fallback review mutations, settings, token management, operating rules, and AI-run metadata.
 - Convex has an auth config scaffold for Clerk JWTs.
 - The MCP package has transport-independent handlers, stdio wiring, and a Streamable HTTP remote handler.
 - The web package is a Next/PWA app shell that uses static preview data without env vars and switches to live Clerk/Convex queries when configured.
@@ -18,6 +18,8 @@ The system is still not production-ready. Convex deployment env is configured, `
 
 Most recent development batch:
 
+- Pivoted source ingestion from triage-first to rubric-first. Skippy now exposes an editable importance rubric in Settings, a `get_importance_rubric` MCP tool, and a primary `ingest_object` MCP tool that writes accepted source-backed objects directly when the harness can explain why they clear the rubric.
+- Kept `submit_candidate_object` and the old review table/page as a legacy uncertainty fallback, but renamed the visible web surface to Review/unclear signals rather than Triage.
 - Fixed triage approval schema mapping by normalizing harness-friendly candidate payloads before accepted Convex inserts.
 - Improved MCP chat confirmations for candidate submission, direct project/task creation, and task completion.
 - Created a repository Skill at `skills/skippy-harness` with harness ingestion judgment, tool choice, privacy/source-reference rules, confirmation language, and entity mapping reference.
@@ -137,12 +139,12 @@ Auth/config functions:
 
 Knowledge functions:
 
-- Candidate submission and source refs.
+- Rubric-first direct ingestion, legacy fallback review submission, and source refs.
 - Direct accepted project/task creation for explicit user commands.
 - Relationship creation.
 - Basic approve/reject.
-- Unified `reviewTriageItem` supporting approve, reject, correct, merge, and reclassify.
-- Viewer-scoped dashboard, projects/tasks, contacts, triage, and pending-action queries.
+- Unified legacy `reviewTriageItem` supporting approve, reject, correct, merge, and reclassify for unclear signals.
+- Viewer-scoped dashboard, projects/tasks, contacts, fallback review, and pending-action queries.
 - Viewer-scoped task completion.
 - Focus summary upsert/read.
 - Pending-action result recording.
@@ -175,7 +177,7 @@ Implemented:
 
 - Transport-independent `SkippyClient`.
 - MCP SDK tool registration.
-- Top-level MCP server instructions for Skippy's triage-first harness workflow.
+- Top-level MCP server instructions for Skippy's rubric-first harness workflow.
 - Rich tool descriptions, schema field descriptions, and read/write annotations for harness discovery.
 - `skippy://guide/harness-usage` resource exposing the harness usage guide.
 - `skippy_intro` prompt and `skippy://guide/intro` resource provide a user-facing intro/capabilities message for harnesses that support MCP prompts/resources.
@@ -189,6 +191,8 @@ Tools include:
 - `capture`
 - `ask`
 - `summarize_focus`
+- `get_importance_rubric`
+- `ingest_object`
 - `submit_candidate_object`
 - `create_project`
 - `create_task`
@@ -208,11 +212,11 @@ Remote MCP:
 - The same MCP server/tool logic is used after auth.
 - `pnpm mcp:smoke` runs a local Streamable HTTP MCP smoke test when `SKIPPY_MCP_TOKEN` is set.
 - Remote MCP smoke test has passed against `http://127.0.0.1:3000/api/mcp`, listing tools and calling `ask`.
-- A live `capture` tool call has written a note candidate through remote MCP and it appears in the web triage queue.
+- A live `capture` tool call has written a note through remote MCP. Capture now writes accepted notes directly.
 - A live Gmail/Google Calendar pilot ingest submitted four candidates through remote MCP: Optimum bill, Claude trusted-device alert, Hotels.com review reminder, and Meg Birthday calendar event.
-- Skippy MCP has been used to submit its own roadmap as triage candidates: project `Skippy MCP and APP` plus six prioritized development tasks.
+- Skippy MCP has been used to submit its own roadmap: project `Skippy MCP and APP` plus prioritized development tasks.
 - Explicit direct-create MCP tools created 15 additional accepted backlog tasks from `DEV_SPEC.md` and assigned them to `Skippy MCP and APP`.
-- MCP manifest tests verify that connected harnesses receive Skippy instructions, triage-first tool descriptions, input schemas, and read-only annotations.
+- MCP manifest tests verify that connected harnesses receive Skippy instructions, rubric-first tool descriptions, input schemas, and read-only annotations.
 - Live remote MCP smoke test verifies `skippy_intro` prompt discovery and previews the intro message.
 
 ### `apps/web`
@@ -235,14 +239,14 @@ Live routes:
 - Projects reads accepted projects/tasks and can mark tasks done.
 - Projects groups tasks under accepted projects using `belongs_to` relationships.
 - Contacts reads accepted people/companies.
-- Triage reads pending suggestions and supports approve, reject, correct, merge, and reclassify controls.
+- Review reads legacy unclear signals and supports approve, reject, correct, merge, and reclassify controls.
 - Pending actions reads pending external actions.
 - Settings reads/writes brain config and manages MCP tokens.
-- Triage icon-only action buttons now have descriptive `title` and `aria-label` text.
+- Review icon-only action buttons now have descriptive `title` and `aria-label` text.
 
 Current UI limitations:
 
-- Triage correction/reclassification uses JSON payload editing. It is functional but not yet a polished domain-specific editor.
+- Legacy review correction/reclassification uses typed payload fields for common entities.
 - Pending action approve/reject/revise UI is display-only in this pass.
 
 ## Verification completed
@@ -301,13 +305,13 @@ Next steps:
 
 Viewer-scoped web functions use Convex auth and `requireOwnedBrain`. Older structured MCP functions still accept `brainInstanceId` and should stay protected by MCP token routing or be split into internal helpers.
 
-### Triage schema mapping
+### Legacy review schema mapping
 
-Fixed for the current schema. `createAcceptedEntity` now normalizes candidate payloads through shared accepted-entity mapping before inserting into typed Convex tables, so fields like `dueDate`, `sourceSummary`, `personName`, `companyName`, and `email` are mapped or dropped safely. Follow-up: add browser/E2E coverage around approval of real Gmail/calendar candidates and continue expanding mappings as new source shapes appear.
+Fixed for the current legacy review schema. `createAcceptedEntity` now normalizes fallback payloads through shared accepted-entity mapping before inserting into typed Convex tables, so fields like `dueDate`, `sourceSummary`, `personName`, `companyName`, and `email` are mapped or dropped safely. The primary path is now direct `ingest_object`; follow-up is to add dedupe/merge safety around direct ingestion.
 
 ### Direct create path
 
-Dedicated `create_project` and `create_task` MCP tools now support direct accepted-object creation for explicit user commands. Autonomous or inferred source ingestion should remain triage-first. Direct create responses now return chat-friendly confirmations. Remaining work: harden policy/tests and consider direct-create support for other entity types only when clearly justified.
+Dedicated `create_project` and `create_task` MCP tools support direct accepted-object creation for explicit user commands. Source ingestion now prefers `ingest_object` when the harness can explain why the item clears the importance rubric. `submit_candidate_object` remains only as a legacy uncertainty fallback.
 
 ### Project/task assignment UX
 
@@ -315,19 +319,19 @@ Task-to-project assignment is relationship-backed and displays correctly when `t
 
 ### MCP chat confirmations
 
-Improved for the main write loop. `capture`, `submit_candidate_object`, `upsert_*`, `create_project`, `create_task`, and `mark_task_done` now return chat-friendly fields such as `status`, `entityType`, `title`, IDs, and `reviewUrl`. Follow-up: extend the same style to pending actions, source refs, relationships, ingestion runs, and future AI/embedding tools.
+Improved for the main write loop. `capture`, `ingest_object`, `submit_candidate_object`, `upsert_*`, `create_project`, `create_task`, and `mark_task_done` now return chat-friendly fields such as `status`, `entityType`, `title`, IDs, `rubricDecision` where relevant, and `reviewUrl`. Follow-up: extend the same style to pending actions, source refs, relationships, ingestion runs, and future AI/embedding tools.
 
 ### Skippy harness skill
 
-Created `skills/skippy-harness` with `SKILL.md`, `agents/openai.yaml`, and `references/entity-mapping.md`. It teaches ingestion judgment, direct-create vs triage policy, tool choice, source-ref/privacy rules, schema-friendly mappings, and chat confirmation language. Follow-up: install or package it for the target harnesses that support user skills/custom instructions.
+Created `skills/skippy-harness` with `SKILL.md`, `agents/openai.yaml`, and `references/entity-mapping.md`. It now teaches importance-rubric judgment, `ingest_object` first, legacy fallback review only for uncertainty, source-ref/privacy rules, schema-friendly mappings, and chat confirmation language. Follow-up: install or package it for the target harnesses that support user skills/custom instructions.
 
-### Triage review UX
+### Legacy review UX
 
-Improved the live triage card from raw JSON editing to typed correction fields by entity type. Supported editors include task, project, goal, note, person, company, link, and knowledge object forms, while preserving approve, correct, reclassify, merge, and reject actions. Verified with a temporary task candidate and rejected the smoke-test candidate afterward. Follow-up: add stronger validation/errors, existing-entity merge lookup, source-ref display, and E2E tests.
+Improved the legacy review card from raw JSON editing to typed correction fields by entity type. Supported editors include task, project, goal, note, person, company, link, and knowledge object forms, while preserving approve, correct, reclassify, merge, and reject actions. Verified with a temporary task candidate and rejected the smoke-test candidate afterward. Follow-up: add stronger validation/errors, existing-entity merge lookup, source-ref display, and E2E tests.
 
 ### Entity matching and merge assistance
 
-Added a viewer-scoped accepted-entity options query and candidate-aware text-overlap scoring in the triage UI. Merge review now uses a target picker grouped into suggested matches and other accepted records for the selected entity type, instead of requiring raw ID entry. Verified with a temporary project candidate that suggested the existing `Skippy MCP and APP` project, then rejected the smoke-test candidate.
+Added a viewer-scoped accepted-entity options query and fallback-item text-overlap scoring in the review UI. Merge review now uses a target picker grouped into suggested matches and other accepted records for the selected entity type, instead of requiring raw ID entry. Verified with a temporary project candidate that suggested the existing `Skippy MCP and APP` project, then rejected the smoke-test candidate.
 
 ### Pending actions
 
@@ -344,6 +348,10 @@ Embedding config/schema/interfaces exist. The MCP `ask` and `refresh_focus_summa
 ### Task progress tracking
 
 Accepted tasks can now be marked `in_progress` by harnesses through `mark_task_in_progress`, preserving `startedAt` and `startedBy`. The Projects page displays an in-progress indicator and actor label.
+
+### Live source sync status
+
+Added a `sourceSyncStatuses` Convex table and `update_source_sync_status` MCP tool for automation/harness runs. The Home NOW card now shows an `Updating` pill and short status message while a source ingestion run is active. The Skippy harness Skill and the Codex source-ingestion automation now instruct scheduled runs to set status to `running` at start, heartbeat during long runs, and close with `completed` or `failed`.
 
 ### Notifications
 

@@ -1,6 +1,6 @@
 # Skippy Entity Mapping
 
-Use these fields when calling Skippy MCP candidate tools.
+Use these fields when calling Skippy MCP accepted-ingestion tools.
 
 ## Task
 
@@ -8,7 +8,7 @@ Use for action items, follow-ups, bills, reminders, deadlines, and things the us
 
 - Required: `title`
 - Optional: `description`, `status`, `dueAt`, `dueDate`, `sourceSummary`, `priorityReason`, `priorityScore`, `urgencyScore`, `importanceScore`
-- Prefer `dueDate` for natural extracted dates; Skippy normalizes it to `dueAt` on approval.
+- Prefer `dueDate` for natural extracted dates; Skippy normalizes it to `dueAt` on ingestion.
 - Put unsupported source details such as event start/end, amount due, location, or attendees in `sourceSummary` unless they are essential.
 
 ## Project

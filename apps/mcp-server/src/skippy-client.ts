@@ -11,6 +11,7 @@ import type {
 import type { SkippyClient } from "./tools.js";
 
 const submitCandidateObjectRef = makeFunctionReference<"mutation">("knowledge:submitCandidateObject");
+const ingestObjectRef = makeFunctionReference<"mutation">("knowledge:ingestObject");
 const createProjectDirectRef = makeFunctionReference<"mutation">("knowledge:createProjectDirect");
 const createTaskDirectRef = makeFunctionReference<"mutation">("knowledge:createTaskDirect");
 const addSourceRefRef = makeFunctionReference<"mutation">("knowledge:addSourceRef");
@@ -25,6 +26,9 @@ const markTaskDoneRef = makeFunctionReference<"mutation">("knowledge:markTaskDon
 const recordPendingActionResultRef = makeFunctionReference<"mutation">("knowledge:recordPendingActionResult");
 const recordEntityReviewRef = makeFunctionReference<"mutation">("knowledge:recordEntityReview");
 const recordIngestionRunRef = makeFunctionReference<"mutation">("knowledge:recordIngestionRun");
+const updateSourceSyncStatusRef = makeFunctionReference<"mutation">("knowledge:updateSourceSyncStatus");
+const operatingRulesForBrainRef = makeFunctionReference<"query">("settings:operatingRulesForBrain");
+const getEffectiveRubricForBrainRef = makeFunctionReference<"query">("settings:getEffectiveRubricForBrain");
 const notificationDispatchContextForBrainRef = makeFunctionReference<"query">("settings:notificationDispatchContextForBrain");
 const recordNotificationDeliveryRef = makeFunctionReference<"mutation">("settings:recordNotificationDelivery");
 
@@ -37,6 +41,8 @@ export function createConvexSkippyClient(convexUrl: string, authToken?: string):
   return {
     submitCandidateObject: (brainInstanceId, input) =>
       client.mutation(submitCandidateObjectRef, { brainInstanceId, ...input }),
+    ingestObject: (brainInstanceId, input) =>
+      client.mutation(ingestObjectRef, { brainInstanceId, ...input }),
     createProjectDirect: (brainInstanceId, input) =>
       client.mutation(createProjectDirectRef, { brainInstanceId, ...input }),
     createTaskDirect: (brainInstanceId, input) =>
@@ -73,6 +79,12 @@ export function createConvexSkippyClient(convexUrl: string, authToken?: string):
       client.mutation(recordEntityReviewRef, { brainInstanceId, ...review }),
     recordIngestionRun: (brainInstanceId, run) =>
       client.mutation(recordIngestionRunRef, { brainInstanceId, ...run }),
+    updateSourceSyncStatus: (brainInstanceId, status) =>
+      client.mutation(updateSourceSyncStatusRef, { brainInstanceId, ...status }),
+    getOperatingRules: (brainInstanceId, scope) =>
+      client.query(operatingRulesForBrainRef, { brainInstanceId, scope }),
+    getEffectiveRubric: (brainInstanceId) =>
+      client.query(getEffectiveRubricForBrainRef, { brainInstanceId }),
     getNotificationDispatchContext: (brainInstanceId) =>
       client.query(notificationDispatchContextForBrainRef, { brainInstanceId }),
     recordNotificationDelivery: (brainInstanceId, delivery) =>
@@ -82,6 +94,7 @@ export function createConvexSkippyClient(convexUrl: string, authToken?: string):
 
 export type ConvexSkippyClientInput = {
   submitCandidateObject: CandidateObjectInput;
+  ingestObject: CandidateObjectInput & { rubricDecision: string };
   addSourceRef: SourceRefInput;
   linkEntities: RelationshipInput;
   focusSummary: FocusSummary;
