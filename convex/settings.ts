@@ -18,6 +18,39 @@ const notificationPreferencesInput = v.object({
   ),
 });
 
+const memoryPrivacyPolicyInput = v.object({
+  storageMode: v.optional(
+    v.union(
+      v.literal("summaries_with_refs"),
+      v.literal("source_refs_only"),
+      v.literal("full_content_when_important"),
+    ),
+  ),
+  excludedContent: v.optional(v.string()),
+  sensitiveContentInstructions: v.optional(v.string()),
+  retentionDays: v.optional(v.number()),
+});
+
+const recallPreferencesInput = v.object({
+  cadence: v.optional(v.union(v.literal("manual"), v.literal("daily"), v.literal("weekly"), v.literal("active_context"))),
+  focusWindow: v.optional(v.string()),
+  allowProactiveRecall: v.optional(v.boolean()),
+});
+
+const harnessAutonomyPolicyInput = v.object({
+  ingestionMode: v.optional(
+    v.union(
+      v.literal("suggest_only"),
+      v.literal("auto_accept_high_confidence"),
+      v.literal("auto_accept_with_action_review"),
+    ),
+  ),
+  actionApproval: v.optional(
+    v.union(v.literal("always_require"), v.literal("allow_low_risk_drafts"), v.literal("allow_low_risk_send")),
+  ),
+  notes: v.optional(v.string()),
+});
+
 const pushPermissionState = v.union(
   v.literal("granted"),
   v.literal("denied"),
@@ -100,6 +133,65 @@ export const getSettings = queryGeneric({
         updatedAt: subscription.updatedAt,
       })),
     };
+  },
+});
+
+export const getSecondBrainSettingsForViewer = queryGeneric({
+  args: {},
+  handler: async (ctx) => {
+    const { brain } = await requireOwnedBrain(ctx);
+    const config = await ctx.db
+      .query("brainConfigs")
+      .withIndex("by_brain", (q) => q.eq("brainInstanceId", brain._id))
+      .first();
+    const importanceRules = await ctx.db
+      .query("operatingRules")
+      .withIndex("by_brain_scope", (q) => q.eq("brainInstanceId", brain._id))
+      .filter((q) => q.eq(q.field("scope"), "importance"))
+      .collect();
+
+    return {
+      memoryPrivacyPolicy: config?.memoryPrivacyPolicy,
+      recallPreferences: config?.recallPreferences,
+      harnessAutonomyPolicy: config?.harnessAutonomyPolicy,
+      operatingRules: withDefaultImportanceRule(importanceRules, brain._id),
+    };
+  },
+});
+
+export const updateSecondBrainSettingsForViewer = mutationGeneric({
+  args: {
+    memoryPrivacyPolicy: v.optional(memoryPrivacyPolicyInput),
+    recallPreferences: v.optional(recallPreferencesInput),
+    harnessAutonomyPolicy: v.optional(harnessAutonomyPolicyInput),
+  },
+  handler: async (ctx, args) => {
+    const { brain } = await requireOwnedBrain(ctx);
+    const config = await ctx.db
+      .query("brainConfigs")
+      .withIndex("by_brain", (q) => q.eq("brainInstanceId", brain._id))
+      .first();
+
+    if (!config) {
+      throw new Error("brain config not found");
+    }
+
+    const now = Date.now();
+    await ctx.db.patch(config._id, {
+      ...args,
+      updatedAt: now,
+    });
+
+    await ctx.db.insert("activityEvents", {
+      brainInstanceId: brain._id,
+      activityType: "settings_updated",
+      actorType: "user",
+      timestamp: now,
+      summary: "Second-brain settings updated.",
+      metadata: args,
+    });
+
+    return { configId: config._id };
   },
 });
 
@@ -276,6 +368,9 @@ export const updateConfig = mutationGeneric({
     linkEnrichmentEnabled: v.optional(v.boolean()),
     notificationsEnabled: v.optional(v.boolean()),
     notificationPreferences: v.optional(notificationPreferencesInput),
+    memoryPrivacyPolicy: v.optional(memoryPrivacyPolicyInput),
+    recallPreferences: v.optional(recallPreferencesInput),
+    harnessAutonomyPolicy: v.optional(harnessAutonomyPolicyInput),
     embeddingProviderMode: v.optional(v.string()),
     embeddingModel: v.optional(v.string()),
   },

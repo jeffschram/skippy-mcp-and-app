@@ -1,9 +1,35 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { createSkippyToolHandlers, type SkippyClient } from "./tools.js";
+import {
+  createSkippyToolHandlers,
+  type AnswerInterviewQuestionInput,
+  type ArchiveInterviewInput,
+  type CompleteInterviewInput,
+  type CaptureThoughtInput,
+  type ContextBundleInput,
+  type GetInterviewInput,
+  type InterviewKind,
+  type LinkMemoryInput,
+  type MemoryDetailInput,
+  type MemoryKind,
+  type MemoryListInput,
+  type MemoryReviewBehavior,
+  type MemoryReviewCandidateInput,
+  type RecordMemoryInput,
+  type SkippyClient,
+  type StartInterviewInput,
+} from "./tools.js";
 import type { CandidateObjectInput, EntityType, FocusSummary, RelationshipInput, SourceRefInput } from "@skippy/shared";
 
 const entityTypeValues = ["goal", "project", "task", "note", "person", "company", "link", "knowledgeObject"] as const;
+
+const memoryKindValues = ["memory", "decision", "principle"] as const;
+
+const interviewKindValues = ["project", "goal", "person", "decision", "weekly_review"] as const;
+
+const interviewMemoryKindValues = ["thought", "memory", "decision", "principle", "question", "insight", "artifact"] as const;
+
+const memoryReviewBehaviorValues = ["accept", "submit_for_review", "auto"] as const;
 
 const relationshipTypeValues = [
   "belongs_to",
@@ -41,6 +67,9 @@ const skippyInstructions = [
   "Avoid storing full raw emails, full calendar descriptions, or unnecessary private text. Store concise summaries and fields needed for future retrieval/focus.",
   "For noisy sources, submit only items that are actionable, relationship-building, deadline-bearing, decision-relevant, or clearly useful later.",
   "Use pending actions only for external side effects that need separate approval/execution. Do not send email, edit calendars, or mark source systems changed through Skippy.",
+  "Use capture_thought, record_memory, record_decision, and record_principle for durable second-brain memory. Include source refs, related entity refs, confidence, captureReason/rubricDecision, and reviewBehavior when available.",
+  "Use submit_memory_review_candidate when a possible memory is useful but uncertain. Use list_memory/get_context_bundle/get_memory_detail before adding likely duplicates or answering from memory, and link_memory to attach memories to accepted entities.",
+  "Use list_interview_templates/start_interview/get_interview/answer_interview_question/complete_interview/archive_interview to run guided second-brain interviews inside the harness chat. Ask one question at a time in chat, using the assistantDisplayName returned by Skippy.",
   "Use ask/summarize_focus/list_pending_actions for retrieval. Internal AI synthesis may be disabled, so expect structured context rather than polished answers.",
 ].join("\n");
 
@@ -63,6 +92,7 @@ function buildIntroMessage() {
     "- Reading connected sources through this harness, such as email, calendar, reminders, messages, links, or conversation context when you grant access.",
     "- Extracting useful tasks, projects, people, companies, links, notes, goals, and knowledge objects.",
     "- Applying your importance rubric and writing source-backed items directly into Skippy when they clear the bar.",
+    "- Capturing durable memories, decisions, and operating principles with source links and review behavior.",
     "- Including provenance like message IDs, event IDs, timestamps, participants, links, summaries, and short excerpts.",
     "- Answering from existing Skippy context with `ask` and `summarize_focus`.",
     "- Tracking approved external actions separately from knowledge so side effects stay reviewable.",
@@ -98,6 +128,34 @@ const entityRefSchema = z.object({
   entityType: z.enum(entityTypeValues).describe("Accepted Skippy entity type."),
   entityId: z.string().describe("Existing accepted entity ID, not a fallback review item ID."),
 });
+
+const memoryKindSchema = z
+  .enum(memoryKindValues)
+  .describe("Memory category. Use memory for general durable preferences/facts, decision for choices made, principle for durable operating rules.");
+
+const interviewKindSchema = z
+  .enum(interviewKindValues)
+  .describe("Guided interview template to run inside the harness chat.");
+
+const interviewMemoryKindSchema = z
+  .enum(interviewMemoryKindValues)
+  .describe("Memory category for optional interview memory candidates. Interview-created memories are submitted to review.");
+
+const memoryReviewBehaviorSchema = z
+  .enum(memoryReviewBehaviorValues)
+  .describe("accept writes directly, submit_for_review queues for user review, auto lets Skippy apply backend policy.");
+
+const memoryEvidenceSchema = {
+  captureReason: z.string().optional().describe("Why this thought belongs in long-term memory."),
+  rubricDecision: z.string().optional().describe("How this clears the user's memory/importance rubric."),
+  confidence: z.number().min(0).max(1).optional().describe("Confidence from 0 to 1."),
+  reviewBehavior: memoryReviewBehaviorSchema.optional(),
+  sourceRefs: z.array(sourceRefSchema).optional().describe("Lightweight provenance records."),
+  sourceRefIds: z.array(z.string()).optional().describe("Existing source reference IDs."),
+  relatedEntityRefs: z.array(entityRefSchema).optional().describe("Accepted Skippy entities this memory should be associated with."),
+  createdBy: z.string().optional().describe("Harness/user identifier for audit logging."),
+  metadata: z.unknown().optional().describe("Small JSON metadata object. Avoid secrets and raw source dumps."),
+};
 
 const focusTopItemSchema = z.object({
   entityRef: entityRefSchema.describe("Accepted entity that belongs in the focus summary."),
@@ -258,6 +316,90 @@ function pendingActionResultConfirmation(
   };
 }
 
+function memoryConfirmation(
+  action: "captured" | "recorded" | "submitted_for_review" | "linked",
+  input: {
+    kind?: MemoryKind | undefined;
+    content?: string | undefined;
+    rubricDecision?: string | undefined;
+    reviewBehavior?: MemoryReviewBehavior | undefined;
+  },
+  result: unknown,
+) {
+  const resultRecord = objectResult(result);
+  const memoryId = resultRecord.memoryId ?? resultRecord._id ?? resultRecord.id;
+  const reviewItemId = resultRecord.reviewItemId ?? resultRecord.triageItemId;
+  const status = resultRecord.status ?? (reviewItemId ? "submitted_for_review" : action);
+  const content = input.content?.trim();
+
+  return {
+    status,
+    entityType: "memory",
+    memoryId,
+    reviewItemId,
+    kind: resultRecord.kind ?? resultRecord.memoryKind ?? input.kind,
+    title:
+      resultRecord.title ??
+      (content ? (content.length > 80 ? `${content.slice(0, 77)}...` : content) : undefined),
+    sourceRefIds: resultRecord.sourceRefIds,
+    relatedEntityRefs: resultRecord.relatedEntityRefs,
+    confidence: resultRecord.confidence,
+    rubricDecision: resultRecord.rubricDecision ?? input.rubricDecision,
+    reviewBehavior: input.reviewBehavior,
+    reviewUrl: reviewUrl("/memory"),
+    nextAction:
+      status === "submitted_for_review"
+        ? "Review, accept, edit, or reject this memory candidate in Skippy."
+        : "Memory updated in Skippy.",
+  };
+}
+
+function withAbsoluteReviewUrl(value: unknown) {
+  const record = objectResult(value);
+  if (typeof record.reviewUrl !== "string") {
+    return value;
+  }
+
+  if (record.reviewUrl.startsWith("http://") || record.reviewUrl.startsWith("https://")) {
+    return value;
+  }
+
+  return {
+    ...record,
+    reviewUrl: reviewUrl(record.reviewUrl),
+  };
+}
+
+function interviewStartConfirmation(input: StartInterviewInput, result: unknown) {
+  const resultRecord = withAbsoluteReviewUrl(result) as Record<string, unknown>;
+  const currentQuestion = objectResult(resultRecord.currentQuestion);
+  const assistantDisplayName =
+    typeof resultRecord.assistantDisplayName === "string" ? resultRecord.assistantDisplayName : getAssistantDisplayName();
+  return {
+    ...resultRecord,
+    status: "active",
+    kind: input.kind,
+    assistantDisplayName,
+    nextAction: currentQuestion.prompt
+      ? `Ask this in the harness chat: ${currentQuestion.prompt}`
+      : `Ask the next interview question in the harness chat for ${assistantDisplayName}.`,
+  };
+}
+
+function interviewAnswerConfirmation(result: unknown) {
+  const resultRecord = withAbsoluteReviewUrl(result) as Record<string, unknown>;
+  const nextQuestion = objectResult(resultRecord.nextQuestion);
+  return {
+    ...resultRecord,
+    status: resultRecord.isLastAnswer ? "ready_to_complete" : "answer_saved",
+    nextAction: resultRecord.isLastAnswer
+      ? "All interview questions have answers. Ask whether to complete the interview and whether to submit a summary memory candidate."
+      : nextQuestion.prompt
+        ? `Ask this next in the harness chat: ${nextQuestion.prompt}`
+        : "Ask the next interview question in the harness chat.",
+  };
+}
+
 function stripUndefined<T>(value: T): T {
   if (!value || typeof value !== "object") {
     return value;
@@ -378,6 +520,347 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
         ingestConfirmation(candidate, result),
       );
     },
+  );
+
+  server.registerTool(
+    "capture_thought",
+    {
+      title: "Capture thought",
+      description:
+        "Capture an explicit user thought as second-brain memory. Use for durable preferences, reflections, decisions-in-progress, or context the user wants remembered. Include provenance and let reviewBehavior choose direct write versus review.",
+      annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: true },
+      inputSchema: z.object({
+        text: z.string().describe("Concise thought to remember. Avoid dumping full raw private source text."),
+        content: z.string().optional().describe("Optional normalized memory content when different from text."),
+        proposedKind: memoryKindSchema.optional(),
+        ...memoryEvidenceSchema,
+      }),
+    },
+    async (args) => {
+      const input = stripUndefined(args) as CaptureThoughtInput;
+      const result = await tools.captureThought(input);
+      return toolResult(
+        memoryConfirmation(
+          "captured",
+          {
+            kind: input.proposedKind,
+            content: input.content ?? input.text,
+            rubricDecision: input.rubricDecision,
+            reviewBehavior: input.reviewBehavior,
+          },
+          result,
+        ),
+      );
+    },
+  );
+
+  server.registerTool(
+    "record_memory",
+    {
+      title: "Record memory",
+      description:
+        "Write a durable second-brain memory when the harness can explain why it belongs. Use for stable user preferences, personal facts, recurring context, and durable working notes. Use record_decision or record_principle for those specific kinds.",
+      annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: true },
+      inputSchema: z.object({
+        content: z.string().describe("Concise durable memory content."),
+        kind: memoryKindSchema.optional(),
+        title: z.string().optional().describe("Optional short display title."),
+        summary: z.string().optional().describe("Optional one-sentence summary."),
+        ...memoryEvidenceSchema,
+        rubricDecision: z
+          .string()
+          .describe("Why this clears the user's memory/importance rubric. Required for direct memory writes."),
+      }),
+    },
+    async (args) => {
+      const input = stripUndefined(args) as RecordMemoryInput;
+      return toolResult(
+        memoryConfirmation("recorded", input, await tools.recordMemory(input)),
+      );
+    },
+  );
+
+  server.registerTool(
+    "record_decision",
+    {
+      title: "Record decision",
+      description:
+        "Write a durable decision memory. Use when the user or a source clearly establishes a choice, direction, commitment, or tradeoff that should be remembered later.",
+      annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: true },
+      inputSchema: z.object({
+        content: z.string().describe("The decision, phrased concisely."),
+        title: z.string().optional().describe("Optional short display title."),
+        summary: z.string().optional().describe("Optional context summary."),
+        ...memoryEvidenceSchema,
+        rubricDecision: z.string().describe("Why this decision is durable enough to store."),
+      }),
+    },
+    async (args) => {
+      const input = { ...(stripUndefined(args) as Omit<RecordMemoryInput, "kind">), kind: "decision" as const };
+      return toolResult(
+        memoryConfirmation("recorded", input, await tools.recordMemory(input)),
+      );
+    },
+  );
+
+  server.registerTool(
+    "record_principle",
+    {
+      title: "Record principle",
+      description:
+        "Write a durable operating principle or preference. Use for stable guidance about how Skippy or harnesses should behave, not one-off observations.",
+      annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: true },
+      inputSchema: z.object({
+        content: z.string().describe("The principle or durable preference."),
+        title: z.string().optional().describe("Optional short display title."),
+        summary: z.string().optional().describe("Optional context summary."),
+        ...memoryEvidenceSchema,
+        rubricDecision: z.string().describe("Why this principle should persist."),
+      }),
+    },
+    async (args) => {
+      const input = { ...(stripUndefined(args) as Omit<RecordMemoryInput, "kind">), kind: "principle" as const };
+      return toolResult(
+        memoryConfirmation("recorded", input, await tools.recordMemory(input)),
+      );
+    },
+  );
+
+  server.registerTool(
+    "submit_memory_review_candidate",
+    {
+      title: "Submit memory review candidate",
+      description:
+        "Queue a possible memory for user review when the harness is unsure it should be stored directly. Prefer record_memory, record_decision, or record_principle when the item clearly clears the rubric.",
+      annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: true },
+      inputSchema: z.object({
+        content: z.string().describe("Concise proposed memory content."),
+        proposedKind: memoryKindSchema.optional(),
+        ...memoryEvidenceSchema,
+      }),
+    },
+    async (args) => {
+      const input = stripUndefined(args) as MemoryReviewCandidateInput;
+      return toolResult(
+        memoryConfirmation(
+          "submitted_for_review",
+          {
+            kind: input.proposedKind,
+            content: input.content,
+            rubricDecision: input.rubricDecision,
+            reviewBehavior: input.reviewBehavior,
+          },
+          await tools.submitMemoryReviewCandidate(input),
+        ),
+      );
+    },
+  );
+
+  server.registerTool(
+    "list_memory",
+    {
+      title: "List memory",
+      description:
+        "Read-only memory search/list tool. Use to retrieve durable second-brain memories by query, kind, related entity, or archive state before answering or adding duplicates.",
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: z.object({
+        query: z.string().optional().describe("Search text for memory content/title/summary."),
+        memoryType: memoryKindSchema.optional().describe("Single memory kind filter. Use kinds for multiple values."),
+        kinds: z.array(memoryKindSchema).optional().describe("Optional memory kind filters."),
+        relatedEntityRefs: z.array(entityRefSchema).optional().describe("Only memories related to these accepted entities."),
+        includeArchived: z.boolean().optional().describe("Include archived/disabled memories. Defaults to false."),
+        limit: z.number().min(1).max(50).optional().describe("Maximum memories to return. Defaults to 20."),
+      }),
+    },
+    async (args) => toolResult(await tools.listMemory(stripUndefined(args) as MemoryListInput)),
+  );
+
+  server.registerTool(
+    "get_memory_detail",
+    {
+      title: "Get memory detail",
+      description:
+        "Read-only memory detail. Use when a list/search result needs provenance, related entities, or full stored detail before acting.",
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: z.object({
+        memoryId: z.string().describe("Memory ID returned by list_memory, capture_thought, or record_memory."),
+        includeSourceRefs: z.boolean().optional().describe("Include source refs/provenance if backend supports it."),
+        includeRelatedEntities: z.boolean().optional().describe("Include related accepted Skippy entities if backend supports it."),
+      }),
+    },
+    async (args) => toolResult(await tools.getMemoryDetail(stripUndefined(args) as MemoryDetailInput)),
+  );
+
+  server.registerTool(
+    "get_context_bundle",
+    {
+      title: "Get context bundle",
+      description:
+        "Read-only semantic-ish context bundle. Use to gather scored memories, source refs, and related project/task/person/company/note/link context for a query and/or accepted entity refs.",
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: z.object({
+        query: z.string().optional().describe("Search text for memory and related entity context."),
+        memoryType: memoryKindSchema.optional().describe("Single memory kind filter. Use kinds for multiple values."),
+        kinds: z.array(memoryKindSchema).optional().describe("Optional memory kind filters."),
+        relatedEntityRefs: z.array(entityRefSchema).optional().describe("Accepted entities to anchor the bundle."),
+        includeArchived: z.boolean().optional().describe("Include archived/rejected memories. Defaults to false."),
+        memoryLimit: z.number().min(1).max(25).optional().describe("Maximum scored memories. Defaults to 8."),
+        entityLimit: z.number().min(1).max(40).optional().describe("Maximum related/matched entities. Defaults to 12."),
+        sourceLimit: z.number().min(1).max(40).optional().describe("Maximum provenance source refs. Defaults to 12."),
+      }),
+    },
+    async (args) => toolResult(await tools.getContextBundle(stripUndefined(args) as ContextBundleInput)),
+  );
+
+  server.registerTool(
+    "link_memory",
+    {
+      title: "Link memory",
+      description:
+        "Attach an existing memory to an accepted Skippy entity with a confidence-rated relationship. Use after you know both the memory ID and accepted entity ref.",
+      annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      inputSchema: z.object({
+        memoryId: z.string().describe("Existing memory ID."),
+        entityRef: entityRefSchema.describe("Accepted Skippy entity to relate to this memory."),
+        relationshipType: z.string().optional().describe("Relationship label. Defaults to related_to."),
+        reason: z.string().optional().describe("Short explanation for this link."),
+        confidence: z.number().min(0).max(1).optional().describe("Confidence from 0 to 1 for inferred relationships."),
+        sourceRefs: z.array(sourceRefSchema).optional().describe("Evidence source refs for the link."),
+        sourceRefIds: z.array(z.string()).optional().describe("Existing source ref IDs for the link."),
+        createdBy: z.string().optional().describe("Harness/user identifier for audit logging."),
+      }),
+    },
+    async (args) => {
+      const input = stripUndefined(args) as LinkMemoryInput;
+      return toolResult(
+        memoryConfirmation("linked", {}, await tools.linkMemory(input)),
+      );
+    },
+  );
+
+  server.registerTool(
+    "list_interview_templates",
+    {
+      title: "List interview templates",
+      description:
+        "Read the guided interview templates and assistantDisplayName. Use this before offering an interview in chat so the harness can say, for example, `Want to do a project interview for [assistantDisplayName]?`.",
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    async () => toolResult(withAbsoluteReviewUrl(await tools.listInterviewTemplates())),
+  );
+
+  server.registerTool(
+    "list_interviews",
+    {
+      title: "List interviews",
+      description:
+        "Read active and recent guided interviews for the current Skippy brain. Use to resume an existing chat interview before starting a duplicate.",
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: z.object({
+        recentLimit: z.number().min(1).max(50).optional().describe("How many recent interviews to return. Defaults to 12."),
+      }),
+    },
+    async (args) => {
+      const input = stripUndefined(args) as { recentLimit?: number };
+      return toolResult(withAbsoluteReviewUrl(await tools.listInterviews(input)));
+    },
+  );
+
+  server.registerTool(
+    "start_interview",
+    {
+      title: "Start interview",
+      description:
+        "Start a guided second-brain interview that the harness should conduct one question at a time in chat. Use assistantDisplayName/suggestedPrompt from list_interview_templates or this result when offering the interview to the user.",
+      annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      inputSchema: z.object({
+        kind: interviewKindSchema,
+        title: z.string().optional().describe("Optional custom interview title."),
+        subjectLabel: z.string().optional().describe("Optional project, goal, person, or decision label for the interview subject."),
+        subjectEntityRef: entityRefSchema.optional().describe("Optional accepted Skippy entity this interview is about."),
+        startedBy: z.string().optional().describe("Harness/user identifier for audit logging."),
+      }),
+    },
+    async (args) => {
+      const input = stripUndefined(args) as StartInterviewInput;
+      return toolResult(interviewStartConfirmation(input, await tools.startInterview(input)));
+    },
+  );
+
+  server.registerTool(
+    "get_interview",
+    {
+      title: "Get interview",
+      description:
+        "Read an interview's current question, prior responses, progress, assistantDisplayName, and review URL. Use this to resume a chat interview.",
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: z.object({
+        interviewId: z.string().describe("Interview ID returned by start_interview or list_interviews."),
+      }),
+    },
+    async (args) => toolResult(withAbsoluteReviewUrl(await tools.getInterview(stripUndefined(args) as GetInterviewInput))),
+  );
+
+  server.registerTool(
+    "answer_interview_question",
+    {
+      title: "Answer interview question",
+      description:
+        "Save the user's answer to the current interview question and return the next question for the harness to ask in chat. Only set createMemoryCandidate when the user explicitly wants this answer sent to Memory Inbox.",
+      annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      inputSchema: z.object({
+        interviewId: z.string().describe("Active interview ID."),
+        answerText: z.string().describe("The user's answer to the current question."),
+        answerValue: z.unknown().optional().describe("Optional structured representation of the answer."),
+        createMemoryCandidate: z
+          .boolean()
+          .optional()
+          .describe("When true, submit this answer to Memory Inbox if the template marks the question as memorable."),
+        memoryType: interviewMemoryKindSchema.optional(),
+        answeredBy: z.string().optional().describe("Harness/user identifier for audit logging."),
+      }),
+    },
+    async (args) =>
+      toolResult(interviewAnswerConfirmation(await tools.answerInterviewQuestion(stripUndefined(args) as AnswerInterviewQuestionInput))),
+  );
+
+  server.registerTool(
+    "complete_interview",
+    {
+      title: "Complete interview",
+      description:
+        "Complete a guided interview after the chat questions are answered. Optionally submit a summary memory candidate to Memory Inbox when the user explicitly wants Skippy to retain the distilled interview.",
+      annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      inputSchema: z.object({
+        interviewId: z.string().describe("Interview ID to complete."),
+        summary: z.string().optional().describe("Optional concise interview summary."),
+        createSummaryMemoryCandidate: z
+          .boolean()
+          .optional()
+          .describe("When true, submit a distilled interview summary to Memory Inbox."),
+        memoryType: interviewMemoryKindSchema.optional(),
+        completedBy: z.string().optional().describe("Harness/user identifier for audit logging."),
+      }),
+    },
+    async (args) =>
+      toolResult(withAbsoluteReviewUrl(await tools.completeInterview(stripUndefined(args) as CompleteInterviewInput))),
+  );
+
+  server.registerTool(
+    "archive_interview",
+    {
+      title: "Archive interview",
+      description:
+        "Archive a guided interview when the user cancels, abandons a test interview, or does not want to keep it active.",
+      annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      inputSchema: z.object({
+        interviewId: z.string().describe("Interview ID to archive."),
+        archiveReason: z.string().optional().describe("Short reason for archiving."),
+        archivedBy: z.string().optional().describe("Harness/user identifier for audit logging."),
+      }),
+    },
+    async (args) =>
+      toolResult(withAbsoluteReviewUrl(await tools.archiveInterview(stripUndefined(args) as ArchiveInterviewInput))),
   );
 
   server.registerTool(

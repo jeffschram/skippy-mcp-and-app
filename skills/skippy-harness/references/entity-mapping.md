@@ -58,3 +58,35 @@ Use for structured facts that do not fit task/project/person/company/link/note.
 - Required: `title`
 - Optional: `objectType`, `summary`, `properties`
 - Use `properties` for small structured attributes only.
+
+## Decision
+
+Until Skippy exposes a dedicated `record_decision` tool, store decisions as `knowledgeObject` with `objectType: "decision"`.
+
+- Required: `title`, `summary`
+- Recommended `properties`: `decision`, `rationale`, `alternatives`, `decidedAt`, `revisitAt`
+- Directly capture only when the user clearly states the decision or the source evidence is strong.
+
+## Principle
+
+Until Skippy exposes a dedicated `record_principle` tool, store principles as `knowledgeObject` with `objectType: "principle"`.
+
+- Required: `title`, `summary`
+- Recommended `properties`: `principle`, `scope`, `strength`, `exceptions`
+- `strength` should be `preference`, `default`, or `hard_rule` when known.
+
+## Question
+
+Until Skippy exposes a dedicated `record_question` tool, store open questions as `knowledgeObject` with `objectType: "question"`.
+
+- Required: `title`, `summary`
+- Recommended `properties`: `question`, `status`, `nextReviewAt`
+- Use when the user wants the question tracked or it is clearly important to an active project.
+
+## Memory
+
+Until Skippy exposes a dedicated `record_memory` tool, store durable user/project context as `knowledgeObject` with `objectType: "memory"`.
+
+- Required: `title`, `summary`
+- Recommended `properties`: `memoryType`, `content`, `sensitivity`, `consentMode`
+- Ask first before storing sensitive personal context or inferred private facts.

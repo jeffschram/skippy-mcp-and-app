@@ -182,6 +182,24 @@ function formatDate(value?: number) {
   }).format(value);
 }
 
+function formatJson(value: unknown) {
+  if (value === undefined || value === null) {
+    return "";
+  }
+  return JSON.stringify(value, null, 2);
+}
+
+function formatRunDuration(run: AnyRecord) {
+  if (!run.completedAt) {
+    return "still running";
+  }
+  const seconds = Math.max(0, Math.round((run.completedAt - run.startedAt) / 1000));
+  if (seconds < 60) {
+    return `${seconds}s`;
+  }
+  return `${Math.round(seconds / 60)}m`;
+}
+
 function splitTopLevelList(value: string) {
   const items: string[] = [];
   let current = "";
@@ -362,6 +380,7 @@ export function LiveHomeContent() {
         .filter((item) => !focusActionByKey.has(item.itemKey)),
     [focusActionByKey, focusDetails],
   );
+  const displayedFocusHeading = visibleFocusDetails.length ? focusHeading : "Nothing new needs focus right now.";
   const unclearSignalCount = data?.triageItems.length ?? 0;
   const pendingActionCount = data?.pendingActions.length ?? 0;
   const hasDecisionQueueItems = unclearSignalCount > 0 || pendingActionCount > 0;
@@ -423,7 +442,7 @@ export function LiveHomeContent() {
                     `Checking ${(sourceSyncStatus.sourceSystemsChecked ?? []).join(", ") || "connected sources"}.`}
                 </p>
               ) : null}
-              <h1 className="focus-heading">{focusHeading}</h1>
+              <h1 className="focus-heading">{displayedFocusHeading}</h1>
               {visibleFocusDetails.length ? (
                 <ul className="focus-summary-list">
                   {visibleFocusDetails.map((item) => (
@@ -463,7 +482,9 @@ export function LiveHomeContent() {
                     </li>
                   ))}
                 </ul>
-              ) : null}
+              ) : (
+                <p className="muted">New source items and remaining focus bullets will appear here when they need attention.</p>
+              )}
             </div>
           </section>
           {hasDecisionQueueItems ? (
@@ -559,6 +580,256 @@ function ProjectRow({ href, project, taskCount }: { href: string; project: AnyRe
         <icons.ChevronRight size={18} aria-hidden />
       </span>
     </Link>
+  );
+}
+
+export function LiveIngestionLogsContent() {
+  const viewerReady = useViewerReady();
+  const runs = useQuery(api.knowledge.ingestionRunsForViewer, viewerReady ? { limit: 50 } : "skip") as AnyRecord[] | undefined;
+
+  return (
+    <LiveGate>
+      {!runs ? (
+        <section className="card section">
+          <h2>Loading ingestion logs</h2>
+        </section>
+      ) : runs.length === 0 ? (
+        <p className="muted">No ingestion runs have been recorded yet.</p>
+      ) : (
+        <div className="item-list">
+          {runs.map((run) => (
+            <Link className="item project-row" href={`/ingestion-logs/${run._id}`} key={run._id}>
+              <span className={`item-icon ${run.status === "running" ? "is-active" : ""}`}>
+                <icons.Archive size={17} aria-hidden />
+              </span>
+              <div>
+                <p className="item-title">{run.harness}</p>
+                <p className="item-meta">
+                  {formatDate(run.startedAt)}
+                  {" · "}
+                  {(run.sourceSystemsChecked ?? []).join(", ") || "no sources recorded"}
+                  {" · "}
+                  {formatRunDuration(run)}
+                </p>
+              </div>
+              <span className="project-row-side">
+                <span className={`badge ${run.status === "failed" ? "red" : run.status === "running" ? "gold" : "blue"}`}>
+                  {run.status}
+                </span>
+                <icons.ChevronRight size={18} aria-hidden />
+              </span>
+            </Link>
+          ))}
+        </div>
+      )}
+    </LiveGate>
+  );
+}
+
+export function LiveIngestionLogDetailContent({ ingestionRunId }: { ingestionRunId: string }) {
+  const viewerReady = useViewerReady();
+  const data = useQuery(
+    api.knowledge.ingestionRunDetailForViewer,
+    viewerReady ? { ingestionRunId: ingestionRunId as any } : "skip",
+  ) as AnyRecord | null | undefined;
+
+  if (data === null) {
+    return (
+      <section className="card section">
+        <h2>Log not found</h2>
+        <p className="muted">
+          This ingestion log may have been removed. <Link href="/ingestion-logs">Back to ingestion logs</Link>.
+        </p>
+      </section>
+    );
+  }
+
+  const run = data?.run;
+  const activityEvents = data?.activityEvents ?? [];
+  const sourceRefs = data?.sourceRefs ?? [];
+  const auditSummary = data?.auditSummary ?? {};
+  const memories = data?.memories ?? [];
+  const entities = data?.entities ?? [];
+  const ignoredItems = data?.ignoredItems ?? [];
+
+  return (
+    <LiveGate>
+      {!data ? (
+        <section className="card section">
+          <h2>Loading ingestion log</h2>
+        </section>
+      ) : (
+        <div className="grid">
+          <section className="card section span-12">
+            <div className="settings-row">
+              <div>
+                <h2>{run.harness}</h2>
+                <p className="muted">
+                  Started {formatDate(run.startedAt)}
+                  {run.completedAt ? ` · Completed ${formatDate(run.completedAt)}` : " · Still running"}
+                  {" · "}
+                  {formatRunDuration(run)}
+                </p>
+              </div>
+              <span className={`badge ${run.status === "failed" ? "red" : run.status === "running" ? "gold" : "blue"}`}>
+                {run.status}
+              </span>
+            </div>
+            <div className="toolbar">
+              {(run.sourceSystemsChecked ?? []).map((source: string) => (
+                <span className="badge" key={source}>
+                  {source}
+                </span>
+              ))}
+            </div>
+          </section>
+
+          <section className="card section span-12">
+            <h2>Counts</h2>
+            <div className="toolbar">
+              <span className="badge blue">{run.objectsCreated ?? 0} created</span>
+              <span className="badge blue">{run.objectsUpdated ?? 0} updated</span>
+              <span className="badge gold">{run.candidatesSubmitted ?? 0} review candidates</span>
+              <span className={`badge ${run.errors?.length ? "red" : "blue"}`}>{run.errors?.length ?? 0} errors</span>
+            </div>
+            {run.errors?.length ? (
+              <div className="item-list">
+                {run.errors.map((error: string) => (
+                  <p className="muted" key={error}>
+                    {error}
+                  </p>
+                ))}
+              </div>
+            ) : null}
+          </section>
+
+          <section className="card section span-12">
+            <h2>Audit trail</h2>
+            <div className="toolbar">
+              <span className="badge blue">{auditSummary.capturedDirect ?? 0} captured</span>
+              <span className="badge gold">{auditSummary.sentToReview ?? 0} sent to review</span>
+              <span className="badge blue">{auditSummary.linked ?? 0} linked</span>
+              <span className="badge blue">{auditSummary.updated ?? 0} updated</span>
+              <span className={`badge ${(auditSummary.rejected ?? 0) > 0 ? "red" : "blue"}`}>{auditSummary.rejected ?? 0} rejected</span>
+              <span className="badge">{auditSummary.ignored ?? 0} ignored</span>
+            </div>
+            {memories.length || entities.length ? (
+              <div className="item-list">
+                {memories.map((memory: AnyRecord) => (
+                  <Link className="item project-row" href={memoryHref(memory)} key={memory._id}>
+                    <span className="item-icon">
+                      <icons.Brain size={17} aria-hidden />
+                    </span>
+                    <div>
+                      <p className="item-title">{memoryTitle(memory)}</p>
+                      <p className="item-meta">
+                        {memoryKind(memory)}
+                        {" · "}
+                        {memoryState(memory)}
+                      </p>
+                      {memory.rubricDecision ? <p className="item-meta">Decision: {memory.rubricDecision}</p> : null}
+                      {memory.captureReason ? <p className="item-meta">Capture: {memory.captureReason}</p> : null}
+                    </div>
+                    <span className="project-row-side">
+                      <span className={`badge ${badgeColorForState(memoryState(memory))}`}>{memoryState(memory)}</span>
+                      <icons.ChevronRight size={18} aria-hidden />
+                    </span>
+                  </Link>
+                ))}
+                {entities.map((entry: AnyRecord) => {
+                  const entity = entry.entity ?? entry;
+                  return (
+                    <article className="item" key={`${entry.ref?.entityType ?? entity.entityType}:${entry.ref?.entityId ?? entity._id}`}>
+                      <span className="item-icon">
+                        <icons.Archive size={17} aria-hidden />
+                      </span>
+                      <div>
+                        <p className="item-title">{relatedEntityTitle(entry)}</p>
+                        <p className="item-meta">{relatedEntityMeta(entry)}</p>
+                        {entity.priorityReason ? <p className="item-meta">{entity.priorityReason}</p> : null}
+                      </div>
+                      <span className="badge blue">{entry.ref?.entityType ?? entity.entityType ?? "entity"}</span>
+                    </article>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="muted">No created or linked Skippy entities were detected for this run.</p>
+            )}
+            {ignoredItems.length ? (
+              <details>
+                <summary className="item-title">Ignored or skipped items</summary>
+                <pre className="code rubric-rendered-text">{formatJson(ignoredItems)}</pre>
+              </details>
+            ) : null}
+          </section>
+
+          <section className="card section span-12">
+            <h2>Activity</h2>
+            {activityEvents.length === 0 ? (
+              <p className="muted">No activity events were linked to this run or found in its time window.</p>
+            ) : (
+              <div className="item-list">
+                {activityEvents.map((event: AnyRecord) => (
+                  <article className="item" key={event._id}>
+                    <span className="item-icon">
+                      <icons.Clock3 size={17} aria-hidden />
+                    </span>
+                    <div>
+                      <p className="item-title">{event.summary}</p>
+                      <p className="item-meta">
+                        {event.activityType}
+                        {" · "}
+                        {formatDate(event.timestamp)}
+                      </p>
+                      {event.metadata?.rubricDecision ? (
+                        <p className="item-meta">Decision: {event.metadata.rubricDecision}</p>
+                      ) : null}
+                    </div>
+                    <span className="badge">{event.actorType}</span>
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
+
+          <section className="card section span-12">
+            <h2>Source refs</h2>
+            {sourceRefs.length === 0 ? (
+              <p className="muted">No source references were linked to this run.</p>
+            ) : (
+              <div className="item-list">
+                {sourceRefs.map((sourceRef: AnyRecord) => (
+                  <article className="item" key={sourceRef._id}>
+                    <span className="item-icon">
+                      <icons.LinkIcon size={17} aria-hidden />
+                    </span>
+                    <div>
+                      <p className="item-title">{sourceRef.summary ?? sourceRef.excerpt ?? sourceRef.externalId ?? sourceRef.sourceSystem}</p>
+                      <p className="item-meta">
+                        {sourceRef.sourceSystem}
+                        {sourceRef.sourceTimestamp ? ` · ${formatDate(sourceRef.sourceTimestamp)}` : ""}
+                      </p>
+                      {sourceRef.participants?.length ? (
+                        <p className="item-meta">Participants: {sourceRef.participants.join(", ")}</p>
+                      ) : null}
+                    </div>
+                    <span className="badge">{sourceRef.messageId ?? sourceRef.eventId ?? sourceRef.threadId ?? "source"}</span>
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
+
+          {run.metadata ? (
+            <section className="card section span-12">
+              <h2>Run metadata</h2>
+              <pre className="code rubric-rendered-text">{formatJson(run.metadata)}</pre>
+            </section>
+          ) : null}
+        </div>
+      )}
+    </LiveGate>
   );
 }
 
@@ -860,6 +1131,385 @@ function ContactList({
         ))}
       </div>
     </section>
+  );
+}
+
+const expectedMemoryApi = api.knowledge as AnyRecord;
+
+// Expected backend queries:
+// - knowledge.listMemoryInboxForViewer({ limit?, memoryType? }) -> memory[]
+// - knowledge.listAcceptedMemoryLibraryForViewer({ limit?, memoryType? }) -> memory[]
+// - knowledge.getMemoryDetailForViewer({ memoryId }) -> { memory, sourceRefs?, relatedEntities? } | null
+type MemoryCollectionFilter = {
+  objectTypes?: string[];
+  emptyMessage?: string;
+};
+
+function arrayValue(value: unknown): AnyRecord[] {
+  return Array.isArray(value) ? value.filter((item): item is AnyRecord => Boolean(item) && typeof item === "object") : [];
+}
+
+function collectionItems(data: unknown): AnyRecord[] {
+  if (Array.isArray(data)) {
+    return arrayValue(data);
+  }
+  if (!data || typeof data !== "object") {
+    return [];
+  }
+  const record = data as AnyRecord;
+  return arrayValue(record.items ?? record.memories ?? record.objects ?? record.results);
+}
+
+function memoryTitle(memory: AnyRecord) {
+  return textValue(memory.title, memory.name, memory.summary, memory.content, memory.body, memory.objectType) || "Untitled memory";
+}
+
+function memorySummary(memory: AnyRecord) {
+  return textValue(memory.summary, memory.description, memory.body, memory.content, memory.excerpt) || "No summary yet.";
+}
+
+function memoryKind(memory: AnyRecord) {
+  return textValue(memory.objectType, memory.memoryType, memory.type, memory.category, memory.entityType) || "memory";
+}
+
+function memoryState(memory: AnyRecord) {
+  return textValue(memory.reviewState, memory.processingState, memory.status, memory.state) || "accepted";
+}
+
+function memoryReason(memory: AnyRecord) {
+  return textValue(
+    memory.captureReason,
+    memory.reviewReason,
+    memory.rubricDecision,
+    memory.priorityReason,
+    memory.whyItMatters,
+  );
+}
+
+function badgeColorForState(state: string) {
+  if (/reject|error|archiv|discard/i.test(state)) {
+    return "red";
+  }
+  if (/suggest|pending|review|draft/i.test(state)) {
+    return "gold";
+  }
+  return "blue";
+}
+
+function memoryHref(memory: AnyRecord) {
+  const id = textValue(memory._id, memory.id, memory.memoryId, memory.entityId);
+  return id ? `/library/${encodeURIComponent(id)}` : "/library";
+}
+
+function sourceRefTitle(sourceRef: AnyRecord) {
+  return (
+    textValue(sourceRef.summary, sourceRef.excerpt, sourceRef.title, sourceRef.externalId, sourceRef.messageId, sourceRef.eventId) ||
+    "Source reference"
+  );
+}
+
+function sourceRefMeta(sourceRef: AnyRecord) {
+  const sourceSystem = textValue(sourceRef.sourceSystem, sourceRef.provider, sourceRef.system) || "source";
+  return `${sourceSystem}${sourceRef.sourceTimestamp ? ` · ${formatDate(sourceRef.sourceTimestamp)}` : ""}`;
+}
+
+function relatedEntityTitle(entity: AnyRecord) {
+  const nestedEntity = entity.entity && typeof entity.entity === "object" ? (entity.entity as AnyRecord) : undefined;
+  const ref = entity.ref && typeof entity.ref === "object" ? (entity.ref as AnyRecord) : undefined;
+  return textValue(nestedEntity?.title, nestedEntity?.name, entity.title, entity.name, ref?.entityId, entity.entityId, entity.id) || "Related entity";
+}
+
+function relatedEntityMeta(entity: AnyRecord) {
+  const ref = entity.ref && typeof entity.ref === "object" ? (entity.ref as AnyRecord) : undefined;
+  return textValue(ref?.entityType, entity.entityType, entity.type, entity.relationship, entity.reason) || "related";
+}
+
+function MemoryRow({ memory, variant = "library" }: { memory: AnyRecord; variant?: "inbox" | "library" }) {
+  const state = memoryState(memory);
+  const reason = memoryReason(memory);
+  const sourceRefs = arrayValue(memory.sourceRefs ?? memory.sources);
+  const sourceRefIds = Array.isArray(memory.sourceRefIds) ? memory.sourceRefIds : [];
+
+  return (
+    <Link className="item project-row" href={memoryHref(memory)}>
+      <span className={`item-icon ${variant === "inbox" ? "is-active" : ""}`}>
+        {variant === "inbox" ? <icons.Brain size={17} aria-hidden /> : <icons.BookOpen size={17} aria-hidden />}
+      </span>
+      <div className="form-grid">
+        <div>
+          <p className="item-title">{memoryTitle(memory)}</p>
+          <p className="item-meta">
+            {memoryKind(memory)}
+            {memory.confidence ? ` · ${Math.round(Number(memory.confidence) * 100)}% confidence` : ""}
+            {memory.updatedAt || memory.createdAt ? ` · ${formatDate(memory.updatedAt ?? memory.createdAt)}` : ""}
+          </p>
+        </div>
+        <p className="item-meta">{memorySummary(memory)}</p>
+        {reason ? <p className="item-meta">Capture: {reason}</p> : null}
+        <InlineSourceRefs sourceRefs={sourceRefs} sourceRefIds={sourceRefIds} />
+        <InlineRelatedEntities entities={arrayValue(memory.relatedEntities)} />
+      </div>
+      <span className="project-row-side">
+        <span className={`badge ${badgeColorForState(state)}`}>{state}</span>
+        <icons.ChevronRight size={18} aria-hidden />
+      </span>
+    </Link>
+  );
+}
+
+function InlineSourceRefs({ sourceRefs, sourceRefIds }: { sourceRefs: AnyRecord[]; sourceRefIds?: unknown[] }) {
+  if (sourceRefs.length === 0 && (!sourceRefIds || sourceRefIds.length === 0)) {
+    return <p className="item-meta">No source references attached.</p>;
+  }
+
+  return (
+    <div className="toolbar" aria-label="Source references">
+      {sourceRefs.slice(0, 4).map((sourceRef) => (
+        <span className="badge" key={textValue(sourceRef._id, sourceRef.id, sourceRef.externalId, sourceRefTitle(sourceRef))}>
+          {textValue(sourceRef.sourceSystem, sourceRef.provider) || "source"}
+        </span>
+      ))}
+      {sourceRefs.length === 0
+        ? sourceRefIds?.slice(0, 4).map((sourceRefId) => (
+            <span className="badge" key={String(sourceRefId)}>
+              source
+            </span>
+          ))
+        : null}
+    </div>
+  );
+}
+
+function InlineRelatedEntities({ entities }: { entities: AnyRecord[] }) {
+  if (entities.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="toolbar" aria-label="Related entities">
+      {entities.slice(0, 5).map((entity) => (
+        <span className="badge blue" key={textValue(entity.entityId, entity.id, entity._id, relatedEntityTitle(entity))}>
+          {relatedEntityTitle(entity)}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function SourceRefList({ sourceRefs }: { sourceRefs: AnyRecord[] }) {
+  if (sourceRefs.length === 0) {
+    return <p className="muted">No source references were returned for this memory.</p>;
+  }
+
+  return (
+    <div className="item-list">
+      {sourceRefs.map((sourceRef) => (
+        <article className="item" key={textValue(sourceRef._id, sourceRef.id, sourceRef.externalId, sourceRefTitle(sourceRef))}>
+          <span className="item-icon">
+            <icons.LinkIcon size={17} aria-hidden />
+          </span>
+          <div>
+            <p className="item-title">{sourceRefTitle(sourceRef)}</p>
+            <p className="item-meta">{sourceRefMeta(sourceRef)}</p>
+            {sourceRef.participants?.length ? <p className="item-meta">Participants: {sourceRef.participants.join(", ")}</p> : null}
+          </div>
+          <span className="badge">{textValue(sourceRef.messageId, sourceRef.eventId, sourceRef.threadId, sourceRef.externalId) || "source"}</span>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function RelatedEntityList({ entities }: { entities: AnyRecord[] }) {
+  if (entities.length === 0) {
+    return <p className="muted">No related entities were returned yet.</p>;
+  }
+
+  return (
+    <div className="item-list">
+      {entities.map((entity) => (
+        <article className="item" key={textValue(entity.entityId, entity.id, entity._id, relatedEntityTitle(entity))}>
+          <span className="item-icon">
+            <icons.LinkIcon size={17} aria-hidden />
+          </span>
+          <div>
+            <p className="item-title">{relatedEntityTitle(entity)}</p>
+            <p className="item-meta">{relatedEntityMeta(entity)}</p>
+          </div>
+          <span className="badge blue">{textValue(entity.entityType, entity.type) || "entity"}</span>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+export function LiveMemoryInboxContent() {
+  const viewerReady = useViewerReady();
+  const data = useQuery(expectedMemoryApi.listMemoryInboxForViewer, viewerReady ? { limit: 50 } : "skip") as
+    | AnyRecord
+    | AnyRecord[]
+    | undefined;
+  const items = collectionItems(data);
+
+  return (
+    <LiveGate>
+      {!data ? (
+        <section className="card section">
+          <h2>Loading memory inbox</h2>
+          <p className="muted">Waiting for suggested memories and review states from Convex.</p>
+        </section>
+      ) : items.length === 0 ? (
+        <section className="card section">
+          <h2>Inbox clear</h2>
+          <p className="muted">No captured memory objects need review right now.</p>
+        </section>
+      ) : (
+        <div className="item-list">
+          {items.map((memory) => (
+            <MemoryRow key={textValue(memory._id, memory.id, memoryTitle(memory))} memory={memory} variant="inbox" />
+          ))}
+        </div>
+      )}
+    </LiveGate>
+  );
+}
+
+export function LiveMemoryLibraryContent({ objectTypes, emptyMessage }: MemoryCollectionFilter = {}) {
+  const viewerReady = useViewerReady();
+  const memoryType = objectTypes?.length === 1 ? objectTypes[0] : undefined;
+  const data = useQuery(
+    expectedMemoryApi.listAcceptedMemoryLibraryForViewer,
+    viewerReady ? { memoryType, limit: 100 } : "skip",
+  ) as AnyRecord | AnyRecord[] | undefined;
+  const items = collectionItems(data);
+  const counts = !Array.isArray(data) && data && typeof data === "object" ? arrayValue((data as AnyRecord).counts) : [];
+
+  return (
+    <LiveGate>
+      {!data ? (
+        <section className="card section">
+          <h2>Loading library</h2>
+          <p className="muted">Waiting for accepted memory objects from Convex.</p>
+        </section>
+      ) : (
+        <div className="grid">
+          <section className="span-12">
+            {items.length === 0 ? (
+              <p className="muted">{emptyMessage ?? "No accepted memory objects yet."}</p>
+            ) : (
+              <div className="item-list">
+                {items.map((memory) => (
+                  <MemoryRow key={textValue(memory._id, memory.id, memoryTitle(memory))} memory={memory} />
+                ))}
+              </div>
+            )}
+          </section>
+          {counts.length ? (
+            <section className="card section span-12">
+              <h2>Types</h2>
+              <div className="toolbar">
+                {counts.map((count) => (
+                  <span className="badge blue" key={textValue(count.objectType, count.type, count.label)}>
+                    {textValue(count.objectType, count.type, count.label)}: {count.count ?? count.total ?? 0}
+                  </span>
+                ))}
+              </div>
+            </section>
+          ) : null}
+        </div>
+      )}
+    </LiveGate>
+  );
+}
+
+export function LiveMemoryDetailContent({ memoryId }: { memoryId: string }) {
+  const viewerReady = useViewerReady();
+  const data = useQuery(
+    expectedMemoryApi.getMemoryDetailForViewer,
+    viewerReady ? { memoryId: memoryId as any } : "skip",
+  ) as AnyRecord | null | undefined;
+
+  if (data === null) {
+    return (
+      <section className="card section">
+        <h2>Memory not found</h2>
+        <p className="muted">
+          This memory may have been removed. <Link href="/library">Back to library</Link>.
+        </p>
+      </section>
+    );
+  }
+
+  const memory = data?.memory ?? data?.item ?? data;
+  const sourceRefs = arrayValue(data?.sourceRefs ?? memory?.sourceRefs ?? memory?.sources);
+  const relatedEntities = arrayValue(data?.relatedEntities ?? memory?.relatedEntities);
+  const relationships = arrayValue(data?.relationships ?? memory?.relationships);
+  const activityEvents = arrayValue(data?.activityEvents ?? memory?.activityEvents);
+
+  return (
+    <LiveGate>
+      {!data || !memory ? (
+        <section className="card section">
+          <h2>Loading memory</h2>
+        </section>
+      ) : (
+        <div className="grid">
+          <section className="card section span-12">
+            <div className="settings-row">
+              <div>
+                <h2>{memoryTitle(memory)}</h2>
+                <p className="muted">{memorySummary(memory)}</p>
+              </div>
+              <span className={`badge ${badgeColorForState(memoryState(memory))}`}>{memoryState(memory)}</span>
+            </div>
+            <div className="toolbar">
+              <span className="badge blue">{memoryKind(memory)}</span>
+              {memory.confidence ? <span className="badge">{Math.round(Number(memory.confidence) * 100)}% confidence</span> : null}
+              {memory.updatedAt || memory.createdAt ? <span className="badge">Updated {formatDate(memory.updatedAt ?? memory.createdAt)}</span> : null}
+            </div>
+            {memoryReason(memory) ? <p className="muted">Capture: {memoryReason(memory)}</p> : null}
+          </section>
+
+          <section className="card section span-12">
+            <h2>Sources</h2>
+            <SourceRefList sourceRefs={sourceRefs} />
+          </section>
+
+          <section className="card section span-6">
+            <h2>Related entities</h2>
+            <RelatedEntityList entities={relatedEntities} />
+          </section>
+
+          <section className="card section span-6">
+            <h2>Relationships</h2>
+            <RelatedEntityList entities={relationships} />
+          </section>
+
+          {activityEvents.length ? (
+            <section className="card section span-12">
+              <h2>Activity</h2>
+              <div className="item-list">
+                {activityEvents.map((event) => (
+                  <article className="item" key={textValue(event._id, event.id, event.summary)}>
+                    <span className="item-icon">
+                      <icons.Clock3 size={17} aria-hidden />
+                    </span>
+                    <div>
+                      <p className="item-title">{textValue(event.summary, event.activityType) || "Activity"}</p>
+                      <p className="item-meta">
+                        {textValue(event.activityType, event.actorType) || "event"}
+                        {event.timestamp ? ` · ${formatDate(event.timestamp)}` : ""}
+                      </p>
+                    </div>
+                    <span className="badge">{textValue(event.actorType) || "system"}</span>
+                  </article>
+                ))}
+              </div>
+            </section>
+          ) : null}
+        </div>
+      )}
+    </LiveGate>
   );
 }
 
@@ -1395,6 +2045,25 @@ const defaultImportanceRubric = [
   "Record a concise rubricDecision for each direct ingestion so Skippy can learn what mattered.",
 ].join("\n");
 
+const defaultMemoryPrivacyPolicy = {
+  storageMode: "summaries_with_refs",
+  excludedContent: "Do not store passwords, one-time codes, raw financial account numbers, medical details, or private content that is not needed for recall.",
+  sensitiveContentInstructions:
+    "Prefer short summaries and source references for sensitive items. Store only the minimum needed to remember the commitment, decision, or relationship context.",
+};
+
+const defaultRecallPreferences = {
+  cadence: "active_context",
+  focusWindow: "Recall active goals, in-progress projects, pending actions, and recent decisions before suggesting next steps.",
+  allowProactiveRecall: true,
+};
+
+const defaultHarnessAutonomyPolicy = {
+  ingestionMode: "auto_accept_high_confidence",
+  actionApproval: "always_require",
+  notes: "Harnesses may write high-confidence, source-backed memories. External actions should stay drafted until reviewed.",
+};
+
 function base64UrlToUint8Array(value: string) {
   const padding = "=".repeat((4 - (value.length % 4)) % 4);
   const base64 = `${value}${padding}`.replace(/-/g, "+").replace(/_/g, "/");
@@ -1443,6 +2112,7 @@ export function LiveSettingsContent() {
     | AnyRecord
     | undefined;
   const updateConfig = useMutation(api.settings.updateConfig);
+  const updateSecondBrainSettings = useMutation((api.settings as AnyRecord).updateSecondBrainSettingsForViewer);
   const upsertPushSubscription = useMutation(api.settings.upsertPushSubscription);
   const disablePushSubscription = useMutation(api.settings.disablePushSubscription);
   const upsertOperatingRule = useMutation(api.settings.upsertOperatingRule);
@@ -1454,6 +2124,19 @@ export function LiveSettingsContent() {
   const [permissionState, setPermissionState] = useState<string>(() =>
     typeof window !== "undefined" && "Notification" in window ? Notification.permission : "unsupported",
   );
+  const config = data?.config;
+  const memoryPrivacyPolicy = {
+    ...defaultMemoryPrivacyPolicy,
+    ...(config?.memoryPrivacyPolicy ?? {}),
+  };
+  const recallPreferences = {
+    ...defaultRecallPreferences,
+    ...(config?.recallPreferences ?? {}),
+  };
+  const harnessAutonomyPolicy = {
+    ...defaultHarnessAutonomyPolicy,
+    ...(config?.harnessAutonomyPolicy ?? {}),
+  };
 
   return (
     <LiveGate>
@@ -1528,6 +2211,153 @@ export function LiveSettingsContent() {
                 </details>
               </div>
             )}
+          </section>
+          <section className="card section span-6">
+            <h2>Privacy and storage</h2>
+            <p className="muted">What Skippy should avoid storing, and how much source material harnesses may keep.</p>
+            <div className="form-grid">
+              <label className="field">
+                <span>Storage mode</span>
+                <select
+                  className="select"
+                  value={memoryPrivacyPolicy.storageMode}
+                  onChange={(event) =>
+                    void updateSecondBrainSettings({
+                      memoryPrivacyPolicy: { ...memoryPrivacyPolicy, storageMode: event.target.value },
+                    } as any)
+                  }
+                >
+                  <option value="summaries_with_refs">Summaries with source refs</option>
+                  <option value="source_refs_only">Source refs only for sensitive items</option>
+                  <option value="full_content_when_important">Full content when important</option>
+                </select>
+              </label>
+              <label className="field">
+                <span>Do not store</span>
+                <textarea
+                  className="textarea"
+                  key={`excluded-${memoryPrivacyPolicy.excludedContent}`}
+                  defaultValue={memoryPrivacyPolicy.excludedContent}
+                  onBlur={(event) =>
+                    void updateSecondBrainSettings({
+                      memoryPrivacyPolicy: { ...memoryPrivacyPolicy, excludedContent: event.target.value },
+                    } as any)
+                  }
+                />
+              </label>
+              <label className="field">
+                <span>Sensitive content handling</span>
+                <textarea
+                  className="textarea"
+                  key={`sensitive-${memoryPrivacyPolicy.sensitiveContentInstructions}`}
+                  defaultValue={memoryPrivacyPolicy.sensitiveContentInstructions}
+                  onBlur={(event) =>
+                    void updateSecondBrainSettings({
+                      memoryPrivacyPolicy: { ...memoryPrivacyPolicy, sensitiveContentInstructions: event.target.value },
+                    } as any)
+                  }
+                />
+              </label>
+            </div>
+          </section>
+          <section className="card section span-6">
+            <h2>Recall cadence</h2>
+            <p className="muted">When Skippy should bring stored context back into focus.</p>
+            <div className="form-grid">
+              <label className="field">
+                <span>Recall rhythm</span>
+                <select
+                  className="select"
+                  value={recallPreferences.cadence}
+                  onChange={(event) =>
+                    void updateSecondBrainSettings({
+                      recallPreferences: { ...recallPreferences, cadence: event.target.value },
+                    } as any)
+                  }
+                >
+                  <option value="active_context">When active context changes</option>
+                  <option value="daily">Daily</option>
+                  <option value="weekly">Weekly</option>
+                  <option value="manual">Only when asked</option>
+                </select>
+              </label>
+              <label className="checkbox-field">
+                <input
+                  type="checkbox"
+                  checked={recallPreferences.allowProactiveRecall}
+                  onChange={(event) =>
+                    void updateSecondBrainSettings({
+                      recallPreferences: { ...recallPreferences, allowProactiveRecall: event.target.checked },
+                    } as any)
+                  }
+                />
+                <span>Allow proactive recall</span>
+              </label>
+              <label className="field">
+                <span>Recall focus</span>
+                <textarea
+                  className="textarea"
+                  key={`recall-${recallPreferences.focusWindow}`}
+                  defaultValue={recallPreferences.focusWindow}
+                  onBlur={(event) =>
+                    void updateSecondBrainSettings({
+                      recallPreferences: { ...recallPreferences, focusWindow: event.target.value },
+                    } as any)
+                  }
+                />
+              </label>
+            </div>
+          </section>
+          <section className="card section span-6">
+            <h2>Harness autonomy</h2>
+            <p className="muted">How much local harnesses may do before asking you to review.</p>
+            <div className="form-grid">
+              <label className="field">
+                <span>Memory ingestion</span>
+                <select
+                  className="select"
+                  value={harnessAutonomyPolicy.ingestionMode}
+                  onChange={(event) =>
+                    void updateSecondBrainSettings({
+                      harnessAutonomyPolicy: { ...harnessAutonomyPolicy, ingestionMode: event.target.value },
+                    } as any)
+                  }
+                >
+                  <option value="suggest_only">Suggest only</option>
+                  <option value="auto_accept_high_confidence">Auto-accept high confidence memories</option>
+                  <option value="auto_accept_with_action_review">Auto-accept memory, review actions</option>
+                </select>
+              </label>
+              <label className="field">
+                <span>External actions</span>
+                <select
+                  className="select"
+                  value={harnessAutonomyPolicy.actionApproval}
+                  onChange={(event) =>
+                    void updateSecondBrainSettings({
+                      harnessAutonomyPolicy: { ...harnessAutonomyPolicy, actionApproval: event.target.value },
+                    } as any)
+                  }
+                >
+                  <option value="always_require">Always require approval</option>
+                  <option value="allow_low_risk_drafts">Allow low-risk drafts</option>
+                  <option value="allow_low_risk_send">Allow low-risk sends</option>
+                </select>
+              </label>
+              <label className="field">
+                <span>Autonomy notes</span>
+                <textarea
+                  className="textarea"
+                  key={`autonomy-${harnessAutonomyPolicy.notes}`}
+                  defaultValue={harnessAutonomyPolicy.notes}
+                  onBlur={(event) =>
+                    void updateSecondBrainSettings({
+                      harnessAutonomyPolicy: { ...harnessAutonomyPolicy, notes: event.target.value },
+                    } as any)
+                  }
+                />
+              </label>
+            </div>
           </section>
           <section className="card section span-6">
             <h2>Brain settings</h2>

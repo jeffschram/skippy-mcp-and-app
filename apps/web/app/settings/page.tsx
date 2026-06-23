@@ -4,6 +4,10 @@ import { LiveSettingsContent } from "../live-pages";
 
 const settings = [
   ["Assistant name", "Skippy"],
+  ["Importance policy", "editable rubric"],
+  ["Privacy and storage", "summaries with source refs"],
+  ["Recall cadence", "active context"],
+  ["Harness autonomy", "review external actions"],
   ["LLM provider", "none"],
   ["Link enrichment", "off"],
   ["Notifications", "off"],

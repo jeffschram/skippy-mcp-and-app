@@ -43,6 +43,21 @@ function createFakeClient(): { client: SkippyClient; calls: Array<{ name: string
         record("recordPendingActionResult", pendingActionId, result),
       recordEntityReview: (brainInstanceId, review) =>
         record("recordEntityReview", brainInstanceId, review),
+      captureThought: (brainInstanceId, input) => record("captureThought", brainInstanceId, input),
+      recordMemory: (brainInstanceId, input) => record("recordMemory", brainInstanceId, input),
+      submitMemoryReviewCandidate: (brainInstanceId, input) =>
+        record("submitMemoryReviewCandidate", brainInstanceId, input),
+      listMemory: (brainInstanceId, input) => record("listMemory", brainInstanceId, input),
+      getContextBundle: (brainInstanceId, input) => record("getContextBundle", brainInstanceId, input),
+      getMemoryDetail: (brainInstanceId, input) => record("getMemoryDetail", brainInstanceId, input),
+      linkMemory: (brainInstanceId, input) => record("linkMemory", brainInstanceId, input),
+      listInterviewTemplates: (brainInstanceId) => record("listInterviewTemplates", brainInstanceId),
+      listInterviews: (brainInstanceId, input) => record("listInterviews", brainInstanceId, input),
+      startInterview: (brainInstanceId, input) => record("startInterview", brainInstanceId, input),
+      getInterview: (brainInstanceId, input) => record("getInterview", brainInstanceId, input),
+      answerInterviewQuestion: (brainInstanceId, input) => record("answerInterviewQuestion", brainInstanceId, input),
+      completeInterview: (brainInstanceId, input) => record("completeInterview", brainInstanceId, input),
+      archiveInterview: (brainInstanceId, input) => record("archiveInterview", brainInstanceId, input),
       recordIngestionRun: (brainInstanceId, run) => record("recordIngestionRun", brainInstanceId, run),
       updateSourceSyncStatus: (brainInstanceId, status) => record("updateSourceSyncStatus", brainInstanceId, status),
       getOperatingRules: (brainInstanceId, scope) => record("getOperatingRules", brainInstanceId, scope),
@@ -206,6 +221,133 @@ describe("Skippy MCP tool handlers", () => {
           reviewSummary: "Task is now urgent",
           priorityScore: 0.9,
           reviewedBy: "skippy_mcp",
+        },
+      ],
+    });
+  });
+
+  it("captures memory thoughts with review behavior and provenance", async () => {
+    const { client, calls } = createFakeClient();
+    const tools = createSkippyToolHandlers(client, "brain_123");
+
+    await tools.captureThought({
+      text: "  I prefer concise implementation updates.  ",
+      captureReason: "Explicit preference stated in chat.",
+      confidence: 0.95,
+      reviewBehavior: "auto",
+      sourceRefs: [
+        {
+          sourceSystem: "codex",
+          externalId: "thread_123",
+          summary: "User preference from rollout thread.",
+        },
+      ],
+    });
+
+    expect(calls[0]).toMatchObject({
+      name: "captureThought",
+      args: [
+        "brain_123",
+        {
+          text: "I prefer concise implementation updates.",
+          content: "I prefer concise implementation updates.",
+          proposedKind: "memory",
+          captureReason: "Explicit preference stated in chat.",
+          confidence: 0.95,
+          reviewBehavior: "auto",
+          createdBy: "skippy_mcp",
+          sourceRefs: [
+            {
+              sourceSystem: "codex",
+              externalId: "thread_123",
+              summary: "User preference from rollout thread.",
+            },
+          ],
+        },
+      ],
+    });
+  });
+
+  it("starts chat interviews with harness attribution", async () => {
+    const { client, calls } = createFakeClient();
+    const tools = createSkippyToolHandlers(client, "brain_123");
+
+    await tools.startInterview({
+      kind: "project",
+      subjectLabel: "Skippy MCP and APP",
+      startedBy: "codex",
+    });
+
+    expect(calls[0]).toMatchObject({
+      name: "startInterview",
+      args: [
+        "brain_123",
+        {
+          kind: "project",
+          subjectLabel: "Skippy MCP and APP",
+          startedBy: "codex",
+        },
+      ],
+    });
+  });
+
+  it("saves interview answers without creating memory candidates by default", async () => {
+    const { client, calls } = createFakeClient();
+    const tools = createSkippyToolHandlers(client, "brain_123");
+
+    await tools.answerInterviewQuestion({
+      interviewId: "interview_123",
+      answerText: "  The project is ready for MCP interview tools.  ",
+    });
+
+    expect(calls[0]).toMatchObject({
+      name: "answerInterviewQuestion",
+      args: [
+        "brain_123",
+        {
+          interviewId: "interview_123",
+          answerText: "The project is ready for MCP interview tools.",
+          answeredBy: "skippy_mcp",
+        },
+      ],
+    });
+    expect((calls[0]?.args[1] as { createMemoryCandidate?: boolean }).createMemoryCandidate).toBeUndefined();
+  });
+
+  it("normalizes memory search and context bundle retrieval", async () => {
+    const { client, calls } = createFakeClient();
+    const tools = createSkippyToolHandlers(client, "brain_123");
+
+    await tools.listMemory({
+      query: "  rollout preferences  ",
+      kinds: ["memory"],
+    });
+    await tools.getContextBundle({
+      query: "  rollout preferences  ",
+      relatedEntityRefs: [{ entityType: "project", entityId: "project_123" }],
+    });
+
+    expect(calls[0]).toMatchObject({
+      name: "listMemory",
+      args: [
+        "brain_123",
+        {
+          query: "rollout preferences",
+          kinds: ["memory"],
+          limit: 20,
+        },
+      ],
+    });
+    expect(calls[1]).toMatchObject({
+      name: "getContextBundle",
+      args: [
+        "brain_123",
+        {
+          query: "rollout preferences",
+          relatedEntityRefs: [{ entityType: "project", entityId: "project_123" }],
+          memoryLimit: 8,
+          entityLimit: 12,
+          sourceLimit: 12,
         },
       ],
     });

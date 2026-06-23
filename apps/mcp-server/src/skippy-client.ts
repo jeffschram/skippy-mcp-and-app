@@ -8,7 +8,22 @@ import type {
   RelationshipInput,
   SourceRefInput,
 } from "@skippy/shared";
-import type { SkippyClient } from "./tools.js";
+import type {
+  CaptureThoughtInput,
+  AnswerInterviewQuestionInput,
+  ArchiveInterviewInput,
+  CompleteInterviewInput,
+  ContextBundleInput,
+  GetInterviewInput,
+  InterviewListInput,
+  LinkMemoryInput,
+  MemoryDetailInput,
+  MemoryListInput,
+  MemoryReviewCandidateInput,
+  RecordMemoryInput,
+  SkippyClient,
+  StartInterviewInput,
+} from "./tools.js";
 
 const submitCandidateObjectRef = makeFunctionReference<"mutation">("knowledge:submitCandidateObject");
 const ingestObjectRef = makeFunctionReference<"mutation">("knowledge:ingestObject");
@@ -25,6 +40,22 @@ const markTaskInProgressRef = makeFunctionReference<"mutation">("knowledge:markT
 const markTaskDoneRef = makeFunctionReference<"mutation">("knowledge:markTaskDone");
 const recordPendingActionResultRef = makeFunctionReference<"mutation">("knowledge:recordPendingActionResult");
 const recordEntityReviewRef = makeFunctionReference<"mutation">("knowledge:recordEntityReview");
+const captureThoughtForBrainRef = makeFunctionReference<"mutation">("knowledge:captureThoughtForBrain");
+const recordMemoryForBrainRef = makeFunctionReference<"mutation">("knowledge:recordMemoryForBrain");
+const submitMemoryReviewCandidateForBrainRef = makeFunctionReference<"mutation">(
+  "knowledge:submitMemoryReviewCandidateForBrain",
+);
+const searchMemoriesForBrainRef = makeFunctionReference<"query">("knowledge:searchMemoriesForBrain");
+const getContextBundleForBrainRef = makeFunctionReference<"query">("knowledge:getContextBundleForBrain");
+const memoryDetailForBrainRef = makeFunctionReference<"query">("knowledge:memoryDetailForBrain");
+const linkMemoryForBrainRef = makeFunctionReference<"mutation">("knowledge:linkMemoryForBrain");
+const interviewTemplatesForBrainRef = makeFunctionReference<"query">("interviews:templatesForBrain");
+const listInterviewsForBrainRef = makeFunctionReference<"query">("interviews:listForBrain");
+const interviewDetailForBrainRef = makeFunctionReference<"query">("interviews:detailForBrain");
+const startInterviewForBrainRef = makeFunctionReference<"mutation">("interviews:startForBrain");
+const answerInterviewQuestionForBrainRef = makeFunctionReference<"mutation">("interviews:answerCurrentQuestionForBrain");
+const completeInterviewForBrainRef = makeFunctionReference<"mutation">("interviews:completeForBrain");
+const archiveInterviewForBrainRef = makeFunctionReference<"mutation">("interviews:archiveForBrain");
 const recordIngestionRunRef = makeFunctionReference<"mutation">("knowledge:recordIngestionRun");
 const updateSourceSyncStatusRef = makeFunctionReference<"mutation">("knowledge:updateSourceSyncStatus");
 const operatingRulesForBrainRef = makeFunctionReference<"query">("settings:operatingRulesForBrain");
@@ -77,6 +108,34 @@ export function createConvexSkippyClient(convexUrl: string, authToken?: string):
       client.mutation(recordPendingActionResultRef, { pendingActionId, ...result }),
     recordEntityReview: (brainInstanceId, review) =>
       client.mutation(recordEntityReviewRef, { brainInstanceId, ...review }),
+    captureThought: (brainInstanceId, input) =>
+      client.mutation(captureThoughtForBrainRef, { brainInstanceId, ...input }),
+    recordMemory: (brainInstanceId, input) =>
+      client.mutation(recordMemoryForBrainRef, { brainInstanceId, ...input }),
+    submitMemoryReviewCandidate: (brainInstanceId, input) =>
+      client.mutation(submitMemoryReviewCandidateForBrainRef, { brainInstanceId, ...input }),
+    listMemory: (brainInstanceId, input) =>
+      client.query(searchMemoriesForBrainRef, { brainInstanceId, ...input }),
+    getContextBundle: (brainInstanceId, input) =>
+      client.query(getContextBundleForBrainRef, { brainInstanceId, ...input }),
+    getMemoryDetail: (brainInstanceId, input) =>
+      client.query(memoryDetailForBrainRef, { brainInstanceId, ...input }),
+    linkMemory: (brainInstanceId, input) =>
+      client.mutation(linkMemoryForBrainRef, { brainInstanceId, ...input }),
+    listInterviewTemplates: (brainInstanceId) =>
+      client.query(interviewTemplatesForBrainRef, { brainInstanceId }),
+    listInterviews: (brainInstanceId, input) =>
+      client.query(listInterviewsForBrainRef, { brainInstanceId, ...input }),
+    startInterview: (brainInstanceId, input) =>
+      client.mutation(startInterviewForBrainRef, { brainInstanceId, ...input }),
+    getInterview: (brainInstanceId, input) =>
+      client.query(interviewDetailForBrainRef, { brainInstanceId, ...input }),
+    answerInterviewQuestion: (brainInstanceId, input) =>
+      client.mutation(answerInterviewQuestionForBrainRef, { brainInstanceId, ...input }),
+    completeInterview: (brainInstanceId, input) =>
+      client.mutation(completeInterviewForBrainRef, { brainInstanceId, ...input }),
+    archiveInterview: (brainInstanceId, input) =>
+      client.mutation(archiveInterviewForBrainRef, { brainInstanceId, ...input }),
     recordIngestionRun: (brainInstanceId, run) =>
       client.mutation(recordIngestionRunRef, { brainInstanceId, ...run }),
     updateSourceSyncStatus: (brainInstanceId, status) =>
@@ -100,4 +159,17 @@ export type ConvexSkippyClientInput = {
   focusSummary: FocusSummary;
   pendingAction: PendingActionInput;
   entityRef: EntityRef;
+  captureThought: CaptureThoughtInput;
+  recordMemory: RecordMemoryInput;
+  memoryReviewCandidate: MemoryReviewCandidateInput;
+  memoryList: MemoryListInput;
+  contextBundle: ContextBundleInput;
+  memoryDetail: MemoryDetailInput;
+  linkMemory: LinkMemoryInput;
+  interviewList: InterviewListInput;
+  startInterview: StartInterviewInput;
+  getInterview: GetInterviewInput;
+  answerInterviewQuestion: AnswerInterviewQuestionInput;
+  completeInterview: CompleteInterviewInput;
+  archiveInterview: ArchiveInterviewInput;
 };
