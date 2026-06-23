@@ -124,6 +124,20 @@ export type SkippyClient = {
     },
   ): Promise<unknown>;
   recordEntityReview(brainInstanceId: string, review: EntityReviewInput): Promise<unknown>;
+  captureThought(brainInstanceId: string, input: CaptureThoughtInput): Promise<unknown>;
+  recordMemory(brainInstanceId: string, input: RecordMemoryInput): Promise<unknown>;
+  submitMemoryReviewCandidate(brainInstanceId: string, input: MemoryReviewCandidateInput): Promise<unknown>;
+  listMemory(brainInstanceId: string, input: MemoryListInput): Promise<unknown>;
+  getContextBundle(brainInstanceId: string, input: ContextBundleInput): Promise<unknown>;
+  getMemoryDetail(brainInstanceId: string, input: MemoryDetailInput): Promise<unknown>;
+  linkMemory(brainInstanceId: string, input: LinkMemoryInput): Promise<unknown>;
+  listInterviewTemplates(brainInstanceId: string): Promise<unknown>;
+  listInterviews(brainInstanceId: string, input: InterviewListInput): Promise<unknown>;
+  startInterview(brainInstanceId: string, input: StartInterviewInput): Promise<unknown>;
+  getInterview(brainInstanceId: string, input: GetInterviewInput): Promise<unknown>;
+  answerInterviewQuestion(brainInstanceId: string, input: AnswerInterviewQuestionInput): Promise<unknown>;
+  completeInterview(brainInstanceId: string, input: CompleteInterviewInput): Promise<unknown>;
+  archiveInterview(brainInstanceId: string, input: ArchiveInterviewInput): Promise<unknown>;
   recordIngestionRun(
     brainInstanceId: string,
     run: {
@@ -195,6 +209,120 @@ type EntityReviewInput = {
   priorityPolicyVersion?: string;
   sourceRefIds?: string[];
   sourceRefs?: SourceRefInput[];
+};
+
+export type MemoryKind = "memory" | "decision" | "principle";
+
+export type InterviewKind = "project" | "goal" | "person" | "decision" | "weekly_review";
+
+export type InterviewMemoryKind = "thought" | "memory" | "decision" | "principle" | "question" | "insight" | "artifact";
+
+export type MemoryReviewBehavior = "accept" | "submit_for_review" | "auto";
+
+export type MemoryReviewCandidateInput = {
+  content: string;
+  proposedKind?: MemoryKind;
+  captureReason?: string;
+  rubricDecision?: string;
+  confidence?: number;
+  reviewBehavior?: MemoryReviewBehavior;
+  sourceRefs?: SourceRefInput[];
+  sourceRefIds?: string[];
+  relatedEntityRefs?: EntityRef[];
+  createdBy?: string;
+  metadata?: unknown;
+};
+
+export type CaptureThoughtInput = Omit<MemoryReviewCandidateInput, "content"> & {
+  text: string;
+  content?: string;
+};
+
+export type RecordMemoryInput = {
+  content: string;
+  kind?: MemoryKind;
+  title?: string;
+  summary?: string;
+  captureReason?: string;
+  rubricDecision: string;
+  confidence?: number;
+  reviewBehavior?: MemoryReviewBehavior;
+  sourceRefs?: SourceRefInput[];
+  sourceRefIds?: string[];
+  relatedEntityRefs?: EntityRef[];
+  createdBy?: string;
+  metadata?: unknown;
+};
+
+export type MemoryListInput = {
+  query?: string;
+  memoryType?: MemoryKind;
+  kinds?: MemoryKind[];
+  relatedEntityRefs?: EntityRef[];
+  includeArchived?: boolean;
+  limit?: number;
+};
+
+export type ContextBundleInput = Omit<MemoryListInput, "limit"> & {
+  memoryLimit?: number;
+  entityLimit?: number;
+  sourceLimit?: number;
+};
+
+export type MemoryDetailInput = {
+  memoryId: string;
+  includeSourceRefs?: boolean;
+  includeRelatedEntities?: boolean;
+};
+
+export type LinkMemoryInput = {
+  memoryId: string;
+  entityRef: EntityRef;
+  relationshipType?: string;
+  reason?: string;
+  confidence?: number;
+  sourceRefs?: SourceRefInput[];
+  sourceRefIds?: string[];
+  createdBy?: string;
+};
+
+export type InterviewListInput = {
+  recentLimit?: number;
+};
+
+export type StartInterviewInput = {
+  kind: InterviewKind;
+  title?: string;
+  subjectLabel?: string;
+  subjectEntityRef?: EntityRef;
+  startedBy?: string;
+};
+
+export type GetInterviewInput = {
+  interviewId: string;
+};
+
+export type AnswerInterviewQuestionInput = {
+  interviewId: string;
+  answerText: string;
+  answerValue?: unknown;
+  createMemoryCandidate?: boolean;
+  memoryType?: InterviewMemoryKind;
+  answeredBy?: string;
+};
+
+export type CompleteInterviewInput = {
+  interviewId: string;
+  summary?: string;
+  createSummaryMemoryCandidate?: boolean;
+  memoryType?: InterviewMemoryKind;
+  completedBy?: string;
+};
+
+export type ArchiveInterviewInput = {
+  interviewId: string;
+  archiveReason?: string;
+  archivedBy?: string;
 };
 
 type NotificationCandidate = {
@@ -482,13 +610,19 @@ function configureWebPush() {
   return true;
 }
 
+function normalizeRequiredText(value: string, fieldName: string) {
+  const normalized = value.trim();
+  if (!normalized) {
+    throw new Error(`${fieldName} is required`);
+  }
+
+  return normalized;
+}
+
 export function createSkippyToolHandlers(client: SkippyClient, brainInstanceId: string) {
   return {
     async capture(input: { text: string; sourceRef?: SourceRefInput }) {
-      const normalizedText = input.text.trim();
-      if (!normalizedText) {
-        throw new Error("text is required");
-      }
+      const normalizedText = normalizeRequiredText(input.text, "text");
 
       const candidate: CandidateObjectInput<"note"> = {
         candidateEntityType: "note",
@@ -744,16 +878,140 @@ export function createSkippyToolHandlers(client: SkippyClient, brainInstanceId: 
     },
 
     async recordEntityReview(input: EntityReviewInput) {
-      const reviewSummary = input.reviewSummary.trim();
-      if (!reviewSummary) {
-        throw new Error("reviewSummary is required");
-      }
+      const reviewSummary = normalizeRequiredText(input.reviewSummary, "reviewSummary");
 
       return await client.recordEntityReview(brainInstanceId, {
         ...input,
         reviewSummary,
         reviewedBy: input.reviewedBy ?? "skippy_mcp",
         priorityComputedAt: input.priorityComputedAt ?? Date.now(),
+      });
+    },
+
+    async captureThought(input: CaptureThoughtInput) {
+      const text = normalizeRequiredText(input.text, "text");
+      return await client.captureThought(brainInstanceId, {
+        ...input,
+        text,
+        content: normalizeRequiredText(input.content ?? text, "content"),
+        proposedKind: input.proposedKind ?? "memory",
+        captureReason: input.captureReason ?? "Captured from an explicit MCP memory request.",
+        reviewBehavior: input.reviewBehavior ?? "auto",
+        createdBy: input.createdBy ?? "skippy_mcp",
+      });
+    },
+
+    async recordMemory(input: RecordMemoryInput) {
+      return await client.recordMemory(brainInstanceId, {
+        ...input,
+        content: normalizeRequiredText(input.content, "content"),
+        kind: input.kind ?? "memory",
+        rubricDecision: normalizeRequiredText(input.rubricDecision, "rubricDecision"),
+        reviewBehavior: input.reviewBehavior ?? "accept",
+        createdBy: input.createdBy ?? "skippy_mcp",
+      });
+    },
+
+    async submitMemoryReviewCandidate(input: MemoryReviewCandidateInput) {
+      return await client.submitMemoryReviewCandidate(brainInstanceId, {
+        ...input,
+        content: normalizeRequiredText(input.content, "content"),
+        proposedKind: input.proposedKind ?? "memory",
+        captureReason: input.captureReason ?? "Submitted for memory review through MCP.",
+        reviewBehavior: input.reviewBehavior ?? "submit_for_review",
+        createdBy: input.createdBy ?? "skippy_mcp",
+      });
+    },
+
+    async listMemory(input: MemoryListInput = {}) {
+      const listInput: MemoryListInput = {
+        ...input,
+        limit: input.limit ?? 20,
+      };
+      const query = input.query?.trim();
+      if (query) {
+        listInput.query = query;
+      }
+
+      return await client.listMemory(brainInstanceId, listInput);
+    },
+
+    async getContextBundle(input: ContextBundleInput = {}) {
+      const bundleInput: ContextBundleInput = {
+        ...input,
+        memoryLimit: input.memoryLimit ?? 8,
+        entityLimit: input.entityLimit ?? 12,
+        sourceLimit: input.sourceLimit ?? 12,
+      };
+      const query = input.query?.trim();
+      if (query) {
+        bundleInput.query = query;
+      }
+
+      return await client.getContextBundle(brainInstanceId, bundleInput);
+    },
+
+    async getMemoryDetail(input: MemoryDetailInput) {
+      return await client.getMemoryDetail(brainInstanceId, {
+        ...input,
+        memoryId: normalizeRequiredText(input.memoryId, "memoryId"),
+      });
+    },
+
+    async linkMemory(input: LinkMemoryInput) {
+      return await client.linkMemory(brainInstanceId, {
+        ...input,
+        memoryId: normalizeRequiredText(input.memoryId, "memoryId"),
+        relationshipType: input.relationshipType ?? "related_to",
+        createdBy: input.createdBy ?? "skippy_mcp",
+      });
+    },
+
+    async listInterviewTemplates() {
+      return await client.listInterviewTemplates(brainInstanceId);
+    },
+
+    async listInterviews(input: InterviewListInput = {}) {
+      return await client.listInterviews(brainInstanceId, {
+        recentLimit: input.recentLimit ?? 12,
+      });
+    },
+
+    async startInterview(input: StartInterviewInput) {
+      return await client.startInterview(brainInstanceId, {
+        ...input,
+        startedBy: input.startedBy ?? "skippy_mcp",
+      });
+    },
+
+    async getInterview(input: GetInterviewInput) {
+      return await client.getInterview(brainInstanceId, {
+        interviewId: normalizeRequiredText(input.interviewId, "interviewId"),
+      });
+    },
+
+    async answerInterviewQuestion(input: AnswerInterviewQuestionInput) {
+      return await client.answerInterviewQuestion(brainInstanceId, {
+        ...input,
+        interviewId: normalizeRequiredText(input.interviewId, "interviewId"),
+        answerText: normalizeRequiredText(input.answerText, "answerText"),
+        answeredBy: input.answeredBy ?? "skippy_mcp",
+      });
+    },
+
+    async completeInterview(input: CompleteInterviewInput) {
+      return await client.completeInterview(brainInstanceId, {
+        ...input,
+        interviewId: normalizeRequiredText(input.interviewId, "interviewId"),
+        completedBy: input.completedBy ?? "skippy_mcp",
+      });
+    },
+
+    async archiveInterview(input: ArchiveInterviewInput) {
+      return await client.archiveInterview(brainInstanceId, {
+        ...input,
+        interviewId: normalizeRequiredText(input.interviewId, "interviewId"),
+        archivedBy: input.archivedBy ?? "skippy_mcp",
       });
     },
 

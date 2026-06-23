@@ -53,6 +53,100 @@ function createFakeClient(overrides: Partial<SkippyClient> = {}): SkippyClient {
     markTaskDone: async (_brainInstanceId, taskId) => ({ taskId }),
     recordPendingActionResult: async () => ({ ok: true }),
     recordEntityReview: async () => ({ ok: true }),
+    captureThought: async (_brainInstanceId, input) => ({
+      status: input.reviewBehavior === "submit_for_review" ? "submitted_for_review" : "captured",
+      memoryId: "memory_123",
+      kind: input.proposedKind ?? "memory",
+      title: input.content ?? input.text,
+      sourceRefIds: ["source_123"],
+      confidence: input.confidence,
+    }),
+    recordMemory: async (_brainInstanceId, input) => ({
+      status: "recorded",
+      memoryId: "memory_123",
+      kind: input.kind ?? "memory",
+      title: input.title ?? input.content,
+      rubricDecision: input.rubricDecision,
+    }),
+    submitMemoryReviewCandidate: async (_brainInstanceId, input) => ({
+      status: "submitted_for_review",
+      reviewItemId: "memory_review_123",
+      kind: input.proposedKind ?? "memory",
+      title: input.content,
+    }),
+    listMemory: async () => [],
+    getContextBundle: async (_brainInstanceId, input) => ({
+      query: input.query,
+      memories: [],
+      entities: [],
+      sourceRefs: [],
+    }),
+    getMemoryDetail: async (_brainInstanceId, input) => ({ memoryId: input.memoryId }),
+    linkMemory: async (_brainInstanceId, input) => ({
+      status: "linked",
+      memoryId: input.memoryId,
+      relatedEntityRefs: [input.entityRef],
+    }),
+    listInterviewTemplates: async () => ({
+      assistantDisplayName: "Skippy",
+      templates: [
+        {
+          kind: "project",
+          title: "Project check-in",
+          description: "Clarify scope, momentum, blockers, and next action.",
+          questionCount: 4,
+          suggestedPrompt: "Want to do a project interview for Skippy?",
+        },
+      ],
+    }),
+    listInterviews: async () => ({
+      assistantDisplayName: "Skippy",
+      templates: [],
+      active: [],
+      recent: [],
+    }),
+    startInterview: async (_brainInstanceId, input) => ({
+      status: "active",
+      interviewId: "interview_123",
+      assistantDisplayName: "Skippy",
+      kind: input.kind,
+      currentQuestion: {
+        id: "project_current_state",
+        prompt: "What is the current state of this project?",
+      },
+      progress: { answered: 0, total: 4 },
+      suggestedPrompt: "Want to do a project interview for Skippy?",
+      reviewUrl: "/interviews/interview_123",
+    }),
+    getInterview: async (_brainInstanceId, input) => ({
+      assistantDisplayName: "Skippy",
+      interview: { _id: input.interviewId, status: "active" },
+      currentQuestion: { id: "project_current_state", prompt: "What is the current state of this project?" },
+      responses: [],
+      progress: { answered: 0, total: 4 },
+      reviewUrl: `/interviews/${input.interviewId}`,
+    }),
+    answerInterviewQuestion: async (_brainInstanceId, input) => ({
+      interviewId: input.interviewId,
+      assistantDisplayName: "Skippy",
+      nextQuestion: {
+        id: "project_desired_outcome",
+        prompt: "What outcome would make this project successful?",
+      },
+      progress: { answered: 1, total: 4 },
+      isLastAnswer: false,
+      reviewUrl: `/interviews/${input.interviewId}`,
+    }),
+    completeInterview: async (_brainInstanceId, input) => ({
+      interviewId: input.interviewId,
+      assistantDisplayName: "Skippy",
+      reviewUrl: `/interviews/${input.interviewId}`,
+    }),
+    archiveInterview: async (_brainInstanceId, input) => ({
+      interviewId: input.interviewId,
+      assistantDisplayName: "Skippy",
+      reviewUrl: "/interviews",
+    }),
     recordIngestionRun: async () => ({ ok: true }),
     updateSourceSyncStatus: async () => ({ ok: true }),
     getOperatingRules: async () => [],
@@ -108,6 +202,21 @@ describe("Skippy MCP manifest", () => {
       const recordEntityReview = tools.find((tool) => tool.name === "record_entity_review");
       const markTaskInProgress = tools.find((tool) => tool.name === "mark_task_in_progress");
       const dispatchNotifications = tools.find((tool) => tool.name === "dispatch_notifications");
+      const captureThought = tools.find((tool) => tool.name === "capture_thought");
+      const recordMemory = tools.find((tool) => tool.name === "record_memory");
+      const recordDecision = tools.find((tool) => tool.name === "record_decision");
+      const recordPrinciple = tools.find((tool) => tool.name === "record_principle");
+      const submitMemoryReviewCandidate = tools.find(
+        (tool) => tool.name === "submit_memory_review_candidate",
+      );
+      const listMemory = tools.find((tool) => tool.name === "list_memory");
+      const getContextBundle = tools.find((tool) => tool.name === "get_context_bundle");
+      const getMemoryDetail = tools.find((tool) => tool.name === "get_memory_detail");
+      const linkMemory = tools.find((tool) => tool.name === "link_memory");
+      const listInterviewTemplates = tools.find((tool) => tool.name === "list_interview_templates");
+      const startInterview = tools.find((tool) => tool.name === "start_interview");
+      const answerInterviewQuestion = tools.find((tool) => tool.name === "answer_interview_question");
+      const completeInterview = tools.find((tool) => tool.name === "complete_interview");
 
       expect(ingestObject?.description).toContain("importance rubric");
       expect(ingestObject?.inputSchema.properties?.rubricDecision).toBeDefined();
@@ -120,6 +229,21 @@ describe("Skippy MCP manifest", () => {
       expect(recordEntityReview?.description).toContain("Record a review of an accepted Skippy entity");
       expect(markTaskInProgress?.description).toContain("when a harness starts working");
       expect(dispatchNotifications?.description).toContain("Use dryRun first");
+      expect(captureThought?.description).toContain("second-brain memory");
+      expect(captureThought?.inputSchema.properties?.sourceRefs).toBeDefined();
+      expect(recordMemory?.inputSchema.properties?.rubricDecision).toBeDefined();
+      expect(recordDecision?.description).toContain("durable decision memory");
+      expect(recordPrinciple?.description).toContain("operating principle");
+      expect(submitMemoryReviewCandidate?.description).toContain("Queue a possible memory");
+      expect(listMemory?.annotations?.readOnlyHint).toBe(true);
+      expect(getContextBundle?.description).toContain("context bundle");
+      expect(getContextBundle?.inputSchema.properties?.relatedEntityRefs).toBeDefined();
+      expect(getMemoryDetail?.description).toContain("memory detail");
+      expect(linkMemory?.inputSchema.properties?.confidence).toBeDefined();
+      expect(listInterviewTemplates?.description).toContain("assistantDisplayName");
+      expect(startInterview?.description).toContain("one question at a time in chat");
+      expect(answerInterviewQuestion?.description).toContain("current interview question");
+      expect(completeInterview?.description).toContain("Complete a guided interview");
 
       const prompts = await client.listPrompts();
       expect(prompts.prompts.find((prompt) => prompt.name === "skippy_intro")?.description).toContain(
@@ -164,6 +288,216 @@ describe("Skippy MCP manifest", () => {
         entityId: "entity_123",
         rubricDecision: "Active project task with concrete implementation value.",
         reviewUrl: "http://127.0.0.1:3000/projects",
+      });
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
+  it("returns chat-friendly confirmations for memory captures", async () => {
+    const captureCalls: Array<{ brainInstanceId: string; input: unknown }> = [];
+    const server = createMcpServer(
+      createFakeClient({
+        captureThought: async (brainInstanceId, input) => {
+          captureCalls.push({ brainInstanceId, input });
+          return {
+            status: "captured",
+            memoryId: "memory_123",
+            kind: input.proposedKind ?? "memory",
+            title: input.content ?? input.text,
+            sourceRefIds: ["source_123"],
+            confidence: input.confidence,
+          };
+        },
+      }),
+      "brain_123",
+    );
+    const client = new Client({ name: "memory-capture-test", version: "0.1.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    try {
+      await server.connect(serverTransport);
+      await client.connect(clientTransport);
+
+      const result = await client.callTool({
+        name: "capture_thought",
+        arguments: {
+          text: "I prefer terse status updates during rollouts.",
+          proposedKind: "memory",
+          captureReason: "Explicit preference stated by user.",
+          confidence: 0.9,
+          reviewBehavior: "auto",
+          sourceRefs: [
+            {
+              sourceSystem: "codex",
+              externalId: "thread_123",
+              summary: "Preference from rollout thread.",
+            },
+          ],
+        },
+      });
+
+      expect(captureCalls).toEqual([
+        {
+          brainInstanceId: "brain_123",
+          input: {
+            text: "I prefer terse status updates during rollouts.",
+            content: "I prefer terse status updates during rollouts.",
+            proposedKind: "memory",
+            captureReason: "Explicit preference stated by user.",
+            confidence: 0.9,
+            reviewBehavior: "auto",
+            createdBy: "skippy_mcp",
+            sourceRefs: [
+              {
+                sourceSystem: "codex",
+                externalId: "thread_123",
+                summary: "Preference from rollout thread.",
+              },
+            ],
+          },
+        },
+      ]);
+      expect(textResult(result)).toMatchObject({
+        status: "captured",
+        entityType: "memory",
+        memoryId: "memory_123",
+        kind: "memory",
+        title: "I prefer terse status updates during rollouts.",
+        sourceRefIds: ["source_123"],
+        confidence: 0.9,
+        reviewBehavior: "auto",
+        reviewUrl: "http://127.0.0.1:3000/memory",
+        nextAction: "Memory updated in Skippy.",
+      });
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
+  it("returns assistant-named chat interview prompts and next questions", async () => {
+    const server = createMcpServer(
+      createFakeClient({
+        listInterviewTemplates: async () => ({
+          assistantDisplayName: "Mabel",
+          templates: [
+            {
+              kind: "project",
+              title: "Project check-in",
+              description: "Clarify scope, momentum, blockers, and next action.",
+              questionCount: 4,
+              suggestedPrompt: "Want to do a project interview for Mabel?",
+            },
+          ],
+        }),
+        startInterview: async () => ({
+          interviewId: "interview_123",
+          assistantDisplayName: "Mabel",
+          currentQuestion: {
+            id: "project_current_state",
+            prompt: "What is the current state of this project?",
+          },
+          progress: { answered: 0, total: 4 },
+          suggestedPrompt: "Want to do a project interview for Mabel?",
+          reviewUrl: "/interviews/interview_123",
+        }),
+      }),
+      "brain_123",
+    );
+    const client = new Client({ name: "interview-test", version: "0.1.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    try {
+      await server.connect(serverTransport);
+      await client.connect(clientTransport);
+
+      const templates = textResult(await client.callTool({ name: "list_interview_templates", arguments: {} }));
+      expect(templates).toMatchObject({
+        assistantDisplayName: "Mabel",
+        templates: [
+          {
+            suggestedPrompt: "Want to do a project interview for Mabel?",
+          },
+        ],
+      });
+
+      const started = textResult(
+        await client.callTool({
+          name: "start_interview",
+          arguments: {
+            kind: "project",
+            subjectLabel: "Skippy MCP and APP",
+            startedBy: "codex",
+          },
+        }),
+      );
+      expect(started).toMatchObject({
+        status: "active",
+        assistantDisplayName: "Mabel",
+        suggestedPrompt: "Want to do a project interview for Mabel?",
+        currentQuestion: {
+          prompt: "What is the current state of this project?",
+        },
+        nextAction: "Ask this in the harness chat: What is the current state of this project?",
+        reviewUrl: "http://127.0.0.1:3000/interviews/interview_123",
+      });
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
+  it("wires context bundle retrieval to the backend", async () => {
+    const bundleCalls: Array<{ brainInstanceId: string; input: unknown }> = [];
+    const server = createMcpServer(
+      createFakeClient({
+        getContextBundle: async (brainInstanceId, input) => {
+          bundleCalls.push({ brainInstanceId, input });
+          return {
+            query: input.query,
+            memories: [{ memory: { _id: "memory_123", title: "Rollout preference" }, score: 12 }],
+            entities: [{ ref: { entityType: "project", entityId: "project_123" }, title: "Skippy" }],
+            sourceRefs: [{ _id: "source_123", sourceSystem: "codex" }],
+          };
+        },
+      }),
+      "brain_123",
+    );
+    const client = new Client({ name: "context-bundle-test", version: "0.1.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    try {
+      await server.connect(serverTransport);
+      await client.connect(clientTransport);
+
+      const result = await client.callTool({
+        name: "get_context_bundle",
+        arguments: {
+          query: " rollout preferences ",
+          relatedEntityRefs: [{ entityType: "project", entityId: "project_123" }],
+          memoryLimit: 5,
+        },
+      });
+
+      expect(bundleCalls).toEqual([
+        {
+          brainInstanceId: "brain_123",
+          input: {
+            query: "rollout preferences",
+            relatedEntityRefs: [{ entityType: "project", entityId: "project_123" }],
+            memoryLimit: 5,
+            entityLimit: 12,
+            sourceLimit: 12,
+          },
+        },
+      ]);
+      expect(textResult(result)).toMatchObject({
+        query: "rollout preferences",
+        memories: [{ memory: { _id: "memory_123", title: "Rollout preference" }, score: 12 }],
+        entities: [{ ref: { entityType: "project", entityId: "project_123" }, title: "Skippy" }],
+        sourceRefs: [{ _id: "source_123", sourceSystem: "codex" }],
       });
     } finally {
       await client.close();

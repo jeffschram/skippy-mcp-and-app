@@ -10,8 +10,11 @@
 
 import type * as auth from "../auth.js";
 import type * as bootstrap from "../bootstrap.js";
+import type * as interviews from "../interviews.js";
 import type * as knowledge from "../knowledge.js";
 import type * as mcpTokens from "../mcpTokens.js";
+import type * as memoryGraph from "../memoryGraph.js";
+import type * as resurfacing from "../resurfacing.js";
 import type * as settings from "../settings.js";
 
 import type {
@@ -23,8 +26,11 @@ import type {
 declare const fullApi: ApiFromModules<{
   auth: typeof auth;
   bootstrap: typeof bootstrap;
+  interviews: typeof interviews;
   knowledge: typeof knowledge;
   mcpTokens: typeof mcpTokens;
+  memoryGraph: typeof memoryGraph;
+  resurfacing: typeof resurfacing;
   settings: typeof settings;
 }>;
 

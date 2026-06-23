@@ -26,6 +26,37 @@ const entityRef = v.object({
   entityId: v.string(),
 });
 
+const memoryType = v.union(
+  v.literal("thought"),
+  v.literal("memory"),
+  v.literal("decision"),
+  v.literal("principle"),
+  v.literal("question"),
+  v.literal("insight"),
+  v.literal("artifact"),
+);
+
+const memoryStatus = v.union(
+  v.literal("inbox"),
+  v.literal("accepted"),
+  v.literal("rejected"),
+  v.literal("archived"),
+);
+
+const memoryReviewState = v.union(
+  v.literal("unreviewed"),
+  v.literal("pending_review"),
+  v.literal("accepted"),
+  v.literal("rejected"),
+  v.literal("archived"),
+);
+
+const memoryReviewBehavior = v.union(
+  v.literal("accept"),
+  v.literal("submit_for_review"),
+  v.literal("auto"),
+);
+
 const entityEmbeddingInput = {
   brainInstanceId: v.id("brainInstances"),
   entityRef,
@@ -181,6 +212,503 @@ async function insertSourceRefs(db: any, brainInstanceId: any, sourceRefs: any[]
     );
   }
   return sourceRefIds;
+}
+
+function optionalTrimmed(value: string | undefined) {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
+function memoryTitleFor(memoryTypeName: string, title: string | undefined, body: string) {
+  const trimmedTitle = optionalTrimmed(title);
+  if (trimmedTitle) {
+    return trimmedTitle;
+  }
+
+  const fallback = body.replace(/\s+/g, " ").trim().slice(0, 80);
+  return fallback || `${memoryTypeName.slice(0, 1).toUpperCase()}${memoryTypeName.slice(1)}`;
+}
+
+function dedupeIds(ids: any[]) {
+  const seen = new Set<string>();
+  const deduped = [];
+  for (const id of ids) {
+    const key = String(id);
+    if (!seen.has(key)) {
+      seen.add(key);
+      deduped.push(id);
+    }
+  }
+  return deduped;
+}
+
+function dedupeEntityRefs(refs: Array<{ entityType: string; entityId: string }>) {
+  const seen = new Set<string>();
+  const deduped = [];
+  for (const ref of refs) {
+    const key = `${ref.entityType}:${ref.entityId}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      deduped.push(ref);
+    }
+  }
+  return deduped;
+}
+
+async function requireSourceRefsForBrain(db: any, brainInstanceId: any, sourceRefIds: any[] | undefined) {
+  const deduped = dedupeIds(sourceRefIds ?? []);
+  for (const sourceRefId of deduped) {
+    const sourceRef = await db.get(sourceRefId);
+    if (!sourceRef || sourceRef.brainInstanceId !== brainInstanceId) {
+      throw new Error("source ref not found for brain instance");
+    }
+  }
+  return deduped;
+}
+
+async function requireRelatedEntityRefsForBrain(
+  db: any,
+  brainInstanceId: any,
+  relatedEntityRefs: Array<{ entityType: keyof typeof entityTableByType; entityId: string }> | undefined,
+) {
+  const deduped = dedupeEntityRefs(relatedEntityRefs ?? []);
+  for (const ref of deduped) {
+    const entityTable = entityTableByType[ref.entityType as keyof typeof entityTableByType];
+    const entity = entityTable ? await db.get(ref.entityId as any) : null;
+    if (!entity || entity.brainInstanceId !== brainInstanceId) {
+      throw new Error(`${ref.entityType} not found for brain instance`);
+    }
+  }
+  return deduped;
+}
+
+async function memorySourceRefIdsFromArgs(
+  db: any,
+  brainInstanceId: any,
+  sourceRefIds: any[] | undefined,
+  sourceRefs: any[] | undefined,
+  now: number,
+) {
+  return dedupeIds([
+    ...(await requireSourceRefsForBrain(db, brainInstanceId, sourceRefIds)),
+    ...(await insertSourceRefs(db, brainInstanceId, sourceRefs, now)),
+  ]);
+}
+
+async function sourceRefsForMemory(db: any, brainInstanceId: any, sourceRefIds: any[] | undefined) {
+  const sourceRefs = [];
+  for (const sourceRefId of sourceRefIds ?? []) {
+    const sourceRef = await db.get(sourceRefId);
+    if (sourceRef && sourceRef.brainInstanceId === brainInstanceId) {
+      sourceRefs.push(sourceRef);
+    }
+  }
+  return sourceRefs;
+}
+
+async function relatedEntitiesForMemory(
+  db: any,
+  brainInstanceId: any,
+  relatedEntityRefs: Array<{ entityType: keyof typeof entityTableByType; entityId: string }> | undefined,
+) {
+  const relatedEntities = [];
+  for (const ref of relatedEntityRefs ?? []) {
+    const entityTable = entityTableByType[ref.entityType];
+    const entity = entityTable ? await db.get(ref.entityId as any) : null;
+    if (entity && entity.brainInstanceId === brainInstanceId) {
+      relatedEntities.push({ ref, entity });
+    }
+  }
+  return relatedEntities;
+}
+
+const memorySearchStopWords = new Set([
+  "a",
+  "an",
+  "and",
+  "are",
+  "as",
+  "at",
+  "be",
+  "by",
+  "for",
+  "from",
+  "has",
+  "have",
+  "i",
+  "in",
+  "is",
+  "it",
+  "me",
+  "my",
+  "of",
+  "on",
+  "or",
+  "our",
+  "that",
+  "the",
+  "this",
+  "to",
+  "we",
+  "what",
+  "when",
+  "with",
+]);
+
+function clampSearchLimit(limit: number | undefined, fallback: number, max: number) {
+  if (typeof limit !== "number" || !Number.isFinite(limit)) {
+    return fallback;
+  }
+  return Math.max(1, Math.min(max, Math.floor(limit)));
+}
+
+function searchTokens(query: string | undefined) {
+  return Array.from(
+    new Set(
+      (query ?? "")
+        .toLowerCase()
+        .replace(/['’]/g, "")
+        .split(/[^a-z0-9]+/)
+        .map((token) => token.trim())
+        .filter((token) => token.length >= 2 && !memorySearchStopWords.has(token)),
+    ),
+  );
+}
+
+function textScore(text: string | undefined, tokens: string[], weight: number) {
+  if (!text || tokens.length === 0) {
+    return 0;
+  }
+  const normalized = text.toLowerCase();
+  let score = 0;
+  for (const token of tokens) {
+    if (normalized.includes(token)) {
+      score += weight;
+    }
+  }
+  return score;
+}
+
+function refKey(ref: { entityType: string; entityId: string }) {
+  return `${ref.entityType}:${ref.entityId}`;
+}
+
+function hasRequestedRelatedRefs(
+  memory: any,
+  relatedEntityRefs: Array<{ entityType: string; entityId: string }> | undefined,
+) {
+  if (!relatedEntityRefs?.length) {
+    return true;
+  }
+  const memoryRefKeys = new Set((memory.relatedEntityRefs ?? []).map((ref: any) => refKey(ref)));
+  return relatedEntityRefs.every((ref) => memoryRefKeys.has(refKey(ref)));
+}
+
+function memoryMatchesType(memory: any, args: { memoryType?: string; kinds?: string[] }) {
+  const types = new Set([args.memoryType, ...(args.kinds ?? [])].filter(Boolean));
+  return types.size === 0 || types.has(memory.memoryType);
+}
+
+function memoryIsSearchable(memory: any, includeArchived: boolean | undefined) {
+  if (includeArchived) {
+    return true;
+  }
+  return memory.status !== "archived" && memory.status !== "rejected";
+}
+
+function sourceRefText(sourceRef: any) {
+  return [
+    sourceRef?.sourceSystem,
+    sourceRef?.externalId,
+    sourceRef?.threadId,
+    sourceRef?.messageId,
+    sourceRef?.eventId,
+    sourceRef?.url,
+    sourceRef?.deepLink,
+    sourceRef?.summary,
+    sourceRef?.excerpt,
+    ...(sourceRef?.participants ?? []),
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function entityDisplay(ref: { entityType: string; entityId: string }, entity: any) {
+  const title =
+    entity?.title ??
+    entity?.name ??
+    entity?.url ??
+    (typeof entity?.body === "string" ? entity.body.slice(0, 80) : undefined) ??
+    ref.entityId;
+  const summary = [
+    entity?.summary,
+    entity?.description,
+    entity?.body,
+    entity?.relationshipContext,
+    entity?.roleTitle,
+    entity?.notes,
+    entity?.domain,
+    entity?.website,
+    entity?.whyItMatters,
+    entity?.objectType,
+    entity?.status,
+    ...(entity?.emails ?? []),
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  const display: {
+    ref: { entityType: string; entityId: string };
+    entity: any;
+    title: string;
+    summary?: string;
+  } = {
+    ref,
+    entity,
+    title,
+  };
+  if (summary) {
+    display.summary = summary;
+  }
+  return display;
+}
+
+function entityContextText(item: { title?: string; summary?: string; ref: { entityType: string; entityId: string } }) {
+  return [item.ref.entityType, item.ref.entityId, item.title, item.summary].filter(Boolean).join(" ");
+}
+
+function scoreMemoryResult(
+  memory: any,
+  sourceRefs: any[],
+  relatedEntities: Array<{ ref: { entityType: string; entityId: string }; entity: any }>,
+  args: {
+    query?: string;
+    relatedEntityRefs?: Array<{ entityType: string; entityId: string }>;
+  },
+) {
+  const tokens = searchTokens(args.query);
+  const query = args.query?.trim().toLowerCase();
+  const sourceText = sourceRefs.map(sourceRefText).join(" ");
+  const relatedText = relatedEntities.map((item) => entityContextText(entityDisplay(item.ref, item.entity))).join(" ");
+  let score = 0;
+  score += textScore(memory.title, tokens, 5);
+  score += textScore(memory.summary, tokens, 3);
+  score += textScore(memory.body, tokens, 2);
+  score += textScore(sourceText, tokens, 1);
+  score += textScore(relatedText, tokens, 2);
+  if (query) {
+    const combined = [memory.title, memory.summary, memory.body, sourceText, relatedText].filter(Boolean).join(" ").toLowerCase();
+    if (combined.includes(query)) {
+      score += 6;
+    }
+  }
+
+  const requestedRefKeys = new Set((args.relatedEntityRefs ?? []).map((ref) => refKey(ref)));
+  const matchingRelatedRefCount = (memory.relatedEntityRefs ?? []).filter((ref: any) => requestedRefKeys.has(refKey(ref))).length;
+  score += matchingRelatedRefCount * 8;
+
+  const recencyScore = Math.max(0, Math.min(1, (memory.updatedAt ?? memory.createdAt ?? 0) / Date.now())) / 10;
+  score += recencyScore;
+
+  return {
+    score: Number(score.toFixed(3)),
+    matchedTokens: tokens.filter((token) =>
+      [memory.title, memory.summary, memory.body, sourceText, relatedText]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase()
+        .includes(token),
+    ),
+    scoreDetails: {
+      queryTokenCount: tokens.length,
+      matchingRelatedRefCount,
+      sourceRefCount: sourceRefs.length,
+      relatedEntityCount: relatedEntities.length,
+    },
+  };
+}
+
+async function searchMemoriesForBrainId(
+  db: any,
+  brainInstanceId: any,
+  args: {
+    query?: string;
+    memoryType?: string;
+    kinds?: string[];
+    relatedEntityRefs?: Array<{ entityType: string; entityId: string }>;
+    includeArchived?: boolean;
+    limit?: number;
+  },
+) {
+  const limit = clampSearchLimit(args.limit, 20, 50);
+  const queryTokens = searchTokens(args.query);
+  const candidateLimit = Math.max(100, Math.min(500, limit * (queryTokens.length || args.relatedEntityRefs?.length ? 12 : 3)));
+  const memories = await db
+    .query("memories")
+    .withIndex("by_brain_updated", (q: any) => q.eq("brainInstanceId", brainInstanceId))
+    .order("desc")
+    .take(candidateLimit);
+  const hydrated = [];
+
+  for (const memory of memories) {
+    if (!memoryIsSearchable(memory, args.includeArchived)) {
+      continue;
+    }
+    if (!memoryMatchesType(memory, args)) {
+      continue;
+    }
+    if (!hasRequestedRelatedRefs(memory, args.relatedEntityRefs)) {
+      continue;
+    }
+
+    const [sourceRefs, relatedEntities] = await Promise.all([
+      sourceRefsForMemory(db, brainInstanceId, memory.sourceRefIds),
+      relatedEntitiesForMemory(db, brainInstanceId, memory.relatedEntityRefs as any),
+    ]);
+    const scored = scoreMemoryResult(memory, sourceRefs, relatedEntities, args);
+    if (queryTokens.length && scored.score <= 0) {
+      continue;
+    }
+    hydrated.push({
+      memory,
+      ...scored,
+      sourceRefs,
+      relatedEntities: relatedEntities.map((item) => entityDisplay(item.ref, item.entity)),
+    });
+  }
+
+  return hydrated.sort((left, right) => right.score - left.score || (right.memory.updatedAt ?? 0) - (left.memory.updatedAt ?? 0)).slice(0, limit);
+}
+
+async function entityContextForRefs(
+  db: any,
+  brainInstanceId: any,
+  refs: Array<{ entityType: keyof typeof entityTableByType; entityId: string }>,
+) {
+  const contexts = [];
+  for (const ref of dedupeEntityRefs(refs) as Array<{ entityType: keyof typeof entityTableByType; entityId: string }>) {
+    const tableName = entityTableByType[ref.entityType];
+    const entity = tableName ? await db.get(ref.entityId as any) : null;
+    if (entity && entity.brainInstanceId === brainInstanceId) {
+      contexts.push({ ...entityDisplay(ref, entity), score: 100, reason: "related_entity_ref" });
+    }
+  }
+  return contexts;
+}
+
+async function queryMatchedEntityContext(
+  db: any,
+  brainInstanceId: any,
+  query: string | undefined,
+  existingKeys: Set<string>,
+  limit: number,
+) {
+  const tokens = searchTokens(query);
+  if (tokens.length === 0 || limit <= 0) {
+    return [];
+  }
+
+  const entityRows = [
+    ...(await db.query("goals").withIndex("by_brain_state", (q: any) => q.eq("brainInstanceId", brainInstanceId)).filter((q: any) => q.eq(q.field("processingState"), "accepted")).take(60)).map((entity: any) => ({ ref: { entityType: "goal", entityId: entity._id }, entity })),
+    ...(await db.query("projects").withIndex("by_brain_state", (q: any) => q.eq("brainInstanceId", brainInstanceId)).filter((q: any) => q.eq(q.field("processingState"), "accepted")).take(60)).map((entity: any) => ({ ref: { entityType: "project", entityId: entity._id }, entity })),
+    ...(await db.query("tasks").withIndex("by_brain_state", (q: any) => q.eq("brainInstanceId", brainInstanceId)).filter((q: any) => q.eq(q.field("processingState"), "accepted")).take(80)).map((entity: any) => ({ ref: { entityType: "task", entityId: entity._id }, entity })),
+    ...(await db.query("notes").withIndex("by_brain_state", (q: any) => q.eq("brainInstanceId", brainInstanceId)).filter((q: any) => q.eq(q.field("processingState"), "accepted")).take(40)).map((entity: any) => ({ ref: { entityType: "note", entityId: entity._id }, entity })),
+    ...(await db.query("people").withIndex("by_brain_state", (q: any) => q.eq("brainInstanceId", brainInstanceId)).filter((q: any) => q.eq(q.field("processingState"), "accepted")).take(60)).map((entity: any) => ({ ref: { entityType: "person", entityId: entity._id }, entity })),
+    ...(await db.query("companies").withIndex("by_brain_state", (q: any) => q.eq("brainInstanceId", brainInstanceId)).filter((q: any) => q.eq(q.field("processingState"), "accepted")).take(60)).map((entity: any) => ({ ref: { entityType: "company", entityId: entity._id }, entity })),
+    ...(await db.query("links").withIndex("by_brain_state", (q: any) => q.eq("brainInstanceId", brainInstanceId)).filter((q: any) => q.eq(q.field("processingState"), "accepted")).take(60)).map((entity: any) => ({ ref: { entityType: "link", entityId: entity._id }, entity })),
+    ...(await db.query("knowledgeObjects").withIndex("by_brain_state", (q: any) => q.eq("brainInstanceId", brainInstanceId)).filter((q: any) => q.eq(q.field("processingState"), "accepted")).take(40)).map((entity: any) => ({ ref: { entityType: "knowledgeObject", entityId: entity._id }, entity })),
+  ];
+
+  return entityRows
+    .map(({ ref, entity }) => {
+      const display = entityDisplay(ref, entity);
+      const score = textScore(entityContextText(display), tokens, 2);
+      return { ...display, score, reason: "query_match" };
+    })
+    .filter((item) => item.score > 0 && !existingKeys.has(refKey(item.ref)))
+    .sort((left, right) => right.score - left.score)
+    .slice(0, limit);
+}
+
+async function contextBundleForBrainId(
+  db: any,
+  brainInstanceId: any,
+  args: {
+    query?: string;
+    memoryType?: string;
+    kinds?: string[];
+    relatedEntityRefs?: Array<{ entityType: keyof typeof entityTableByType; entityId: string }>;
+    includeArchived?: boolean;
+    memoryLimit?: number;
+    entityLimit?: number;
+    sourceLimit?: number;
+  },
+) {
+  const memoryLimit = clampSearchLimit(args.memoryLimit, 8, 25);
+  const entityLimit = clampSearchLimit(args.entityLimit, 12, 40);
+  const sourceLimit = clampSearchLimit(args.sourceLimit, 12, 40);
+  const memorySearchArgs: {
+    query?: string;
+    memoryType?: string;
+    kinds?: string[];
+    relatedEntityRefs?: Array<{ entityType: string; entityId: string }>;
+    includeArchived?: boolean;
+    limit?: number;
+  } = { limit: memoryLimit };
+  if (args.query !== undefined) {
+    memorySearchArgs.query = args.query;
+  }
+  if (args.memoryType !== undefined) {
+    memorySearchArgs.memoryType = args.memoryType;
+  }
+  if (args.kinds !== undefined) {
+    memorySearchArgs.kinds = args.kinds;
+  }
+  if (args.relatedEntityRefs !== undefined) {
+    memorySearchArgs.relatedEntityRefs = args.relatedEntityRefs;
+  }
+  if (args.includeArchived !== undefined) {
+    memorySearchArgs.includeArchived = args.includeArchived;
+  }
+  const memories = await searchMemoriesForBrainId(db, brainInstanceId, memorySearchArgs);
+  const memoryRelatedRefs = memories.flatMap((result) => result.memory.relatedEntityRefs ?? []);
+  const explicitEntities = await entityContextForRefs(db, brainInstanceId, [
+    ...((args.relatedEntityRefs ?? []) as any),
+    ...memoryRelatedRefs,
+  ]);
+  const explicitEntityKeys = new Set(explicitEntities.map((item) => refKey(item.ref)));
+  const matchedEntities = await queryMatchedEntityContext(
+    db,
+    brainInstanceId,
+    args.query,
+    explicitEntityKeys,
+    Math.max(0, entityLimit - explicitEntities.length),
+  );
+  const sourceRefs = [];
+  const sourceRefIds = new Set<string>();
+  for (const memoryResult of memories) {
+    for (const sourceRef of memoryResult.sourceRefs ?? []) {
+      const key = String(sourceRef._id);
+      if (!sourceRefIds.has(key) && sourceRefs.length < sourceLimit) {
+        sourceRefIds.add(key);
+        sourceRefs.push(sourceRef);
+      }
+    }
+  }
+
+  return {
+    query: args.query,
+    filters: {
+      memoryType: args.memoryType,
+      kinds: args.kinds,
+      relatedEntityRefs: args.relatedEntityRefs,
+      includeArchived: args.includeArchived ?? false,
+    },
+    memories,
+    entities: [...explicitEntities, ...matchedEntities].slice(0, entityLimit),
+    sourceRefs,
+    limits: { memoryLimit, entityLimit, sourceLimit },
+  };
 }
 
 async function cancelDuplicateFocusCreatedTasks(db: any, brainInstanceId: any, actorId?: string) {
@@ -760,6 +1288,123 @@ export const dashboardForViewer = queryGeneric({
   },
 });
 
+export const ingestionRunsForViewer = queryGeneric({
+  args: {
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const { brain } = await requireOwnedBrain(ctx);
+    return await ctx.db
+      .query("ingestionRuns")
+      .withIndex("by_brain_started", (q) => q.eq("brainInstanceId", brain._id))
+      .order("desc")
+      .take(args.limit ?? 50);
+  },
+});
+
+export const ingestionRunDetailForViewer = queryGeneric({
+  args: {
+    ingestionRunId: v.id("ingestionRuns"),
+  },
+  handler: async (ctx, args) => {
+    const { brain } = await requireOwnedBrain(ctx);
+    const run = await ctx.db.get(args.ingestionRunId);
+    if (!run || run.brainInstanceId !== brain._id) {
+      return null;
+    }
+
+    const windowEnd = run.completedAt ?? Date.now();
+    const activityEvents = (
+      await ctx.db
+        .query("activityEvents")
+        .withIndex("by_brain_timestamp", (q) => q.eq("brainInstanceId", brain._id))
+        .order("desc")
+        .take(200)
+    ).filter((event) => {
+      if (event.ingestionRunId === run._id) {
+        return true;
+      }
+      return event.timestamp >= run.startedAt && event.timestamp <= windowEnd;
+    });
+
+    const sourceRefIds = Array.from(
+      new Set(activityEvents.flatMap((event) => (event.sourceRefIds ?? []).map((sourceRefId: unknown) => String(sourceRefId)))),
+    );
+    const sourceRefs = [];
+    for (const sourceRefId of sourceRefIds) {
+      const sourceRef = await ctx.db.get(sourceRefId as any);
+      if (sourceRef && sourceRef.brainInstanceId === brain._id) {
+        sourceRefs.push(sourceRef);
+      }
+    }
+
+    const memoryIds = Array.from(
+      new Set(
+        activityEvents
+          .map((event) => event.metadata?.memoryId)
+          .filter((memoryId): memoryId is string => typeof memoryId === "string" && memoryId.length > 0),
+      ),
+    );
+    const memories = [];
+    for (const memoryId of memoryIds) {
+      const memory = await ctx.db.get(memoryId as any);
+      if (memory && memory.brainInstanceId === brain._id) {
+        memories.push(memory);
+      }
+    }
+
+    const entityRefs = Array.from(
+      new Map(
+        activityEvents
+          .map((event) => event.entityRef)
+          .filter((ref): ref is { entityType: keyof typeof entityTableByType; entityId: string } => Boolean(ref))
+          .map((ref) => [`${ref.entityType}:${ref.entityId}`, ref]),
+      ).values(),
+    );
+    const entities = [];
+    for (const ref of entityRefs) {
+      const entityTable = entityTableByType[ref.entityType];
+      const entity = entityTable ? await ctx.db.get(ref.entityId as any) : null;
+      if (entity && entity.brainInstanceId === brain._id) {
+        entities.push({ ref, entity });
+      }
+    }
+
+    const ignoredItems =
+      Array.isArray(run.metadata?.ignoredItems) ? run.metadata.ignoredItems :
+      Array.isArray(run.metadata?.ignored) ? run.metadata.ignored :
+      Array.isArray(run.metadata?.skippedItems) ? run.metadata.skippedItems :
+      [];
+    const auditSummary = activityEvents.reduce(
+      (summary, event) => {
+        const type = event.activityType;
+        if (type.includes("review_candidate") || type.includes("candidate_submitted")) {
+          summary.sentToReview += 1;
+        } else if (type.includes("rejected")) {
+          summary.rejected += 1;
+        } else if (type.includes("linked")) {
+          summary.linked += 1;
+        } else if (type.includes("updated") || type.includes("reviewed")) {
+          summary.updated += 1;
+        } else if (type.includes("created") || type.includes("recorded") || type.includes("captured") || type.includes("ingested") || type.includes("accepted")) {
+          summary.capturedDirect += 1;
+        }
+        return summary;
+      },
+      {
+        capturedDirect: 0,
+        sentToReview: 0,
+        linked: 0,
+        updated: 0,
+        rejected: 0,
+        ignored: ignoredItems.length,
+      },
+    );
+
+    return { run, activityEvents, sourceRefs, memories, entities, ignoredItems, auditSummary };
+  },
+});
+
 export const recordFocusItemActionForViewer = mutationGeneric({
   args: {
     focusSummaryId: v.id("focusSummaries"),
@@ -1211,6 +1856,881 @@ export const triageForViewer = queryGeneric({
       .query("triageItems")
       .filter((q) => q.and(q.eq(q.field("brainInstanceId"), brain._id), q.eq(q.field("status"), "pending")))
       .collect();
+  },
+});
+
+export const listMemoryInboxForViewer = queryGeneric({
+  args: {
+    limit: v.optional(v.number()),
+    memoryType: v.optional(memoryType),
+  },
+  handler: async (ctx, args) => {
+    const { brain } = await requireOwnedBrain(ctx);
+    const memories = await ctx.db
+      .query("memories")
+      .withIndex("by_brain_status", (q) => q.eq("brainInstanceId", brain._id))
+      .filter((q) => q.eq(q.field("status"), "inbox"))
+      .order("desc")
+      .take(args.limit ?? 50);
+
+    return args.memoryType ? memories.filter((memory) => memory.memoryType === args.memoryType) : memories;
+  },
+});
+
+export const listMemoryReviewItemsForViewer = queryGeneric({
+  args: {
+    limit: v.optional(v.number()),
+    memoryType: v.optional(memoryType),
+  },
+  handler: async (ctx, args) => {
+    const { brain } = await requireOwnedBrain(ctx);
+    const memories = await ctx.db
+      .query("memories")
+      .withIndex("by_brain_review_state", (q) => q.eq("brainInstanceId", brain._id))
+      .filter((q) => q.eq(q.field("reviewState"), "pending_review"))
+      .order("desc")
+      .take(args.limit ?? 50);
+
+    return args.memoryType ? memories.filter((memory) => memory.memoryType === args.memoryType) : memories;
+  },
+});
+
+export const listAcceptedMemoryLibraryForViewer = queryGeneric({
+  args: {
+    limit: v.optional(v.number()),
+    memoryType: v.optional(memoryType),
+  },
+  handler: async (ctx, args) => {
+    const { brain } = await requireOwnedBrain(ctx);
+    const memories = args.memoryType
+      ? await ctx.db
+          .query("memories")
+          .withIndex("by_brain_type_status", (q) => q.eq("brainInstanceId", brain._id))
+          .filter((q) => q.and(q.eq(q.field("memoryType"), args.memoryType), q.eq(q.field("status"), "accepted")))
+          .order("desc")
+          .take(args.limit ?? 100)
+      : await ctx.db
+          .query("memories")
+          .withIndex("by_brain_status", (q) => q.eq("brainInstanceId", brain._id))
+          .filter((q) => q.eq(q.field("status"), "accepted"))
+          .order("desc")
+          .take(args.limit ?? 100);
+
+    return memories;
+  },
+});
+
+export const searchMemoriesForViewer = queryGeneric({
+  args: {
+    query: v.optional(v.string()),
+    memoryType: v.optional(memoryType),
+    kinds: v.optional(v.array(memoryType)),
+    relatedEntityRefs: v.optional(v.array(entityRef)),
+    includeArchived: v.optional(v.boolean()),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const { brain } = await requireOwnedBrain(ctx);
+    return await searchMemoriesForBrainId(ctx.db, brain._id, args);
+  },
+});
+
+export const getContextBundleForViewer = queryGeneric({
+  args: {
+    query: v.optional(v.string()),
+    memoryType: v.optional(memoryType),
+    kinds: v.optional(v.array(memoryType)),
+    relatedEntityRefs: v.optional(v.array(entityRef)),
+    includeArchived: v.optional(v.boolean()),
+    memoryLimit: v.optional(v.number()),
+    entityLimit: v.optional(v.number()),
+    sourceLimit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const { brain } = await requireOwnedBrain(ctx);
+    return await contextBundleForBrainId(ctx.db, brain._id, args);
+  },
+});
+
+export const getMemoryDetailForViewer = queryGeneric({
+  args: {
+    memoryId: v.id("memories"),
+  },
+  handler: async (ctx, args) => {
+    const { brain } = await requireOwnedBrain(ctx);
+    const memory = await ctx.db.get(args.memoryId);
+    if (!memory || memory.brainInstanceId !== brain._id) {
+      return null;
+    }
+
+    const [sourceRefs, relatedEntities] = await Promise.all([
+      sourceRefsForMemory(ctx.db, brain._id, memory.sourceRefIds),
+      relatedEntitiesForMemory(ctx.db, brain._id, memory.relatedEntityRefs as any),
+    ]);
+
+    return { memory, sourceRefs, relatedEntities };
+  },
+});
+
+export const captureThoughtForViewer = mutationGeneric({
+  args: {
+    title: v.optional(v.string()),
+    summary: v.optional(v.string()),
+    body: v.string(),
+    confidence: v.optional(v.number()),
+    sourceRefIds: v.optional(v.array(v.id("sourceRefs"))),
+    sourceRefs: v.optional(v.array(sourceRefInput)),
+    relatedEntityRefs: v.optional(v.array(entityRef)),
+    captureReason: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const { user, brain } = await requireOwnedBrain(ctx);
+    const body = args.body.trim();
+    if (!body) {
+      throw new Error("thought body is required");
+    }
+
+    const now = Date.now();
+    const sourceRefIds = await memorySourceRefIdsFromArgs(
+      ctx.db,
+      brain._id,
+      args.sourceRefIds,
+      args.sourceRefs,
+      now,
+    );
+    const relatedEntityRefs = await requireRelatedEntityRefsForBrain(ctx.db, brain._id, args.relatedEntityRefs as any);
+    const title = memoryTitleFor("thought", args.title, body);
+    const memoryId = await ctx.db.insert("memories", {
+      brainInstanceId: brain._id,
+      memoryType: "thought",
+      title,
+      summary: optionalTrimmed(args.summary),
+      body,
+      status: "inbox",
+      reviewState: "unreviewed",
+      confidence: args.confidence,
+      sourceRefIds,
+      relatedEntityRefs,
+      captureReason: optionalTrimmed(args.captureReason),
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    await ctx.db.insert("activityEvents", {
+      brainInstanceId: brain._id,
+      activityType: "memory_thought_captured",
+      actorType: "user",
+      actorId: user._id,
+      timestamp: now,
+      summary: `Thought captured: ${title}`,
+      metadata: { memoryId, memoryType: "thought", captureReason: args.captureReason },
+      sourceRefIds,
+    });
+
+    return { memoryId, status: "inbox", reviewState: "unreviewed" };
+  },
+});
+
+export const recordDurableMemoryForViewer = mutationGeneric({
+  args: {
+    memoryType: v.optional(memoryType),
+    title: v.optional(v.string()),
+    summary: v.optional(v.string()),
+    body: v.string(),
+    confidence: v.optional(v.number()),
+    sourceRefIds: v.optional(v.array(v.id("sourceRefs"))),
+    sourceRefs: v.optional(v.array(sourceRefInput)),
+    relatedEntityRefs: v.optional(v.array(entityRef)),
+    rubricDecision: v.optional(v.string()),
+    captureReason: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const { user, brain } = await requireOwnedBrain(ctx);
+    const body = args.body.trim();
+    if (!body) {
+      throw new Error("memory body is required");
+    }
+
+    const now = Date.now();
+    const memoryTypeName = args.memoryType ?? "memory";
+    const sourceRefIds = await memorySourceRefIdsFromArgs(
+      ctx.db,
+      brain._id,
+      args.sourceRefIds,
+      args.sourceRefs,
+      now,
+    );
+    const relatedEntityRefs = await requireRelatedEntityRefsForBrain(ctx.db, brain._id, args.relatedEntityRefs as any);
+    const title = memoryTitleFor(memoryTypeName, args.title, body);
+    const memoryId = await ctx.db.insert("memories", {
+      brainInstanceId: brain._id,
+      memoryType: memoryTypeName,
+      title,
+      summary: optionalTrimmed(args.summary),
+      body,
+      status: "accepted",
+      reviewState: "accepted",
+      confidence: args.confidence,
+      sourceRefIds,
+      relatedEntityRefs,
+      rubricDecision: optionalTrimmed(args.rubricDecision),
+      captureReason: optionalTrimmed(args.captureReason),
+      reviewedBy: user._id,
+      reviewedAt: now,
+      acceptedAt: now,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    await ctx.db.insert("activityEvents", {
+      brainInstanceId: brain._id,
+      activityType: "memory_recorded",
+      actorType: "user",
+      actorId: user._id,
+      timestamp: now,
+      summary: `Memory recorded: ${title}`,
+      metadata: {
+        memoryId,
+        memoryType: memoryTypeName,
+        rubricDecision: args.rubricDecision,
+        captureReason: args.captureReason,
+      },
+      sourceRefIds,
+    });
+
+    return { memoryId, status: "accepted", reviewState: "accepted" };
+  },
+});
+
+export const submitMemoryReviewCandidateForViewer = mutationGeneric({
+  args: {
+    memoryType,
+    title: v.optional(v.string()),
+    summary: v.optional(v.string()),
+    body: v.string(),
+    confidence: v.optional(v.number()),
+    sourceRefIds: v.optional(v.array(v.id("sourceRefs"))),
+    sourceRefs: v.optional(v.array(sourceRefInput)),
+    relatedEntityRefs: v.optional(v.array(entityRef)),
+    rubricDecision: v.optional(v.string()),
+    captureReason: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const { user, brain } = await requireOwnedBrain(ctx);
+    const body = args.body.trim();
+    if (!body) {
+      throw new Error("candidate body is required");
+    }
+
+    const now = Date.now();
+    const sourceRefIds = await memorySourceRefIdsFromArgs(
+      ctx.db,
+      brain._id,
+      args.sourceRefIds,
+      args.sourceRefs,
+      now,
+    );
+    const relatedEntityRefs = await requireRelatedEntityRefsForBrain(ctx.db, brain._id, args.relatedEntityRefs as any);
+    const title = memoryTitleFor(args.memoryType, args.title, body);
+    const memoryId = await ctx.db.insert("memories", {
+      brainInstanceId: brain._id,
+      memoryType: args.memoryType,
+      title,
+      summary: optionalTrimmed(args.summary),
+      body,
+      status: "inbox",
+      reviewState: "pending_review",
+      confidence: args.confidence,
+      sourceRefIds,
+      relatedEntityRefs,
+      rubricDecision: optionalTrimmed(args.rubricDecision),
+      captureReason: optionalTrimmed(args.captureReason),
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    await ctx.db.insert("activityEvents", {
+      brainInstanceId: brain._id,
+      activityType: "memory_review_candidate_submitted",
+      actorType: "user",
+      actorId: user._id,
+      timestamp: now,
+      summary: `Memory review candidate submitted: ${title}`,
+      metadata: {
+        memoryId,
+        memoryType: args.memoryType,
+        rubricDecision: args.rubricDecision,
+        captureReason: args.captureReason,
+      },
+      sourceRefIds,
+    });
+
+    return { memoryId, status: "inbox", reviewState: "pending_review" };
+  },
+});
+
+export const acceptMemoryForViewer = mutationGeneric({
+  args: {
+    memoryId: v.id("memories"),
+    memoryType: v.optional(memoryType),
+    title: v.optional(v.string()),
+    summary: v.optional(v.string()),
+    body: v.optional(v.string()),
+    confidence: v.optional(v.number()),
+    sourceRefIds: v.optional(v.array(v.id("sourceRefs"))),
+    sourceRefs: v.optional(v.array(sourceRefInput)),
+    relatedEntityRefs: v.optional(v.array(entityRef)),
+    rubricDecision: v.optional(v.string()),
+    captureReason: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const { user, brain } = await requireOwnedBrain(ctx);
+    const memory = await ctx.db.get(args.memoryId);
+    if (!memory || memory.brainInstanceId !== brain._id) {
+      throw new Error("memory not found");
+    }
+    if (memory.status === "archived") {
+      throw new Error("archived memories cannot be accepted");
+    }
+
+    const now = Date.now();
+    const body = args.body === undefined ? memory.body : args.body.trim();
+    if (!body) {
+      throw new Error("memory body cannot be empty");
+    }
+    const memoryTypeName = args.memoryType ?? memory.memoryType;
+    const newSourceRefIds = await memorySourceRefIdsFromArgs(
+      ctx.db,
+      brain._id,
+      args.sourceRefIds,
+      args.sourceRefs,
+      now,
+    );
+    const relatedEntityRefs =
+      args.relatedEntityRefs === undefined
+        ? memory.relatedEntityRefs
+        : await requireRelatedEntityRefsForBrain(ctx.db, brain._id, args.relatedEntityRefs as any);
+    const sourceRefIds = dedupeIds([...(memory.sourceRefIds ?? []), ...newSourceRefIds]);
+    const title = memoryTitleFor(memoryTypeName, args.title ?? memory.title, body);
+
+    await ctx.db.patch(args.memoryId, {
+      memoryType: memoryTypeName,
+      title,
+      summary: args.summary === undefined ? memory.summary : optionalTrimmed(args.summary),
+      body,
+      status: "accepted",
+      reviewState: "accepted",
+      confidence: args.confidence ?? memory.confidence,
+      sourceRefIds,
+      relatedEntityRefs,
+      rubricDecision: args.rubricDecision === undefined ? memory.rubricDecision : optionalTrimmed(args.rubricDecision),
+      captureReason: args.captureReason === undefined ? memory.captureReason : optionalTrimmed(args.captureReason),
+      reviewedBy: user._id,
+      reviewedAt: now,
+      acceptedAt: memory.acceptedAt ?? now,
+      updatedAt: now,
+    });
+
+    await ctx.db.insert("activityEvents", {
+      brainInstanceId: brain._id,
+      activityType: "memory_accepted",
+      actorType: "user",
+      actorId: user._id,
+      timestamp: now,
+      summary: `Memory accepted: ${title}`,
+      metadata: { memoryId: args.memoryId, memoryType: memoryTypeName },
+      sourceRefIds,
+    });
+
+    return { memoryId: args.memoryId, status: "accepted", reviewState: "accepted" };
+  },
+});
+
+export const rejectMemoryForViewer = mutationGeneric({
+  args: {
+    memoryId: v.id("memories"),
+    rejectionReason: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const { user, brain } = await requireOwnedBrain(ctx);
+    const memory = await ctx.db.get(args.memoryId);
+    if (!memory || memory.brainInstanceId !== brain._id) {
+      throw new Error("memory not found");
+    }
+
+    const now = Date.now();
+    await ctx.db.patch(args.memoryId, {
+      status: "rejected",
+      reviewState: "rejected",
+      reviewedBy: user._id,
+      reviewedAt: now,
+      rejectedAt: now,
+      rejectionReason: optionalTrimmed(args.rejectionReason),
+      updatedAt: now,
+    });
+
+    await ctx.db.insert("activityEvents", {
+      brainInstanceId: brain._id,
+      activityType: "memory_rejected",
+      actorType: "user",
+      actorId: user._id,
+      timestamp: now,
+      summary: `Memory rejected: ${memory.title}`,
+      metadata: { memoryId: args.memoryId, rejectionReason: args.rejectionReason },
+      sourceRefIds: memory.sourceRefIds,
+    });
+
+    return { memoryId: args.memoryId, status: "rejected", reviewState: "rejected" };
+  },
+});
+
+export const archiveMemoryForViewer = mutationGeneric({
+  args: {
+    memoryId: v.id("memories"),
+    archiveReason: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const { user, brain } = await requireOwnedBrain(ctx);
+    const memory = await ctx.db.get(args.memoryId);
+    if (!memory || memory.brainInstanceId !== brain._id) {
+      throw new Error("memory not found");
+    }
+
+    const now = Date.now();
+    await ctx.db.patch(args.memoryId, {
+      status: "archived",
+      reviewState: "archived",
+      archivedAt: now,
+      archiveReason: optionalTrimmed(args.archiveReason),
+      updatedAt: now,
+    });
+
+    await ctx.db.insert("activityEvents", {
+      brainInstanceId: brain._id,
+      activityType: "memory_archived",
+      actorType: "user",
+      actorId: user._id,
+      timestamp: now,
+      summary: `Memory archived: ${memory.title}`,
+      metadata: { memoryId: args.memoryId, archiveReason: args.archiveReason },
+      sourceRefIds: memory.sourceRefIds,
+    });
+
+    return { memoryId: args.memoryId, status: "archived", reviewState: "archived" };
+  },
+});
+
+export const linkMemoryToEntitiesForViewer = mutationGeneric({
+  args: {
+    memoryId: v.id("memories"),
+    relatedEntityRefs: v.array(entityRef),
+    mode: v.optional(v.union(v.literal("add"), v.literal("replace"))),
+    reason: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const { user, brain } = await requireOwnedBrain(ctx);
+    const memory = await ctx.db.get(args.memoryId);
+    if (!memory || memory.brainInstanceId !== brain._id) {
+      throw new Error("memory not found");
+    }
+
+    const now = Date.now();
+    const requestedRefs = await requireRelatedEntityRefsForBrain(ctx.db, brain._id, args.relatedEntityRefs as any);
+    const relatedEntityRefs =
+      args.mode === "replace"
+        ? requestedRefs
+        : dedupeEntityRefs([...(memory.relatedEntityRefs ?? []), ...requestedRefs]);
+
+    await ctx.db.patch(args.memoryId, {
+      relatedEntityRefs,
+      updatedAt: now,
+    });
+
+    await ctx.db.insert("activityEvents", {
+      brainInstanceId: brain._id,
+      activityType: args.mode === "replace" ? "memory_entity_links_replaced" : "memory_entity_links_added",
+      actorType: "user",
+      actorId: user._id,
+      timestamp: now,
+      summary: `Memory linked to ${requestedRefs.length} ${requestedRefs.length === 1 ? "entity" : "entities"}: ${memory.title}`,
+      metadata: {
+        memoryId: args.memoryId,
+        relatedEntityRefs,
+        reason: args.reason,
+      },
+      sourceRefIds: memory.sourceRefIds,
+    });
+
+    return { memoryId: args.memoryId, relatedEntityRefs };
+  },
+});
+
+export const captureThoughtForBrain = mutationGeneric({
+  args: {
+    brainInstanceId: v.id("brainInstances"),
+    text: v.string(),
+    content: v.optional(v.string()),
+    proposedKind: v.optional(memoryType),
+    captureReason: v.optional(v.string()),
+    rubricDecision: v.optional(v.string()),
+    confidence: v.optional(v.number()),
+    reviewBehavior: v.optional(memoryReviewBehavior),
+    sourceRefIds: v.optional(v.array(v.id("sourceRefs"))),
+    sourceRefs: v.optional(v.array(sourceRefInput)),
+    relatedEntityRefs: v.optional(v.array(entityRef)),
+    createdBy: v.optional(v.string()),
+    metadata: v.optional(v.any()),
+  },
+  handler: async ({ db }, args) => {
+    const body = (args.content ?? args.text).trim();
+    if (!body) {
+      throw new Error("memory content is required");
+    }
+
+    const now = Date.now();
+    const memoryTypeName = args.proposedKind ?? "memory";
+    const reviewBehavior = args.reviewBehavior ?? "auto";
+    const sourceRefIds = await memorySourceRefIdsFromArgs(db, args.brainInstanceId, args.sourceRefIds, args.sourceRefs, now);
+    const relatedEntityRefs = await requireRelatedEntityRefsForBrain(db, args.brainInstanceId, args.relatedEntityRefs as any);
+    const title = memoryTitleFor(memoryTypeName, undefined, body);
+    const submitForReview = reviewBehavior === "submit_for_review";
+    const directAccept = reviewBehavior === "accept";
+
+    const memoryId = await db.insert("memories", {
+      brainInstanceId: args.brainInstanceId,
+      memoryType: memoryTypeName,
+      title,
+      body,
+      status: directAccept ? "accepted" : "inbox",
+      reviewState: directAccept ? "accepted" : submitForReview ? "pending_review" : "unreviewed",
+      confidence: args.confidence,
+      sourceRefIds,
+      relatedEntityRefs,
+      rubricDecision: optionalTrimmed(args.rubricDecision),
+      captureReason: optionalTrimmed(args.captureReason),
+      acceptedAt: directAccept ? now : undefined,
+      reviewedAt: directAccept ? now : undefined,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    await db.insert("activityEvents", {
+      brainInstanceId: args.brainInstanceId,
+      activityType: submitForReview ? "memory_review_candidate_submitted" : "memory_captured_from_mcp",
+      actorType: "harness",
+      actorId: args.createdBy,
+      timestamp: now,
+      summary: `${submitForReview ? "Memory review candidate submitted" : "Memory captured"}: ${title}`,
+      metadata: {
+        memoryId,
+        memoryType: memoryTypeName,
+        captureReason: args.captureReason,
+        rubricDecision: args.rubricDecision,
+        reviewBehavior,
+        sourceMetadata: args.metadata,
+      },
+      sourceRefIds,
+    });
+
+    return {
+      status: submitForReview ? "submitted_for_review" : "captured",
+      memoryId,
+      reviewItemId: submitForReview ? memoryId : undefined,
+      kind: memoryTypeName,
+      title,
+      sourceRefIds,
+      relatedEntityRefs,
+      confidence: args.confidence,
+      rubricDecision: args.rubricDecision,
+    };
+  },
+});
+
+export const recordMemoryForBrain = mutationGeneric({
+  args: {
+    brainInstanceId: v.id("brainInstances"),
+    content: v.string(),
+    kind: v.optional(memoryType),
+    title: v.optional(v.string()),
+    summary: v.optional(v.string()),
+    captureReason: v.optional(v.string()),
+    rubricDecision: v.string(),
+    confidence: v.optional(v.number()),
+    reviewBehavior: v.optional(memoryReviewBehavior),
+    sourceRefIds: v.optional(v.array(v.id("sourceRefs"))),
+    sourceRefs: v.optional(v.array(sourceRefInput)),
+    relatedEntityRefs: v.optional(v.array(entityRef)),
+    createdBy: v.optional(v.string()),
+    metadata: v.optional(v.any()),
+  },
+  handler: async ({ db }, args) => {
+    const body = args.content.trim();
+    if (!body) {
+      throw new Error("memory content is required");
+    }
+    const rubricDecision = args.rubricDecision.trim();
+    if (!rubricDecision) {
+      throw new Error("rubricDecision is required");
+    }
+
+    const now = Date.now();
+    const memoryTypeName = args.kind ?? "memory";
+    const reviewBehavior = args.reviewBehavior ?? "accept";
+    const submitForReview = reviewBehavior === "submit_for_review";
+    const sourceRefIds = await memorySourceRefIdsFromArgs(db, args.brainInstanceId, args.sourceRefIds, args.sourceRefs, now);
+    const relatedEntityRefs = await requireRelatedEntityRefsForBrain(db, args.brainInstanceId, args.relatedEntityRefs as any);
+    const title = memoryTitleFor(memoryTypeName, args.title, body);
+
+    const memoryId = await db.insert("memories", {
+      brainInstanceId: args.brainInstanceId,
+      memoryType: memoryTypeName,
+      title,
+      summary: optionalTrimmed(args.summary),
+      body,
+      status: submitForReview ? "inbox" : "accepted",
+      reviewState: submitForReview ? "pending_review" : "accepted",
+      confidence: args.confidence,
+      sourceRefIds,
+      relatedEntityRefs,
+      rubricDecision,
+      captureReason: optionalTrimmed(args.captureReason),
+      acceptedAt: submitForReview ? undefined : now,
+      reviewedAt: submitForReview ? undefined : now,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    await db.insert("activityEvents", {
+      brainInstanceId: args.brainInstanceId,
+      activityType: submitForReview ? "memory_review_candidate_submitted" : "memory_recorded_from_mcp",
+      actorType: "harness",
+      actorId: args.createdBy,
+      timestamp: now,
+      summary: `${submitForReview ? "Memory review candidate submitted" : "Memory recorded"}: ${title}`,
+      metadata: {
+        memoryId,
+        memoryType: memoryTypeName,
+        captureReason: args.captureReason,
+        rubricDecision,
+        reviewBehavior,
+        sourceMetadata: args.metadata,
+      },
+      sourceRefIds,
+    });
+
+    return {
+      status: submitForReview ? "submitted_for_review" : "recorded",
+      memoryId,
+      reviewItemId: submitForReview ? memoryId : undefined,
+      kind: memoryTypeName,
+      title,
+      sourceRefIds,
+      relatedEntityRefs,
+      confidence: args.confidence,
+      rubricDecision,
+    };
+  },
+});
+
+export const submitMemoryReviewCandidateForBrain = mutationGeneric({
+  args: {
+    brainInstanceId: v.id("brainInstances"),
+    content: v.string(),
+    proposedKind: v.optional(memoryType),
+    captureReason: v.optional(v.string()),
+    rubricDecision: v.optional(v.string()),
+    confidence: v.optional(v.number()),
+    reviewBehavior: v.optional(memoryReviewBehavior),
+    sourceRefIds: v.optional(v.array(v.id("sourceRefs"))),
+    sourceRefs: v.optional(v.array(sourceRefInput)),
+    relatedEntityRefs: v.optional(v.array(entityRef)),
+    createdBy: v.optional(v.string()),
+    metadata: v.optional(v.any()),
+  },
+  handler: async ({ db }, args) => {
+    const body = args.content.trim();
+    if (!body) {
+      throw new Error("memory content is required");
+    }
+
+    const now = Date.now();
+    const memoryTypeName = args.proposedKind ?? "memory";
+    const sourceRefIds = await memorySourceRefIdsFromArgs(db, args.brainInstanceId, args.sourceRefIds, args.sourceRefs, now);
+    const relatedEntityRefs = await requireRelatedEntityRefsForBrain(db, args.brainInstanceId, args.relatedEntityRefs as any);
+    const title = memoryTitleFor(memoryTypeName, undefined, body);
+    const memoryId = await db.insert("memories", {
+      brainInstanceId: args.brainInstanceId,
+      memoryType: memoryTypeName,
+      title,
+      body,
+      status: "inbox",
+      reviewState: "pending_review",
+      confidence: args.confidence,
+      sourceRefIds,
+      relatedEntityRefs,
+      rubricDecision: optionalTrimmed(args.rubricDecision),
+      captureReason: optionalTrimmed(args.captureReason),
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    await db.insert("activityEvents", {
+      brainInstanceId: args.brainInstanceId,
+      activityType: "memory_review_candidate_submitted",
+      actorType: "harness",
+      actorId: args.createdBy,
+      timestamp: now,
+      summary: `Memory review candidate submitted: ${title}`,
+      metadata: {
+        memoryId,
+        memoryType: memoryTypeName,
+        captureReason: args.captureReason,
+        rubricDecision: args.rubricDecision,
+        reviewBehavior: args.reviewBehavior,
+        sourceMetadata: args.metadata,
+      },
+      sourceRefIds,
+    });
+
+    return {
+      status: "submitted_for_review",
+      memoryId,
+      reviewItemId: memoryId,
+      kind: memoryTypeName,
+      title,
+      sourceRefIds,
+      relatedEntityRefs,
+      confidence: args.confidence,
+      rubricDecision: args.rubricDecision,
+    };
+  },
+});
+
+export const searchMemoriesForBrain = queryGeneric({
+  args: {
+    brainInstanceId: v.id("brainInstances"),
+    query: v.optional(v.string()),
+    memoryType: v.optional(memoryType),
+    kinds: v.optional(v.array(memoryType)),
+    relatedEntityRefs: v.optional(v.array(entityRef)),
+    includeArchived: v.optional(v.boolean()),
+    limit: v.optional(v.number()),
+  },
+  handler: async ({ db }, args) => {
+    return await searchMemoriesForBrainId(db, args.brainInstanceId, args);
+  },
+});
+
+export const searchMemoryForBrain = searchMemoriesForBrain;
+
+export const memoryLibraryForBrain = queryGeneric({
+  args: {
+    brainInstanceId: v.id("brainInstances"),
+    query: v.optional(v.string()),
+    memoryType: v.optional(memoryType),
+    kinds: v.optional(v.array(memoryType)),
+    relatedEntityRefs: v.optional(v.array(entityRef)),
+    includeArchived: v.optional(v.boolean()),
+    limit: v.optional(v.number()),
+  },
+  handler: async ({ db }, args) => {
+    return await searchMemoriesForBrainId(db, args.brainInstanceId, args);
+  },
+});
+
+export const getContextBundleForBrain = queryGeneric({
+  args: {
+    brainInstanceId: v.id("brainInstances"),
+    query: v.optional(v.string()),
+    memoryType: v.optional(memoryType),
+    kinds: v.optional(v.array(memoryType)),
+    relatedEntityRefs: v.optional(v.array(entityRef)),
+    includeArchived: v.optional(v.boolean()),
+    memoryLimit: v.optional(v.number()),
+    entityLimit: v.optional(v.number()),
+    sourceLimit: v.optional(v.number()),
+  },
+  handler: async ({ db }, args) => {
+    return await contextBundleForBrainId(db, args.brainInstanceId, args);
+  },
+});
+
+export const memoryDetailForBrain = queryGeneric({
+  args: {
+    brainInstanceId: v.id("brainInstances"),
+    memoryId: v.id("memories"),
+    includeSourceRefs: v.optional(v.boolean()),
+    includeRelatedEntities: v.optional(v.boolean()),
+  },
+  handler: async ({ db }, args) => {
+    const memory = await db.get(args.memoryId);
+    if (!memory || memory.brainInstanceId !== args.brainInstanceId) {
+      return null;
+    }
+
+    const [sourceRefs, relatedEntities] = await Promise.all([
+      args.includeSourceRefs === false ? [] : sourceRefsForMemory(db, args.brainInstanceId, memory.sourceRefIds),
+      args.includeRelatedEntities === false ? [] : relatedEntitiesForMemory(db, args.brainInstanceId, memory.relatedEntityRefs as any),
+    ]);
+
+    return { memory, sourceRefs, relatedEntities };
+  },
+});
+
+export const linkMemoryForBrain = mutationGeneric({
+  args: {
+    brainInstanceId: v.id("brainInstances"),
+    memoryId: v.id("memories"),
+    entityRef,
+    relationshipType: v.optional(v.string()),
+    reason: v.optional(v.string()),
+    confidence: v.optional(v.number()),
+    sourceRefIds: v.optional(v.array(v.id("sourceRefs"))),
+    sourceRefs: v.optional(v.array(sourceRefInput)),
+    createdBy: v.optional(v.string()),
+  },
+  handler: async ({ db }, args) => {
+    const memory = await db.get(args.memoryId);
+    if (!memory || memory.brainInstanceId !== args.brainInstanceId) {
+      throw new Error("memory not found for brain instance");
+    }
+
+    const now = Date.now();
+    const [entityRefToAdd] = await requireRelatedEntityRefsForBrain(db, args.brainInstanceId, [args.entityRef] as any);
+    const newSourceRefIds = await memorySourceRefIdsFromArgs(db, args.brainInstanceId, args.sourceRefIds, args.sourceRefs, now);
+    const relatedEntityRefs = dedupeEntityRefs([...(memory.relatedEntityRefs ?? []), entityRefToAdd]);
+    const sourceRefIds = dedupeIds([...(memory.sourceRefIds ?? []), ...newSourceRefIds]);
+
+    await db.patch(args.memoryId, {
+      relatedEntityRefs,
+      sourceRefIds,
+      updatedAt: now,
+    });
+
+    await db.insert("activityEvents", {
+      brainInstanceId: args.brainInstanceId,
+      activityType: "memory_entity_linked_from_mcp",
+      actorType: "harness",
+      actorId: args.createdBy,
+      timestamp: now,
+      summary: `Memory linked to ${args.entityRef.entityType}: ${memory.title}`,
+      metadata: {
+        memoryId: args.memoryId,
+        entityRef: args.entityRef,
+        relationshipType: args.relationshipType,
+        reason: args.reason,
+        confidence: args.confidence,
+      },
+      sourceRefIds,
+    });
+
+    return {
+      status: "linked",
+      memoryId: args.memoryId,
+      relatedEntityRefs,
+      sourceRefIds,
+      confidence: args.confidence,
+    };
   },
 });
 

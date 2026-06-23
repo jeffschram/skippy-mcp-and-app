@@ -24,6 +24,31 @@ const entityRef = v.object({
   entityId: v.string(),
 });
 
+const memoryType = v.union(
+  v.literal("thought"),
+  v.literal("memory"),
+  v.literal("decision"),
+  v.literal("principle"),
+  v.literal("question"),
+  v.literal("insight"),
+  v.literal("artifact"),
+);
+
+const memoryStatus = v.union(
+  v.literal("inbox"),
+  v.literal("accepted"),
+  v.literal("rejected"),
+  v.literal("archived"),
+);
+
+const memoryReviewState = v.union(
+  v.literal("unreviewed"),
+  v.literal("pending_review"),
+  v.literal("accepted"),
+  v.literal("rejected"),
+  v.literal("archived"),
+);
+
 const processingMetadata = {
   processingState,
   rejectedAt: v.optional(v.number()),
@@ -60,6 +85,39 @@ const notificationPreferences = v.object({
   ),
 });
 
+const memoryPrivacyPolicy = v.object({
+  storageMode: v.optional(
+    v.union(
+      v.literal("summaries_with_refs"),
+      v.literal("source_refs_only"),
+      v.literal("full_content_when_important"),
+    ),
+  ),
+  excludedContent: v.optional(v.string()),
+  sensitiveContentInstructions: v.optional(v.string()),
+  retentionDays: v.optional(v.number()),
+});
+
+const recallPreferences = v.object({
+  cadence: v.optional(v.union(v.literal("manual"), v.literal("daily"), v.literal("weekly"), v.literal("active_context"))),
+  focusWindow: v.optional(v.string()),
+  allowProactiveRecall: v.optional(v.boolean()),
+});
+
+const harnessAutonomyPolicy = v.object({
+  ingestionMode: v.optional(
+    v.union(
+      v.literal("suggest_only"),
+      v.literal("auto_accept_high_confidence"),
+      v.literal("auto_accept_with_action_review"),
+    ),
+  ),
+  actionApproval: v.optional(
+    v.union(v.literal("always_require"), v.literal("allow_low_risk_drafts"), v.literal("allow_low_risk_send")),
+  ),
+  notes: v.optional(v.string()),
+});
+
 export default defineSchema({
   users: defineTable({
     authProvider: v.literal("clerk"),
@@ -93,6 +151,9 @@ export default defineSchema({
     linkEnrichmentEnabled: v.boolean(),
     notificationsEnabled: v.boolean(),
     notificationPreferences: v.optional(notificationPreferences),
+    memoryPrivacyPolicy: v.optional(memoryPrivacyPolicy),
+    recallPreferences: v.optional(recallPreferences),
+    harnessAutonomyPolicy: v.optional(harnessAutonomyPolicy),
     embeddingProviderMode: v.optional(v.string()),
     embeddingModel: v.optional(v.string()),
     featureToggles: v.optional(v.any()),
@@ -236,6 +297,77 @@ export default defineSchema({
     createdAt: v.number(),
     updatedAt: v.number(),
   }).index("by_brain_state", ["brainInstanceId", "processingState"]),
+
+  memories: defineTable({
+    brainInstanceId: v.id("brainInstances"),
+    memoryType,
+    title: v.string(),
+    summary: v.optional(v.string()),
+    body: v.string(),
+    status: memoryStatus,
+    reviewState: memoryReviewState,
+    confidence: v.optional(v.number()),
+    sourceRefIds,
+    relatedEntityRefs: v.optional(v.array(entityRef)),
+    rubricDecision: v.optional(v.string()),
+    captureReason: v.optional(v.string()),
+    reviewedBy: v.optional(v.id("users")),
+    reviewedAt: v.optional(v.number()),
+    acceptedAt: v.optional(v.number()),
+    rejectedAt: v.optional(v.number()),
+    rejectionReason: v.optional(v.string()),
+    archivedAt: v.optional(v.number()),
+    archiveReason: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_brain_status", ["brainInstanceId", "status"])
+    .index("by_brain_review_state", ["brainInstanceId", "reviewState"])
+    .index("by_brain_type_status", ["brainInstanceId", "memoryType", "status"])
+    .index("by_brain_created", ["brainInstanceId", "createdAt"])
+    .index("by_brain_updated", ["brainInstanceId", "updatedAt"]),
+
+  interviews: defineTable({
+    brainInstanceId: v.id("brainInstances"),
+    templateKind: v.union(
+      v.literal("project"),
+      v.literal("goal"),
+      v.literal("person"),
+      v.literal("decision"),
+      v.literal("weekly_review"),
+    ),
+    title: v.string(),
+    status: v.union(v.literal("active"), v.literal("completed"), v.literal("archived")),
+    currentQuestionIndex: v.number(),
+    questionCount: v.number(),
+    subjectEntityRef: v.optional(entityRef),
+    subjectLabel: v.optional(v.string()),
+    summary: v.optional(v.string()),
+    startedBy: v.id("users"),
+    completedAt: v.optional(v.number()),
+    archivedAt: v.optional(v.number()),
+    archiveReason: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_brain_status", ["brainInstanceId", "status"])
+    .index("by_brain_kind_status", ["brainInstanceId", "templateKind", "status"])
+    .index("by_brain_updated", ["brainInstanceId", "updatedAt"]),
+
+  interviewResponses: defineTable({
+    brainInstanceId: v.id("brainInstances"),
+    interviewId: v.id("interviews"),
+    questionId: v.string(),
+    questionIndex: v.number(),
+    prompt: v.string(),
+    answerText: v.string(),
+    answerValue: v.optional(v.any()),
+    memoryCandidateId: v.optional(v.id("memories")),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_interview_order", ["interviewId", "questionIndex"])
+    .index("by_brain_interview", ["brainInstanceId", "interviewId"]),
 
   relationships: defineTable({
     brainInstanceId: v.id("brainInstances"),
