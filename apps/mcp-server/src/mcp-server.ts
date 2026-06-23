@@ -107,6 +107,74 @@ function buildIntroMessage() {
   ].join("\n");
 }
 
+function buildSkillsMessage() {
+  const assistantName = getAssistantDisplayName();
+  const appUrl = getSkippyAppUrl();
+
+  return [
+    `# Skippy Harness Skills`,
+    "",
+    `Use these instructions whenever a harness is connected to the ${assistantName} MCP. Treat ${assistantName} as the user's portable second-brain, project context, memory, and review layer.`,
+    "",
+    "## Core Behavior",
+    "",
+    "1. Retrieve before contextful work.",
+    "   - Use `ask`, `summarize_focus`, `list_memory`, or `get_context_bundle` when the user mentions a known project, person, company, task, source, recurring area, prior decision, or asks what to focus on.",
+    "   - Use retrieved context to avoid stale decisions and duplicate captures. Mention only the context that changes the work.",
+    "",
+    "2. Apply the importance rubric before writing.",
+    "   - Use `get_importance_rubric` before nontrivial source ingestion.",
+    "   - Store only items that are actionable, deadline-bearing, relationship-building, decision-relevant, financially/security relevant, tied to active focus, user-preference-like, or clearly useful later.",
+    "   - Ignore routine notifications, marketing, newsletters, generic confirmations, stale noise, and raw source content with no future-use signal.",
+    "",
+    "3. Choose the narrowest tool.",
+    "   - `ingest_object`: primary accepted write for source-backed tasks, projects, people, companies, links, notes, goals, or knowledge objects. Include `rubricDecision`.",
+    "   - `record_memory`, `record_decision`, `record_principle`: durable second-brain memory when the harness can explain why it belongs.",
+    "   - `capture_thought`: explicit user thought or preference that should become memory or review.",
+    "   - `submit_memory_review_candidate`: possible memory that seems useful but uncertain.",
+    "   - `submit_candidate_object`: legacy review fallback for non-memory objects when classification or importance is uncertain.",
+    "   - `create_project` / `create_task`: only for explicit user commands.",
+    "   - `link_entities` / `link_memory`: only after accepted entity IDs or memory IDs are known.",
+    "   - `list_pending_actions`: inspect external side effects awaiting approval. Do not send emails/messages or alter external systems through Skippy.",
+    "",
+    "4. Use the consent model.",
+    "   - Direct capture: explicit user requests, low-risk source-backed commitments, deadlines, decisions, principles, project facts, and stable preferences.",
+    "   - Ask first: sensitive personal context, health/legal/financial/family/relationship details, exact addresses, negative judgments about people, major inferred projects, priority changes, strategic commitments, or anything the user may not expect to be retained.",
+    "   - Review candidate: useful but uncertain, potentially duplicate/conflicting, weakly inferred, or needs user classification.",
+    "   - Never store secrets, auth codes, private keys, payment numbers, full raw emails/messages/calendar descriptions, or raw private dumps.",
+    "",
+    "5. Include lightweight provenance.",
+    "   - Add `sourceRefs` for source-derived or inspected content.",
+    "   - Good source refs include `sourceSystem`, upstream IDs, timestamp, participants, URL/deepLink, one-sentence summary, and a short excerpt.",
+    "   - Keep excerpts short and do not copy full private source bodies.",
+    "",
+    "6. Run interviews in the harness chat.",
+    "   - Use `list_interview_templates` to get `assistantDisplayName` and available templates.",
+    "   - Offer interviews using the returned name, e.g. `Want to do a project interview for ${assistantName}?`.",
+    "   - Use `start_interview`, then ask the returned current question in chat.",
+    "   - For each user answer, call `answer_interview_question` and ask the returned next question.",
+    "   - Leave `createMemoryCandidate` false unless the user explicitly wants that answer sent to Memory Inbox.",
+    "   - At the end, ask whether to `complete_interview` and whether to submit a summary memory candidate. Use `archive_interview` for tests/cancellations.",
+    "",
+    "7. Close source-sync status when used.",
+    "   - For batch/scheduled ingestion, call `update_source_sync_status` with `running` at start, heartbeat during long runs, and `completed` or `failed` before ending.",
+    "   - Use `failed` only when the whole run cannot complete; otherwise include partial source errors and finish `completed`.",
+    "",
+    "8. Explain actions plainly.",
+    "   - Tell the user what was stored, skipped, asked, sent to Review, retrieved, linked, or archived.",
+    "   - Include entity type/title, consent path, rubric decision/capture reason, and the Skippy URL returned by the tool.",
+    "",
+    "## Example Confirmation Language",
+    "",
+    "- `Stored Pay Optimum bill as an accepted Skippy task because it has a financial deadline.`",
+    "- `Sent Possible vendor renewal to Skippy Review because the email hints at a commitment, but owner/date are unclear.`",
+    "- `I skipped the newsletter because it had no deadline, relationship signal, decision, or reusable project context.`",
+    "- `I checked Skippy first and found the standing rule to keep source ingestion rubric-first.`",
+    "",
+    `Review and manage Skippy in the app: ${appUrl}`,
+  ].join("\n");
+}
+
 const sourceRefSchema = z.object({
   sourceSystem: z
     .string()
@@ -451,6 +519,25 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
   );
 
   server.registerResource(
+    "skippy_skills",
+    "skippy://guide/skills",
+    {
+      title: "Skippy portable harness skills",
+      description: "Portable instructions that teach any MCP-capable harness how to use Skippy as a second brain.",
+      mimeType: "text/markdown",
+    },
+    (uri) => ({
+      contents: [
+        {
+          uri: uri.href,
+          mimeType: "text/markdown",
+          text: buildSkillsMessage(),
+        },
+      ],
+    }),
+  );
+
+  server.registerResource(
     "skippy_intro",
     "skippy://guide/intro",
     {
@@ -464,6 +551,27 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
           uri: uri.href,
           mimeType: "text/plain",
           text: buildIntroMessage(),
+        },
+      ],
+    }),
+  );
+
+  server.registerPrompt(
+    "skippy_skills",
+    {
+      title: "Load Skippy Skills",
+      description:
+        "Portable harness instructions for using Skippy MCP as a second brain: retrieval, capture, rubric decisions, source refs, review, memory, interviews, and user-facing confirmations.",
+    },
+    () => ({
+      description: "Teach the connected harness how to use Skippy well.",
+      messages: [
+        {
+          role: "assistant",
+          content: {
+            type: "text",
+            text: buildSkillsMessage(),
+          },
         },
       ],
     }),
