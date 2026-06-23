@@ -249,12 +249,24 @@ describe("Skippy MCP manifest", () => {
       expect(prompts.prompts.find((prompt) => prompt.name === "skippy_intro")?.description).toContain(
         "first connected",
       );
+      expect(prompts.prompts.find((prompt) => prompt.name === "skippy_skills")?.description).toContain(
+        "Portable harness instructions",
+      );
 
       const intro = await client.getPrompt({ name: "skippy_intro" });
       expect(intro.messages[0]?.content.type).toBe("text");
       if (intro.messages[0]?.content.type === "text") {
         expect(intro.messages[0].content.text).toContain("Hi, I'm Skippy");
         expect(intro.messages[0].content.text).toContain("http://127.0.0.1:3000");
+      }
+
+      const skills = await client.getPrompt({ name: "skippy_skills" });
+      expect(skills.messages[0]?.content.type).toBe("text");
+      if (skills.messages[0]?.content.type === "text") {
+        expect(skills.messages[0].content.text).toContain("Skippy Harness Skills");
+        expect(skills.messages[0].content.text).toContain("Retrieve before contextful work");
+        expect(skills.messages[0].content.text).toContain("Run interviews in the harness chat");
+        expect(skills.messages[0].content.text).toContain("Use `get_importance_rubric`");
       }
     } finally {
       await client.close();
