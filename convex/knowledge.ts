@@ -3511,6 +3511,56 @@ export const markTaskDoneForViewer = mutationGeneric({
   },
 });
 
+export const markTaskInProgressForViewer = mutationGeneric({
+  args: {
+    taskId: v.id("tasks"),
+    startedBy: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const { brain } = await requireOwnedBrain(ctx);
+    const task = await ctx.db.get(args.taskId);
+    if (!task || task.brainInstanceId !== brain._id) {
+      throw new Error("task not found");
+    }
+    if (task.processingState !== "accepted") {
+      throw new Error("only accepted tasks can be started from the web app");
+    }
+    if (task.ownerType !== "agent") {
+      throw new Error("only agent-owned tasks can be started from the web app");
+    }
+    if (task.status === "done" || task.status === "cancelled") {
+      throw new Error("done or cancelled tasks cannot be started");
+    }
+
+    const now = Date.now();
+    const startedAt = task.startedAt ?? now;
+    const startedBy = args.startedBy?.trim() || brain.displayName;
+    await ctx.db.patch(args.taskId, {
+      status: "in_progress",
+      startedAt,
+      startedBy,
+      updatedAt: now,
+    });
+
+    await ctx.db.insert("activityEvents", {
+      brainInstanceId: brain._id,
+      entityRef: { entityType: "task", entityId: args.taskId },
+      activityType: "agent_task_started",
+      actorType: "harness",
+      actorId: startedBy,
+      timestamp: now,
+      summary: `Agent task started: ${task.title}`,
+    });
+
+    return {
+      taskId: args.taskId,
+      status: "in_progress",
+      startedAt,
+      startedBy,
+    };
+  },
+});
+
 export const listActiveProjectsAndTasks = queryGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
