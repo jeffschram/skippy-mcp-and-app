@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useConvexAuth, useMutation, useQuery } from "convex/react";
 import { api } from "../lib/skippy-api";
+import { focusItemKey, focusSummaryBullets, focusSummaryPresentation } from "./focus-summary";
 import { LiveGate } from "./live-auth";
 import { icons } from "./ui";
 
@@ -70,6 +71,7 @@ function editablePayloadFor(type: string, payload: AnyRecord) {
         title: textValue(payload.title, payload.name, payload.summary),
         description: textValue(payload.description, payload.summary),
         status: textValue(payload.status) || "todo",
+        ownerType: textValue(payload.ownerType, payload.taskOwner, payload.assignedTo, payload.assignee),
         dueDate: textValue(payload.dueDate, payload.due, payload.start),
         sourceSummary: textValue(payload.sourceSummary),
         priorityReason: textValue(payload.priorityReason),
@@ -114,6 +116,15 @@ function editablePayloadFor(type: string, payload: AnyRecord) {
 
 function compactPayload(payload: AnyRecord) {
   return Object.fromEntries(Object.entries(payload).filter(([, value]) => value !== ""));
+}
+
+function displayLabelsFrom(data: AnyRecord | undefined) {
+  return {
+    ownerName: textValue(data?.displayLabels?.ownerName, data?.user?.displayName, data?.user?.name) || "Owner",
+    agentName:
+      textValue(data?.displayLabels?.agentName, data?.config?.assistantDisplayName, data?.brain?.displayName) ||
+      "Agent",
+  };
 }
 
 function words(value: string) {
@@ -198,153 +209,6 @@ function formatRunDuration(run: AnyRecord) {
     return `${seconds}s`;
   }
   return `${Math.round(seconds / 60)}m`;
-}
-
-function splitTopLevelList(value: string) {
-  const items: string[] = [];
-  let current = "";
-  let depth = 0;
-
-  for (let index = 0; index < value.length; index += 1) {
-    const character = value[index];
-    if (character === "(") {
-      depth += 1;
-    }
-    if (character === ")" && depth > 0) {
-      depth -= 1;
-    }
-
-    const nextCharacter = value[index + 1];
-    if (character === "," && depth === 0 && !/\d/.test(nextCharacter ?? "")) {
-      if (current.trim()) {
-        items.push(current.trim());
-      }
-      current = "";
-      continue;
-    }
-
-    current += character;
-  }
-
-  if (current.trim()) {
-    items.push(current.trim());
-  }
-
-  return items.map((item) => item.replace(/^and\s+/i, "").trim()).filter(Boolean);
-}
-
-function focusSummaryBullets(summaryText: string | undefined) {
-  if (!summaryText?.trim()) {
-    return ["No stored focus summary yet. A harness can generate one through the MCP."];
-  }
-
-  const trimmed = summaryText.trim();
-  const markdownBullets = trimmed
-    .split(/\n+/)
-    .map((line) => line.replace(/^[-*]\s+|^\d+\.\s+/, "").trim())
-    .filter(Boolean);
-  if (markdownBullets.length > 1) {
-    return markdownBullets;
-  }
-
-  const [primaryText = "", supportingText] = trimmed.split(/\s+Supporting items:\s+/i);
-  const bullets: string[] = [];
-  const primaryParts = primaryText.split(/:\s+/);
-  if (primaryParts.length > 1) {
-    bullets.push((primaryParts[0] ?? "").replace(/\.$/, "."));
-    bullets.push(...primaryParts.slice(1).join(": ").split(/\s+and\s+/i).map((item) => item.trim()));
-  } else {
-    bullets.push(primaryText);
-  }
-
-  if (supportingText) {
-    bullets.push(...splitTopLevelList(supportingText.replace(/\.$/, "")));
-  }
-
-  return bullets
-    .map((bullet) => bullet.replace(/\.$/, "").trim())
-    .filter(Boolean)
-    .map((bullet) => `${bullet[0]?.toUpperCase() ?? ""}${bullet.slice(1)}.`);
-}
-
-function isGenericFocusLead(value: string) {
-  return /^(prioritize|focus on|focus|handle|work through|stay on top of|review today's|today's)\b/i.test(
-    value.replace(/\.$/, "").trim(),
-  );
-}
-
-function joinHeadingParts(parts: string[]) {
-  if (parts.length <= 1) {
-    return parts[0] ?? "Current focus";
-  }
-  if (parts.length === 2) {
-    return `${parts[0]} and ${parts[1]}`;
-  }
-  return `${parts.slice(0, -1).join(", ")}, and ${parts[parts.length - 1]}`;
-}
-
-function focusCategoryForBullet(value: string) {
-  const text = value.toLowerCase();
-  if (/(amazon|usps|deliver|shipment|package)/.test(text)) {
-    return "deliveries";
-  }
-  if (/(subscription|prime video|mgm\+|trial|renewal)/.test(text)) {
-    return "subscriptions";
-  }
-  if (/(chase|card statement|credit card|refund|bill|payment|balance|auto-pay|spend)/.test(text)) {
-    return "finance";
-  }
-  if (/(skippy|mcp|convex|pwa|web app|roadmap|build)/.test(text)) {
-    return "Skippy build";
-  }
-  if (/(calendar|meeting|appointment|call)/.test(text)) {
-    return "calendar";
-  }
-  if (/(email|reply|follow up|follow-up)/.test(text)) {
-    return "follow-ups";
-  }
-  return undefined;
-}
-
-type FocusCategory = NonNullable<ReturnType<typeof focusCategoryForBullet>>;
-
-function focusSummaryPresentation(bullets: string[]) {
-  const [firstBullet = "Current focus", ...remainingBullets] = bullets;
-  const firstIsGeneric = isGenericFocusLead(firstBullet);
-  const details = firstIsGeneric ? remainingBullets : remainingBullets.length ? remainingBullets : bullets;
-  const categoryOrder: FocusCategory[] = ["deliveries", "subscriptions", "finance", "Skippy build", "calendar", "follow-ups"];
-  const categoryLabels = Array.from(
-    new Set(details.map(focusCategoryForBullet).filter((label): label is FocusCategory => Boolean(label))),
-  )
-    .sort((left, right) => categoryOrder.indexOf(left) - categoryOrder.indexOf(right))
-    .slice(0, 4);
-
-  if (categoryLabels.length >= 2) {
-    return {
-      heading: `Today: ${joinHeadingParts(categoryLabels)}.`,
-      details,
-    };
-  }
-
-  if (firstIsGeneric && details[0]) {
-    return {
-      heading: details[0],
-      details: details.slice(1),
-    };
-  }
-
-  return {
-    heading: firstBullet,
-    details: remainingBullets,
-  };
-}
-
-function focusItemKey(value: string) {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "")
-    .slice(0, 120);
 }
 
 function activeSourceSyncStatus(statuses: AnyRecord[] | undefined) {
@@ -838,6 +702,7 @@ export function LiveProjectDetailContent({ projectId }: { projectId: string }) {
   const data = useQuery(api.knowledge.projectsAndTasksForViewer, viewerReady ? {} : "skip") as AnyRecord | undefined;
   const markDoneMutation = useMutation(api.knowledge.markTaskDoneForViewer);
   const markDone = async (args: AnyRecord) => markDoneMutation({ taskId: args.taskId as any });
+  const displayLabels = displayLabelsFrom(data);
   const project = useMemo(
     () => data?.projects?.find((candidate: AnyRecord) => candidate._id === projectId),
     [data?.projects, projectId],
@@ -874,7 +739,7 @@ export function LiveProjectDetailContent({ projectId }: { projectId: string }) {
           </section>
           <section className="card section span-12">
             <h2>Tasks</h2>
-            <TaskList tasks={tasks} markDone={markDone} />
+            <TaskList tasks={tasks} markDone={markDone} displayLabels={displayLabels} />
           </section>
         </div>
       )}
@@ -887,6 +752,7 @@ export function LiveTasksContent() {
   const data = useQuery(api.knowledge.projectsAndTasksForViewer, viewerReady ? {} : "skip") as AnyRecord | undefined;
   const markDoneMutation = useMutation(api.knowledge.markTaskDoneForViewer);
   const markDone = async (args: AnyRecord) => markDoneMutation({ taskId: args.taskId as any });
+  const displayLabels = displayLabelsFrom(data);
   const unassignedTasks = useMemo(
     () => (data?.tasks ?? []).filter((task: AnyRecord) => !task.projectId),
     [data?.tasks],
@@ -899,13 +765,31 @@ export function LiveTasksContent() {
           <h2>Loading tasks</h2>
         </section>
       ) : (
-        <TaskList tasks={unassignedTasks} markDone={markDone} />
+        <TaskList tasks={unassignedTasks} markDone={markDone} displayLabels={displayLabels} />
       )}
     </LiveGate>
   );
 }
 
-function TaskList({ tasks, markDone }: { tasks: AnyRecord[]; markDone: (args: AnyRecord) => Promise<unknown> }) {
+function taskOwnerLabel(ownerType: string | undefined, displayLabels: { ownerName: string; agentName: string }) {
+  if (ownerType === "agent") {
+    return displayLabels.agentName;
+  }
+  if (ownerType === "owner") {
+    return displayLabels.ownerName;
+  }
+  return undefined;
+}
+
+function TaskList({
+  tasks,
+  markDone,
+  displayLabels,
+}: {
+  tasks: AnyRecord[];
+  markDone: (args: AnyRecord) => Promise<unknown>;
+  displayLabels: { ownerName: string; agentName: string };
+}) {
   if (tasks.length === 0) {
     return <p className="muted">No tasks here.</p>;
   }
@@ -913,7 +797,7 @@ function TaskList({ tasks, markDone }: { tasks: AnyRecord[]; markDone: (args: An
   return (
     <div className="item-list">
       {tasks.map((task) => (
-        <article className="item" key={task._id}>
+        <article className="item task-item" key={task._id}>
           <span className={`item-icon ${task.status === "in_progress" ? "is-active" : ""}`}>
             {task.status === "in_progress" ? (
               <icons.Clock3 size={17} aria-hidden />
@@ -929,7 +813,10 @@ function TaskList({ tasks, markDone }: { tasks: AnyRecord[]; markDone: (args: An
                 : (task.priorityReason ?? task.status)}
             </p>
           </div>
-          <span className={`badge ${task.status === "in_progress" ? "gold" : "blue"}`}>{task.status}</span>
+          <span className="task-side">
+            {task.ownerType ? <span className="badge">{taskOwnerLabel(task.ownerType, displayLabels)}</span> : null}
+            <span className={`badge ${task.status === "in_progress" ? "gold" : "blue"}`}>{task.status}</span>
+          </span>
           <button
             className="icon-button"
             type="button"
@@ -1515,8 +1402,10 @@ export function LiveMemoryDetailContent({ memoryId }: { memoryId: string }) {
 
 export function LiveTriageContent() {
   const viewerReady = useViewerReady();
+  const viewer = useQuery(api.auth.viewer, viewerReady ? {} : "skip") as AnyRecord | undefined;
   const items = useQuery(api.knowledge.triageForViewer, viewerReady ? {} : "skip") as AnyRecord[] | undefined;
   const entityOptions = useQuery(api.knowledge.acceptedEntityOptionsForViewer, viewerReady ? {} : "skip") as AnyRecord[] | undefined;
+  const displayLabels = displayLabelsFrom(viewer);
 
   return (
     <LiveGate>
@@ -1528,7 +1417,7 @@ export function LiveTriageContent() {
         <div className="item-list">
           {items.length === 0 ? <p className="muted">No unclear signals need review.</p> : null}
           {items.map((item) => (
-            <TriageItem key={item._id} item={item} entityOptions={entityOptions} />
+            <TriageItem key={item._id} item={item} entityOptions={entityOptions} displayLabels={displayLabels} />
           ))}
         </div>
       )}
@@ -1536,7 +1425,15 @@ export function LiveTriageContent() {
   );
 }
 
-function TriageItem({ item, entityOptions }: { item: AnyRecord; entityOptions: AnyRecord[] }) {
+function TriageItem({
+  item,
+  entityOptions,
+  displayLabels,
+}: {
+  item: AnyRecord;
+  entityOptions: AnyRecord[];
+  displayLabels: { ownerName: string; agentName: string };
+}) {
   const review = useMutation(api.knowledge.reviewTriageItem);
   const [targetEntityType, setTargetEntityType] = useState(item.candidateEntityType ?? "note");
   const [editedPayload, setEditedPayload] = useState(() =>
@@ -1586,7 +1483,12 @@ function TriageItem({ item, entityOptions }: { item: AnyRecord; entityOptions: A
             {item.confidence ? `, confidence ${Math.round(item.confidence * 100)}%` : ""}
           </p>
         </div>
-        <PayloadEditor entityType={targetEntityType} payload={editedPayload} setPayload={setEditedPayload} />
+        <PayloadEditor
+          entityType={targetEntityType}
+          payload={editedPayload}
+          setPayload={setEditedPayload}
+          displayLabels={displayLabels}
+        />
         <div className="split-list">
           <label className="field">
             <span>Target type</span>
@@ -1682,10 +1584,12 @@ function PayloadEditor({
   entityType,
   payload,
   setPayload,
+  displayLabels,
 }: {
   entityType: string;
   payload: AnyRecord;
   setPayload: (payload: AnyRecord) => void;
+  displayLabels: { ownerName: string; agentName: string };
 }) {
   function update(field: string, value: string) {
     setPayload({ ...payload, [field]: value });
@@ -1721,11 +1625,23 @@ function PayloadEditor({
   ) : null;
 
   if (entityType === "task") {
+    const ownerType = (
+      <label className="field">
+        <span>Owner</span>
+        <select className="select" value={payload.ownerType ?? ""} onChange={(event) => update("ownerType", event.target.value)}>
+          <option value="">Unspecified</option>
+          <option value="owner">{displayLabels.ownerName}</option>
+          <option value="agent">{displayLabels.agentName}</option>
+        </select>
+      </label>
+    );
+
     return (
       <div className="form-grid compact-form">
         {field("title", "Title")}
         <div className="split-list">
           {status}
+          {ownerType}
           {field("dueDate", "Due date")}
         </div>
         {field("description", "Description", { multiline: true })}

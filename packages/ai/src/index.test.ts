@@ -69,6 +69,33 @@ describe("AI provider abstractions", () => {
     expect(calls[0]?.init.headers).toMatchObject({ Authorization: "Bearer test-key" });
   });
 
+  it("instructs focus summaries to omit standing context from Now", async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    const fetchMock = async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response(
+        JSON.stringify({
+          output: [{ type: "message", content: [{ type: "output_text", text: "- Monitor deployment." }] }],
+        }),
+        { status: 200 },
+      );
+    };
+    const client = createLlmClient(
+      { mode: "openai" },
+      { apiKey: "test-key", fetch: fetchMock as typeof fetch },
+    );
+
+    await client.generateFocusSummary({
+      generatedAt: 123,
+      items: [{ title: "Jeff profile", summary: "Jeff is the primary user." }],
+    });
+
+    const body = JSON.parse(String(calls[0]?.init.body));
+    expect(body.instructions).toContain("actionable next moves only");
+    expect(body.instructions).toContain("standing context");
+    expect(body.instructions).toContain("identity facts");
+  });
+
   it("calls Anthropic Messages API for synthesis", async () => {
     const calls: Array<{ url: string; init: RequestInit }> = [];
     const fetchMock = async (url: string | URL | Request, init?: RequestInit) => {

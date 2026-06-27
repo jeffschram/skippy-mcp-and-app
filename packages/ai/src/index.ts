@@ -84,6 +84,8 @@ export const DEFAULT_OPENAI_EMBEDDING_MODEL = "text-embedding-3-small";
 export const DEFAULT_ANTHROPIC_SYNTHESIS_MODEL = "claude-sonnet-4-20250514";
 export const DEFAULT_OPENROUTER_SYNTHESIS_MODEL = "openai/gpt-4.1-mini";
 export const DEFAULT_LOCAL_SYNTHESIS_MODEL = "local-model";
+const FOCUS_SUMMARY_INSTRUCTIONS =
+  "Write a concise Skippy focus summary using only the supplied context. Return 3-5 short markdown bullet lines. Use Now for actionable next moves only: concrete things the user or Skippy should monitor, review, decide, prepare, follow up on, or complete. Do not turn standing context, identity facts, relationships, user preferences, or assumptions into bullets; those belong in memory/topItems, not the Now action list. If there are no clear actions, return exactly: Nothing new needs focus right now.";
 
 function getEnvironmentValue(name: string): string | undefined {
   const maybeProcess = globalThis as typeof globalThis & {
@@ -246,8 +248,7 @@ export function createOpenAiLlmClient(config: AiProviderConfig, options?: AiClie
         },
         body: JSON.stringify({
           model,
-          instructions:
-            "Write a concise Skippy focus summary using only the supplied context. Return 3-5 short markdown bullet lines. Put the most important next move first, then supporting items. Do not produce a roadmap or paragraph.",
+          instructions: FOCUS_SUMMARY_INSTRUCTIONS,
           input: contextText(request.items) || "No context available.",
         }),
       });
@@ -318,7 +319,7 @@ export function createAnthropicLlmClient(config: AiProviderConfig, options?: AiC
 
     async generateFocusSummary(request) {
       const result = await createMessage(
-        "Write a concise Skippy focus summary using only the supplied context. Return 3-5 short markdown bullet lines. Put the most important next move first, then supporting items. Do not produce a roadmap or paragraph.",
+        FOCUS_SUMMARY_INSTRUCTIONS,
         contextText(request.items) || "No context available.",
         "focus_summary",
         request.policyVersion,
@@ -395,7 +396,7 @@ function createChatCompletionLlmClient({
 
     async generateFocusSummary(request) {
       const result = await createChat(
-        "Write a concise Skippy focus summary using only the supplied context. Return 3-5 short markdown bullet lines. Put the most important next move first, then supporting items. Do not produce a roadmap or paragraph.",
+        FOCUS_SUMMARY_INSTRUCTIONS,
         contextText(request.items) || "No context available.",
         "focus_summary",
         request.policyVersion,

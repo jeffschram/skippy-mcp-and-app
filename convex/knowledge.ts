@@ -164,16 +164,241 @@ function taskTitleLooksDuplicate(left: string, right: string) {
   return overlap / Math.max(leftWords.size, rightWords.size) >= 0.55 || overlap / Math.min(leftWords.size, rightWords.size) >= 0.75;
 }
 
+function normalizedContactText(value: string | undefined) {
+  return (value ?? "")
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function normalizedEmail(value: string | undefined) {
+  return value?.trim().toLowerCase();
+}
+
+function normalizedPhone(value: string | undefined) {
+  return value?.replace(/\D+/g, "");
+}
+
+function normalizedDomain(value: string | undefined) {
+  const rawValue = value?.trim().toLowerCase();
+  if (!rawValue) {
+    return undefined;
+  }
+
+  try {
+    return new URL(rawValue.startsWith("http") ? rawValue : `https://${rawValue}`).hostname.replace(/^www\./, "");
+  } catch {
+    return rawValue.replace(/^www\./, "");
+  }
+}
+
+function arraysOverlap(left: string[] | undefined, right: string[] | undefined) {
+  const rightValues = new Set((right ?? []).filter(Boolean));
+  return (left ?? []).some((item) => rightValues.has(item));
+}
+
+function personLooksDuplicate(left: any, right: any) {
+  const leftEmails = (left.emails ?? []).map(normalizedEmail).filter(Boolean);
+  const rightEmails = (right.emails ?? []).map(normalizedEmail).filter(Boolean);
+  if (arraysOverlap(leftEmails as string[], rightEmails as string[])) {
+    return true;
+  }
+
+  const leftPhones = (left.phoneNumbers ?? []).map(normalizedPhone).filter(Boolean);
+  const rightPhones = (right.phoneNumbers ?? []).map(normalizedPhone).filter(Boolean);
+  if (arraysOverlap(leftPhones as string[], rightPhones as string[])) {
+    return true;
+  }
+
+  const leftName = normalizedContactText(left.name);
+  const rightName = normalizedContactText(right.name);
+  return Boolean(leftName && rightName && (leftName === rightName || leftName.includes(rightName) || rightName.includes(leftName)));
+}
+
+function companyLooksDuplicate(left: any, right: any) {
+  const leftDomain = normalizedDomain(left.domain ?? left.website);
+  const rightDomain = normalizedDomain(right.domain ?? right.website);
+  if (leftDomain && rightDomain && leftDomain === rightDomain) {
+    return true;
+  }
+
+  const leftName = normalizedContactText(left.name);
+  const rightName = normalizedContactText(right.name);
+  return Boolean(leftName && rightName && leftName === rightName);
+}
+
+async function findAcceptedEntityDuplicate(
+  db: any,
+  brainInstanceId: any,
+  entityTypeName: keyof typeof entityTableByType,
+  payload: any,
+) {
+  if (!["task", "person", "company"].includes(entityTypeName)) {
+    return null;
+  }
+
+  const tableName = entityTableByType[entityTypeName];
+  const acceptedEntities = await db
+    .query(tableName)
+    .withIndex("by_brain_state", (q: any) => q.eq("brainInstanceId", brainInstanceId))
+    .filter((q: any) => q.eq(q.field("processingState"), "accepted"))
+    .take(300);
+
+  if (entityTypeName === "task") {
+    return acceptedEntities.find(
+      (task: any) =>
+        task.status !== "done" &&
+        task.status !== "cancelled" &&
+        taskTitleLooksDuplicate(payload.title, task.title),
+    ) ?? null;
+  }
+
+  if (entityTypeName === "person") {
+    return acceptedEntities.find((person: any) => personLooksDuplicate(payload, person)) ?? null;
+  }
+
+  if (entityTypeName === "company") {
+    return acceptedEntities.find((company: any) => companyLooksDuplicate(payload, company)) ?? null;
+  }
+
+  return null;
+}
+
+function mergeArrays(left: string[] | undefined, right: string[] | undefined) {
+  return Array.from(new Set([...(left ?? []), ...(right ?? [])].filter(Boolean)));
+}
+
+function mergeDuplicateEntityPatch(entityTypeName: keyof typeof entityTableByType, existing: any, incoming: any, now: number) {
+  const patch: Record<string, unknown> = { updatedAt: now };
+
+  if (entityTypeName === "task") {
+    if (!existing.description && incoming.description) patch.description = incoming.description;
+    if (!existing.priorityReason && incoming.priorityReason) patch.priorityReason = incoming.priorityReason;
+    if (!existing.ownerType && incoming.ownerType) patch.ownerType = incoming.ownerType;
+    if (!existing.dueAt && incoming.dueAt) patch.dueAt = incoming.dueAt;
+    if (!existing.urgencyScore && incoming.urgencyScore) patch.urgencyScore = incoming.urgencyScore;
+    if (!existing.importanceScore && incoming.importanceScore) patch.importanceScore = incoming.importanceScore;
+    if (!existing.priorityScore && incoming.priorityScore) patch.priorityScore = incoming.priorityScore;
+    if (!existing.priorityComputedAt && incoming.priorityComputedAt) patch.priorityComputedAt = incoming.priorityComputedAt;
+    if (!existing.priorityPolicyVersion && incoming.priorityPolicyVersion) patch.priorityPolicyVersion = incoming.priorityPolicyVersion;
+  }
+
+  if (entityTypeName === "person") {
+    const emails = mergeArrays(existing.emails, incoming.emails);
+    const phoneNumbers = mergeArrays(existing.phoneNumbers, incoming.phoneNumbers);
+    const addresses = mergeArrays(existing.addresses, incoming.addresses);
+    if (emails.length) patch.emails = emails;
+    if (phoneNumbers.length) patch.phoneNumbers = phoneNumbers;
+    if (addresses.length) patch.addresses = addresses;
+    if (!existing.roleTitle && incoming.roleTitle) patch.roleTitle = incoming.roleTitle;
+    if (!existing.relationshipContext && incoming.relationshipContext) patch.relationshipContext = incoming.relationshipContext;
+    if (!existing.notes && incoming.notes) patch.notes = incoming.notes;
+  }
+
+  if (entityTypeName === "company") {
+    if (!existing.website && incoming.website) patch.website = incoming.website;
+    if (!existing.domain && incoming.domain) patch.domain = incoming.domain;
+    if (!existing.notes && incoming.notes) patch.notes = incoming.notes;
+    if (!existing.relationshipLabel && incoming.relationshipLabel) patch.relationshipLabel = incoming.relationshipLabel;
+  }
+
+  return patch;
+}
+
+async function linkSourceRefsToEntity(
+  db: any,
+  brainInstanceId: any,
+  entityRefValue: { entityType: keyof typeof entityTableByType; entityId: any },
+  sourceRefIds: any[],
+  relationship: "created_from" | "updated_from" | "mentioned_in" | "evidence_for",
+  now: number,
+) {
+  for (const sourceRefId of sourceRefIds) {
+    await db.insert("entitySourceRefs", {
+      brainInstanceId,
+      entityRef: entityRefValue,
+      sourceRefId,
+      relationship,
+      createdAt: now,
+    });
+  }
+}
+
+async function mergeIntoDuplicateEntity(
+  db: any,
+  brainInstanceId: any,
+  entityTypeName: keyof typeof entityTableByType,
+  existing: any,
+  normalizedPayload: any,
+  sourceRefIds: any[],
+  now: number,
+  activitySummary: string,
+  metadata?: Record<string, unknown>,
+  actorType: "user" | "harness" | "skippy_ai" | "system" = "harness",
+  actorId?: string,
+) {
+  const patch = mergeDuplicateEntityPatch(entityTypeName, existing, normalizedPayload, now);
+  await db.patch(existing._id, patch);
+
+  const entityRefValue = { entityType: entityTypeName, entityId: existing._id };
+  await linkSourceRefsToEntity(db, brainInstanceId, entityRefValue, sourceRefIds, "updated_from", now);
+
+  await db.insert("activityEvents", {
+    brainInstanceId,
+    entityRef: entityRefValue,
+    activityType: "duplicate_entity_merged",
+    actorType,
+    actorId,
+    timestamp: now,
+    summary: activitySummary,
+    metadata: {
+      ...metadata,
+      duplicateEntityType: entityTypeName,
+      matchedEntityId: existing._id,
+      incomingTitle: normalizedPayload.title ?? normalizedPayload.name,
+    },
+    sourceRefIds,
+  });
+
+  return { entityRef: entityRefValue, sourceRefIds, normalizedPayload, duplicate: true };
+}
+
 async function createAcceptedEntity(
   db: any,
   triageItem: any,
   entityTypeName: keyof typeof entityTableByType,
   payload: any,
   now: number,
+  actorType: "user" | "harness" | "skippy_ai" | "system" = "harness",
+  actorId?: string,
 ) {
   const tableName = entityTableByType[entityTypeName];
   const sourceRefIds = triageItem.sourceRefIds ?? [];
   const normalizedPayload = normalizeAcceptedEntityPayload(entityTypeName, payload);
+  const duplicateEntity = await findAcceptedEntityDuplicate(
+    db,
+    triageItem.brainInstanceId,
+    entityTypeName,
+    normalizedPayload,
+  );
+  if (duplicateEntity) {
+    return await mergeIntoDuplicateEntity(
+      db,
+      triageItem.brainInstanceId,
+      entityTypeName,
+      duplicateEntity,
+      normalizedPayload,
+      sourceRefIds,
+      now,
+      `Merged duplicate suggested ${entityTypeName} into existing accepted ${entityTypeName}.`,
+      { triageItemId: triageItem._id },
+      actorType,
+      actorId,
+    );
+  }
+
   const entityDocument = {
     ...normalizedPayload,
     brainInstanceId: triageItem.brainInstanceId,
@@ -186,17 +411,16 @@ async function createAcceptedEntity(
 
   const entityId = await db.insert(tableName, entityDocument);
 
-  for (const sourceRefId of sourceRefIds) {
-    await db.insert("entitySourceRefs", {
-      brainInstanceId: triageItem.brainInstanceId,
-      entityRef: { entityType: entityTypeName, entityId },
-      sourceRefId,
-      relationship: "created_from",
-      createdAt: now,
-    });
-  }
+  await linkSourceRefsToEntity(
+    db,
+    triageItem.brainInstanceId,
+    { entityType: entityTypeName, entityId },
+    sourceRefIds,
+    "created_from",
+    now,
+  );
 
-  return { entityRef: { entityType: entityTypeName, entityId }, sourceRefIds, normalizedPayload };
+  return { entityRef: { entityType: entityTypeName, entityId }, sourceRefIds, normalizedPayload, duplicate: false };
 }
 
 async function insertSourceRefs(db: any, brainInstanceId: any, sourceRefs: any[] | undefined, now: number) {
@@ -867,6 +1091,36 @@ export const submitCandidateObject = mutationGeneric({
       );
     }
 
+    const existingAcceptedEntity = await findAcceptedEntityDuplicate(
+      db,
+      args.brainInstanceId,
+      args.candidateEntityType as keyof typeof entityTableByType,
+      normalizedPayload,
+    );
+    if (existingAcceptedEntity) {
+      const entityTypeName = args.candidateEntityType as keyof typeof entityTableByType;
+      await mergeIntoDuplicateEntity(
+        db,
+        args.brainInstanceId,
+        entityTypeName,
+        existingAcceptedEntity,
+        normalizedPayload,
+        sourceRefIds,
+        now,
+        `Duplicate suggested ${entityTypeName} matched an existing accepted ${entityTypeName}.`,
+        { candidateFingerprint: fingerprint },
+      );
+
+      return {
+        entityRef: { entityType: entityTypeName, entityId: existingAcceptedEntity._id },
+        entityId: existingAcceptedEntity._id,
+        sourceRefIds,
+        duplicate: true,
+        status: "duplicate_existing",
+        candidateFingerprint: fingerprint,
+      };
+    }
+
     if (existingPendingItem) {
       const mergedSourceRefIds = Array.from(new Set([...(existingPendingItem.sourceRefIds ?? []), ...sourceRefIds]));
       await db.patch(existingPendingItem._id, {
@@ -953,18 +1207,38 @@ export const ingestObject = mutationGeneric({
       updatedAt: now,
     };
     const tableName = entityTableByType[entityTypeName];
+    const duplicateEntity = await findAcceptedEntityDuplicate(db, args.brainInstanceId, entityTypeName, normalizedPayload);
+    if (duplicateEntity) {
+      await mergeIntoDuplicateEntity(
+        db,
+        args.brainInstanceId,
+        entityTypeName,
+        duplicateEntity,
+        normalizedPayload,
+        sourceRefIds,
+        now,
+        `Merged duplicate direct ${entityTypeName} ingestion into existing accepted ${entityTypeName}.`,
+        {
+          rubricDecision: args.rubricDecision,
+          candidateFingerprint: candidateFingerprint(entityTypeName, normalizedPayload),
+        },
+      );
+
+      return {
+        status: "duplicate_existing",
+        duplicate: true,
+        entityType: entityTypeName,
+        entityId: duplicateEntity._id,
+        title: displayPayload.title ?? displayPayload.name ?? displayPayload.url ?? displayPayload.body,
+        sourceRefIds,
+        rubricDecision: args.rubricDecision,
+      };
+    }
+
     const entityId = await db.insert(tableName, entityDocument);
     const acceptedEntityRef = { entityType: entityTypeName, entityId };
 
-    for (const sourceRefId of sourceRefIds) {
-      await db.insert("entitySourceRefs", {
-        brainInstanceId: args.brainInstanceId,
-        entityRef: acceptedEntityRef,
-        sourceRefId,
-        relationship: "created_from",
-        createdAt: now,
-      });
-    }
+    await linkSourceRefsToEntity(db, args.brainInstanceId, acceptedEntityRef, sourceRefIds, "created_from", now);
 
     await db.insert("activityEvents", {
       brainInstanceId: args.brainInstanceId,
@@ -1019,6 +1293,8 @@ export const approveTriageItem = mutationGeneric({
       entityTypeName,
       payload,
       now,
+      "user",
+      reviewedBy,
     );
 
     await db.patch(triageItemId, {
@@ -1134,6 +1410,8 @@ export const reviewTriageItem = mutationGeneric({
       entityTypeName,
       payload,
       now,
+      "user",
+      user._id,
     );
 
     const status = args.action === "approve" ? "approved" : "corrected";
@@ -1589,7 +1867,11 @@ export const cancelDuplicateFocusTasks = mutationGeneric({
 export const projectsAndTasksForViewer = queryGeneric({
   args: {},
   handler: async (ctx) => {
-    const { brain } = await requireOwnedBrain(ctx);
+    const { user, brain } = await requireOwnedBrain(ctx);
+    const config = await ctx.db
+      .query("brainConfigs")
+      .withIndex("by_brain", (q) => q.eq("brainInstanceId", brain._id))
+      .first();
     const projects = await ctx.db
       .query("projects")
       .filter((q) =>
@@ -1619,7 +1901,15 @@ export const projectsAndTasksForViewer = queryGeneric({
       projectId: projectIdByTaskId.get(task._id),
     }));
 
-    return { brain, projects, tasks: tasksWithProjectIds };
+    return {
+      brain,
+      displayLabels: {
+        ownerName: user.displayName,
+        agentName: config?.assistantDisplayName ?? brain.displayName,
+      },
+      projects,
+      tasks: tasksWithProjectIds,
+    };
   },
 });
 
@@ -3029,6 +3319,7 @@ export const createTaskDirect = mutationGeneric({
         v.literal("cancelled"),
       ),
     ),
+    ownerType: v.optional(v.union(v.literal("owner"), v.literal("agent"))),
     dueAt: v.optional(v.number()),
     priorityReason: v.optional(v.string()),
     projectId: v.optional(v.id("projects")),
@@ -3037,11 +3328,86 @@ export const createTaskDirect = mutationGeneric({
   handler: async ({ db }, args) => {
     const now = Date.now();
     const normalizedTitle = args.title.trim();
+    const normalizedPayload = normalizeAcceptedEntityPayload("task", {
+      title: normalizedTitle,
+      description: args.description,
+      status: args.status ?? "todo",
+      ownerType: args.ownerType,
+      dueAt: args.dueAt,
+      priorityReason: args.priorityReason,
+    });
+    const duplicateTask = await findAcceptedEntityDuplicate(db, args.brainInstanceId, "task", normalizedPayload);
+
+    let projectTitle = undefined;
+    let relationshipId = undefined;
+    if (args.projectId) {
+      const project = await db.get(args.projectId);
+      if (!project || project.brainInstanceId !== args.brainInstanceId) {
+        throw new Error("project not found for brain instance");
+      }
+      projectTitle = project.title;
+    }
+
+    if (duplicateTask) {
+      await db.patch(duplicateTask._id, mergeDuplicateEntityPatch("task", duplicateTask, normalizedPayload, now));
+
+      if (args.projectId) {
+        const existingRelationship = await db
+          .query("relationships")
+          .withIndex("by_brain_type", (q) => q.eq("brainInstanceId", args.brainInstanceId))
+          .filter((q) => q.eq(q.field("type"), "belongs_to"))
+          .filter((q) => q.eq(q.field("from.entityType"), "task"))
+          .filter((q) => q.eq(q.field("from.entityId"), duplicateTask._id))
+          .filter((q) => q.eq(q.field("to.entityType"), "project"))
+          .filter((q) => q.eq(q.field("to.entityId"), args.projectId))
+          .first();
+
+        relationshipId = existingRelationship?._id;
+        if (!relationshipId) {
+          relationshipId = await db.insert("relationships", {
+            brainInstanceId: args.brainInstanceId,
+            from: { entityType: "task", entityId: duplicateTask._id },
+            to: { entityType: "project", entityId: args.projectId },
+            type: "belongs_to",
+            confidence: 1,
+            reason: "Duplicate task creation request linked the existing task to this project.",
+            createdBy: "harness",
+            createdAt: now,
+            updatedAt: now,
+          });
+        }
+      }
+
+      await db.insert("activityEvents", {
+        brainInstanceId: args.brainInstanceId,
+        entityRef: { entityType: "task", entityId: duplicateTask._id },
+        activityType: "duplicate_task_create_reused",
+        actorType: "harness",
+        actorId: args.createdBy,
+        timestamp: now,
+        summary: `Reused existing task for duplicate create request: ${duplicateTask.title}`,
+        metadata: { requestedTitle: normalizedTitle, projectId: args.projectId, relationshipId },
+      });
+
+      return {
+        status: "duplicate_existing",
+        duplicate: true,
+        entityType: "task",
+        taskId: duplicateTask._id,
+        title: duplicateTask.title,
+        ownerType: duplicateTask.ownerType ?? args.ownerType,
+        projectId: args.projectId,
+        projectTitle,
+        relationshipId,
+      };
+    }
+
     const taskId = await db.insert("tasks", {
       brainInstanceId: args.brainInstanceId,
       title: normalizedTitle,
       description: args.description,
       status: args.status ?? "todo",
+      ownerType: args.ownerType,
       dueAt: args.dueAt,
       priorityReason: args.priorityReason,
       processingState: "accepted",
@@ -3049,8 +3415,6 @@ export const createTaskDirect = mutationGeneric({
       updatedAt: now,
     });
 
-    let relationshipId = undefined;
-    let projectTitle = undefined;
     if (args.projectId) {
       const project = await db.get(args.projectId);
       if (!project || project.brainInstanceId !== args.brainInstanceId) {
@@ -3086,6 +3450,7 @@ export const createTaskDirect = mutationGeneric({
       entityType: "task",
       taskId,
       title: normalizedTitle,
+      ownerType: args.ownerType,
       projectId: args.projectId,
       projectTitle,
       relationshipId,

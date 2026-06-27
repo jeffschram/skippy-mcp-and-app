@@ -79,6 +79,7 @@ export type SkippyClient = {
       title: string;
       description?: string;
       status?: "todo" | "in_progress" | "waiting" | "done" | "cancelled";
+      ownerType?: "owner" | "agent";
       dueAt?: number;
       priorityReason?: string;
       projectId?: string;
