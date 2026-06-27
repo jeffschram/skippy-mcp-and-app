@@ -701,7 +701,10 @@ export function LiveProjectDetailContent({ projectId }: { projectId: string }) {
   const viewerReady = useViewerReady();
   const data = useQuery(api.knowledge.projectsAndTasksForViewer, viewerReady ? {} : "skip") as AnyRecord | undefined;
   const markDoneMutation = useMutation(api.knowledge.markTaskDoneForViewer);
+  const startAgentTaskMutation = useMutation(api.knowledge.markTaskInProgressForViewer);
   const markDone = async (args: AnyRecord) => markDoneMutation({ taskId: args.taskId as any });
+  const startAgentTask = async (args: AnyRecord) =>
+    startAgentTaskMutation({ taskId: args.taskId as any, startedBy: displayLabels.agentName });
   const displayLabels = displayLabelsFrom(data);
   const project = useMemo(
     () => data?.projects?.find((candidate: AnyRecord) => candidate._id === projectId),
@@ -739,7 +742,12 @@ export function LiveProjectDetailContent({ projectId }: { projectId: string }) {
           </section>
           <section className="card section span-12">
             <h2>Tasks</h2>
-            <TaskList tasks={tasks} markDone={markDone} displayLabels={displayLabels} />
+            <TaskList
+              tasks={tasks}
+              markDone={markDone}
+              startAgentTask={startAgentTask}
+              displayLabels={displayLabels}
+            />
           </section>
         </div>
       )}
@@ -751,7 +759,10 @@ export function LiveTasksContent() {
   const viewerReady = useViewerReady();
   const data = useQuery(api.knowledge.projectsAndTasksForViewer, viewerReady ? {} : "skip") as AnyRecord | undefined;
   const markDoneMutation = useMutation(api.knowledge.markTaskDoneForViewer);
+  const startAgentTaskMutation = useMutation(api.knowledge.markTaskInProgressForViewer);
   const markDone = async (args: AnyRecord) => markDoneMutation({ taskId: args.taskId as any });
+  const startAgentTask = async (args: AnyRecord) =>
+    startAgentTaskMutation({ taskId: args.taskId as any, startedBy: displayLabels.agentName });
   const displayLabels = displayLabelsFrom(data);
   const unassignedTasks = useMemo(
     () => (data?.tasks ?? []).filter((task: AnyRecord) => !task.projectId),
@@ -765,7 +776,12 @@ export function LiveTasksContent() {
           <h2>Loading tasks</h2>
         </section>
       ) : (
-        <TaskList tasks={unassignedTasks} markDone={markDone} displayLabels={displayLabels} />
+        <TaskList
+          tasks={unassignedTasks}
+          markDone={markDone}
+          startAgentTask={startAgentTask}
+          displayLabels={displayLabels}
+        />
       )}
     </LiveGate>
   );
@@ -784,10 +800,12 @@ function taskOwnerLabel(ownerType: string | undefined, displayLabels: { ownerNam
 function TaskList({
   tasks,
   markDone,
+  startAgentTask,
   displayLabels,
 }: {
   tasks: AnyRecord[];
   markDone: (args: AnyRecord) => Promise<unknown>;
+  startAgentTask: (args: AnyRecord) => Promise<unknown>;
   displayLabels: { ownerName: string; agentName: string };
 }) {
   if (tasks.length === 0) {
@@ -796,38 +814,47 @@ function TaskList({
 
   return (
     <div className="item-list">
-      {tasks.map((task) => (
-        <article className="item task-item" key={task._id}>
-          <span className={`item-icon ${task.status === "in_progress" ? "is-active" : ""}`}>
-            {task.status === "in_progress" ? (
-              <icons.Clock3 size={17} aria-hidden />
-            ) : (
-              <icons.Check size={17} aria-hidden />
-            )}
-          </span>
-          <div>
-            <p className="item-title">{task.title}</p>
-            <p className="item-meta">
-              {task.status === "in_progress"
-                ? `In progress${task.startedBy ? ` by ${task.startedBy}` : ""}`
-                : (task.priorityReason ?? task.status)}
-            </p>
-          </div>
-          <span className="task-side">
-            {task.ownerType ? <span className="badge">{taskOwnerLabel(task.ownerType, displayLabels)}</span> : null}
-            <span className={`badge ${task.status === "in_progress" ? "gold" : "blue"}`}>{task.status}</span>
-          </span>
-          <button
-            className="icon-button"
-            type="button"
-            title="Mark done"
-            disabled={task.status === "done"}
-            onClick={() => void markDone({ taskId: task._id })}
-          >
-            <icons.CircleCheck size={17} aria-hidden />
-          </button>
-        </article>
-      ))}
+      {tasks.map((task) => {
+        const isAgentTask = task.ownerType === "agent";
+        const isInProgress = task.status === "in_progress";
+        const isDone = task.status === "done";
+        const actionLabel = isAgentTask ? `Start ${displayLabels.agentName} task` : "Mark done";
+        const actionDisabled = isDone || (isAgentTask && isInProgress);
+        const action = isAgentTask ? startAgentTask : markDone;
+        const ActionIcon = isAgentTask ? icons.Play : icons.CircleCheck;
+
+        return (
+          <article className="item task-item" key={task._id}>
+            <span className={`item-icon ${isInProgress ? "is-active" : ""}`}>
+              {isInProgress ? (
+                <icons.Clock3 size={17} aria-hidden />
+              ) : (
+                <icons.Check size={17} aria-hidden />
+              )}
+            </span>
+            <div>
+              <p className="item-title">{task.title}</p>
+              <p className="item-meta">
+                {isInProgress ? `In progress${task.startedBy ? ` by ${task.startedBy}` : ""}` : (task.priorityReason ?? task.status)}
+              </p>
+            </div>
+            <span className="task-side">
+              {task.ownerType ? <span className="badge">{taskOwnerLabel(task.ownerType, displayLabels)}</span> : null}
+              <span className={`badge ${isInProgress ? "gold" : "blue"}`}>{task.status}</span>
+            </span>
+            <button
+              className="icon-button"
+              type="button"
+              title={actionLabel}
+              aria-label={`${actionLabel}: ${task.title}`}
+              disabled={actionDisabled}
+              onClick={() => void action({ taskId: task._id })}
+            >
+              <ActionIcon size={17} aria-hidden />
+            </button>
+          </article>
+        );
+      })}
     </div>
   );
 }
