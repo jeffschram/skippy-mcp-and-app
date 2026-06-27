@@ -59,6 +59,7 @@ const entityReviewTypeValues = [
 const skippyInstructions = [
   "Skippy is a second-brain MCP for submitting useful structured knowledge into a Convex brain.",
   "When a user first connects or asks what Skippy can do, offer the skippy_intro prompt/message if the harness supports MCP prompts.",
+  "When a user asks for slash commands or types slash-command shorthand, load skippy_slash_commands if the harness supports MCP prompts.",
   "Use the user's evolving importance rubric. Directly ingest source-backed objects when they are actionable, deadline-bearing, relationship-building, decision-relevant, financially/security relevant, or clearly useful later.",
   "For direct ingestion, call ingest_object and include a concise rubricDecision explaining why the item clears the importance bar.",
   "Use submit_candidate_object only as a legacy fallback when the harness cannot decide whether the item belongs in Skippy.",
@@ -107,6 +108,36 @@ function buildIntroMessage() {
   ].join("\n");
 }
 
+function buildSlashCommandsMessage() {
+  return [
+    "# Skippy Slash Commands",
+    "",
+    "Treat these as user-facing shorthand when a user types them in a harness chat. Parse the command, ask only for missing required fields, then call the mapped Skippy MCP tool. Do not expose raw JSON unless the user asks.",
+    "",
+    "| Slash command | Use | MCP mapping |",
+    "| --- | --- | --- |",
+    "| `/task ...` | Create an accepted task from an explicit user command. | `create_task` |",
+    "| `/project ...` | Create an accepted project from an explicit user command. | `create_project` |",
+    "| `/remember ...` | Store a durable memory or capture a thought. | `record_memory` or `capture_thought` |",
+    "| `/decision ...` | Record a durable decision memory. | `record_decision` |",
+    "| `/principle ...` | Record a durable operating principle. | `record_principle` |",
+    "| `/ask ...` | Retrieve context or answer from Skippy. | `ask` or `get_context_bundle` |",
+    "| `/focus` | Summarize or refresh current focus. | `summarize_focus` or `refresh_focus_summary` |",
+    "| `/interview ...` | Start or continue a guided interview in the harness chat. | `list_interview_templates` plus `start_interview` |",
+    "| `/inbox ...` | Send uncertain or review-needed memory/object candidates to Skippy Review. | `submit_memory_review_candidate` or `submit_candidate_object` |",
+    "| `/link ...` | Link accepted entities or memories when IDs/context are known. | `link_entities` or `link_memory` |",
+    "| `/done ...` | Mark an accepted Skippy task done. | `mark_task_done` |",
+    "",
+    "Command handling rules:",
+    "- Prefer direct accepted writes only when the user is explicit or the item clearly clears the rubric.",
+    "- Preserve the user's wording in titles/summaries, but keep descriptions concise.",
+    "- For source-derived items, include source refs and a rubric/capture reason when available.",
+    "- For ambiguous `/remember`, choose `capture_thought` for free-form user thoughts and `record_memory` when you can structure a durable memory.",
+    "- For `/focus`, use `summarize_focus` when answering from current Skippy context; use `refresh_focus_summary` when the user asks to update the dashboard.",
+    "- For `/done`, retrieve or ask for the target task if the command does not identify one clearly.",
+  ].join("\n");
+}
+
 function buildSkillsMessage() {
   const assistantName = getAssistantDisplayName();
   const appUrl = getSkippyAppUrl();
@@ -136,6 +167,24 @@ function buildSkillsMessage() {
     "   - `create_project` / `create_task`: only for explicit user commands.",
     "   - `link_entities` / `link_memory`: only after accepted entity IDs or memory IDs are known.",
     "   - `list_pending_actions`: inspect external side effects awaiting approval. Do not send emails/messages or alter external systems through Skippy.",
+    "",
+    "## User Slash Commands",
+    "",
+    "When a user types a command-like message, treat it as shorthand for the matching MCP workflow:",
+    "",
+    "- `/task ...` -> `create_task`",
+    "- `/project ...` -> `create_project`",
+    "- `/remember ...` -> `record_memory` or `capture_thought`",
+    "- `/decision ...` -> `record_decision`",
+    "- `/principle ...` -> `record_principle`",
+    "- `/ask ...` -> `ask` or `get_context_bundle`",
+    "- `/focus` -> `summarize_focus` or `refresh_focus_summary`",
+    "- `/interview ...` -> `list_interview_templates` plus `start_interview`",
+    "- `/inbox ...` -> `submit_memory_review_candidate` or `submit_candidate_object`",
+    "- `/link ...` -> `link_entities` or `link_memory`",
+    "- `/done ...` -> `mark_task_done`",
+    "",
+    "Use the `skippy_slash_commands` prompt/resource when the harness wants the standalone command reference.",
     "",
     "4. Use the consent model.",
     "   - Direct capture: explicit user requests, low-risk source-backed commitments, deadlines, decisions, principles, project facts, and stable preferences.",
@@ -301,6 +350,7 @@ function ingestConfirmation(input: CandidateObjectInput & { rubricDecision: stri
     entityType: resultRecord.entityType ?? input.candidateEntityType,
     title: resultRecord.title ?? payloadTitle(input.candidateEntityType, input.candidatePayload),
     entityId: resultRecord.entityId,
+    duplicate: resultRecord.duplicate,
     sourceRefIds: resultRecord.sourceRefIds,
     rubricDecision: resultRecord.rubricDecision ?? input.rubricDecision,
     reviewUrl: reviewUrl("/projects"),
@@ -315,6 +365,8 @@ function directCreateConfirmation(result: unknown, fallbackEntityType: "project"
     entityType,
     title: resultRecord.title,
     entityId: resultRecord.taskId ?? resultRecord.projectId,
+    duplicate: resultRecord.duplicate,
+    ownerType: resultRecord.ownerType,
     projectId: resultRecord.projectId,
     projectTitle: resultRecord.projectTitle,
     relationshipId: resultRecord.relationshipId,
@@ -538,6 +590,25 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
   );
 
   server.registerResource(
+    "skippy_slash_commands",
+    "skippy://guide/slash-commands",
+    {
+      title: "Skippy slash commands",
+      description: "User-facing slash command shortcuts and their Skippy MCP tool mappings.",
+      mimeType: "text/markdown",
+    },
+    (uri) => ({
+      contents: [
+        {
+          uri: uri.href,
+          mimeType: "text/markdown",
+          text: buildSlashCommandsMessage(),
+        },
+      ],
+    }),
+  );
+
+  server.registerResource(
     "skippy_intro",
     "skippy://guide/intro",
     {
@@ -592,6 +663,26 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
           content: {
             type: "text",
             text: buildIntroMessage(),
+          },
+        },
+      ],
+    }),
+  );
+
+  server.registerPrompt(
+    "skippy_slash_commands",
+    {
+      title: "Load Skippy Slash Commands",
+      description: "Portable user-facing slash command shortcuts for mapping chat commands to Skippy MCP tools.",
+    },
+    () => ({
+      description: "Teach the connected harness the Skippy slash command shorthand.",
+      messages: [
+        {
+          role: "assistant",
+          content: {
+            type: "text",
+            text: buildSlashCommandsMessage(),
           },
         },
       ],
@@ -1012,7 +1103,7 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
     {
       title: "Refresh focus summary",
       description:
-        "Generate and store a fresh Skippy focus summary from accepted entities using the configured internal AI provider and embedding ranking. Use when the user asks what to focus on now or wants the dashboard refreshed.",
+        "Generate and store a fresh Skippy focus summary from accepted entities using the configured internal AI provider and embedding ranking. Use when the user asks what to focus on now or wants the dashboard refreshed. The user-facing Now list is for actionable next moves only; standing context, user identity, relationships, and assumptions should remain in memory/context rather than appearing as task-like bullets.",
       annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: false },
       inputSchema: z.object({
         generatedAt: z.number().optional().describe("Epoch milliseconds to record as the generation time. Defaults to now."),
@@ -1140,6 +1231,10 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
           .enum(["todo", "in_progress", "waiting", "done", "cancelled"])
           .optional()
           .describe("Task status. Defaults to todo."),
+        ownerType: z
+          .enum(["owner", "agent"])
+          .optional()
+          .describe("Who should do the task: owner means user-owned work; agent means the connected assistant/harness should work it."),
         dueAt: z.number().optional().describe("Optional due date/time in epoch milliseconds."),
         priorityReason: z.string().optional().describe("Why this task matters or its intended priority."),
         projectId: z.string().optional().describe("Accepted project ID to assign the task to."),
@@ -1216,12 +1311,12 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
     {
       title: "Generate focus summary",
       description:
-        "Store a synthesized focus summary for the user-facing dashboard. Use accepted entities and current context; do not invent tasks or entities here. If you discover new important items while summarizing, ingest them separately with sourceRefs and a rubricDecision.",
+        "Store a synthesized focus summary for the user-facing dashboard. Use accepted entities and current context; do not invent tasks or entities here. Summary bullets should be actionable next moves only, not standing context, identity facts, relationship assumptions, or permission requests. If you discover new important items while summarizing, ingest them separately with sourceRefs and a rubricDecision.",
       annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: false },
       inputSchema: z.object({
         generatedAt: z.number().describe("Epoch milliseconds when this summary was generated."),
         validUntil: z.number().optional().describe("Optional epoch milliseconds after which this summary should be considered stale."),
-        summaryText: z.string().describe("Concise human-facing focus summary."),
+        summaryText: z.string().describe("Concise human-facing focus summary containing actionable Now bullets only."),
         topItems: z.array(focusTopItemSchema).describe("Accepted entities that explain the focus summary."),
         sourceRunId: z.string().optional().describe("Optional ingestion/processing run ID that produced the summary."),
         policyVersion: z.string().optional().describe("Optional policy/ranking version used by the harness."),

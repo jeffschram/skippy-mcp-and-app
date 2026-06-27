@@ -44,6 +44,7 @@ describe("candidate object normalization", () => {
       normalizeAcceptedEntityPayload("task", {
         title: "  Pay Optimum bill  ",
         dueDate: "2026-06-10",
+        taskOwner: "owner",
         sourceSummary: "Email says the bill is ready.",
         start: "2026-06-09T14:00:00.000Z",
         end: "2026-06-09T15:00:00.000Z",
@@ -53,6 +54,7 @@ describe("candidate object normalization", () => {
     ).toMatchObject({
       title: "Pay Optimum bill",
       status: "todo",
+      ownerType: "owner",
       dueAt: Date.parse("2026-06-10"),
       description: expect.stringContaining("Email says the bill is ready."),
     });

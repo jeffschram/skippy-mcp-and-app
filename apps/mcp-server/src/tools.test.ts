@@ -135,6 +135,7 @@ describe("Skippy MCP tool handlers", () => {
     await tools.createTaskDirect({
       title: "  Ship direct create path  ",
       projectId: "project_123",
+      ownerType: "agent",
     });
 
     expect(calls[0]).toMatchObject({
@@ -144,6 +145,7 @@ describe("Skippy MCP tool handlers", () => {
         {
           title: "Ship direct create path",
           projectId: "project_123",
+          ownerType: "agent",
           createdBy: "skippy_mcp",
         },
       ],

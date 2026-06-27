@@ -35,6 +35,9 @@ export type ProjectStatus = (typeof PROJECT_STATUSES)[number];
 export const TASK_STATUSES = ["todo", "in_progress", "waiting", "done", "cancelled"] as const;
 export type TaskStatus = (typeof TASK_STATUSES)[number];
 
+export const TASK_OWNER_TYPES = ["owner", "agent"] as const;
+export type TaskOwnerType = (typeof TASK_OWNER_TYPES)[number];
+
 export const LINK_STATUSES = ["unread", "read", "saved", "discarded"] as const;
 export type LinkStatus = (typeof LINK_STATUSES)[number];
 
@@ -168,6 +171,7 @@ export type TaskInput = PriorityMetadata & {
   description?: string;
   processingState?: ProcessingState;
   status?: TaskStatus;
+  ownerType?: TaskOwnerType;
   dueAt?: number;
   startedAt?: number;
   startedBy?: string;
@@ -539,6 +543,11 @@ export function normalizeAcceptedEntityPayload<T extends EntityType>(
         title: normalizeRequiredString(firstString(payload.title, payload.name, payload.summary) ?? "", "title"),
         description,
         status: oneOfValue(TASK_STATUSES, payload.status) ?? "todo",
+        ownerType:
+          oneOfValue(TASK_OWNER_TYPES, payload.ownerType) ??
+          oneOfValue(TASK_OWNER_TYPES, payload.taskOwner) ??
+          oneOfValue(TASK_OWNER_TYPES, payload.assignedTo) ??
+          oneOfValue(TASK_OWNER_TYPES, payload.assignee),
         dueAt: timestampValue(payload.dueAt, payload.dueDate, payload.due, payload.start),
         completedAt: timestampValue(payload.completedAt),
         ...priorityFields(payload),

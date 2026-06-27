@@ -356,6 +356,10 @@ p {
   background: var(--panel-strong);
 }
 
+.task-item {
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+}
+
 .project-row {
   align-items: center;
   color: inherit;
@@ -455,6 +459,13 @@ p {
 .badge.red {
   background: #f5e3e1;
   color: var(--red);
+}
+
+.task-side {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
 }
 
 .toolbar {
@@ -653,13 +664,21 @@ p {
     grid-template-columns: auto 1fr;
   }
 
+  .task-item {
+    grid-template-columns: auto 1fr;
+  }
+
   .pending-action-item {
     grid-template-columns: auto 1fr;
   }
 
   .item .badge {
-    grid-column: 2;
     width: fit-content;
+  }
+
+  .task-side {
+    grid-column: 2;
+    justify-content: flex-start;
   }
 
   .pending-action-side {

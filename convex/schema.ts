@@ -210,6 +210,7 @@ export default defineSchema({
       v.literal("done"),
       v.literal("cancelled"),
     ),
+    ownerType: v.optional(v.union(v.literal("owner"), v.literal("agent"))),
     dueAt: v.optional(v.number()),
     startedAt: v.optional(v.number()),
     startedBy: v.optional(v.string()),

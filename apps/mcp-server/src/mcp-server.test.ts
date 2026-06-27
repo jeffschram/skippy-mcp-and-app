@@ -223,6 +223,7 @@ describe("Skippy MCP manifest", () => {
       expect(submitCandidate?.description).toContain("Legacy fallback");
       expect(submitCandidate?.inputSchema.properties?.reviewReason).toBeDefined();
       expect(createTask?.description).toContain("when the user explicitly asks");
+      expect(createTask?.inputSchema.properties?.ownerType).toBeDefined();
       expect(capture?.description).toContain("accepted note directly");
       expect(ask?.annotations?.readOnlyHint).toBe(true);
       expect(refreshFocusSummary?.description).toContain("Generate and store");
@@ -252,6 +253,9 @@ describe("Skippy MCP manifest", () => {
       expect(prompts.prompts.find((prompt) => prompt.name === "skippy_skills")?.description).toContain(
         "Portable harness instructions",
       );
+      expect(prompts.prompts.find((prompt) => prompt.name === "skippy_slash_commands")?.description).toContain(
+        "slash command",
+      );
 
       const intro = await client.getPrompt({ name: "skippy_intro" });
       expect(intro.messages[0]?.content.type).toBe("text");
@@ -267,6 +271,16 @@ describe("Skippy MCP manifest", () => {
         expect(skills.messages[0].content.text).toContain("Retrieve before contextful work");
         expect(skills.messages[0].content.text).toContain("Run interviews in the harness chat");
         expect(skills.messages[0].content.text).toContain("Use `get_importance_rubric`");
+        expect(skills.messages[0].content.text).toContain("/task ...");
+        expect(skills.messages[0].content.text).toContain("mark_task_done");
+      }
+
+      const slashCommands = await client.getPrompt({ name: "skippy_slash_commands" });
+      expect(slashCommands.messages[0]?.content.type).toBe("text");
+      if (slashCommands.messages[0]?.content.type === "text") {
+        expect(slashCommands.messages[0].content.text).toContain("Skippy Slash Commands");
+        expect(slashCommands.messages[0].content.text).toContain("| `/task ...`");
+        expect(slashCommands.messages[0].content.text).toContain("`mark_task_done`");
       }
     } finally {
       await client.close();
