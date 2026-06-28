@@ -125,6 +125,7 @@ export type SkippyClient = {
     },
   ): Promise<unknown>;
   recordEntityReview(brainInstanceId: string, review: EntityReviewInput): Promise<unknown>;
+  getCurrentContext(brainInstanceId: string): Promise<unknown>;
   planProject(brainInstanceId: string, input: { projectId: string; maxTasks?: number }): Promise<unknown>;
   listReadyTasks(brainInstanceId: string, input: { limit?: number }): Promise<unknown>;
   getTaskBrief(brainInstanceId: string, input: { taskId: string }): Promise<unknown>;
@@ -894,6 +895,10 @@ export function createSkippyToolHandlers(client: SkippyClient, brainInstanceId: 
         reviewedBy: input.reviewedBy ?? "skippy_mcp",
         priorityComputedAt: input.priorityComputedAt ?? Date.now(),
       });
+    },
+
+    async getCurrentContext() {
+      return await client.getCurrentContext(brainInstanceId);
     },
 
     async planProject(input: { projectId: string; maxTasks?: number }) {

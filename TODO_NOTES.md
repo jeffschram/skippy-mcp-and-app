@@ -1,41 +1,31 @@
 This file contains notes and todo issues for features and updates to be added.
 
-## Slash commands
+## Current webapp page
 
-create slash commands that map to the mcp commands
-/task ...
-→ create_task
+Save a global state variable in the webapp with information about the current page opened. Then in the harness I can ask something like "Add a task to this project" and it would know which project Im talking about
 
-/project ...
-→ create_project
+## Code Projects
 
-/remember ...
-→ record_memory or capture_thought
+If a project is software/code it has an associated github repo and local folder.
+If the Agent is assigned a task we need the agent to
 
-/decision ...
-→ record_decision
+- create a new local branch in the local repo
+- do the work
+- commit and make a PR to the repo
+- update the task progress to 'in review'
+- add the PR URL to the task
+- when user approves/merges the PR the task is set to DONE
 
-/principle ...
-→ record_principle
+## Project Tasks
 
-/ask ...
-→ ask or get_context_bundle
+Briefed tasks should have an editable Execution brief and Acceptance Criteria in the web app
+I don't think we need the 'Record result (supervise)' section in a briefed task
+Currently the CTA for a Briefed task is 'Start' but it should be 'Mark Ready' and promoted to the Ready level
 
-/focus
-→ summarize_focus or refresh_focus_summary
+## All Projects
 
-/interview ...
-→ list_interview_templates + start_interview
+Should have a local folder filepath to save output files/assets
 
-/inbox ...
-→ submit_memory_review_candidate or submit_candidate_object
+## Project Task UI in Webapp
 
-/link ...
-→ link_entities or link_memory
-
-/done ...
-→ mark_task_done
-
-## Now section
-
-I don't think the heading is an accurate summary of all the bullets, i think it's the first bullet put into a heading. it should be a summary of all the bullets
+Kanban board should allow user to move tasks to different states "Briefed" to "Ready" etc

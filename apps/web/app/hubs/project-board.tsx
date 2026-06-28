@@ -1,19 +1,33 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useAction, useMutation, useQuery } from "convex/react";
-import { ArrowLeft, ClipboardCopy, Play, Sparkles } from "lucide-react";
+import {
+  ArrowLeft,
+  ClipboardCopy,
+  Folder,
+  GitBranch,
+  Pencil,
+  Play,
+  Settings2,
+  Sparkles,
+} from "lucide-react";
 import { api } from "../../lib/skippy-api";
 import { LiveGate } from "../live-auth";
 import {
   Badge,
   Button,
   Card,
+  Dialog,
   Drawer,
   EmptyState,
+  Field,
   LoadingRow,
   ProgressBar,
+  Select,
+  TextArea,
+  TextInput,
   useToast,
 } from "../components";
 import { EXECUTION_COLUMNS, executionStateTone, taskStatusTone, titleCase } from "../../lib/display";
@@ -22,9 +36,16 @@ import boardStyles from "./board.module.css";
 
 type AnyRecord = Record<string, any>;
 
-function buildBriefText(task: AnyRecord, projectTitle?: string): string {
+// States where the task hasn't been executed yet — brief is editable, no result capture.
+const PRE_EXECUTION = new Set(["unplanned", "briefed", "ready", "blocked"]);
+// States where recording a result makes sense.
+const RESULT_STATES = new Set(["in_progress", "in_review"]);
+
+function buildBriefText(task: AnyRecord, project?: AnyRecord): string {
   const lines = [`# ${task.title}`];
-  if (projectTitle) lines.push(`Project: ${projectTitle}`);
+  if (project?.title) lines.push(`Project: ${project.title}`);
+  if (project?.repoUrl) lines.push(`Repo: ${project.repoUrl}`);
+  if (project?.localPath) lines.push(`Local folder: ${project.localPath}`);
   if (task.kind) lines.push(`Kind: ${task.kind}`);
   if (task.description) lines.push("", task.description);
   if (task.executionBrief) lines.push("", "## Brief", task.executionBrief);
@@ -44,6 +65,10 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
   const markInProgress = useMutation(api.knowledge.markTaskInProgressForViewer);
   const markDone = useMutation(api.knowledge.markTaskDoneForViewer);
   const recordResult = useMutation(api.projects.recordTaskResultForViewer);
+  const setExecState = useMutation(api.projects.setTaskExecutionStateForViewer);
+  const updateBrief = useMutation(api.projects.updateTaskBriefForViewer);
+  const updateProject = useMutation(api.projects.updateProjectForViewer);
+  const setViewerContext = useMutation(api.projects.setViewerContext);
   const toast = useToast();
 
   const [planning, setPlanning] = useState(false);
@@ -52,11 +77,50 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
   const [resultSummary, setResultSummary] = useState("");
   const [busy, setBusy] = useState(false);
 
+  // Brief editing
+  const [editingBrief, setEditingBrief] = useState(false);
+  const [briefDraft, setBriefDraft] = useState("");
+  const [criteriaDraft, setCriteriaDraft] = useState("");
+
+  // Project settings dialog
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [pKind, setPKind] = useState("general");
+  const [pRepo, setPRepo] = useState("");
+  const [pFolder, setPFolder] = useState("");
+  const [pSummary, setPSummary] = useState("");
+
   const selected = board?.tasks?.find((task: AnyRecord) => task._id === selectedId) ?? null;
   const detail = useQuery(
     api.projects.getTaskBriefForViewer,
     viewerReady && selectedId ? { taskId: selectedId as any } : "skip",
   ) as AnyRecord | null | undefined;
+
+  // Tell the harness which project is open ("this project").
+  useEffect(() => {
+    if (!viewerReady) return;
+    void setViewerContext({ activeRoute: `/projects/${projectId}`, activeProjectId: projectId as any }).catch(
+      () => undefined,
+    );
+  }, [viewerReady, projectId, setViewerContext]);
+
+  // Reset edit state whenever a different task is opened.
+  useEffect(() => {
+    setEditingBrief(false);
+    if (selected) {
+      setBriefDraft(selected.executionBrief ?? "");
+      setCriteriaDraft((selected.acceptanceCriteria ?? []).join("\n"));
+    }
+  }, [selectedId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const project = board?.project;
+  const openSettings = () => {
+    if (!project) return;
+    setPKind(project.kind ?? "general");
+    setPRepo(project.repoUrl ?? "");
+    setPFolder(project.localPath ?? "");
+    setPSummary(project.summary ?? "");
+    setSettingsOpen(true);
+  };
 
   const runPlan = async () => {
     setPlanning(true);
@@ -72,10 +136,22 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
 
   const copyBrief = async (task: AnyRecord) => {
     try {
-      await navigator.clipboard.writeText(buildBriefText(task, board?.project?.title));
+      await navigator.clipboard.writeText(buildBriefText(task, project));
       toast("Brief copied — paste it into your coding agent.", "success");
     } catch {
       toast("Could not copy to clipboard", "error");
+    }
+  };
+
+  const moveTo = async (taskId: string, state: string) => {
+    setBusy(true);
+    try {
+      await setExecState({ taskId: taskId as any, executionState: state as any });
+      toast(`Moved to ${titleCase(state)}.`, "info");
+    } catch (error) {
+      toast(error instanceof Error ? error.message : "Could not move task", "error");
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -83,9 +159,29 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
     setBusy(true);
     try {
       await markInProgress({ taskId: taskId as any });
-      toast("Task moved to in progress.", "info");
+      toast("Task started.", "info");
     } catch (error) {
       toast(error instanceof Error ? error.message : "Could not start task", "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const saveBrief = async (taskId: string) => {
+    setBusy(true);
+    try {
+      await updateBrief({
+        taskId: taskId as any,
+        executionBrief: briefDraft,
+        acceptanceCriteria: criteriaDraft
+          .split("\n")
+          .map((line) => line.trim())
+          .filter(Boolean),
+      } as any);
+      toast("Brief updated.", "success");
+      setEditingBrief(false);
+    } catch (error) {
+      toast(error instanceof Error ? error.message : "Could not save brief", "error");
     } finally {
       setBusy(false);
     }
@@ -107,6 +203,25 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
       setResultSummary("");
     } catch (error) {
       toast(error instanceof Error ? error.message : "Could not record result", "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const saveSettings = async () => {
+    setBusy(true);
+    try {
+      await updateProject({
+        projectId: projectId as any,
+        kind: pKind as any,
+        repoUrl: pRepo,
+        localPath: pFolder,
+        summary: pSummary,
+      } as any);
+      toast("Project updated.", "success");
+      setSettingsOpen(false);
+    } catch (error) {
+      toast(error instanceof Error ? error.message : "Could not update project", "error");
     } finally {
       setBusy(false);
     }
@@ -134,14 +249,33 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
             </Link>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 16, flexWrap: "wrap" }}>
               <div>
-                <p className="eyebrow">Project</p>
-                <h1>{board.project.title}</h1>
-                {board.project.summary ? <p className="muted" style={{ maxWidth: 640 }}>{board.project.summary}</p> : null}
+                <p className="eyebrow">{project.kind === "code" ? "Code project" : "Project"}</p>
+                <h1>{project.title}</h1>
+                {project.summary ? <p className="muted" style={{ maxWidth: 640 }}>{project.summary}</p> : null}
+                {project.repoUrl || project.localPath ? (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
+                    {project.repoUrl ? (
+                      <a className="badge blue" href={project.repoUrl} target="_blank" rel="noreferrer" style={{ gap: 6 }}>
+                        <GitBranch size={13} aria-hidden /> Repo
+                      </a>
+                    ) : null}
+                    {project.localPath ? (
+                      <span className="badge" style={{ gap: 6 }} title={project.localPath}>
+                        <Folder size={13} aria-hidden /> {project.localPath}
+                      </span>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
-              <Button variant="primary" onClick={() => void runPlan()} disabled={planning}>
-                <Sparkles size={17} aria-hidden />
-                {planning ? "Planning…" : board.tasks.length ? "Re-plan with AI" : "Plan with AI"}
-              </Button>
+              <div style={{ display: "flex", gap: 8 }}>
+                <Button onClick={openSettings} title="Project settings">
+                  <Settings2 size={16} aria-hidden /> Settings
+                </Button>
+                <Button variant="primary" onClick={() => void runPlan()} disabled={planning}>
+                  <Sparkles size={17} aria-hidden />
+                  {planning ? "Planning…" : board.tasks.length ? "Re-plan with AI" : "Plan with AI"}
+                </Button>
+              </div>
             </div>
           </div>
 
@@ -209,7 +343,11 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                   <Button onClick={() => void copyBrief(selected)}>
                     <ClipboardCopy size={16} aria-hidden /> Copy brief
                   </Button>
-                  {selected.executionState === "ready" || selected.executionState === "briefed" ? (
+                  {selected.executionState === "briefed" ? (
+                    <Button variant="primary" disabled={busy} onClick={() => void moveTo(selected._id, "ready")}>
+                      Mark Ready
+                    </Button>
+                  ) : selected.executionState === "ready" ? (
                     <Button variant="primary" disabled={busy} onClick={() => void startTask(selected._id)}>
                       <Play size={16} aria-hidden /> Start
                     </Button>
@@ -220,7 +358,7 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
           >
             {selected ? (
               <div style={{ display: "grid", gap: 16 }}>
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
                   <Badge tone={executionStateTone(selected.executionState)} dot>
                     {titleCase(selected.executionState)}
                   </Badge>
@@ -230,25 +368,80 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                   {selected.kind ? <Badge tone="neutral">{selected.kind}</Badge> : null}
                 </div>
 
+                {/* Move between states (kanban) */}
+                <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14 }}>
+                  <span className="muted" style={{ fontWeight: 700 }}>Move to</span>
+                  <Select
+                    value={selected.executionState}
+                    disabled={busy}
+                    onChange={(event) => void moveTo(selected._id, event.target.value)}
+                    style={{ maxWidth: 200 }}
+                  >
+                    {EXECUTION_COLUMNS.map((column) => (
+                      <option key={column.key} value={column.key}>
+                        {column.label}
+                      </option>
+                    ))}
+                  </Select>
+                </label>
+
                 {selected.description ? <p style={{ margin: 0 }}>{selected.description}</p> : null}
 
-                {selected.executionBrief ? (
-                  <section>
-                    <h3>Execution brief</h3>
-                    <p className={boardStyles.brief}>{selected.executionBrief}</p>
-                  </section>
-                ) : null}
-
-                {selected.acceptanceCriteria?.length ? (
-                  <section>
-                    <h3>Acceptance criteria</h3>
-                    <ul style={{ margin: 0, paddingLeft: 18, display: "grid", gap: 6 }}>
-                      {selected.acceptanceCriteria.map((criterion: string, index: number) => (
-                        <li key={index}>{criterion}</li>
-                      ))}
-                    </ul>
-                  </section>
-                ) : null}
+                {/* Execution brief + acceptance criteria (editable pre-execution) */}
+                <section>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                    <h3 style={{ margin: 0 }}>Execution brief</h3>
+                    {PRE_EXECUTION.has(selected.executionState) && !editingBrief ? (
+                      <Button small onClick={() => setEditingBrief(true)}>
+                        <Pencil size={14} aria-hidden /> Edit
+                      </Button>
+                    ) : null}
+                  </div>
+                  {editingBrief ? (
+                    <div style={{ display: "grid", gap: 10, marginTop: 8 }}>
+                      <TextArea
+                        value={briefDraft}
+                        onChange={(event) => setBriefDraft(event.target.value)}
+                        placeholder="What to do, where, and any context an executor needs."
+                        style={{ minHeight: 120 }}
+                      />
+                      <Field label="Acceptance criteria (one per line)">
+                        <TextArea
+                          value={criteriaDraft}
+                          onChange={(event) => setCriteriaDraft(event.target.value)}
+                          placeholder={"Tests pass\nFeature renders in the app"}
+                          style={{ minHeight: 90 }}
+                        />
+                      </Field>
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <Button disabled={busy} onClick={() => setEditingBrief(false)}>
+                          Cancel
+                        </Button>
+                        <Button variant="primary" disabled={busy} onClick={() => void saveBrief(selected._id)}>
+                          Save brief
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      {selected.executionBrief ? (
+                        <p className={boardStyles.brief}>{selected.executionBrief}</p>
+                      ) : (
+                        <p className="muted" style={{ fontSize: 14 }}>No brief yet.</p>
+                      )}
+                      {selected.acceptanceCriteria?.length ? (
+                        <>
+                          <h3 style={{ marginTop: 14 }}>Acceptance criteria</h3>
+                          <ul style={{ margin: 0, paddingLeft: 18, display: "grid", gap: 6 }}>
+                            {selected.acceptanceCriteria.map((criterion: string, index: number) => (
+                              <li key={index}>{criterion}</li>
+                            ))}
+                          </ul>
+                        </>
+                      ) : null}
+                    </>
+                  )}
+                </section>
 
                 {detail?.dependencies?.length ? (
                   <section>
@@ -276,7 +469,8 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                   </section>
                 ) : null}
 
-                {selected.executionState !== "done" ? (
+                {/* Record result only once work is underway (not for briefed/ready). */}
+                {RESULT_STATES.has(selected.executionState) ? (
                   <section style={{ borderTop: "1px solid var(--line)", paddingTop: 14, display: "grid", gap: 10 }}>
                     <h3 style={{ margin: 0 }}>Record result (supervise)</h3>
                     <input
@@ -305,6 +499,34 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
               </div>
             ) : null}
           </Drawer>
+
+          <Dialog open={settingsOpen} onClose={() => setSettingsOpen(false)} title="Project settings">
+            <div style={{ display: "grid", gap: 14 }}>
+              <Field label="Project type">
+                <Select value={pKind} onChange={(event) => setPKind(event.target.value)}>
+                  <option value="general">General</option>
+                  <option value="code">Code (GitHub repo + branch/PR workflow)</option>
+                </Select>
+              </Field>
+              {pKind === "code" ? (
+                <Field label="GitHub repo URL">
+                  <TextInput value={pRepo} onChange={(event) => setPRepo(event.target.value)} placeholder="https://github.com/you/repo" />
+                </Field>
+              ) : null}
+              <Field label="Local folder path (output files / assets)">
+                <TextInput value={pFolder} onChange={(event) => setPFolder(event.target.value)} placeholder="/Users/you/projects/thing" />
+              </Field>
+              <Field label="Summary">
+                <TextArea value={pSummary} onChange={(event) => setPSummary(event.target.value)} />
+              </Field>
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+                <Button onClick={() => setSettingsOpen(false)}>Cancel</Button>
+                <Button variant="primary" disabled={busy} onClick={() => void saveSettings()}>
+                  Save
+                </Button>
+              </div>
+            </div>
+          </Dialog>
         </>
       )}
     </LiveGate>

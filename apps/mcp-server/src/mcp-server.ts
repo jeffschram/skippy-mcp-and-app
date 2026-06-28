@@ -1269,6 +1269,18 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
   );
 
   server.registerTool(
+    "get_current_context",
+    {
+      title: "Get the user's current app context",
+      description:
+        "Read-only. Returns what the user currently has open in the Skippy web app — notably the active project (id + title) and route. Use this to resolve references like 'this project' or 'add a task here' when the user does not name the project explicitly. Returns null if nothing is open.",
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: z.object({}),
+    },
+    async () => toolResult(await tools.getCurrentContext()),
+  );
+
+  server.registerTool(
     "plan_project",
     {
       title: "Plan a project into tasks",

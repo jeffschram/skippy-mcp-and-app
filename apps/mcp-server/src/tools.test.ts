@@ -43,6 +43,7 @@ function createFakeClient(): { client: SkippyClient; calls: Array<{ name: string
         record("recordPendingActionResult", pendingActionId, result),
       recordEntityReview: (brainInstanceId, review) =>
         record("recordEntityReview", brainInstanceId, review),
+      getCurrentContext: (brainInstanceId) => record("getCurrentContext", brainInstanceId),
       planProject: (brainInstanceId, input) => record("planProject", brainInstanceId, input),
       listReadyTasks: (brainInstanceId, input) => record("listReadyTasks", brainInstanceId, input),
       getTaskBrief: (brainInstanceId, input) => record("getTaskBrief", brainInstanceId, input),
