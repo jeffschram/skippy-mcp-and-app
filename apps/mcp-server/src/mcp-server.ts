@@ -126,6 +126,10 @@ function buildSlashCommandsMessage() {
     "| `/interview ...` | Start or continue a guided interview in the harness chat. | `list_interview_templates` plus `start_interview` |",
     "| `/inbox ...` | Send uncertain or review-needed memory/object candidates to Skippy Review. | `submit_memory_review_candidate` or `submit_candidate_object` |",
     "| `/link ...` | Link accepted entities or memories when IDs/context are known. | `link_entities` or `link_memory` |",
+    "| `/plan ...` | Decompose a project into executable task briefs. | `plan_project` |",
+    "| `/next` | Show the next ready-to-execute task(s). | `list_ready_tasks` |",
+    "| `/brief ...` | Get a task's ready-to-hand-off execution brief. | `get_task_brief` |",
+    "| `/result ...` | Report an executed task's outcome (PR/summary). | `record_task_result` |",
     "| `/done ...` | Mark an accepted Skippy task done. | `mark_task_done` |",
     "",
     "Command handling rules:",
@@ -182,7 +186,21 @@ function buildSkillsMessage() {
     "- `/interview ...` -> `list_interview_templates` plus `start_interview`",
     "- `/inbox ...` -> `submit_memory_review_candidate` or `submit_candidate_object`",
     "- `/link ...` -> `link_entities` or `link_memory`",
+    "- `/plan ...` -> `plan_project`",
+    "- `/next` -> `list_ready_tasks`",
+    "- `/brief ...` -> `get_task_brief`",
+    "- `/result ...` -> `record_task_result`",
     "- `/done ...` -> `mark_task_done`",
+    "",
+    "## Plan → Execute Loop (supervised project automation)",
+    "",
+    "Skippy plans; you (or a coding agent like Claude Code) execute. Skippy never writes code itself.",
+    "",
+    "1. `plan_project` decomposes an accepted project into ordered tasks, each with an execution brief, acceptance criteria, and dependency links. Requires an LLM provider configured for the brain.",
+    "2. `list_ready_tasks` returns tasks whose dependencies are all done — the next work to pick up.",
+    "3. `get_task_brief` returns one task's self-contained brief. Execute it (write code, open a PR) outside Skippy.",
+    "4. `record_task_result` reports the outcome (summary + PR/commit URL). By default the task moves to `in_review` for the owner to approve; pass `markDone: true` to complete it, which unblocks dependent tasks.",
+    "Keep the human in the loop: surface plans and results for review rather than silently completing work.",
     "",
     "Use the `skippy_slash_commands` prompt/resource when the harness wants the standalone command reference.",
     "",
@@ -1246,6 +1264,74 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
         directCreateConfirmation(
           await tools.createTaskDirect(stripUndefined(args) as Parameters<typeof tools.createTaskDirect>[0]),
           "task",
+        ),
+      ),
+  );
+
+  server.registerTool(
+    "plan_project",
+    {
+      title: "Plan a project into tasks",
+      description:
+        "Use Skippy's AI planner to decompose an accepted project into an ordered set of executable tasks, each with an execution brief, acceptance criteria, and dependency links. Skippy plans; a human or coding agent executes. Requires an LLM provider configured for the brain. Re-running adds a fresh plan version.",
+      annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: true },
+      inputSchema: z.object({
+        projectId: z.string().describe("Accepted project ID to plan."),
+        maxTasks: z.number().int().min(1).max(12).optional().describe("Maximum number of tasks to produce (default 10)."),
+      }),
+    },
+    async (args) => toolResult(await tools.planProject(stripUndefined(args) as { projectId: string; maxTasks?: number })),
+  );
+
+  server.registerTool(
+    "list_ready_tasks",
+    {
+      title: "List ready-to-execute tasks",
+      description:
+        "Read-only, dependency-aware queue of agent-owned tasks whose dependencies are all complete (execution state 'ready'). This is what a coding agent should pick up next. Each item includes the execution brief and acceptance criteria.",
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: z.object({
+        limit: z.number().int().min(1).max(50).optional().describe("Maximum tasks to return (default 12)."),
+      }),
+    },
+    async (args) => toolResult(await tools.listReadyTasks(stripUndefined(args) as { limit?: number })),
+  );
+
+  server.registerTool(
+    "get_task_brief",
+    {
+      title: "Get a task's execution brief",
+      description:
+        "Read-only. Fetch the ready-to-hand-off brief for a single task: description, execution brief, acceptance criteria, owning project, and dependency status. Hand this to a coding agent to execute.",
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: z.object({
+        taskId: z.string().describe("Task ID to fetch the brief for."),
+      }),
+    },
+    async (args) => toolResult(await tools.getTaskBrief(stripUndefined(args) as { taskId: string })),
+  );
+
+  server.registerTool(
+    "record_task_result",
+    {
+      title: "Record a task result",
+      description:
+        "Report the outcome of an executed task back to Skippy for supervision. Provide a result summary and/or a PR/commit URL. By default the task moves to 'in_review' for the owner to approve; set markDone to complete it, which also unblocks dependent tasks.",
+      annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      inputSchema: z.object({
+        taskId: z.string().describe("Task ID that was executed."),
+        resultSummary: z.string().optional().describe("Short summary of what was done."),
+        resultUrl: z.string().optional().describe("PR, commit, or artifact URL."),
+        markDone: z
+          .boolean()
+          .optional()
+          .describe("If true, mark the task done immediately instead of leaving it for owner review."),
+      }),
+    },
+    async (args) =>
+      toolResult(
+        await tools.recordTaskResult(
+          stripUndefined(args) as { taskId: string; resultSummary?: string; resultUrl?: string; markDone?: boolean },
         ),
       ),
   );

@@ -125,6 +125,13 @@ export type SkippyClient = {
     },
   ): Promise<unknown>;
   recordEntityReview(brainInstanceId: string, review: EntityReviewInput): Promise<unknown>;
+  planProject(brainInstanceId: string, input: { projectId: string; maxTasks?: number }): Promise<unknown>;
+  listReadyTasks(brainInstanceId: string, input: { limit?: number }): Promise<unknown>;
+  getTaskBrief(brainInstanceId: string, input: { taskId: string }): Promise<unknown>;
+  recordTaskResult(
+    brainInstanceId: string,
+    input: { taskId: string; resultSummary?: string; resultUrl?: string; markDone?: boolean; actorId?: string },
+  ): Promise<unknown>;
   captureThought(brainInstanceId: string, input: CaptureThoughtInput): Promise<unknown>;
   recordMemory(brainInstanceId: string, input: RecordMemoryInput): Promise<unknown>;
   submitMemoryReviewCandidate(brainInstanceId: string, input: MemoryReviewCandidateInput): Promise<unknown>;
@@ -886,6 +893,30 @@ export function createSkippyToolHandlers(client: SkippyClient, brainInstanceId: 
         reviewSummary,
         reviewedBy: input.reviewedBy ?? "skippy_mcp",
         priorityComputedAt: input.priorityComputedAt ?? Date.now(),
+      });
+    },
+
+    async planProject(input: { projectId: string; maxTasks?: number }) {
+      return await client.planProject(brainInstanceId, input);
+    },
+
+    async listReadyTasks(input: { limit?: number } = {}) {
+      return await client.listReadyTasks(brainInstanceId, input);
+    },
+
+    async getTaskBrief(input: { taskId: string }) {
+      return await client.getTaskBrief(brainInstanceId, input);
+    },
+
+    async recordTaskResult(input: {
+      taskId: string;
+      resultSummary?: string;
+      resultUrl?: string;
+      markDone?: boolean;
+    }) {
+      return await client.recordTaskResult(brainInstanceId, {
+        ...input,
+        actorId: "skippy_mcp",
       });
     },
 

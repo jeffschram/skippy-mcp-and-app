@@ -53,6 +53,16 @@ function createFakeClient(overrides: Partial<SkippyClient> = {}): SkippyClient {
     markTaskDone: async (_brainInstanceId, taskId) => ({ taskId }),
     recordPendingActionResult: async () => ({ ok: true }),
     recordEntityReview: async () => ({ ok: true }),
+    planProject: async (_brainInstanceId, input) => ({
+      status: "planned",
+      planId: "plan_123",
+      projectId: input.projectId,
+      taskCount: 3,
+      summary: "Planned",
+    }),
+    listReadyTasks: async () => [],
+    getTaskBrief: async (_brainInstanceId, input) => ({ _id: input.taskId, title: "Task", executionBrief: "do it" }),
+    recordTaskResult: async (_brainInstanceId, input) => ({ taskId: input.taskId, executionState: "in_review" }),
     captureThought: async (_brainInstanceId, input) => ({
       status: input.reviewBehavior === "submit_for_review" ? "submitted_for_review" : "captured",
       memoryId: "memory_123",

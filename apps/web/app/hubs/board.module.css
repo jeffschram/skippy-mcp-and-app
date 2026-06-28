@@ -1,0 +1,117 @@
+.progressCard {
+  margin-bottom: 16px;
+}
+
+.progressHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.progressHead strong {
+  font-size: 17px;
+  font-weight: 760;
+}
+
+.board {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(232px, 1fr);
+  gap: 12px;
+  overflow-x: auto;
+  padding-bottom: 8px;
+}
+
+.column {
+  display: flex;
+  flex-direction: column;
+  min-height: 120px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+}
+
+.columnHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+  font-weight: 760;
+  font-size: 14px;
+}
+
+.columnCount {
+  display: inline-grid;
+  place-items: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: light-dark(#e8e2d3, #333);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.columnBody {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  align-content: start;
+}
+
+.taskCard {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel-strong);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.taskCard:hover,
+.taskCard:focus-visible {
+  border-color: var(--blue);
+  box-shadow: var(--shadow);
+  outline: none;
+}
+
+.taskTitle {
+  font-weight: 700;
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.taskMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.columnEmpty {
+  margin: 0;
+  padding: 6px;
+  color: var(--muted);
+  text-align: center;
+  font-size: 13px;
+}
+
+.brief {
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel-strong);
+  white-space: pre-wrap;
+  font-size: 14px;
+  line-height: 1.5;
+}

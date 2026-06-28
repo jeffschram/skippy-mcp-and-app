@@ -25,6 +25,7 @@
     "vitest": "^4.0.14"
   },
   "dependencies": {
+    "@skippy/ai": "workspace:*",
     "@skippy/shared": "workspace:*",
     "convex": "^1.40.0"
   }

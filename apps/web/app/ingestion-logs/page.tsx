@@ -1,16 +1,5 @@
-import { AppShell, PageHeader } from "../ui";
-import { isLiveConfigured } from "../../lib/skippy-api";
-import { LiveIngestionLogsContent } from "../live-pages";
+import { redirect } from "next/navigation";
 
-export default function IngestionLogsPage() {
-  return (
-    <AppShell>
-      <PageHeader eyebrow="Ingestion logs" title="Source runs and decisions." />
-      {isLiveConfigured() ? (
-        <LiveIngestionLogsContent />
-      ) : (
-        <p className="muted">Ingestion logs are available when the app is connected to Convex.</p>
-      )}
-    </AppShell>
-  );
+export default function Page() {
+  redirect("/settings");
 }

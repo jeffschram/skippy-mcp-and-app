@@ -64,9 +64,50 @@ export type EmbeddingResult = {
   model: string;
 };
 
+export type LlmCompletionRequest = {
+  system: string;
+  input: string;
+  maxTokens?: number;
+  usedFor?: string;
+  policyVersion?: string;
+};
+
+export type LlmCompletionResult = {
+  text: string;
+  usage: AiUsageRecord;
+};
+
 export type LlmClient = {
   synthesize(request: SynthesisRequest): Promise<SynthesisResult>;
   generateFocusSummary(request: FocusSummaryRequest): Promise<FocusSummary>;
+  /** Low-level single-turn completion used by higher-level workflows (e.g. project planning). */
+  complete(request: LlmCompletionRequest): Promise<LlmCompletionResult>;
+};
+
+/** One task drafted by automated project planning. `dependsOn` indexes earlier tasks in the list. */
+export type ProjectPlanTaskDraft = {
+  title: string;
+  description?: string;
+  kind?: "coding" | "research" | "design" | "manual" | "planning";
+  acceptanceCriteria?: string[];
+  executionBrief?: string;
+  dependsOn?: number[];
+};
+
+export type ProjectPlanRequest = {
+  projectTitle: string;
+  projectSummary?: string;
+  goals?: string[];
+  existingTasks?: string[];
+  notes?: string;
+  maxTasks?: number;
+  policyVersion?: string;
+};
+
+export type ProjectPlanResult = {
+  summary: string;
+  tasks: ProjectPlanTaskDraft[];
+  usage?: AiUsageRecord;
 };
 
 export type EmbeddingClient = {
@@ -85,7 +126,7 @@ export const DEFAULT_ANTHROPIC_SYNTHESIS_MODEL = "claude-sonnet-4-20250514";
 export const DEFAULT_OPENROUTER_SYNTHESIS_MODEL = "openai/gpt-4.1-mini";
 export const DEFAULT_LOCAL_SYNTHESIS_MODEL = "local-model";
 const FOCUS_SUMMARY_INSTRUCTIONS =
-  "Write a concise Skippy focus summary using only the supplied context. Return 3-5 short markdown bullet lines. Use Now for actionable next moves only: concrete things the user or Skippy should monitor, review, decide, prepare, follow up on, or complete. Do not turn standing context, identity facts, relationships, user preferences, or assumptions into bullets; those belong in memory/topItems, not the Now action list. If there are no clear actions, return exactly: Nothing new needs focus right now.";
+  "Write a concise Skippy focus summary using only the supplied context. Start with exactly one line beginning with 'Summary:' that captures the overall theme of ALL the bullets in a single sentence (not just the first item). Then return 3-5 short markdown bullet lines. Use Now for actionable next moves only: concrete things the user or Skippy should monitor, review, decide, prepare, follow up on, or complete. Do not turn standing context, identity facts, relationships, user preferences, or assumptions into bullets; those belong in memory/topItems, not the Now action list. If there are no clear actions, return exactly: Nothing new needs focus right now.";
 
 function getEnvironmentValue(name: string): string | undefined {
   const maybeProcess = globalThis as typeof globalThis & {
@@ -265,6 +306,33 @@ export function createOpenAiLlmClient(config: AiProviderConfig, options?: AiClie
 
       return summary;
     },
+
+    async complete(request) {
+      const response = await fetchImpl("https://api.openai.com/v1/responses", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model,
+          instructions: request.system,
+          input: request.input,
+          ...(request.maxTokens ? { max_output_tokens: request.maxTokens } : {}),
+        }),
+      });
+      const json = await parseJsonResponse(response, "OpenAI");
+      const usage: AiUsageRecord = {
+        provider: "openai",
+        model,
+        usedFor: request.usedFor ?? "completion",
+        timestamp: Date.now(),
+      };
+      if (request.policyVersion) {
+        usage.policyVersion = request.policyVersion;
+      }
+      return { text: outputText(json), usage };
+    },
   };
 }
 
@@ -273,7 +341,13 @@ export function createAnthropicLlmClient(config: AiProviderConfig, options?: AiC
   const apiKey = getApiKey("Anthropic", ["ANTHROPIC_API_KEY"], options);
   const fetchImpl = getFetch(options);
 
-  async function createMessage(system: string, content: string, usedFor: string, policyVersion?: string) {
+  async function createMessage(
+    system: string,
+    content: string,
+    usedFor: string,
+    policyVersion?: string,
+    maxTokens = 700,
+  ) {
     const response = await fetchImpl("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -283,7 +357,7 @@ export function createAnthropicLlmClient(config: AiProviderConfig, options?: AiC
       },
       body: JSON.stringify({
         model,
-        max_tokens: 700,
+        max_tokens: maxTokens,
         system,
         messages: [{ role: "user", content }],
       }),
@@ -334,6 +408,17 @@ export function createAnthropicLlmClient(config: AiProviderConfig, options?: AiC
       }
       return summary;
     },
+
+    async complete(request) {
+      const result = await createMessage(
+        request.system,
+        request.input,
+        request.usedFor ?? "completion",
+        request.policyVersion,
+        request.maxTokens ?? 1500,
+      );
+      return result;
+    },
   };
 }
 
@@ -350,7 +435,13 @@ function createChatCompletionLlmClient({
   headers: Record<string, string>;
   fetchImpl: typeof fetch;
 }): LlmClient {
-  async function createChat(system: string, content: string, usedFor: string, policyVersion?: string) {
+  async function createChat(
+    system: string,
+    content: string,
+    usedFor: string,
+    policyVersion?: string,
+    maxTokens = 700,
+  ) {
     const response = await fetchImpl(endpoint, {
       method: "POST",
       headers: {
@@ -363,7 +454,7 @@ function createChatCompletionLlmClient({
           { role: "system", content: system },
           { role: "user", content },
         ],
-        max_tokens: 700,
+        max_tokens: maxTokens,
       }),
     });
     const json = await parseJsonResponse(response, provider);
@@ -410,6 +501,16 @@ function createChatCompletionLlmClient({
         summary.policyVersion = request.policyVersion;
       }
       return summary;
+    },
+
+    async complete(request) {
+      return createChat(
+        request.system,
+        request.input,
+        request.usedFor ?? "completion",
+        request.policyVersion,
+        request.maxTokens ?? 1500,
+      );
     },
   };
 }
@@ -534,6 +635,11 @@ export function createDisabledLlmClient(): LlmClient {
 
       return summary;
     },
+    async complete() {
+      throw new Error(
+        "Internal Skippy LLM is disabled for this brain. Configure an LLM provider in Settings to use automated planning.",
+      );
+    },
   };
 }
 
@@ -581,4 +687,151 @@ export function createEmbeddingClient(config: AiProviderConfig, options?: AiClie
   throw new Error(
     `Embedding provider '${config.embeddingProvider}' is configured but no provider adapter is installed yet`,
   );
+}
+
+export const PROJECT_PLAN_POLICY_VERSION = "skippy-project-plan-v1";
+
+const PROJECT_PLAN_INSTRUCTIONS = [
+  "You are Skippy's project planning layer. You DECOMPOSE a software/work project into an ordered set of concrete, executable tasks.",
+  "Skippy itself does not write code: each task is a brief that a human or a coding agent (like Claude Code) can pick up and execute.",
+  "Rules:",
+  "- Produce 3 to 12 tasks, ordered so dependencies come first.",
+  "- Each task must be a single, shippable unit of work with a clear outcome.",
+  '- "kind" is one of: coding, research, design, manual, planning.',
+  '- "acceptanceCriteria" is a short list (1-4) of checkable conditions that mean the task is done.',
+  '- "executionBrief" is a self-contained, ready-to-hand-off brief: what to do, where, and any context an executor needs. Write it as if pasting it directly to a coding agent.',
+  '- "dependsOn" is an array of 0-based indexes of earlier tasks in THIS list that must finish first. Omit or use [] when independent.',
+  "Return ONLY a JSON object, no markdown fences, of the exact shape:",
+  '{"summary": string, "tasks": [{"title": string, "description": string, "kind": string, "acceptanceCriteria": string[], "executionBrief": string, "dependsOn": number[]}]}',
+].join("\n");
+
+function extractJsonObject(text: string): string | undefined {
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const candidate = fenced?.[1] ?? text;
+  const start = candidate.indexOf("{");
+  if (start === -1) return undefined;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = start; index < candidate.length; index += 1) {
+    const char = candidate[index];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (char === '"') {
+      inString = true;
+    } else if (char === "{") {
+      depth += 1;
+    } else if (char === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        return candidate.slice(start, index + 1);
+      }
+    }
+  }
+  return undefined;
+}
+
+const PLAN_TASK_KINDS = new Set(["coding", "research", "design", "manual", "planning"]);
+
+function normalizePlanTask(raw: unknown): ProjectPlanTaskDraft | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const record = raw as Record<string, unknown>;
+  const title = typeof record.title === "string" ? record.title.trim() : "";
+  if (!title) return undefined;
+
+  const task: ProjectPlanTaskDraft = { title };
+  if (typeof record.description === "string" && record.description.trim()) {
+    task.description = record.description.trim();
+  }
+  if (typeof record.kind === "string" && PLAN_TASK_KINDS.has(record.kind)) {
+    task.kind = record.kind as NonNullable<ProjectPlanTaskDraft["kind"]>;
+  }
+  if (typeof record.executionBrief === "string" && record.executionBrief.trim()) {
+    task.executionBrief = record.executionBrief.trim();
+  }
+  if (Array.isArray(record.acceptanceCriteria)) {
+    const criteria = record.acceptanceCriteria
+      .map((item) => (typeof item === "string" ? item.trim() : ""))
+      .filter(Boolean);
+    if (criteria.length) task.acceptanceCriteria = criteria;
+  }
+  if (Array.isArray(record.dependsOn)) {
+    const deps = record.dependsOn
+      .map((item) => (typeof item === "number" ? item : Number.parseInt(String(item), 10)))
+      .filter((item) => Number.isInteger(item) && item >= 0);
+    if (deps.length) task.dependsOn = deps;
+  }
+  return task;
+}
+
+/** Parse a raw planning completion into a validated ProjectPlanResult. Exported for testing. */
+export function parseProjectPlan(text: string): { summary: string; tasks: ProjectPlanTaskDraft[] } {
+  const jsonText = extractJsonObject(text);
+  if (!jsonText) {
+    throw new Error("Project plan response did not contain a JSON object");
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(jsonText);
+  } catch {
+    throw new Error("Project plan response was not valid JSON");
+  }
+  const record = (parsed ?? {}) as Record<string, unknown>;
+  const rawTasks = Array.isArray(record.tasks) ? record.tasks : [];
+  const tasks: ProjectPlanTaskDraft[] = [];
+  for (const rawTask of rawTasks) {
+    const task = normalizePlanTask(rawTask);
+    if (task) tasks.push(task);
+  }
+  if (!tasks.length) {
+    throw new Error("Project plan response did not include any valid tasks");
+  }
+  // Drop dependency indexes that point outside the produced task list.
+  for (const task of tasks) {
+    if (task.dependsOn) {
+      task.dependsOn = task.dependsOn.filter((index) => index < tasks.length);
+      if (!task.dependsOn.length) delete task.dependsOn;
+    }
+  }
+  const summary = typeof record.summary === "string" ? record.summary.trim() : "";
+  return { summary, tasks };
+}
+
+export async function generateProjectPlan(
+  client: LlmClient,
+  request: ProjectPlanRequest,
+): Promise<ProjectPlanResult> {
+  const lines = [
+    `Project: ${request.projectTitle}`,
+    request.projectSummary ? `Summary: ${request.projectSummary}` : undefined,
+    request.goals?.length ? `Related goals:\n${request.goals.map((goal) => `- ${goal}`).join("\n")}` : undefined,
+    request.existingTasks?.length
+      ? `Tasks that already exist (do not duplicate these):\n${request.existingTasks.map((task) => `- ${task}`).join("\n")}`
+      : undefined,
+    request.notes ? `Additional notes: ${request.notes}` : undefined,
+    `Produce at most ${request.maxTasks ?? 10} tasks.`,
+  ].filter(Boolean);
+
+  const result = await client.complete({
+    system: PROJECT_PLAN_INSTRUCTIONS,
+    input: lines.join("\n\n"),
+    maxTokens: 3000,
+    usedFor: "project_plan",
+    policyVersion: request.policyVersion ?? PROJECT_PLAN_POLICY_VERSION,
+  });
+
+  const parsed = parseProjectPlan(result.text);
+  return {
+    summary: parsed.summary,
+    tasks: parsed.tasks,
+    usage: result.usage,
+  };
 }

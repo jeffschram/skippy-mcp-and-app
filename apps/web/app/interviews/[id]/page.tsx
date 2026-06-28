@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { isLiveConfigured } from "../../../lib/skippy-api";
-import { AppShell, PageHeader, icons } from "../../ui";
+import { AppShell, PageHeader } from "../../components";
 import { LiveInterviewDetail } from "../ui";
+import { NotConfigured } from "../../hubs/not-configured";
 
 export default async function InterviewDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -13,52 +14,12 @@ export default async function InterviewDetailPage({ params }: { params: Promise<
         eyebrow="Interview"
         title="Guided check-in"
         action={
-          <Link className="text-button" href="/interviews">
-            Back to interviews
+          <Link className="text-button" href="/brain">
+            Back to Brain
           </Link>
         }
       />
-      {isLiveConfigured() ? <LiveInterviewDetail interviewId={interviewId} /> : <StaticInterviewDetail />}
+      {isLiveConfigured() ? <LiveInterviewDetail interviewId={interviewId} /> : <NotConfigured />}
     </AppShell>
-  );
-}
-
-function StaticInterviewDetail() {
-  return (
-    <div className="grid">
-      <section className="card section span-7">
-        <div className="settings-row">
-          <div>
-            <h2>Weekly review</h2>
-            <p className="muted">Question 3 of 4</p>
-          </div>
-          <span className="badge gold">active</span>
-        </div>
-        <article className="item">
-          <span className="item-icon is-active">
-            <icons.MessageSquareText size={17} aria-hidden />
-          </span>
-          <div>
-            <p className="item-title">What did you learn about how you work?</p>
-            <p className="item-meta">Patterns, friction, energy, timing, assumptions, or useful constraints.</p>
-          </div>
-          <span className="badge">static</span>
-        </article>
-      </section>
-      <section className="card section span-5">
-        <h2>Previous answers</h2>
-        <div className="item-list">
-          <article className="item">
-            <span className="item-icon">
-              <icons.Check size={17} aria-hidden />
-            </span>
-            <div>
-              <p className="item-title">What went well this week?</p>
-              <p className="item-meta">Shipped a first-pass review queue and clarified capture rules.</p>
-            </div>
-          </article>
-        </div>
-      </section>
-    </div>
   );
 }

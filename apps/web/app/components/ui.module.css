@@ -1,0 +1,370 @@
+/* Skippy v2 component library — built on the design tokens in globals.css. */
+
+/* ---------- Buttons ---------- */
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 0 16px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--panel-strong);
+  color: var(--ink);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease,
+    box-shadow 0.15s ease,
+    transform 0.05s ease;
+}
+
+.button:hover:not(:disabled),
+.button:focus-visible:not(:disabled) {
+  border-color: #b9c4bc;
+  outline: none;
+}
+
+.button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.primary {
+  border-color: var(--blue);
+  background: var(--blue);
+  color: #fff;
+}
+
+.primary:hover:not(:disabled),
+.primary:focus-visible:not(:disabled) {
+  border-color: #27506f;
+  background: #27506f;
+  box-shadow: var(--shadow);
+}
+
+.danger {
+  border-color: var(--red);
+  color: var(--red);
+}
+
+.danger:hover:not(:disabled),
+.danger:focus-visible:not(:disabled) {
+  background: #f5e3e1;
+  border-color: var(--red);
+}
+
+.ghost {
+  border-color: transparent;
+  background: transparent;
+}
+
+.ghost:hover:not(:disabled),
+.ghost:focus-visible:not(:disabled) {
+  background: light-dark(#ece7d8, #3a3a3a);
+  border-color: transparent;
+}
+
+.small {
+  min-height: 32px;
+  padding: 0 11px;
+  font-size: 13px;
+}
+
+.block {
+  width: 100%;
+}
+
+.iconButton {
+  display: inline-grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--panel-strong);
+  color: var(--ink);
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease;
+}
+
+.iconButton:hover:not(:disabled),
+.iconButton:focus-visible:not(:disabled) {
+  border-color: #b9c4bc;
+  outline: none;
+}
+
+.iconButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.iconButton.small {
+  width: 32px;
+  height: 32px;
+}
+
+/* ---------- Card / Section ---------- */
+.card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.cardPad {
+  padding: 20px;
+}
+
+.cardInteractive {
+  cursor: pointer;
+  text-align: left;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease,
+    transform 0.05s ease;
+}
+
+.cardInteractive:hover,
+.cardInteractive:focus-visible {
+  border-color: var(--blue);
+  box-shadow: var(--shadow);
+  outline: none;
+}
+
+.cardInteractive:active {
+  transform: translateY(1px);
+}
+
+.sectionTitle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.sectionTitle h2 {
+  margin: 0;
+  font-size: 19px;
+}
+
+/* ---------- Badge ---------- */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 24px;
+  padding: 0 9px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: #f4efe2;
+  color: #615845;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.badge.neutral {
+  background: light-dark(#f4efe2, #2c2c2c);
+}
+.badge.blue {
+  background: #e5eef5;
+  border-color: #cadcea;
+  color: var(--blue);
+}
+.badge.green {
+  background: #e4f1e8;
+  border-color: #c8e3d0;
+  color: #2f7d4a;
+}
+.badge.gold {
+  background: #f5ead7;
+  border-color: #e8d5b3;
+  color: var(--gold);
+}
+.badge.red {
+  background: #f5e3e1;
+  border-color: #ecc9c5;
+  color: var(--red);
+}
+.badge.dot::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+/* ---------- EmptyState ---------- */
+.empty {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  padding: 40px 20px;
+  text-align: center;
+  color: var(--muted);
+}
+
+.emptyIcon {
+  display: grid;
+  width: 46px;
+  height: 46px;
+  place-items: center;
+  border-radius: 12px;
+  background: light-dark(#edf3f0, #2c2c2c);
+  color: var(--blue);
+}
+
+.emptyTitle {
+  margin: 0;
+  color: var(--ink);
+  font-weight: 720;
+  font-size: 16px;
+}
+
+.empty p {
+  margin: 0;
+  max-width: 420px;
+  font-size: 14px;
+}
+
+/* ---------- Spinner ---------- */
+.spinner {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--line);
+  border-top-color: var(--blue);
+  border-radius: 999px;
+  animation: ui-spin 0.7s linear infinite;
+}
+
+.loadingRow {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+@keyframes ui-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ---------- ProgressBar ---------- */
+.progress {
+  position: relative;
+  height: 8px;
+  border-radius: 999px;
+  background: light-dark(#e8e2d3, #333);
+  overflow: hidden;
+}
+
+.progressFill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 999px;
+  background: var(--blue);
+  transition: width 0.3s ease;
+}
+
+.progressFill.green {
+  background: #4a9a68;
+}
+
+/* ---------- Fields ---------- */
+.field {
+  display: grid;
+  gap: 6px;
+}
+
+.fieldLabel {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.input,
+.select,
+.textarea {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--panel-strong);
+  color: var(--ink);
+  font: inherit;
+}
+
+.input,
+.select {
+  min-height: 40px;
+  padding: 0 11px;
+}
+
+.textarea {
+  min-height: 110px;
+  padding: 10px 11px;
+  resize: vertical;
+  line-height: 1.45;
+}
+
+.input:focus-visible,
+.select:focus-visible,
+.textarea:focus-visible {
+  outline: none;
+  border-color: var(--blue);
+}
+
+.checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 40px;
+  color: var(--ink);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.checkbox input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--blue);
+}
+
+/* ---------- Layout helpers ---------- */
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.stack {
+  display: grid;
+  gap: 10px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.errorText {
+  margin: 0;
+  color: var(--red);
+  font-size: 13px;
+  font-weight: 700;
+}
