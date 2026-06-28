@@ -7,7 +7,7 @@ import { ArrowRight, Bell, Check, Inbox, RefreshCw, ShieldCheck, Sparkles, X } f
 import { api } from "../../lib/skippy-api";
 import { focusItemKey, parseFocusSummary } from "../focus-summary";
 import { LiveGate } from "../live-auth";
-import { Badge, Card, EmptyState, IconButton, LoadingRow, Section } from "../components";
+import { Badge, Card, EmptyState, IconButton, InlineMarkdown, LoadingRow, Section } from "../components";
 import { useViewerReady } from "./use-viewer";
 
 type AnyRecord = Record<string, any>;
@@ -106,12 +106,16 @@ export function TodayContent() {
                   {sync.message ?? `Checking ${(sync.sourceSystemsChecked ?? []).join(", ") || "connected sources"}.`}
                 </p>
               ) : null}
-              <h1 className="focus-heading">{visibleBullets.length ? headline : "Nothing new needs focus right now."}</h1>
+              <h1 className="focus-heading">
+                {visibleBullets.length ? <InlineMarkdown>{headline}</InlineMarkdown> : "Nothing new needs focus right now."}
+              </h1>
               {visibleBullets.length ? (
                 <ul className="focus-summary-list">
                   {visibleBullets.map((item) => (
                     <li key={item.key}>
-                      <span>{item.text}</span>
+                      <span>
+                        <InlineMarkdown>{item.text}</InlineMarkdown>
+                      </span>
                       <span className="focus-item-actions">
                         <IconButton
                           small

@@ -224,7 +224,9 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                   <Badge tone={executionStateTone(selected.executionState)} dot>
                     {titleCase(selected.executionState)}
                   </Badge>
-                  <Badge tone={taskStatusTone(selected.status)}>{titleCase(selected.status)}</Badge>
+                  {titleCase(selected.status) !== titleCase(selected.executionState) ? (
+                    <Badge tone={taskStatusTone(selected.status)}>Status: {titleCase(selected.status)}</Badge>
+                  ) : null}
                   {selected.kind ? <Badge tone="neutral">{selected.kind}</Badge> : null}
                 </div>
 
