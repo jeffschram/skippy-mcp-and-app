@@ -7,6 +7,7 @@ import { api } from "../lib/skippy-api";
 import { focusItemKey, focusSummaryBullets, focusSummaryPresentation } from "./focus-summary";
 import { LiveGate } from "./live-auth";
 import { icons } from "./ui";
+import { InlineMarkdown } from "./components";
 
 type AnyRecord = Record<string, any>;
 type MergeOption = AnyRecord & {
@@ -306,12 +307,16 @@ export function LiveHomeContent() {
                     `Checking ${(sourceSyncStatus.sourceSystemsChecked ?? []).join(", ") || "connected sources"}.`}
                 </p>
               ) : null}
-              <h1 className="focus-heading">{displayedFocusHeading}</h1>
+              <h1 className="focus-heading">
+                <InlineMarkdown>{displayedFocusHeading}</InlineMarkdown>
+              </h1>
               {visibleFocusDetails.length ? (
                 <ul className="focus-summary-list">
                   {visibleFocusDetails.map((item) => (
                     <li key={item.itemKey}>
-                      <span>{item.text}</span>
+                      <span>
+                        <InlineMarkdown>{item.text}</InlineMarkdown>
+                      </span>
                       <span className="focus-item-actions">
                         <button
                           className="icon-button"

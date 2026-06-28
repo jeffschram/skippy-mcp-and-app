@@ -193,6 +193,85 @@ async function taskBrief(db: any, brainInstanceId: any, taskId: string) {
   };
 }
 
+/**
+ * Move a task to a different project by replacing its `belongs_to` project edge.
+ * Removes any existing belongs_to(task -> project) relationships, then links the task
+ * to the target project. Idempotent if the task already belongs only to the target.
+ */
+async function moveTaskToProject(
+  db: any,
+  brainInstanceId: any,
+  taskId: string,
+  toProjectId: string,
+  now: number,
+  actor: { actorType: string; actorId?: string },
+) {
+  const task = await db.get(taskId);
+  if (!task || task.brainInstanceId !== brainInstanceId) {
+    throw new Error("task not found for brain instance");
+  }
+  const toProject = await db.get(toProjectId);
+  if (!toProject || toProject.brainInstanceId !== brainInstanceId) {
+    throw new Error("target project not found for brain instance");
+  }
+
+  const existing = await db
+    .query("relationships")
+    .withIndex("by_brain_type", (q: any) => q.eq("brainInstanceId", brainInstanceId))
+    .filter((q: any) => q.eq(q.field("type"), "belongs_to"))
+    .filter((q: any) => q.eq(q.field("from.entityType"), "task"))
+    .filter((q: any) => q.eq(q.field("from.entityId"), taskId))
+    .collect();
+
+  let fromProjectId: string | undefined;
+  for (const rel of existing) {
+    if (rel.to.entityType === "project") {
+      if (rel.to.entityId === toProjectId) {
+        // Already linked to the target; nothing to remove for this edge.
+        continue;
+      }
+      fromProjectId = rel.to.entityId;
+      await db.delete(rel._id);
+    }
+  }
+
+  const alreadyLinked = existing.some(
+    (rel: any) => rel.to.entityType === "project" && rel.to.entityId === toProjectId,
+  );
+  let relationshipId = existing.find(
+    (rel: any) => rel.to.entityType === "project" && rel.to.entityId === toProjectId,
+  )?._id;
+
+  if (!alreadyLinked) {
+    relationshipId = await db.insert("relationships", {
+      brainInstanceId,
+      from: { entityType: "task", entityId: taskId },
+      to: { entityType: "project", entityId: toProjectId },
+      type: "belongs_to",
+      confidence: 1,
+      reason: "Task moved to this project.",
+      createdBy: actor.actorType === "user" ? "user" : "harness",
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+
+  await db.patch(taskId, { updatedAt: now });
+
+  await db.insert("activityEvents", {
+    brainInstanceId,
+    entityRef: { entityType: "task", entityId: taskId },
+    activityType: "task_moved_project",
+    actorType: actor.actorType,
+    actorId: actor.actorId,
+    timestamp: now,
+    summary: `Moved task to ${toProject.title}: ${task.title}`,
+    metadata: { fromProjectId, toProjectId, relationshipId },
+  });
+
+  return { taskId, fromProjectId, toProjectId, relationshipId };
+}
+
 async function applyTaskResult(
   db: any,
   brainInstanceId: any,
@@ -289,6 +368,35 @@ export const recordTaskResultForViewer = mutationGeneric({
   },
 });
 
+export const moveTaskToProjectForViewer = mutationGeneric({
+  args: { taskId: v.id("tasks"), toProjectId: v.id("projects") },
+  handler: async (ctx, args) => {
+    const { user, brain } = await requireOwnedBrain(ctx);
+    return moveTaskToProject(ctx.db, brain._id, args.taskId, args.toProjectId, Date.now(), {
+      actorType: "user",
+      actorId: user._id,
+    });
+  },
+});
+
+export const moveTasksToProjectForViewer = mutationGeneric({
+  args: { taskIds: v.array(v.id("tasks")), toProjectId: v.id("projects") },
+  handler: async (ctx, args) => {
+    const { user, brain } = await requireOwnedBrain(ctx);
+    const now = Date.now();
+    const moved = [];
+    for (const taskId of args.taskIds) {
+      moved.push(
+        await moveTaskToProject(ctx.db, brain._id, taskId, args.toProjectId, now, {
+          actorType: "user",
+          actorId: user._id,
+        }),
+      );
+    }
+    return { movedCount: moved.length, moved };
+  },
+});
+
 export const projectPlansForViewer = queryGeneric({
   args: { projectId: v.id("projects") },
   handler: async (ctx, args) => {
@@ -307,6 +415,35 @@ export const projectPlansForViewer = queryGeneric({
 /* ------------------------------------------------------------------ */
 /* Brain-facing (MCP token routing)                                   */
 /* ------------------------------------------------------------------ */
+
+export const projectBoardForBrain = queryGeneric({
+  args: { brainInstanceId: v.id("brainInstances"), projectId: v.id("projects") },
+  handler: async ({ db }, args) => {
+    return buildBoard(db, args.brainInstanceId, args.projectId);
+  },
+});
+
+export const moveTasksToProjectForBrain = mutationGeneric({
+  args: {
+    brainInstanceId: v.id("brainInstances"),
+    taskIds: v.array(v.id("tasks")),
+    toProjectId: v.id("projects"),
+    actorId: v.optional(v.string()),
+  },
+  handler: async ({ db }, args) => {
+    const now = Date.now();
+    const moved = [];
+    for (const taskId of args.taskIds) {
+      moved.push(
+        await moveTaskToProject(db, args.brainInstanceId, taskId, args.toProjectId, now, {
+          actorType: "harness",
+          ...(args.actorId ? { actorId: args.actorId } : {}),
+        }),
+      );
+    }
+    return { movedCount: moved.length, moved };
+  },
+});
 
 export const readyTasksForBrain = queryGeneric({
   args: { brainInstanceId: v.id("brainInstances"), limit: v.optional(v.number()) },

@@ -19,5 +19,6 @@ export {
 } from "./ui";
 export type { BadgeTone } from "./ui";
 export { Tabs, Drawer, Dialog, Chip, ChipGroup, ToastProvider, useToast } from "./widgets";
+export { InlineMarkdown } from "./markdown";
 export type { TabItem } from "./widgets";
 export { AppShell, PageHeader, hubs } from "./app-shell";
