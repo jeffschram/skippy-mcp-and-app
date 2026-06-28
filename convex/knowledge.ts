@@ -9,6 +9,7 @@ import {
   normalizeAcceptedEntityPayload,
 } from "@skippy/shared";
 import { requireOwnedBrain } from "./auth";
+import { advanceDependentsAfterDone } from "./taskExecution";
 
 const entityType = v.union(
   v.literal("goal"),
@@ -2038,6 +2039,52 @@ export const updateGoalForViewer = mutationGeneric({
   },
 });
 
+export const createProjectForViewer = mutationGeneric({
+  args: {
+    title: v.string(),
+    summary: v.optional(v.string()),
+    status: v.optional(
+      v.union(
+        v.literal("idea"),
+        v.literal("planned"),
+        v.literal("in_progress"),
+        v.literal("paused"),
+        v.literal("completed"),
+        v.literal("cancelled"),
+      ),
+    ),
+  },
+  handler: async (ctx, args) => {
+    const { user, brain } = await requireOwnedBrain(ctx);
+    const title = args.title.trim();
+    if (!title) {
+      throw new Error("project title is required");
+    }
+    const now = Date.now();
+    const projectId = await ctx.db.insert("projects", {
+      brainInstanceId: brain._id,
+      title,
+      summary: args.summary?.trim() || undefined,
+      status: args.status ?? "idea",
+      processingState: "accepted",
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    await ctx.db.insert("activityEvents", {
+      brainInstanceId: brain._id,
+      entityRef: { entityType: "project", entityId: projectId },
+      activityType: "project_created",
+      actorType: "user",
+      actorId: user._id,
+      timestamp: now,
+      summary: `Project created: ${title}`,
+    });
+
+    return { projectId, status: "created" };
+  },
+});
+
 export const setContactFavoriteForViewer = mutationGeneric({
   args: {
     personId: v.id("people"),
@@ -3129,8 +3176,10 @@ export const markTaskDone = mutationGeneric({
     await db.patch(args.taskId, {
       status: "done",
       completedAt: now,
+      executionState: "done",
       updatedAt: now,
     });
+    await advanceDependentsAfterDone(db, args.brainInstanceId, args.taskId, now);
 
     let pendingActionId = undefined;
     if (args.externalReminderSourceRefId) {
@@ -3233,6 +3282,7 @@ export const markTaskInProgress = mutationGeneric({
       status: "in_progress",
       startedAt,
       startedBy: args.startedBy,
+      executionState: "in_progress",
       updatedAt: now,
     });
 
@@ -3477,8 +3527,10 @@ export const markTaskDoneForViewer = mutationGeneric({
     await ctx.db.patch(args.taskId, {
       status: "done",
       completedAt: now,
+      executionState: "done",
       updatedAt: now,
     });
+    await advanceDependentsAfterDone(ctx.db, brain._id, args.taskId, now);
 
     let pendingActionId = undefined;
     if (args.externalReminderSourceRefId) {
@@ -3539,6 +3591,7 @@ export const markTaskInProgressForViewer = mutationGeneric({
       status: "in_progress",
       startedAt,
       startedBy,
+      executionState: "in_progress",
       updatedAt: now,
     });
 

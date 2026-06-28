@@ -14,8 +14,11 @@ import type * as interviews from "../interviews.js";
 import type * as knowledge from "../knowledge.js";
 import type * as mcpTokens from "../mcpTokens.js";
 import type * as memoryGraph from "../memoryGraph.js";
+import type * as planning from "../planning.js";
+import type * as projects from "../projects.js";
 import type * as resurfacing from "../resurfacing.js";
 import type * as settings from "../settings.js";
+import type * as taskExecution from "../taskExecution.js";
 
 import type {
   ApiFromModules,
@@ -30,8 +33,11 @@ declare const fullApi: ApiFromModules<{
   knowledge: typeof knowledge;
   mcpTokens: typeof mcpTokens;
   memoryGraph: typeof memoryGraph;
+  planning: typeof planning;
+  projects: typeof projects;
   resurfacing: typeof resurfacing;
   settings: typeof settings;
+  taskExecution: typeof taskExecution;
 }>;
 
 /**

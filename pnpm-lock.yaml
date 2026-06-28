@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@skippy/ai':
+        specifier: workspace:*
+        version: link:packages/ai
       '@skippy/shared':
         specifier: workspace:*
         version: link:packages/shared

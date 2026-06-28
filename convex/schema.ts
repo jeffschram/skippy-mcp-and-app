@@ -24,6 +24,26 @@ const entityRef = v.object({
   entityId: v.string(),
 });
 
+const taskKind = v.union(
+  v.literal("coding"),
+  v.literal("research"),
+  v.literal("design"),
+  v.literal("manual"),
+  v.literal("planning"),
+);
+
+// Supervised execution lifecycle, distinct from the user-facing `status`.
+// unplanned -> briefed -> ready -> in_progress -> in_review -> done (or blocked).
+const taskExecutionState = v.union(
+  v.literal("unplanned"),
+  v.literal("briefed"),
+  v.literal("ready"),
+  v.literal("in_progress"),
+  v.literal("in_review"),
+  v.literal("blocked"),
+  v.literal("done"),
+);
+
 const memoryType = v.union(
   v.literal("thought"),
   v.literal("memory"),
@@ -215,13 +235,26 @@ export default defineSchema({
     startedAt: v.optional(v.number()),
     startedBy: v.optional(v.string()),
     completedAt: v.optional(v.number()),
+    // Automated planning + supervised execution (Skippy plans, a coding harness executes).
+    kind: v.optional(taskKind),
+    executionState: v.optional(taskExecutionState),
+    executionBrief: v.optional(v.string()),
+    acceptanceCriteria: v.optional(v.array(v.string())),
+    orderIndex: v.optional(v.number()),
+    briefReadyAt: v.optional(v.number()),
+    planRunId: v.optional(v.id("projectPlans")),
+    resultSummary: v.optional(v.string()),
+    resultUrl: v.optional(v.string()),
+    resultRecordedAt: v.optional(v.number()),
     ...priorityMetadata,
     createdAt: v.number(),
     updatedAt: v.number(),
   })
     .index("by_brain_state", ["brainInstanceId", "processingState"])
     .index("by_brain_status", ["brainInstanceId", "status"])
-    .index("by_brain_due", ["brainInstanceId", "dueAt"]),
+    .index("by_brain_due", ["brainInstanceId", "dueAt"])
+    .index("by_brain_execution_state", ["brainInstanceId", "executionState"])
+    .index("by_brain_plan", ["brainInstanceId", "planRunId"]),
 
   notes: defineTable({
     brainInstanceId: v.id("brainInstances"),
@@ -517,6 +550,26 @@ export default defineSchema({
     createdAt: v.number(),
     updatedAt: v.number(),
   }).index("by_brain_status", ["brainInstanceId", "status"]),
+
+  // Audit of automated AI project-planning runs (decompose a project into tasks).
+  projectPlans: defineTable({
+    brainInstanceId: v.id("brainInstances"),
+    projectId: v.id("projects"),
+    status: v.union(v.literal("running"), v.literal("completed"), v.literal("failed")),
+    planVersion: v.number(),
+    provider: v.optional(v.string()),
+    model: v.optional(v.string()),
+    summary: v.optional(v.string()),
+    taskCount: v.optional(v.number()),
+    createdTaskIds: v.optional(v.array(v.id("tasks"))),
+    error: v.optional(v.string()),
+    createdBy: v.union(v.literal("user"), v.literal("harness"), v.literal("skippy_ai"), v.literal("system")),
+    createdByUserId: v.optional(v.id("users")),
+    createdAt: v.number(),
+    completedAt: v.optional(v.number()),
+  })
+    .index("by_brain_project", ["brainInstanceId", "projectId"])
+    .index("by_brain_created", ["brainInstanceId", "createdAt"]),
 
   ingestionRuns: defineTable({
     brainInstanceId: v.id("brainInstances"),

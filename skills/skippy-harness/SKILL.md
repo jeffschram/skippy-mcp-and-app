@@ -33,6 +33,9 @@ Before capture or retrieval work that may create durable memory, read `reference
    - `capture`: only for useful free-form notes when a typed entity is not clear.
    - `list_interview_templates` / `start_interview` / `get_interview` / `answer_interview_question` / `complete_interview`: run guided second-brain interviews inside the harness chat. Use the returned `assistantDisplayName` when offering the interview.
    - `link_entities`: only after accepted entity IDs are known.
+   - `plan_project`: decompose an accepted project into executable tasks. Requires an LLM provider on the brain.
+   - `list_ready_tasks` / `get_task_brief`: find the next unblocked task and fetch its hand-off brief to execute.
+   - `record_task_result`: report an executed task's outcome (summary + PR/commit URL) for owner review.
    - `mark_task_done`: only when the user says the Skippy task is complete.
 
 5. Apply the consent model.
@@ -52,6 +55,17 @@ Before capture or retrieval work that may create durable memory, read `reference
 
 9. Close batch status.
    If you started a source sync status, always close it with `update_source_sync_status` even when some connectors fail. Use `failed` only when the whole run cannot finish; otherwise use `completed` with short source error summaries.
+
+## Plan → Execute Loop
+
+Skippy is a supervised software-project dashboard: **Skippy plans, a coding agent executes.** Skippy never writes code itself.
+
+1. `plan_project` decomposes an accepted project into ordered tasks, each with an execution brief, acceptance criteria, and `depends_on` links. The owning project moves to `in_progress`.
+2. `list_ready_tasks` returns agent-owned tasks whose dependencies are all done (execution state `ready`) — the next work to pick up.
+3. `get_task_brief` returns one task's self-contained brief. Execute it (write code, open a PR) outside Skippy.
+4. `record_task_result` reports the outcome. By default the task moves to `in_review` for the owner to approve; pass `markDone: true` to complete it, which unblocks dependent tasks.
+
+Keep the human in the loop: surface the plan and each result for review instead of silently completing work. If the brain has no LLM provider, `plan_project` fails — tell the user to configure one in Settings.
 
 ## Entity Mapping
 

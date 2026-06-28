@@ -9,6 +9,8 @@ import {
   createDisabledLlmClient,
   createEmbeddingClient,
   createLlmClient,
+  generateProjectPlan,
+  parseProjectPlan,
 } from "./index";
 
 describe("AI provider abstractions", () => {
@@ -235,5 +237,71 @@ describe("AI provider abstractions", () => {
       [0.1, 0.2],
       [0.3, 0.4],
     ]);
+  });
+});
+
+describe("project plan parsing", () => {
+  it("parses a clean JSON plan", () => {
+    const plan = parseProjectPlan(
+      JSON.stringify({
+        summary: "Ship the login flow",
+        tasks: [
+          { title: "Add schema", kind: "coding", acceptanceCriteria: ["users table exists"] },
+          { title: "Wire UI", description: "build form", dependsOn: [0] },
+        ],
+      }),
+    );
+    expect(plan.summary).toBe("Ship the login flow");
+    expect(plan.tasks).toHaveLength(2);
+    expect(plan.tasks[0]?.acceptanceCriteria).toEqual(["users table exists"]);
+    expect(plan.tasks[1]?.dependsOn).toEqual([0]);
+  });
+
+  it("extracts JSON from a markdown-fenced response", () => {
+    const plan = parseProjectPlan('Here is the plan:\n```json\n{"summary":"x","tasks":[{"title":"Do it"}]}\n```');
+    expect(plan.tasks[0]?.title).toBe("Do it");
+  });
+
+  it("drops dependency indexes that point outside the task list", () => {
+    const plan = parseProjectPlan(
+      JSON.stringify({ summary: "", tasks: [{ title: "Only task", dependsOn: [5] }] }),
+    );
+    expect(plan.tasks[0]?.dependsOn).toBeUndefined();
+  });
+
+  it("throws when no valid tasks are present", () => {
+    expect(() => parseProjectPlan('{"summary":"x","tasks":[]}')).toThrow("did not include any valid tasks");
+    expect(() => parseProjectPlan("not json at all")).toThrow("did not contain a JSON object");
+  });
+
+  it("generateProjectPlan sends planning instructions and returns parsed tasks", async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    const fetchMock = async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response(
+        JSON.stringify({
+          output: [
+            {
+              type: "message",
+              content: [
+                {
+                  type: "output_text",
+                  text: '{"summary":"Build it","tasks":[{"title":"Set up repo","kind":"coding","executionBrief":"git init"}]}',
+                },
+              ],
+            },
+          ],
+        }),
+        { status: 200 },
+      );
+    };
+    const client = createLlmClient({ mode: "openai" }, { apiKey: "test-key", fetch: fetchMock as typeof fetch });
+    const plan = await generateProjectPlan(client, { projectTitle: "Demo", maxTasks: 5 });
+
+    expect(plan.tasks[0]?.title).toBe("Set up repo");
+    expect(plan.tasks[0]?.executionBrief).toBe("git init");
+    const body = JSON.parse(String(calls[0]?.init.body));
+    expect(body.instructions).toContain("DECOMPOSE");
+    expect(body.input).toContain("Demo");
   });
 });

@@ -1,7 +1,8 @@
 import Link from "next/link";
-import { AppShell, PageHeader } from "../../ui";
 import { isLiveConfigured } from "../../../lib/skippy-api";
+import { AppShell, PageHeader } from "../../components";
 import { LiveIngestionLogDetailContent } from "../../live-pages";
+import { NotConfigured } from "../../hubs/not-configured";
 
 export default async function IngestionLogDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -10,19 +11,15 @@ export default async function IngestionLogDetailPage({ params }: { params: Promi
   return (
     <AppShell>
       <PageHeader
-        eyebrow="Ingestion log"
-        title="Run detail"
+        eyebrow="Activity"
+        title="Ingestion run detail"
         action={
-          <Link className="text-button" href="/ingestion-logs">
-            Back to logs
+          <Link className="text-button" href="/settings">
+            Back to Settings
           </Link>
         }
       />
-      {isLiveConfigured() ? (
-        <LiveIngestionLogDetailContent ingestionRunId={ingestionRunId} />
-      ) : (
-        <p className="muted">Ingestion logs are available when the app is connected to Convex.</p>
-      )}
+      {isLiveConfigured() ? <LiveIngestionLogDetailContent ingestionRunId={ingestionRunId} /> : <NotConfigured />}
     </AppShell>
   );
 }

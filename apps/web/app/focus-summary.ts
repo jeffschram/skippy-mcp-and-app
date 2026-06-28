@@ -40,7 +40,8 @@ export function focusSummaryBullets(summaryText: string | undefined) {
   const markdownBullets = trimmed
     .split(/\n+/)
     .map((line) => line.replace(/^[-*]\s+|^\d+\.\s+/, "").trim())
-    .filter(Boolean);
+    .filter(Boolean)
+    .filter((line) => !/^summary:/i.test(line));
   if (markdownBullets.length > 1) {
     return markdownBullets;
   }
@@ -190,6 +191,28 @@ export function focusSummaryPresentation(bullets: string[]) {
     heading,
     details: actionableDetails,
   };
+}
+
+/**
+ * Pull the explicit "Summary:" headline the focus model now emits. Falls back to the
+ * heuristic heading when the model didn't include one (older summaries).
+ */
+export function parseFocusSummary(summaryText: string | undefined): {
+  headline: string;
+  bullets: string[];
+} {
+  const bullets = focusSummaryBullets(summaryText);
+  const explicit = (summaryText ?? "")
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .find((line) => /^summary:/i.test(line));
+  if (explicit) {
+    const headline = explicit.replace(/^summary:\s*/i, "").trim();
+    if (headline) {
+      return { headline, bullets };
+    }
+  }
+  return { headline: focusSummaryPresentation(bullets).heading, bullets };
 }
 
 export function focusItemKey(value: string) {

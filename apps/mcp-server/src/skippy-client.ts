@@ -40,6 +40,10 @@ const markTaskInProgressRef = makeFunctionReference<"mutation">("knowledge:markT
 const markTaskDoneRef = makeFunctionReference<"mutation">("knowledge:markTaskDone");
 const recordPendingActionResultRef = makeFunctionReference<"mutation">("knowledge:recordPendingActionResult");
 const recordEntityReviewRef = makeFunctionReference<"mutation">("knowledge:recordEntityReview");
+const planProjectForBrainRef = makeFunctionReference<"action">("planning:planProjectForBrain");
+const readyTasksForBrainRef = makeFunctionReference<"query">("projects:readyTasksForBrain");
+const getTaskBriefForBrainRef = makeFunctionReference<"query">("projects:getTaskBriefForBrain");
+const recordTaskResultForBrainRef = makeFunctionReference<"mutation">("projects:recordTaskResultForBrain");
 const captureThoughtForBrainRef = makeFunctionReference<"mutation">("knowledge:captureThoughtForBrain");
 const recordMemoryForBrainRef = makeFunctionReference<"mutation">("knowledge:recordMemoryForBrain");
 const submitMemoryReviewCandidateForBrainRef = makeFunctionReference<"mutation">(
@@ -108,6 +112,14 @@ export function createConvexSkippyClient(convexUrl: string, authToken?: string):
       client.mutation(recordPendingActionResultRef, { pendingActionId, ...result }),
     recordEntityReview: (brainInstanceId, review) =>
       client.mutation(recordEntityReviewRef, { brainInstanceId, ...review }),
+    planProject: (brainInstanceId, input) =>
+      client.action(planProjectForBrainRef, { brainInstanceId, ...input }),
+    listReadyTasks: (brainInstanceId, input) =>
+      client.query(readyTasksForBrainRef, { brainInstanceId, ...input }),
+    getTaskBrief: (brainInstanceId, input) =>
+      client.query(getTaskBriefForBrainRef, { brainInstanceId, ...input }),
+    recordTaskResult: (brainInstanceId, input) =>
+      client.mutation(recordTaskResultForBrainRef, { brainInstanceId, ...input }),
     captureThought: (brainInstanceId, input) =>
       client.mutation(captureThoughtForBrainRef, { brainInstanceId, ...input }),
     recordMemory: (brainInstanceId, input) =>
