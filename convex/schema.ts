@@ -211,6 +211,11 @@ export default defineSchema({
       v.literal("completed"),
       v.literal("cancelled"),
     ),
+    // "code" projects have a GitHub repo + local folder and follow the branch->PR agent workflow.
+    kind: v.optional(v.union(v.literal("code"), v.literal("general"))),
+    repoUrl: v.optional(v.string()),
+    // Local folder path for output files/assets (all projects may have one).
+    localPath: v.optional(v.string()),
     ...priorityMetadata,
     createdAt: v.number(),
     updatedAt: v.number(),
@@ -507,6 +512,17 @@ export default defineSchema({
     policyVersion: v.optional(v.string()),
     createdAt: v.number(),
   }).index("by_brain_generated", ["brainInstanceId", "generatedAt"]),
+
+  // Tracks what the user currently has open in the web app, so a connected harness
+  // can resolve references like "this project" via get_current_context.
+  viewerContext: defineTable({
+    brainInstanceId: v.id("brainInstances"),
+    userId: v.id("users"),
+    activeRoute: v.optional(v.string()),
+    activeEntityRef: v.optional(entityRef),
+    activeProjectId: v.optional(v.id("projects")),
+    updatedAt: v.number(),
+  }).index("by_brain", ["brainInstanceId"]),
 
   focusItemActions: defineTable({
     brainInstanceId: v.id("brainInstances"),

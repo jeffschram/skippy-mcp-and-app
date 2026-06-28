@@ -85,6 +85,9 @@ async function buildBoard(db: any, brainInstanceId: any, projectId: string) {
       title: project.title,
       summary: project.summary,
       status: project.status,
+      kind: project.kind ?? "general",
+      repoUrl: project.repoUrl,
+      localPath: project.localPath,
     },
     tasks,
     progress: {
@@ -394,6 +397,192 @@ export const moveTasksToProjectForViewer = mutationGeneric({
       );
     }
     return { movedCount: moved.length, moved };
+  },
+});
+
+const executionStateValidator = v.union(
+  v.literal("unplanned"),
+  v.literal("briefed"),
+  v.literal("ready"),
+  v.literal("in_progress"),
+  v.literal("in_review"),
+  v.literal("blocked"),
+  v.literal("done"),
+);
+
+export const updateProjectForViewer = mutationGeneric({
+  args: {
+    projectId: v.id("projects"),
+    title: v.optional(v.string()),
+    summary: v.optional(v.string()),
+    status: v.optional(
+      v.union(
+        v.literal("idea"),
+        v.literal("planned"),
+        v.literal("in_progress"),
+        v.literal("paused"),
+        v.literal("completed"),
+        v.literal("cancelled"),
+      ),
+    ),
+    kind: v.optional(v.union(v.literal("code"), v.literal("general"))),
+    repoUrl: v.optional(v.string()),
+    localPath: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const { brain } = await requireOwnedBrain(ctx);
+    const project = await ctx.db.get(args.projectId);
+    if (!project || project.brainInstanceId !== brain._id) {
+      throw new Error("project not found");
+    }
+    const now = Date.now();
+    const patch: Record<string, unknown> = { updatedAt: now };
+    if (args.title !== undefined) {
+      const title = args.title.trim();
+      if (!title) throw new Error("project title cannot be empty");
+      patch.title = title;
+    }
+    if (args.summary !== undefined) patch.summary = args.summary.trim() || undefined;
+    if (args.status !== undefined) patch.status = args.status;
+    if (args.kind !== undefined) patch.kind = args.kind;
+    if (args.repoUrl !== undefined) patch.repoUrl = args.repoUrl.trim() || undefined;
+    if (args.localPath !== undefined) patch.localPath = args.localPath.trim() || undefined;
+    await ctx.db.patch(args.projectId, patch);
+    return { projectId: args.projectId, status: "updated" };
+  },
+});
+
+export const updateTaskBriefForViewer = mutationGeneric({
+  args: {
+    taskId: v.id("tasks"),
+    executionBrief: v.optional(v.string()),
+    acceptanceCriteria: v.optional(v.array(v.string())),
+    description: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const { brain } = await requireOwnedBrain(ctx);
+    const task = await ctx.db.get(args.taskId);
+    if (!task || task.brainInstanceId !== brain._id) {
+      throw new Error("task not found");
+    }
+    const now = Date.now();
+    const patch: Record<string, unknown> = { updatedAt: now };
+    if (args.executionBrief !== undefined) patch.executionBrief = args.executionBrief.trim() || undefined;
+    if (args.description !== undefined) patch.description = args.description.trim() || undefined;
+    if (args.acceptanceCriteria !== undefined) {
+      const criteria = args.acceptanceCriteria.map((c) => c.trim()).filter(Boolean);
+      patch.acceptanceCriteria = criteria.length ? criteria : undefined;
+    }
+    await ctx.db.patch(args.taskId, patch);
+    return { taskId: args.taskId, status: "updated" };
+  },
+});
+
+export const setTaskExecutionStateForViewer = mutationGeneric({
+  args: { taskId: v.id("tasks"), executionState: executionStateValidator },
+  handler: async (ctx, args) => {
+    const { user, brain } = await requireOwnedBrain(ctx);
+    const task = await ctx.db.get(args.taskId);
+    if (!task || task.brainInstanceId !== brain._id) {
+      throw new Error("task not found");
+    }
+    const now = Date.now();
+    const patch: Record<string, unknown> = { executionState: args.executionState, updatedAt: now };
+    // Keep the user-facing status roughly in sync with the lifecycle.
+    if (args.executionState === "in_progress") patch.status = "in_progress";
+    else if (args.executionState === "done") {
+      patch.status = "done";
+      patch.completedAt = now;
+    } else if (["briefed", "ready", "blocked"].includes(args.executionState) && task.status === "in_progress") {
+      patch.status = "todo";
+    }
+    await ctx.db.patch(args.taskId, patch);
+
+    if (args.executionState === "done") {
+      await advanceDependentsAfterDone(ctx.db, brain._id, args.taskId, now);
+    }
+
+    await ctx.db.insert("activityEvents", {
+      brainInstanceId: brain._id,
+      entityRef: { entityType: "task", entityId: args.taskId },
+      activityType: "task_execution_state_changed",
+      actorType: "user",
+      actorId: user._id,
+      timestamp: now,
+      summary: `Task moved to ${args.executionState}: ${task.title}`,
+    });
+
+    return { taskId: args.taskId, executionState: args.executionState };
+  },
+});
+
+/* ------------------------------------------------------------------ */
+/* Viewer context (what page the user has open)                       */
+/* ------------------------------------------------------------------ */
+
+export const setViewerContext = mutationGeneric({
+  args: {
+    activeRoute: v.optional(v.string()),
+    activeProjectId: v.optional(v.id("projects")),
+  },
+  handler: async (ctx, args) => {
+    const { user, brain } = await requireOwnedBrain(ctx);
+    const now = Date.now();
+    const existing = await ctx.db
+      .query("viewerContext")
+      .withIndex("by_brain", (q: any) => q.eq("brainInstanceId", brain._id))
+      .first();
+    const fields = {
+      brainInstanceId: brain._id,
+      userId: user._id,
+      activeRoute: args.activeRoute,
+      activeProjectId: args.activeProjectId,
+      activeEntityRef: args.activeProjectId
+        ? { entityType: "project" as const, entityId: args.activeProjectId as string }
+        : undefined,
+      updatedAt: now,
+    };
+    if (existing) {
+      await ctx.db.patch(existing._id, fields);
+      return { status: "updated" };
+    }
+    await ctx.db.insert("viewerContext", fields);
+    return { status: "created" };
+  },
+});
+
+async function currentContext(db: any, brainInstanceId: any) {
+  const context = await db
+    .query("viewerContext")
+    .withIndex("by_brain", (q: any) => q.eq("brainInstanceId", brainInstanceId))
+    .first();
+  if (!context) return null;
+  let activeProject = null;
+  if (context.activeProjectId) {
+    const project = await db.get(context.activeProjectId);
+    if (project && project.brainInstanceId === brainInstanceId) {
+      activeProject = { _id: project._id, title: project.title, kind: project.kind, repoUrl: project.repoUrl };
+    }
+  }
+  return {
+    activeRoute: context.activeRoute ?? null,
+    activeProject,
+    updatedAt: context.updatedAt,
+  };
+}
+
+export const getViewerContext = queryGeneric({
+  args: {},
+  handler: async (ctx) => {
+    const { brain } = await requireOwnedBrain(ctx);
+    return currentContext(ctx.db, brain._id);
+  },
+});
+
+export const currentContextForBrain = queryGeneric({
+  args: { brainInstanceId: v.id("brainInstances") },
+  handler: async ({ db }, args) => {
+    return currentContext(db, args.brainInstanceId);
   },
 });
 

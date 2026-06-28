@@ -40,6 +40,7 @@ const markTaskInProgressRef = makeFunctionReference<"mutation">("knowledge:markT
 const markTaskDoneRef = makeFunctionReference<"mutation">("knowledge:markTaskDone");
 const recordPendingActionResultRef = makeFunctionReference<"mutation">("knowledge:recordPendingActionResult");
 const recordEntityReviewRef = makeFunctionReference<"mutation">("knowledge:recordEntityReview");
+const currentContextForBrainRef = makeFunctionReference<"query">("projects:currentContextForBrain");
 const planProjectForBrainRef = makeFunctionReference<"action">("planning:planProjectForBrain");
 const readyTasksForBrainRef = makeFunctionReference<"query">("projects:readyTasksForBrain");
 const getTaskBriefForBrainRef = makeFunctionReference<"query">("projects:getTaskBriefForBrain");
@@ -112,6 +113,8 @@ export function createConvexSkippyClient(convexUrl: string, authToken?: string):
       client.mutation(recordPendingActionResultRef, { pendingActionId, ...result }),
     recordEntityReview: (brainInstanceId, review) =>
       client.mutation(recordEntityReviewRef, { brainInstanceId, ...review }),
+    getCurrentContext: (brainInstanceId) =>
+      client.query(currentContextForBrainRef, { brainInstanceId }),
     planProject: (brainInstanceId, input) =>
       client.action(planProjectForBrainRef, { brainInstanceId, ...input }),
     listReadyTasks: (brainInstanceId, input) =>

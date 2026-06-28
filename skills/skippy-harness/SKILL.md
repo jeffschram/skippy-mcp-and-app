@@ -33,6 +33,7 @@ Before capture or retrieval work that may create durable memory, read `reference
    - `capture`: only for useful free-form notes when a typed entity is not clear.
    - `list_interview_templates` / `start_interview` / `get_interview` / `answer_interview_question` / `complete_interview`: run guided second-brain interviews inside the harness chat. Use the returned `assistantDisplayName` when offering the interview.
    - `link_entities`: only after accepted entity IDs are known.
+   - `get_current_context`: resolve what the user has open in the web app. Call this when the user says "this project", "here", or "add a task to this project" without naming it; use the returned active project's id.
    - `plan_project`: decompose an accepted project into executable tasks. Requires an LLM provider on the brain.
    - `list_ready_tasks` / `get_task_brief`: find the next unblocked task and fetch its hand-off brief to execute.
    - `record_task_result`: report an executed task's outcome (summary + PR/commit URL) for owner review.
@@ -66,6 +67,22 @@ Skippy is a supervised software-project dashboard: **Skippy plans, a coding agen
 4. `record_task_result` reports the outcome. By default the task moves to `in_review` for the owner to approve; pass `markDone: true` to complete it, which unblocks dependent tasks.
 
 Keep the human in the loop: surface the plan and each result for review instead of silently completing work. If the brain has no LLM provider, `plan_project` fails — tell the user to configure one in Settings.
+
+### Resolving "this project"
+
+When the user refers to a project without naming it ("add a task to this project", "plan this", "here"), call `get_current_context` to get the active project the user has open in the web app, then use its id with `create_task`, `plan_project`, etc.
+
+### Code projects (GitHub repo + local folder)
+
+A project may be a **code project** with an associated GitHub repo URL and a local folder path (set in the web app's project Settings; surfaced in `get_current_context` and task briefs). For an agent-owned task on a code project, follow this execution loop:
+
+1. Create a new local branch in the project's local repo.
+2. Do the work in that branch.
+3. Commit and open a PR to the repo.
+4. Call `record_task_result` with the PR URL as `resultUrl` (and a short summary). This moves the task to `in_review`. **Do not** pass `markDone` — the user completes it.
+5. When the user approves/merges the PR, the task is marked done (`mark_task_done` or recording the result with `markDone: true`), which unblocks dependent tasks.
+
+Non-code projects use a local folder only for output files/assets; the same result-recording flow applies without a PR.
 
 ## Entity Mapping
 
