@@ -8,8 +8,10 @@ import {
   Archive,
   ArchiveRestore,
   ClipboardCopy,
+  ExternalLink,
   Folder,
   GitBranch,
+  GitPullRequest,
   Pencil,
   Plus,
   Play,
@@ -99,6 +101,7 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [pKind, setPKind] = useState("general");
   const [pRepo, setPRepo] = useState("");
+  const [pBaseBranch, setPBaseBranch] = useState("");
   const [pFolder, setPFolder] = useState("");
   const [pSummary, setPSummary] = useState("");
 
@@ -132,6 +135,7 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
     if (!project) return;
     setPKind(project.kind ?? "general");
     setPRepo(project.repoUrl ?? "");
+    setPBaseBranch(project.defaultBaseBranch ?? "");
     setPFolder(project.localPath ?? "");
     setPSummary(project.summary ?? "");
     setSettingsOpen(true);
@@ -285,6 +289,7 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
         projectId: projectId as any,
         kind: pKind as any,
         repoUrl: pRepo,
+        defaultBaseBranch: pBaseBranch,
         localPath: pFolder,
         summary: pSummary,
       } as any);
@@ -643,6 +648,31 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                   </section>
                 ) : null}
 
+                {(selected.prUrl || selected.gitBranchName || selected.executionState === "in_review") && project.repoUrl ? (
+                  <section>
+                    <h3>Pull Request</h3>
+                    {selected.prUrl ? (
+                      <p style={{ margin: 0 }}>
+                        <a className="text-button" href={selected.prUrl} target="_blank" rel="noreferrer">
+                          <GitPullRequest size={16} aria-hidden />
+                          {selected.prNumber ? `PR #${selected.prNumber}` : "Open pull request"}
+                          <ExternalLink size={14} aria-hidden />
+                        </a>
+                      </p>
+                    ) : selected.executionState === "in_review" ? (
+                      <p className="muted" style={{ margin: 0, fontSize: 14 }}>
+                        PR pending or not recorded yet.
+                      </p>
+                    ) : null}
+                    {selected.gitBranchName ? (
+                      <p className="muted" style={{ margin: "6px 0 0", fontSize: 13 }}>
+                        Branch: <span className="code">{selected.gitBranchName}</span>
+                        {selected.prStatus ? ` · ${selected.prStatus}` : ""}
+                      </p>
+                    ) : null}
+                  </section>
+                ) : null}
+
                 {/* Record result only once work is underway (not for briefed/ready). */}
                 {RESULT_STATES.has(selected.executionState) ? (
                   <section style={{ borderTop: "1px solid var(--line)", paddingTop: 14, display: "grid", gap: 10 }}>
@@ -685,6 +715,11 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
               {pKind === "code" ? (
                 <Field label="GitHub repo URL">
                   <TextInput value={pRepo} onChange={(event) => setPRepo(event.target.value)} placeholder="https://github.com/you/repo" />
+                </Field>
+              ) : null}
+              {pKind === "code" ? (
+                <Field label="Default base branch">
+                  <TextInput value={pBaseBranch} onChange={(event) => setPBaseBranch(event.target.value)} placeholder="main" />
                 </Field>
               ) : null}
               <Field label="Local folder path (output files / assets)">
