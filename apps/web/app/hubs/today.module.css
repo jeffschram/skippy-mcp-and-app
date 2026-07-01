@@ -1,0 +1,11 @@
+/* Mobile-first: focus hero and right rail stack in one column by default. */
+.grid {
+  display: grid;
+  gap: 16px;
+}
+
+.rail {
+  display: grid;
+  gap: 16px;
+  align-content: start;
+}

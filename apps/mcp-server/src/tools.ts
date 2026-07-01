@@ -80,6 +80,7 @@ export type SkippyClient = {
       description?: string;
       status?: "todo" | "in_progress" | "waiting" | "done" | "cancelled";
       ownerType?: "owner" | "agent";
+      kind?: "coding" | "review" | "research" | "design" | "manual" | "planning";
       dueAt?: number;
       priorityReason?: string;
       projectId?: string;
@@ -128,6 +129,7 @@ export type SkippyClient = {
   getCurrentContext(brainInstanceId: string): Promise<unknown>;
   planProject(brainInstanceId: string, input: { projectId: string; maxTasks?: number }): Promise<unknown>;
   listReadyTasks(brainInstanceId: string, input: { limit?: number }): Promise<unknown>;
+  listRequestedReadyTasks(brainInstanceId: string, input: { limit?: number }): Promise<unknown>;
   getTaskBrief(brainInstanceId: string, input: { taskId: string }): Promise<unknown>;
   recordTaskResult(
     brainInstanceId: string,
@@ -907,6 +909,10 @@ export function createSkippyToolHandlers(client: SkippyClient, brainInstanceId: 
 
     async listReadyTasks(input: { limit?: number } = {}) {
       return await client.listReadyTasks(brainInstanceId, input);
+    },
+
+    async listRequestedReadyTasks(input: { limit?: number } = {}) {
+      return await client.listRequestedReadyTasks(brainInstanceId, input);
     },
 
     async getTaskBrief(input: { taskId: string }) {

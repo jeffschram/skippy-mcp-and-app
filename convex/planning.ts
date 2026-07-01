@@ -7,8 +7,10 @@ import {
 import { v } from "convex/values";
 import {
   createLlmClient,
+  generateTaskBrief,
   generateProjectPlan,
   PROJECT_PLAN_POLICY_VERSION,
+  TASK_BRIEF_POLICY_VERSION,
   type AiProviderConfig,
   type ProjectPlanTaskDraft,
 } from "@skippy/ai";
@@ -17,6 +19,8 @@ import { requireOwnedBrain } from "./auth";
 const planContextRef = makeFunctionReference<"query">("planning:planContext");
 const writePlanRef = makeFunctionReference<"mutation">("planning:writePlan");
 const resolveViewerBrainRef = makeFunctionReference<"query">("planning:resolveViewerBrain");
+const taskBriefProposalContextRef = makeFunctionReference<"query">("planning:taskBriefProposalContext");
+const writeTaskBriefRef = makeFunctionReference<"mutation">("planning:writeTaskBrief");
 
 const planTaskValidator = v.object({
   title: v.string(),
@@ -26,6 +30,15 @@ const planTaskValidator = v.object({
   executionBrief: v.optional(v.string()),
   dependsOn: v.optional(v.array(v.number())),
 });
+
+const taskKindValidator = v.union(
+  v.literal("coding"),
+  v.literal("review"),
+  v.literal("research"),
+  v.literal("design"),
+  v.literal("manual"),
+  v.literal("planning"),
+);
 
 type PlanContext = {
   ok: boolean;
@@ -108,6 +121,69 @@ export const planContext = internalQueryGeneric({
       aiMode: config?.llmProviderMode ?? "none",
       synthesisModel: config?.synthesisModel,
       planVersion: priorPlans.length + 1,
+    };
+  },
+});
+
+export const taskBriefProposalContext = internalQueryGeneric({
+  args: { brainInstanceId: v.id("brainInstances"), taskId: v.id("tasks") },
+  handler: async ({ db }, args) => {
+    const task = await db.get(args.taskId);
+    if (!task || task.brainInstanceId !== args.brainInstanceId) {
+      return { ok: false, reason: "task not found" };
+    }
+
+    const belongsTo = await db
+      .query("relationships")
+      .withIndex("by_brain_type", (q: any) => q.eq("brainInstanceId", args.brainInstanceId))
+      .filter((q: any) => q.eq(q.field("type"), "belongs_to"))
+      .filter((q: any) => q.eq(q.field("from.entityType"), "task"))
+      .filter((q: any) => q.eq(q.field("from.entityId"), args.taskId))
+      .first();
+
+    let project: any = null;
+    if (belongsTo?.to?.entityType === "project") {
+      project = await db.get(belongsTo.to.entityId);
+    }
+    if (!project || project.brainInstanceId !== args.brainInstanceId) {
+      return { ok: false, reason: "project not found" };
+    }
+
+    const config = await db
+      .query("brainConfigs")
+      .withIndex("by_brain", (q: any) => q.eq("brainInstanceId", args.brainInstanceId))
+      .first();
+
+    const siblingRels = await db
+      .query("relationships")
+      .withIndex("by_brain_type", (q: any) => q.eq("brainInstanceId", args.brainInstanceId))
+      .filter((q: any) => q.eq(q.field("type"), "belongs_to"))
+      .collect();
+    const existingTasks: string[] = [];
+    for (const rel of siblingRels) {
+      if (rel.from.entityType !== "task" || rel.to.entityType !== "project" || rel.to.entityId !== project._id) {
+        continue;
+      }
+      if (rel.from.entityId === args.taskId) {
+        continue;
+      }
+      const sibling = await db.get(rel.from.entityId);
+      if (sibling && sibling.status !== "cancelled") {
+        existingTasks.push(sibling.title as string);
+      }
+    }
+
+    return {
+      ok: true,
+      taskId: task._id,
+      projectId: project._id,
+      projectTitle: project.title as string,
+      projectSummary: project.summary as string | undefined,
+      proposalTitle: task.title as string,
+      proposalText: (task.description || task.executionBrief || task.title) as string,
+      existingTasks,
+      aiMode: config?.llmProviderMode ?? "none",
+      synthesisModel: config?.synthesisModel,
     };
   },
 });
@@ -226,6 +302,53 @@ export const writePlan = internalMutationGeneric({
   },
 });
 
+export const writeTaskBrief = internalMutationGeneric({
+  args: {
+    brainInstanceId: v.id("brainInstances"),
+    taskId: v.id("tasks"),
+    title: v.optional(v.string()),
+    description: v.optional(v.string()),
+    kind: v.optional(taskKindValidator),
+    executionBrief: v.string(),
+    acceptanceCriteria: v.optional(v.array(v.string())),
+    provider: v.string(),
+    model: v.optional(v.string()),
+    createdByUserId: v.optional(v.id("users")),
+  },
+  handler: async ({ db }, args) => {
+    const task = await db.get(args.taskId);
+    if (!task || task.brainInstanceId !== args.brainInstanceId) {
+      throw new Error("task not found for brain instance");
+    }
+    const now = Date.now();
+    const criteria = (args.acceptanceCriteria ?? []).map((item) => item.trim()).filter(Boolean);
+    const patch: Record<string, unknown> = {
+      executionState: "briefed",
+      executionBrief: args.executionBrief.trim(),
+      acceptanceCriteria: criteria.length ? criteria : undefined,
+      briefReadyAt: now,
+      updatedAt: now,
+    };
+    if (args.title?.trim()) patch.title = args.title.trim();
+    if (args.description?.trim()) patch.description = args.description.trim();
+    if (args.kind) patch.kind = args.kind;
+    await db.patch(args.taskId, patch);
+
+    await db.insert("activityEvents", {
+      brainInstanceId: args.brainInstanceId,
+      entityRef: { entityType: "task", entityId: args.taskId },
+      activityType: "task_brief_created",
+      actorType: args.provider === "fallback" ? "user" : "skippy_ai",
+      actorId: args.createdByUserId,
+      timestamp: now,
+      summary: `Created brief for task proposal: ${task.title}`,
+      metadata: { provider: args.provider, model: args.model },
+    });
+
+    return { taskId: args.taskId, executionState: "briefed" };
+  },
+});
+
 /* ------------------------------------------------------------------ */
 /* Shared planning routine                                            */
 /* ------------------------------------------------------------------ */
@@ -303,6 +426,81 @@ export const planProject = actionGeneric({
       createdByUserId: userId,
       ...(args.maxTasks ? { maxTasks: args.maxTasks } : {}),
     });
+  },
+});
+
+export const briefTaskProposal = actionGeneric({
+  args: { taskId: v.id("tasks") },
+  handler: async (ctx, args) => {
+    const { brainInstanceId, userId } = await ctx.runQuery(resolveViewerBrainRef, {});
+    const context: any = await ctx.runQuery(taskBriefProposalContextRef, {
+      brainInstanceId,
+      taskId: args.taskId,
+    });
+    if (!context.ok) {
+      throw new Error(context.reason ?? "could not load task proposal");
+    }
+
+    let brief: ProjectPlanTaskDraft;
+    let provider = context.aiMode ?? "none";
+    let model = context.synthesisModel as string | undefined;
+    if (!context.aiMode || context.aiMode === "none") {
+      provider = "fallback";
+      brief = {
+        title: context.proposalTitle,
+        description: context.proposalText,
+        kind: "coding",
+        executionBrief: [
+          `Implement the proposed task for ${context.projectTitle}.`,
+          "",
+          context.proposalText,
+          "",
+          "Keep the change scoped, follow existing project patterns, and verify the affected project flow before marking it ready.",
+        ].join("\n"),
+        acceptanceCriteria: [
+          "The proposed behavior is implemented in the project.",
+          "The task can be moved through the project board lifecycle.",
+          "Relevant typechecks or tests pass.",
+        ],
+      };
+    } else {
+      const config: AiProviderConfig = {
+        mode: context.aiMode as AiProviderConfig["mode"],
+        ...(context.synthesisModel ? { synthesisModel: context.synthesisModel } : {}),
+      };
+      const client = createLlmClient(config);
+      const result = await generateTaskBrief(client, {
+        projectTitle: context.projectTitle,
+        ...(context.projectSummary ? { projectSummary: context.projectSummary } : {}),
+        proposalTitle: context.proposalTitle,
+        proposalText: context.proposalText,
+        ...(context.existingTasks?.length ? { existingTasks: context.existingTasks } : {}),
+        policyVersion: TASK_BRIEF_POLICY_VERSION,
+      });
+      brief = result;
+      model = result.usage?.model ?? model;
+    }
+
+    const writeResult = await ctx.runMutation(writeTaskBriefRef, {
+      brainInstanceId,
+      taskId: args.taskId,
+      title: brief.title,
+      ...(brief.description ? { description: brief.description } : {}),
+      ...(brief.kind ? { kind: brief.kind } : {}),
+      executionBrief: brief.executionBrief ?? context.proposalText,
+      ...(brief.acceptanceCriteria?.length ? { acceptanceCriteria: brief.acceptanceCriteria } : {}),
+      provider,
+      ...(model ? { model } : {}),
+      createdByUserId: userId,
+    });
+
+    return {
+      status: "briefed" as const,
+      taskId: args.taskId,
+      executionState: writeResult.executionState,
+      provider,
+      ...(model ? { model } : {}),
+    };
   },
 });
 

@@ -10,7 +10,9 @@ import {
   createEmbeddingClient,
   createLlmClient,
   generateProjectPlan,
+  generateTaskBrief,
   parseProjectPlan,
+  parseTaskBrief,
 } from "./index";
 
 describe("AI provider abstractions", () => {
@@ -303,5 +305,58 @@ describe("project plan parsing", () => {
     const body = JSON.parse(String(calls[0]?.init.body));
     expect(body.instructions).toContain("DECOMPOSE");
     expect(body.input).toContain("Demo");
+  });
+});
+
+describe("task brief parsing", () => {
+  it("parses a single task brief", () => {
+    const brief = parseTaskBrief(
+      JSON.stringify({
+        title: "Render markdown bullets",
+        description: "Render Now bullets through markdown.",
+        kind: "coding",
+        executionBrief: "Use the existing markdown renderer.",
+        acceptanceCriteria: ["Bold text renders", "Links render safely"],
+      }),
+    );
+
+    expect(brief.title).toBe("Render markdown bullets");
+    expect(brief.kind).toBe("coding");
+    expect(brief.acceptanceCriteria).toEqual(["Bold text renders", "Links render safely"]);
+  });
+
+  it("generateTaskBrief sends proposal context and returns a parsed brief", async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    const fetchMock = async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response(
+        JSON.stringify({
+          output: [
+            {
+              type: "message",
+              content: [
+                {
+                  type: "output_text",
+                  text: '{"title":"Render markdown bullets","kind":"coding","executionBrief":"Render bullets with markdown support.","acceptanceCriteria":["Markdown bold renders"]}',
+                },
+              ],
+            },
+          ],
+        }),
+        { status: 200 },
+      );
+    };
+    const client = createLlmClient({ mode: "openai" }, { apiKey: "test-key", fetch: fetchMock as typeof fetch });
+    const brief = await generateTaskBrief(client, {
+      projectTitle: "Skippy MCP and APP",
+      proposalTitle: "Render bullets as markdown",
+      proposalText: "Now bullets should render markdown emphasis.",
+    });
+
+    expect(brief.title).toBe("Render markdown bullets");
+    expect(brief.executionBrief).toContain("markdown support");
+    const body = JSON.parse(String(calls[0]?.init.body));
+    expect(body.instructions).toContain("task proposal");
+    expect(body.input).toContain("Now bullets should render markdown emphasis.");
   });
 });

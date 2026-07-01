@@ -9,6 +9,7 @@ import { focusItemKey, parseFocusSummary } from "../focus-summary";
 import { LiveGate } from "../live-auth";
 import { Badge, Card, EmptyState, IconButton, InlineMarkdown, LoadingRow, Section } from "../components";
 import { useViewerReady } from "./use-viewer";
+import todayStyles from "./today.module.css";
 
 type AnyRecord = Record<string, any>;
 
@@ -89,7 +90,7 @@ export function TodayContent() {
           <LoadingRow label="Loading your focus…" />
         </Card>
       ) : (
-        <div style={{ display: "grid", gap: 16, gridTemplateColumns: "minmax(0, 1.6fr) minmax(0, 1fr)" }} className="today-grid">
+        <div className={todayStyles.grid}>
           {/* Focus hero */}
           <section className="card section focus-summary" style={{ minHeight: 0 }}>
             <div>
@@ -155,7 +156,7 @@ export function TodayContent() {
           </section>
 
           {/* Right rail */}
-          <div style={{ display: "grid", gap: 16, alignContent: "start" }}>
+          <div className={todayStyles.rail}>
             <Section
               title={
                 <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>

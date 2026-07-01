@@ -1253,6 +1253,10 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
           .enum(["owner", "agent"])
           .optional()
           .describe("Who should do the task: owner means user-owned work; agent means the connected assistant/harness should work it."),
+        kind: z
+          .enum(["coding", "review", "research", "design", "manual", "planning"])
+          .optional()
+          .describe("Task kind. Use review for one agent reviewing another agent's work."),
         dueAt: z.number().optional().describe("Optional due date/time in epoch milliseconds."),
         priorityReason: z.string().optional().describe("Why this task matters or its intended priority."),
         projectId: z.string().optional().describe("Accepted project ID to assign the task to."),
@@ -1307,6 +1311,20 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
       }),
     },
     async (args) => toolResult(await tools.listReadyTasks(stripUndefined(args) as { limit?: number })),
+  );
+
+  server.registerTool(
+    "list_requested_ready_tasks",
+    {
+      title: "List requested ready agent tasks",
+      description:
+        "Read-only queue of Ready, agent-owned tasks that the user explicitly requested an agent/harness to execute. This is the safest queue for Codex heartbeat runs to poll.",
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: z.object({
+        limit: z.number().int().min(1).max(50).optional().describe("Maximum tasks to return (default 12)."),
+      }),
+    },
+    async (args) => toolResult(await tools.listRequestedReadyTasks(stripUndefined(args) as { limit?: number })),
   );
 
   server.registerTool(

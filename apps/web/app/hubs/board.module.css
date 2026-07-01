@@ -1,3 +1,20 @@
+.projectHeader {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.projectActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+  flex: 1 1 320px;
+  margin-left: auto;
+}
+
 .progressCard {
   margin-bottom: 16px;
 }
@@ -32,6 +49,16 @@
   border: 1px solid var(--line);
   border-radius: 12px;
   background: var(--panel);
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.columnDropTarget {
+  border-color: var(--blue);
+  background: light-dark(#eef6ff, #18293a);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--blue) 42%, transparent);
 }
 
 .columnHead {
@@ -75,7 +102,9 @@
   cursor: pointer;
   transition:
     border-color 0.15s ease,
-    box-shadow 0.15s ease;
+    box-shadow 0.15s ease,
+    opacity 0.15s ease,
+    transform 0.15s ease;
 }
 
 .taskCard:hover,
@@ -83,6 +112,11 @@
   border-color: var(--blue);
   box-shadow: var(--shadow);
   outline: none;
+}
+
+.taskCardDragging {
+  opacity: 0.55;
+  transform: scale(0.99);
 }
 
 .taskTitle {

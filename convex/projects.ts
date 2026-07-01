@@ -35,6 +35,10 @@ async function buildBoard(db: any, brainInstanceId: any, projectId: string) {
   if (!project || project.brainInstanceId !== brainInstanceId) {
     return null;
   }
+  const config = await db
+    .query("brainConfigs")
+    .withIndex("by_brain", (q: any) => q.eq("brainInstanceId", brainInstanceId))
+    .first();
 
   const taskIds = await projectTaskIds(db, brainInstanceId, projectId);
   const rawTasks = [];
@@ -57,6 +61,11 @@ async function buildBoard(db: any, brainInstanceId: any, projectId: string) {
       acceptanceCriteria: task.acceptanceCriteria,
       orderIndex: task.orderIndex ?? 0,
       ownerType: task.ownerType,
+      agentRequestStatus: task.agentRequestStatus,
+      requestedHarness: task.requestedHarness,
+      agentRequestedAt: task.agentRequestedAt,
+      agentRequestedBy: task.agentRequestedBy,
+      agentRequestMessage: task.agentRequestMessage,
       dueAt: task.dueAt,
       resultSummary: task.resultSummary,
       resultUrl: task.resultUrl,
@@ -98,6 +107,7 @@ async function buildBoard(db: any, brainInstanceId: any, projectId: string) {
       blocked: tasks.filter((task) => task.executionState === "blocked").length,
       inReview: tasks.filter((task) => task.executionState === "in_review").length,
     },
+    agentName: config?.assistantDisplayName ?? "Agent",
     latestPlan: latestPlan
       ? {
           _id: latestPlan._id,
@@ -116,11 +126,16 @@ async function readyTasks(db: any, brainInstanceId: any, limit: number) {
   const tasks = (
     await db
       .query("tasks")
-      .withIndex("by_brain_execution_state", (q: any) =>
-        q.eq("brainInstanceId", brainInstanceId).eq("executionState", "ready"),
-      )
+      .withIndex("by_brain_state", (q: any) => q.eq("brainInstanceId", brainInstanceId))
+      .filter((q: any) => q.eq(q.field("processingState"), "accepted"))
       .collect()
-  ).filter((task: any) => task.processingState === "accepted" && task.status !== "done" && task.status !== "cancelled");
+  ).filter(
+    (task: any) =>
+      task.ownerType === "agent" &&
+      executionStateFor(task) === "ready" &&
+      task.status !== "done" &&
+      task.status !== "cancelled",
+  );
 
   // Attach the owning project title for context.
   const result = [];
@@ -144,6 +159,13 @@ async function readyTasks(db: any, brainInstanceId: any, limit: number) {
       title: task.title,
       description: task.description,
       kind: task.kind,
+      ownerType: task.ownerType,
+      executionState: executionStateFor(task),
+      agentRequestStatus: task.agentRequestStatus,
+      requestedHarness: task.requestedHarness,
+      agentRequestedAt: task.agentRequestedAt,
+      agentRequestedBy: task.agentRequestedBy,
+      agentRequestMessage: task.agentRequestMessage,
       executionBrief: task.executionBrief,
       acceptanceCriteria: task.acceptanceCriteria,
       orderIndex: task.orderIndex ?? 0,
@@ -153,6 +175,11 @@ async function readyTasks(db: any, brainInstanceId: any, limit: number) {
   }
   result.sort((a, b) => a.orderIndex - b.orderIndex);
   return result.slice(0, limit);
+}
+
+async function requestedReadyTasks(db: any, brainInstanceId: any, limit: number) {
+  const tasks = await readyTasks(db, brainInstanceId, Math.max(limit * 4, 50));
+  return tasks.filter((task) => task.agentRequestStatus === "requested").slice(0, limit);
 }
 
 async function taskBrief(db: any, brainInstanceId: any, taskId: string) {
@@ -186,6 +213,11 @@ async function taskBrief(db: any, brainInstanceId: any, taskId: string) {
     kind: task.kind,
     status: task.status,
     executionState: executionStateFor(task),
+    agentRequestStatus: task.agentRequestStatus,
+    requestedHarness: task.requestedHarness,
+    agentRequestedAt: task.agentRequestedAt,
+    agentRequestedBy: task.agentRequestedBy,
+    agentRequestMessage: task.agentRequestMessage,
     executionBrief: task.executionBrief,
     acceptanceCriteria: task.acceptanceCriteria,
     resultSummary: task.resultSummary,
@@ -290,6 +322,9 @@ async function applyTaskResult(
     resultSummary: args.resultSummary?.trim() || task.resultSummary,
     resultUrl: args.resultUrl?.trim() || task.resultUrl,
     resultRecordedAt: now,
+    agentRequestStatus: undefined,
+    requestedHarness: undefined,
+    agentRequestMessage: undefined,
     updatedAt: now,
   };
   let promoted: string[] = [];
@@ -337,6 +372,27 @@ export const readyTasksForViewer = queryGeneric({
   handler: async (ctx, args) => {
     const { brain } = await requireOwnedBrain(ctx);
     return readyTasks(ctx.db, brain._id, args.limit ?? 12);
+  },
+});
+
+export const activeProjectsForViewer = queryGeneric({
+  args: {},
+  handler: async (ctx) => {
+    const { brain } = await requireOwnedBrain(ctx);
+    const projects = await ctx.db
+      .query("projects")
+      .withIndex("by_brain_state", (q: any) => q.eq("brainInstanceId", brain._id))
+      .filter((q: any) => q.eq(q.field("processingState"), "accepted"))
+      .collect();
+    return projects
+      .filter((project: any) => project.status !== "completed" && project.status !== "cancelled")
+      .sort((a: any, b: any) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
+      .map((project: any) => ({
+        _id: project._id,
+        title: project.title,
+        status: project.status,
+        kind: project.kind,
+      }));
   },
 });
 
@@ -401,6 +457,7 @@ export const moveTasksToProjectForViewer = mutationGeneric({
 });
 
 const executionStateValidator = v.union(
+  v.literal("proposed"),
   v.literal("unplanned"),
   v.literal("briefed"),
   v.literal("ready"),
@@ -409,6 +466,75 @@ const executionStateValidator = v.union(
   v.literal("blocked"),
   v.literal("done"),
 );
+
+const taskKindValidator = v.union(
+  v.literal("coding"),
+  v.literal("review"),
+  v.literal("research"),
+  v.literal("design"),
+  v.literal("manual"),
+  v.literal("planning"),
+);
+
+export const createTaskProposalForViewer = mutationGeneric({
+  args: {
+    projectId: v.id("projects"),
+    title: v.string(),
+    proposalText: v.string(),
+    kind: v.optional(taskKindValidator),
+  },
+  handler: async (ctx, args) => {
+    const { user, brain } = await requireOwnedBrain(ctx);
+    const project = await ctx.db.get(args.projectId);
+    if (!project || project.brainInstanceId !== brain._id) {
+      throw new Error("project not found");
+    }
+    const title = args.title.trim();
+    const proposalText = args.proposalText.trim();
+    if (!title) throw new Error("task title cannot be empty");
+    if (!proposalText) throw new Error("proposal cannot be empty");
+
+    const now = Date.now();
+    const taskId = await ctx.db.insert("tasks", {
+      brainInstanceId: brain._id,
+      title,
+      description: proposalText,
+      status: "todo",
+      ownerType: "agent",
+      processingState: "accepted",
+      kind: args.kind ?? "coding",
+      executionState: "proposed",
+      orderIndex: now,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const relationshipId = await ctx.db.insert("relationships", {
+      brainInstanceId: brain._id,
+      from: { entityType: "task", entityId: taskId },
+      to: { entityType: "project", entityId: args.projectId },
+      type: "belongs_to",
+      confidence: 1,
+      reason: "Task proposal created from the project board.",
+      createdBy: "user",
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    await ctx.db.insert("activityEvents", {
+      brainInstanceId: brain._id,
+      entityRef: { entityType: "task", entityId: taskId },
+      activityType: "task_proposed",
+      actorType: "user",
+      actorId: user._id,
+      timestamp: now,
+      summary: `Task proposed: ${title}`,
+      metadata: { projectId: args.projectId, relationshipId },
+    });
+
+    return { taskId, relationshipId, executionState: "proposed" };
+  },
+});
 
 export const updateProjectForViewer = mutationGeneric({
   args: {
@@ -478,6 +604,63 @@ export const updateTaskBriefForViewer = mutationGeneric({
   },
 });
 
+export const requestAgentForTaskForViewer = mutationGeneric({
+  args: {
+    taskId: v.id("tasks"),
+    requestedHarness: v.optional(v.string()),
+    agentRequestMessage: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const { user, brain } = await requireOwnedBrain(ctx);
+    const task = await ctx.db.get(args.taskId);
+    if (!task || task.brainInstanceId !== brain._id) {
+      throw new Error("task not found");
+    }
+    if (task.processingState !== "accepted") {
+      throw new Error("only accepted tasks can be requested for agent work");
+    }
+    if (task.ownerType !== "agent") {
+      throw new Error("only agent-owned tasks can be requested for agent work");
+    }
+    if (executionStateFor(task) !== "ready") {
+      throw new Error("only ready tasks can be requested for agent work");
+    }
+    if (task.status === "done" || task.status === "cancelled") {
+      throw new Error("done or cancelled tasks cannot be requested");
+    }
+
+    const now = Date.now();
+    const config = await ctx.db
+      .query("brainConfigs")
+      .withIndex("by_brain", (q: any) => q.eq("brainInstanceId", brain._id))
+      .first();
+    const requestedHarness = args.requestedHarness?.trim() || config?.assistantDisplayName || brain.displayName;
+    const patch = {
+      executionState: "ready",
+      agentRequestStatus: "requested",
+      requestedHarness,
+      agentRequestedAt: task.agentRequestedAt ?? now,
+      agentRequestedBy: user.displayName ?? user.email,
+      agentRequestMessage: args.agentRequestMessage?.trim() || undefined,
+      updatedAt: now,
+    };
+    await ctx.db.patch(args.taskId, patch);
+
+    await ctx.db.insert("activityEvents", {
+      brainInstanceId: brain._id,
+      entityRef: { entityType: "task", entityId: args.taskId },
+      activityType: task.agentRequestStatus === "requested" ? "agent_task_request_refreshed" : "agent_task_requested",
+      actorType: "user",
+      actorId: user._id,
+      timestamp: now,
+      summary: `Agent requested for task: ${task.title}`,
+      metadata: { requestedHarness, agentRequestMessage: patch.agentRequestMessage },
+    });
+
+    return { taskId: args.taskId, agentRequestStatus: "requested", requestedHarness };
+  },
+});
+
 export const setTaskExecutionStateForViewer = mutationGeneric({
   args: { taskId: v.id("tasks"), executionState: executionStateValidator },
   handler: async (ctx, args) => {
@@ -493,7 +676,7 @@ export const setTaskExecutionStateForViewer = mutationGeneric({
     else if (args.executionState === "done") {
       patch.status = "done";
       patch.completedAt = now;
-    } else if (["briefed", "ready", "blocked"].includes(args.executionState) && task.status === "in_progress") {
+    } else if (["proposed", "unplanned", "briefed", "ready", "blocked"].includes(args.executionState) && task.status === "in_progress") {
       patch.status = "todo";
     }
     await ctx.db.patch(args.taskId, patch);
@@ -641,6 +824,13 @@ export const readyTasksForBrain = queryGeneric({
   },
 });
 
+export const requestedReadyTasksForBrain = queryGeneric({
+  args: { brainInstanceId: v.id("brainInstances"), limit: v.optional(v.number()) },
+  handler: async ({ db }, args) => {
+    return requestedReadyTasks(db, args.brainInstanceId, args.limit ?? 12);
+  },
+});
+
 export const getTaskBriefForBrain = queryGeneric({
   args: { brainInstanceId: v.id("brainInstances"), taskId: v.id("tasks") },
   handler: async ({ db }, args) => {
@@ -669,5 +859,32 @@ export const recordTaskResultForBrain = mutationGeneric({
       },
       { actorType: "harness", ...(args.actorId ? { actorId: args.actorId } : {}) },
     );
+  },
+});
+
+export const setTaskKindForBrain = mutationGeneric({
+  args: {
+    brainInstanceId: v.id("brainInstances"),
+    taskId: v.id("tasks"),
+    kind: taskKindValidator,
+    actorId: v.optional(v.string()),
+  },
+  handler: async ({ db }, args) => {
+    const task = await db.get(args.taskId);
+    if (!task || task.brainInstanceId !== args.brainInstanceId) {
+      throw new Error("task not found for brain instance");
+    }
+    const now = Date.now();
+    await db.patch(args.taskId, { kind: args.kind, updatedAt: now });
+    await db.insert("activityEvents", {
+      brainInstanceId: args.brainInstanceId,
+      entityRef: { entityType: "task", entityId: args.taskId },
+      activityType: "task_kind_changed",
+      actorType: "harness",
+      actorId: args.actorId,
+      timestamp: now,
+      summary: `Task kind set to ${args.kind}: ${task.title}`,
+    });
+    return { taskId: args.taskId, kind: args.kind };
   },
 });

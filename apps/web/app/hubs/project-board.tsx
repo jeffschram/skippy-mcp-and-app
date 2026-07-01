@@ -9,6 +9,7 @@ import {
   Folder,
   GitBranch,
   Pencil,
+  Plus,
   Play,
   Settings2,
   Sparkles,
@@ -62,9 +63,11 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
     | null
     | undefined;
   const planProject = useAction(api.planning.planProject);
-  const markInProgress = useMutation(api.knowledge.markTaskInProgressForViewer);
+  const briefTaskProposal = useAction(api.planning.briefTaskProposal);
   const markDone = useMutation(api.knowledge.markTaskDoneForViewer);
+  const createTaskProposal = useMutation(api.projects.createTaskProposalForViewer);
   const recordResult = useMutation(api.projects.recordTaskResultForViewer);
+  const requestAgent = useMutation(api.projects.requestAgentForTaskForViewer);
   const setExecState = useMutation(api.projects.setTaskExecutionStateForViewer);
   const updateBrief = useMutation(api.projects.updateTaskBriefForViewer);
   const updateProject = useMutation(api.projects.updateProjectForViewer);
@@ -76,11 +79,20 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
   const [resultUrl, setResultUrl] = useState("");
   const [resultSummary, setResultSummary] = useState("");
   const [busy, setBusy] = useState(false);
+  const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
+  const [dragOverState, setDragOverState] = useState<string | null>(null);
 
   // Brief editing
   const [editingBrief, setEditingBrief] = useState(false);
   const [briefDraft, setBriefDraft] = useState("");
   const [criteriaDraft, setCriteriaDraft] = useState("");
+
+  // Task proposal dialog
+  const [proposalOpen, setProposalOpen] = useState(false);
+  const [proposalTitle, setProposalTitle] = useState("");
+  const [proposalText, setProposalText] = useState("");
+  const [proposalKind, setProposalKind] = useState("coding");
+  const [proposalBusy, setProposalBusy] = useState(false);
 
   // Project settings dialog
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -113,6 +125,7 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
   }, [selectedId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const project = board?.project;
+  const agentName = board?.agentName ?? "Agent";
   const openSettings = () => {
     if (!project) return;
     setPKind(project.kind ?? "general");
@@ -143,6 +156,46 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
     }
   };
 
+  const proposeTask = async () => {
+    const title = proposalTitle.trim();
+    const text = proposalText.trim();
+    if (!title || !text) {
+      toast("Add a title and proposal notes first.", "error");
+      return;
+    }
+    setProposalBusy(true);
+    try {
+      const created = (await createTaskProposal({
+        projectId: projectId as any,
+        title,
+        proposalText: text,
+        kind: proposalKind as any,
+      })) as AnyRecord;
+      setProposalOpen(false);
+      setProposalTitle("");
+      setProposalText("");
+      setProposalKind("coding");
+      setSelectedId(created.taskId);
+      toast("Task proposed.", "success");
+    } catch (error) {
+      toast(error instanceof Error ? error.message : "Could not propose task", "error");
+    } finally {
+      setProposalBusy(false);
+    }
+  };
+
+  const createBriefForTask = async (taskId: string) => {
+    setBusy(true);
+    try {
+      await briefTaskProposal({ taskId: taskId as any });
+      toast("Brief created.", "success");
+    } catch (error) {
+      toast(error instanceof Error ? error.message : "Could not create brief", "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const moveTo = async (taskId: string, state: string) => {
     setBusy(true);
     try {
@@ -155,16 +208,29 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
     }
   };
 
-  const startTask = async (taskId: string) => {
+  const requestAgentForTask = async (task: AnyRecord) => {
     setBusy(true);
     try {
-      await markInProgress({ taskId: taskId as any });
-      toast("Task started.", "info");
+      await requestAgent({
+        taskId: task._id as any,
+        requestedHarness: agentName,
+        agentRequestMessage: `Execute task ${task._id} (${task.title}) and record the result for review.`,
+      });
+      toast(`${agentName} requested.`, "success");
     } catch (error) {
-      toast(error instanceof Error ? error.message : "Could not start task", "error");
+      toast(error instanceof Error ? error.message : `Could not request ${agentName}`, "error");
     } finally {
       setBusy(false);
     }
+  };
+
+  const dropTaskInState = async (state: string) => {
+    if (!draggedTaskId) return;
+    const task = board?.tasks?.find((candidate: AnyRecord) => candidate._id === draggedTaskId);
+    setDraggedTaskId(null);
+    setDragOverState(null);
+    if (!task || task.executionState === state) return;
+    await moveTo(draggedTaskId, state);
   };
 
   const saveBrief = async (taskId: string) => {
@@ -247,7 +313,7 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
             <Link href="/projects" className="text-button compact" style={{ marginBottom: 14 }}>
               <ArrowLeft size={15} aria-hidden /> Projects
             </Link>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 16, flexWrap: "wrap" }}>
+            <div className={boardStyles.projectHeader}>
               <div>
                 <p className="eyebrow">{project.kind === "code" ? "Code project" : "Project"}</p>
                 <h1>{project.title}</h1>
@@ -267,9 +333,12 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                   </div>
                 ) : null}
               </div>
-              <div style={{ display: "flex", gap: 8 }}>
+              <div className={boardStyles.projectActions}>
                 <Button onClick={openSettings} title="Project settings">
                   <Settings2 size={16} aria-hidden /> Settings
+                </Button>
+                <Button onClick={() => setProposalOpen(true)}>
+                  <Plus size={16} aria-hidden /> Propose task
                 </Button>
                 <Button variant="primary" onClick={() => void runPlan()} disabled={planning}>
                   <Sparkles size={17} aria-hidden />
@@ -308,17 +377,53 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
               {EXECUTION_COLUMNS.map((column) => {
                 const tasks = board.tasks.filter((task: AnyRecord) => task.executionState === column.key);
                 return (
-                  <div key={column.key} className={boardStyles.column}>
+                  <div
+                    key={column.key}
+                    className={`${boardStyles.column} ${dragOverState === column.key ? boardStyles.columnDropTarget : ""}`}
+                    onDragOver={(event) => {
+                      event.preventDefault();
+                      event.dataTransfer.dropEffect = "move";
+                      setDragOverState(column.key);
+                    }}
+                    onDragLeave={(event) => {
+                      if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                        setDragOverState(null);
+                      }
+                    }}
+                    onDrop={(event) => {
+                      event.preventDefault();
+                      void dropTaskInState(column.key);
+                    }}
+                  >
                     <div className={boardStyles.columnHead}>
                       <span>{column.label}</span>
                       <span className={boardStyles.columnCount}>{tasks.length}</span>
                     </div>
                     <div className={boardStyles.columnBody}>
                       {tasks.map((task: AnyRecord) => (
-                        <button key={task._id} className={boardStyles.taskCard} onClick={() => setSelectedId(task._id)} type="button">
+                        <button
+                          key={task._id}
+                          className={`${boardStyles.taskCard} ${draggedTaskId === task._id ? boardStyles.taskCardDragging : ""}`}
+                          draggable
+                          aria-grabbed={draggedTaskId === task._id}
+                          onDragStart={(event) => {
+                            setDraggedTaskId(task._id);
+                            event.dataTransfer.effectAllowed = "move";
+                            event.dataTransfer.setData("text/plain", task._id);
+                          }}
+                          onDragEnd={() => {
+                            setDraggedTaskId(null);
+                            setDragOverState(null);
+                          }}
+                          onClick={() => setSelectedId(task._id)}
+                          type="button"
+                        >
                           <span className={boardStyles.taskTitle}>{task.title}</span>
                           <span className={boardStyles.taskMeta}>
                             {task.kind ? <Badge tone="neutral">{task.kind}</Badge> : null}
+                            {task.agentRequestStatus === "requested" ? (
+                              <Badge tone="blue">Queued for {task.requestedHarness ?? agentName}</Badge>
+                            ) : null}
                             {task.dependsOn?.length ? <Badge tone="gold">{task.dependsOn.length} dep</Badge> : null}
                             {task.resultUrl ? <Badge tone="green">result</Badge> : null}
                           </span>
@@ -340,16 +445,31 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
             footer={
               selected ? (
                 <>
-                  <Button onClick={() => void copyBrief(selected)}>
-                    <ClipboardCopy size={16} aria-hidden /> Copy brief
-                  </Button>
+                  {selected.executionState === "proposed" ? (
+                    <Button variant="primary" disabled={busy} onClick={() => void createBriefForTask(selected._id)}>
+                      <Sparkles size={16} aria-hidden /> Create Brief
+                    </Button>
+                  ) : (
+                    <Button onClick={() => void copyBrief(selected)}>
+                      <ClipboardCopy size={16} aria-hidden /> Copy brief
+                    </Button>
+                  )}
                   {selected.executionState === "briefed" ? (
                     <Button variant="primary" disabled={busy} onClick={() => void moveTo(selected._id, "ready")}>
                       Mark Ready
                     </Button>
+                  ) : selected.executionState === "ready" && selected.ownerType === "agent" ? (
+                    <Button
+                      variant="primary"
+                      disabled={busy || selected.agentRequestStatus === "requested"}
+                      onClick={() => void requestAgentForTask(selected)}
+                    >
+                      <Play size={16} aria-hidden />
+                      {selected.agentRequestStatus === "requested" ? `${agentName} requested` : `Request ${agentName}`}
+                    </Button>
                   ) : selected.executionState === "ready" ? (
-                    <Button variant="primary" disabled={busy} onClick={() => void startTask(selected._id)}>
-                      <Play size={16} aria-hidden /> Start
+                    <Button variant="primary" disabled={busy} onClick={() => void moveTo(selected._id, "in_progress")}>
+                      <Play size={16} aria-hidden /> Mark in progress
                     </Button>
                   ) : null}
                 </>
@@ -366,6 +486,9 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                     <Badge tone={taskStatusTone(selected.status)}>Status: {titleCase(selected.status)}</Badge>
                   ) : null}
                   {selected.kind ? <Badge tone="neutral">{selected.kind}</Badge> : null}
+                  {selected.agentRequestStatus === "requested" ? (
+                    <Badge tone="blue">Queued for {selected.requestedHarness ?? agentName}</Badge>
+                  ) : null}
                 </div>
 
                 {/* Move between states (kanban) */}
@@ -387,8 +510,18 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
 
                 {selected.description ? <p style={{ margin: 0 }}>{selected.description}</p> : null}
 
+                {selected.executionState === "proposed" ? (
+                  <section>
+                    <h3 style={{ marginTop: 0 }}>Proposal</h3>
+                    <p className={boardStyles.brief}>{selected.description ?? selected.title}</p>
+                    <p className="muted" style={{ fontSize: 14 }}>
+                      Create a brief to turn this proposal into an editable, hand-off-ready task.
+                    </p>
+                  </section>
+                ) : null}
+
                 {/* Execution brief + acceptance criteria (editable pre-execution) */}
-                <section>
+                {selected.executionState !== "proposed" ? <section>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
                     <h3 style={{ margin: 0 }}>Execution brief</h3>
                     {PRE_EXECUTION.has(selected.executionState) && !editingBrief ? (
@@ -441,7 +574,7 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                       ) : null}
                     </>
                   )}
-                </section>
+                </section> : null}
 
                 {detail?.dependencies?.length ? (
                   <section>
@@ -523,6 +656,47 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                 <Button onClick={() => setSettingsOpen(false)}>Cancel</Button>
                 <Button variant="primary" disabled={busy} onClick={() => void saveSettings()}>
                   Save
+                </Button>
+              </div>
+            </div>
+          </Dialog>
+          <Dialog open={proposalOpen} onClose={() => setProposalOpen(false)} title="New task proposal">
+            <div style={{ display: "grid", gap: 14 }}>
+              <Field label="Title">
+                <TextInput
+                  value={proposalTitle}
+                  onChange={(event) => setProposalTitle(event.target.value)}
+                  placeholder="Render bullets as markdown"
+                />
+              </Field>
+              <Field label="Kind">
+                <Select value={proposalKind} onChange={(event) => setProposalKind(event.target.value)}>
+                  <option value="coding">Coding</option>
+                  <option value="review">Review</option>
+                  <option value="design">Design</option>
+                  <option value="research">Research</option>
+                  <option value="planning">Planning</option>
+                  <option value="manual">Manual</option>
+                </Select>
+              </Field>
+              <Field label="Proposal">
+                <TextArea
+                  value={proposalText}
+                  onChange={(event) => setProposalText(event.target.value)}
+                  placeholder="Describe the idea, problem, constraints, or proposed solution."
+                  style={{ minHeight: 140 }}
+                />
+              </Field>
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+                <Button onClick={() => setProposalOpen(false)} disabled={proposalBusy}>
+                  Cancel
+                </Button>
+                <Button
+                  variant="primary"
+                  disabled={proposalBusy || !proposalTitle.trim() || !proposalText.trim()}
+                  onClick={() => void proposeTask()}
+                >
+                  <Plus size={16} aria-hidden /> {proposalBusy ? "Proposing…" : "Propose Task"}
                 </Button>
               </div>
             </div>
