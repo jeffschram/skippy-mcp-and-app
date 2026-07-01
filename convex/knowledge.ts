@@ -27,6 +27,15 @@ const entityRef = v.object({
   entityId: v.string(),
 });
 
+const taskKind = v.union(
+  v.literal("coding"),
+  v.literal("review"),
+  v.literal("research"),
+  v.literal("design"),
+  v.literal("manual"),
+  v.literal("planning"),
+);
+
 const memoryType = v.union(
   v.literal("thought"),
   v.literal("memory"),
@@ -1532,7 +1541,7 @@ export const dashboardForViewer = queryGeneric({
         .query("projects")
         .filter(acceptedFilter)
         .take(20)
-    ).filter((project) => project.status !== "completed" && project.status !== "cancelled");
+    ).filter((project) => !["completed", "cancelled", "archived"].includes(project.status));
     const tasks = (
       await ctx.db
       .query("tasks")
@@ -1873,12 +1882,14 @@ export const projectsAndTasksForViewer = queryGeneric({
       .query("brainConfigs")
       .withIndex("by_brain", (q) => q.eq("brainInstanceId", brain._id))
       .first();
-    const projects = await ctx.db
-      .query("projects")
-      .filter((q) =>
-        q.and(q.eq(q.field("brainInstanceId"), brain._id), q.eq(q.field("processingState"), "accepted")),
-      )
-      .collect();
+    const projects = (
+      await ctx.db
+        .query("projects")
+        .filter((q) =>
+          q.and(q.eq(q.field("brainInstanceId"), brain._id), q.eq(q.field("processingState"), "accepted")),
+        )
+        .collect()
+    ).filter((project) => project.status !== "archived");
     const tasks = (
       await ctx.db
       .query("tasks")
@@ -2051,6 +2062,7 @@ export const createProjectForViewer = mutationGeneric({
         v.literal("paused"),
         v.literal("completed"),
         v.literal("cancelled"),
+        v.literal("archived"),
       ),
     ),
   },
@@ -3283,6 +3295,9 @@ export const markTaskInProgress = mutationGeneric({
       startedAt,
       startedBy: args.startedBy,
       executionState: "in_progress",
+      agentRequestStatus: undefined,
+      requestedHarness: undefined,
+      agentRequestMessage: undefined,
       updatedAt: now,
     });
 
@@ -3318,6 +3333,7 @@ export const createProjectDirect = mutationGeneric({
         v.literal("paused"),
         v.literal("completed"),
         v.literal("cancelled"),
+        v.literal("archived"),
       ),
     ),
     priorityReason: v.optional(v.string()),
@@ -3370,6 +3386,7 @@ export const createTaskDirect = mutationGeneric({
       ),
     ),
     ownerType: v.optional(v.union(v.literal("owner"), v.literal("agent"))),
+    kind: v.optional(taskKind),
     dueAt: v.optional(v.number()),
     priorityReason: v.optional(v.string()),
     projectId: v.optional(v.id("projects")),
@@ -3378,11 +3395,13 @@ export const createTaskDirect = mutationGeneric({
   handler: async ({ db }, args) => {
     const now = Date.now();
     const normalizedTitle = args.title.trim();
+    const normalizedKind = args.kind ?? (args.ownerType === "agent" ? "coding" : undefined);
     const normalizedPayload = normalizeAcceptedEntityPayload("task", {
       title: normalizedTitle,
       description: args.description,
       status: args.status ?? "todo",
       ownerType: args.ownerType,
+      kind: normalizedKind,
       dueAt: args.dueAt,
       priorityReason: args.priorityReason,
     });
@@ -3446,6 +3465,7 @@ export const createTaskDirect = mutationGeneric({
         taskId: duplicateTask._id,
         title: duplicateTask.title,
         ownerType: duplicateTask.ownerType ?? args.ownerType,
+        kind: duplicateTask.kind ?? normalizedKind,
         projectId: args.projectId,
         projectTitle,
         relationshipId,
@@ -3458,6 +3478,8 @@ export const createTaskDirect = mutationGeneric({
       description: args.description,
       status: args.status ?? "todo",
       ownerType: args.ownerType,
+      kind: normalizedKind,
+      executionState: args.ownerType === "agent" ? "ready" : undefined,
       dueAt: args.dueAt,
       priorityReason: args.priorityReason,
       processingState: "accepted",
@@ -3501,6 +3523,7 @@ export const createTaskDirect = mutationGeneric({
       taskId,
       title: normalizedTitle,
       ownerType: args.ownerType,
+      kind: normalizedKind,
       projectId: args.projectId,
       projectTitle,
       relationshipId,
@@ -3592,6 +3615,9 @@ export const markTaskInProgressForViewer = mutationGeneric({
       startedAt,
       startedBy,
       executionState: "in_progress",
+      agentRequestStatus: undefined,
+      requestedHarness: undefined,
+      agentRequestMessage: undefined,
       updatedAt: now,
     });
 

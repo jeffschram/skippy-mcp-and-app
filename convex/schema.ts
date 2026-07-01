@@ -26,6 +26,7 @@ const entityRef = v.object({
 
 const taskKind = v.union(
   v.literal("coding"),
+  v.literal("review"),
   v.literal("research"),
   v.literal("design"),
   v.literal("manual"),
@@ -33,8 +34,9 @@ const taskKind = v.union(
 );
 
 // Supervised execution lifecycle, distinct from the user-facing `status`.
-// unplanned -> briefed -> ready -> in_progress -> in_review -> done (or blocked).
+// proposed -> briefed -> ready -> in_progress -> in_review -> done (or blocked).
 const taskExecutionState = v.union(
+  v.literal("proposed"),
   v.literal("unplanned"),
   v.literal("briefed"),
   v.literal("ready"),
@@ -210,6 +212,7 @@ export default defineSchema({
       v.literal("paused"),
       v.literal("completed"),
       v.literal("cancelled"),
+      v.literal("archived"),
     ),
     // "code" projects have a GitHub repo + local folder and follow the branch->PR agent workflow.
     kind: v.optional(v.union(v.literal("code"), v.literal("general"))),
@@ -243,6 +246,11 @@ export default defineSchema({
     // Automated planning + supervised execution (Skippy plans, a coding harness executes).
     kind: v.optional(taskKind),
     executionState: v.optional(taskExecutionState),
+    agentRequestStatus: v.optional(v.union(v.literal("requested"), v.literal("cancelled"))),
+    requestedHarness: v.optional(v.string()),
+    agentRequestedAt: v.optional(v.number()),
+    agentRequestedBy: v.optional(v.string()),
+    agentRequestMessage: v.optional(v.string()),
     executionBrief: v.optional(v.string()),
     acceptanceCriteria: v.optional(v.array(v.string())),
     orderIndex: v.optional(v.number()),

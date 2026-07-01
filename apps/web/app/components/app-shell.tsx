@@ -2,24 +2,98 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Brain, CalendarCheck, FolderKanban, Inbox, Settings, type LucideIcon } from "lucide-react";
+import { useConvexAuth, useQuery } from "convex/react";
+import {
+  Brain,
+  CalendarCheck,
+  FolderKanban,
+  Inbox,
+  Settings,
+  type LucideIcon,
+} from "lucide-react";
+import { api } from "../../lib/skippy-api";
 import { AuthStatus } from "../live-auth";
 import { ToastProvider } from "./widgets";
 import styles from "./app-shell.module.css";
 
-export const hubs: Array<{ href: string; label: string; icon: LucideIcon; match: (path: string) => boolean }> = [
+type NavProject = {
+  _id: string;
+  title: string;
+  status?: string;
+};
+
+export const hubs: Array<{
+  href: string;
+  label: string;
+  icon: LucideIcon;
+  match: (path: string) => boolean;
+}> = [
   { href: "/", label: "Today", icon: CalendarCheck, match: (p) => p === "/" },
-  { href: "/projects", label: "Projects", icon: FolderKanban, match: (p) => p.startsWith("/projects") },
-  { href: "/brain", label: "Brain", icon: Brain, match: (p) => p.startsWith("/brain") },
-  { href: "/review", label: "Review", icon: Inbox, match: (p) => p.startsWith("/review") },
-  { href: "/settings", label: "Settings", icon: Settings, match: (p) => p.startsWith("/settings") },
+  {
+    href: "/projects",
+    label: "Projects",
+    icon: FolderKanban,
+    match: (p) => p.startsWith("/projects"),
+  },
+  {
+    href: "/brain",
+    label: "Brain",
+    icon: Brain,
+    match: (p) => p.startsWith("/brain"),
+  },
+  {
+    href: "/review",
+    label: "Review",
+    icon: Inbox,
+    match: (p) => p.startsWith("/review"),
+  },
+  {
+    href: "/settings",
+    label: "Settings",
+    icon: Settings,
+    match: (p) => p.startsWith("/settings"),
+  },
 ];
 
-function NavLinks({ pathname, mobile }: { pathname: string; mobile?: boolean }) {
+function NavLinks({
+  pathname,
+  projects = [],
+  mobile,
+}: {
+  pathname: string;
+  projects?: NavProject[];
+  mobile?: boolean;
+}) {
   return (
     <>
       {hubs.map((hub) => {
         const active = hub.match(pathname);
+        const showProjectSubmenu = !mobile && hub.href === "/projects" && projects.length > 0;
+        if (showProjectSubmenu) {
+          return (
+            <div className={`${styles.navItem} ${active ? styles.navItemOpen : ""}`} key={hub.href}>
+              <Link
+                href={hub.href}
+                className={`${styles.navLink} ${active ? styles.active : ""}`}
+                aria-current={active ? "page" : undefined}
+              >
+                <hub.icon size={18} aria-hidden />
+                {hub.label}
+              </Link>
+              <div className={styles.navSubmenu} aria-label="Active projects">
+                {projects.map((project) => (
+                  <Link
+                    key={project._id}
+                    href={`/projects/${project._id}`}
+                    className={`${styles.navSubLink} ${pathname === `/projects/${project._id}` ? styles.activeSubLink : ""}`}
+                  >
+                    {project.title}
+                  </Link>
+                ))}
+              </div>
+            </div>
+          );
+        }
         return (
           <Link
             key={hub.href}
@@ -38,6 +112,10 @@ function NavLinks({ pathname, mobile }: { pathname: string; mobile?: boolean }) 
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname() ?? "/";
+  const { isAuthenticated } = useConvexAuth();
+  const activeProjects = useQuery(api.projects.activeProjectsForViewer, isAuthenticated ? {} : "skip") as
+    | NavProject[]
+    | undefined;
 
   return (
     <ToastProvider>
@@ -50,7 +128,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             Skippy
           </div>
           <nav className={styles.nav} aria-label="Primary">
-            <NavLinks pathname={pathname} />
+            <NavLinks pathname={pathname} projects={activeProjects ?? []} />
           </nav>
           <div className={styles.spacer} />
           <div className={styles.sidebarFoot}>
@@ -60,10 +138,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
         <div className={styles.content}>
           <header className={styles.mobileBar}>
+            <AuthStatus />
             <nav className={styles.mobileNav} aria-label="Primary">
               <NavLinks pathname={pathname} mobile />
             </nav>
-            <AuthStatus />
           </header>
           <main className={styles.page}>{children}</main>
         </div>
@@ -88,7 +166,11 @@ export function PageHeader({
       <div>
         {eyebrow ? <p className="eyebrow">{eyebrow}</p> : null}
         <h1>{title}</h1>
-        {description ? <p className="muted" style={{ marginTop: 8, maxWidth: 640 }}>{description}</p> : null}
+        {description ? (
+          <p className="muted" style={{ marginTop: 8, maxWidth: 640 }}>
+            {description}
+          </p>
+        ) : null}
       </div>
       {action}
     </div>

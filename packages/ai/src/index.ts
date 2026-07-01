@@ -88,7 +88,7 @@ export type LlmClient = {
 export type ProjectPlanTaskDraft = {
   title: string;
   description?: string;
-  kind?: "coding" | "research" | "design" | "manual" | "planning";
+  kind?: "coding" | "review" | "research" | "design" | "manual" | "planning";
   acceptanceCriteria?: string[];
   executionBrief?: string;
   dependsOn?: number[];
@@ -104,9 +104,22 @@ export type ProjectPlanRequest = {
   policyVersion?: string;
 };
 
+export type TaskBriefRequest = {
+  projectTitle: string;
+  projectSummary?: string;
+  proposalTitle: string;
+  proposalText: string;
+  existingTasks?: string[];
+  policyVersion?: string;
+};
+
 export type ProjectPlanResult = {
   summary: string;
   tasks: ProjectPlanTaskDraft[];
+  usage?: AiUsageRecord;
+};
+
+export type TaskBriefResult = ProjectPlanTaskDraft & {
   usage?: AiUsageRecord;
 };
 
@@ -690,6 +703,7 @@ export function createEmbeddingClient(config: AiProviderConfig, options?: AiClie
 }
 
 export const PROJECT_PLAN_POLICY_VERSION = "skippy-project-plan-v1";
+export const TASK_BRIEF_POLICY_VERSION = "skippy-task-brief-v1";
 
 const PROJECT_PLAN_INSTRUCTIONS = [
   "You are Skippy's project planning layer. You DECOMPOSE a software/work project into an ordered set of concrete, executable tasks.",
@@ -697,12 +711,25 @@ const PROJECT_PLAN_INSTRUCTIONS = [
   "Rules:",
   "- Produce 3 to 12 tasks, ordered so dependencies come first.",
   "- Each task must be a single, shippable unit of work with a clear outcome.",
-  '- "kind" is one of: coding, research, design, manual, planning.',
+  '- "kind" is one of: coding, review, research, design, manual, planning.',
   '- "acceptanceCriteria" is a short list (1-4) of checkable conditions that mean the task is done.',
   '- "executionBrief" is a self-contained, ready-to-hand-off brief: what to do, where, and any context an executor needs. Write it as if pasting it directly to a coding agent.',
   '- "dependsOn" is an array of 0-based indexes of earlier tasks in THIS list that must finish first. Omit or use [] when independent.',
   "Return ONLY a JSON object, no markdown fences, of the exact shape:",
   '{"summary": string, "tasks": [{"title": string, "description": string, "kind": string, "acceptanceCriteria": string[], "executionBrief": string, "dependsOn": number[]}]}',
+].join("\n");
+
+const TASK_BRIEF_INSTRUCTIONS = [
+  "You are Skippy's task proposal briefing layer. You turn one user-authored proposal into a concrete, executable task brief.",
+  "Skippy itself does not write code: the brief should be ready for a human or coding agent to execute.",
+  "Rules:",
+  "- Preserve the user's intent and do not add unrelated scope.",
+  "- Clarify the likely implementation path and important constraints.",
+  '- "kind" is one of: coding, review, research, design, manual, planning.',
+  '- "acceptanceCriteria" is a short list (1-4) of checkable conditions that mean the task is done.',
+  '- "executionBrief" is self-contained: what to do, where to look, and how to verify it.',
+  "Return ONLY a JSON object, no markdown fences, of the exact shape:",
+  '{"title": string, "description": string, "kind": string, "acceptanceCriteria": string[], "executionBrief": string}',
 ].join("\n");
 
 function extractJsonObject(text: string): string | undefined {
@@ -739,7 +766,7 @@ function extractJsonObject(text: string): string | undefined {
   return undefined;
 }
 
-const PLAN_TASK_KINDS = new Set(["coding", "research", "design", "manual", "planning"]);
+const PLAN_TASK_KINDS = new Set(["coding", "review", "research", "design", "manual", "planning"]);
 
 function normalizePlanTask(raw: unknown): ProjectPlanTaskDraft | undefined {
   if (!raw || typeof raw !== "object") return undefined;
@@ -805,6 +832,28 @@ export function parseProjectPlan(text: string): { summary: string; tasks: Projec
   return { summary, tasks };
 }
 
+/** Parse a raw single-task brief completion into a validated task draft. Exported for testing. */
+export function parseTaskBrief(text: string, fallbackTitle = "Task proposal"): ProjectPlanTaskDraft {
+  const jsonText = extractJsonObject(text);
+  if (!jsonText) {
+    throw new Error("Task brief response did not contain a JSON object");
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(jsonText);
+  } catch {
+    throw new Error("Task brief response was not valid JSON");
+  }
+  const task = normalizePlanTask(parsed);
+  if (!task) {
+    throw new Error("Task brief response did not include a valid task");
+  }
+  if (!task.title.trim()) {
+    task.title = fallbackTitle;
+  }
+  return task;
+}
+
 export async function generateProjectPlan(
   client: LlmClient,
   request: ProjectPlanRequest,
@@ -832,6 +881,35 @@ export async function generateProjectPlan(
   return {
     summary: parsed.summary,
     tasks: parsed.tasks,
+    usage: result.usage,
+  };
+}
+
+export async function generateTaskBrief(
+  client: LlmClient,
+  request: TaskBriefRequest,
+): Promise<TaskBriefResult> {
+  const lines = [
+    `Project: ${request.projectTitle}`,
+    request.projectSummary ? `Project summary: ${request.projectSummary}` : undefined,
+    request.existingTasks?.length
+      ? `Existing tasks (do not duplicate these):\n${request.existingTasks.map((task) => `- ${task}`).join("\n")}`
+      : undefined,
+    `Proposal title: ${request.proposalTitle}`,
+    `Proposal notes:\n${request.proposalText}`,
+  ].filter(Boolean);
+
+  const result = await client.complete({
+    system: TASK_BRIEF_INSTRUCTIONS,
+    input: lines.join("\n\n"),
+    maxTokens: 1600,
+    usedFor: "task_brief",
+    policyVersion: request.policyVersion ?? TASK_BRIEF_POLICY_VERSION,
+  });
+
+  const task = parseTaskBrief(result.text, request.proposalTitle);
+  return {
+    ...task,
     usage: result.usage,
   };
 }

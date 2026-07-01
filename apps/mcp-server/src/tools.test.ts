@@ -46,6 +46,7 @@ function createFakeClient(): { client: SkippyClient; calls: Array<{ name: string
       getCurrentContext: (brainInstanceId) => record("getCurrentContext", brainInstanceId),
       planProject: (brainInstanceId, input) => record("planProject", brainInstanceId, input),
       listReadyTasks: (brainInstanceId, input) => record("listReadyTasks", brainInstanceId, input),
+      listRequestedReadyTasks: (brainInstanceId, input) => record("listRequestedReadyTasks", brainInstanceId, input),
       getTaskBrief: (brainInstanceId, input) => record("getTaskBrief", brainInstanceId, input),
       recordTaskResult: (brainInstanceId, input) => record("recordTaskResult", brainInstanceId, input),
       captureThought: (brainInstanceId, input) => record("captureThought", brainInstanceId, input),
@@ -141,6 +142,7 @@ describe("Skippy MCP tool handlers", () => {
       title: "  Ship direct create path  ",
       projectId: "project_123",
       ownerType: "agent",
+      kind: "review",
     });
 
     expect(calls[0]).toMatchObject({
@@ -151,6 +153,7 @@ describe("Skippy MCP tool handlers", () => {
           title: "Ship direct create path",
           projectId: "project_123",
           ownerType: "agent",
+          kind: "review",
           createdBy: "skippy_mcp",
         },
       ],

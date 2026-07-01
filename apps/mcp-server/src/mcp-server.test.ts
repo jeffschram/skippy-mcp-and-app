@@ -62,6 +62,7 @@ function createFakeClient(overrides: Partial<SkippyClient> = {}): SkippyClient {
       summary: "Planned",
     }),
     listReadyTasks: async () => [],
+    listRequestedReadyTasks: async () => [],
     getTaskBrief: async (_brainInstanceId, input) => ({ _id: input.taskId, title: "Task", executionBrief: "do it" }),
     recordTaskResult: async (_brainInstanceId, input) => ({ taskId: input.taskId, executionState: "in_review" }),
     captureThought: async (_brainInstanceId, input) => ({
@@ -224,6 +225,7 @@ describe("Skippy MCP manifest", () => {
       const getContextBundle = tools.find((tool) => tool.name === "get_context_bundle");
       const getMemoryDetail = tools.find((tool) => tool.name === "get_memory_detail");
       const linkMemory = tools.find((tool) => tool.name === "link_memory");
+      const listRequestedReadyTasks = tools.find((tool) => tool.name === "list_requested_ready_tasks");
       const listInterviewTemplates = tools.find((tool) => tool.name === "list_interview_templates");
       const startInterview = tools.find((tool) => tool.name === "start_interview");
       const answerInterviewQuestion = tools.find((tool) => tool.name === "answer_interview_question");
@@ -235,6 +237,8 @@ describe("Skippy MCP manifest", () => {
       expect(submitCandidate?.inputSchema.properties?.reviewReason).toBeDefined();
       expect(createTask?.description).toContain("when the user explicitly asks");
       expect(createTask?.inputSchema.properties?.ownerType).toBeDefined();
+      expect(createTask?.inputSchema.properties?.kind).toBeDefined();
+      expect(listRequestedReadyTasks?.description).toContain("explicitly requested");
       expect(capture?.description).toContain("accepted note directly");
       expect(ask?.annotations?.readOnlyHint).toBe(true);
       expect(refreshFocusSummary?.description).toContain("Generate and store");

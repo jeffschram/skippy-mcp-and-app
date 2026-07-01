@@ -43,9 +43,11 @@ const PROJECT_STATUS_TONE: Record<string, BadgeTone> = {
   paused: "gold",
   completed: "green",
   cancelled: "red",
+  archived: "neutral",
 };
 
 const EXECUTION_STATE_TONE: Record<string, BadgeTone> = {
+  proposed: "neutral",
   unplanned: "neutral",
   briefed: "gold",
   ready: "blue",
@@ -76,6 +78,7 @@ export function titleCase(value: string | undefined): string {
 
 /** The ordered columns of the supervised-execution plan board. */
 export const EXECUTION_COLUMNS: Array<{ key: string; label: string }> = [
+  { key: "proposed", label: "Proposed" },
   { key: "briefed", label: "Briefed" },
   { key: "ready", label: "Ready" },
   { key: "in_progress", label: "In progress" },

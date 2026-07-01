@@ -31,8 +31,8 @@ export function ProjectsListContent() {
     return counts;
   }, [data?.tasks]);
 
-  const projects = (data?.projects ?? []).slice().sort((a: AnyRecord, b: AnyRecord) => {
-    const order = ["in_progress", "planned", "idea", "paused", "completed", "cancelled"];
+  const projects = (data?.projects ?? []).filter((project: AnyRecord) => project.status !== "archived").slice().sort((a: AnyRecord, b: AnyRecord) => {
+    const order = ["in_progress", "planned", "idea", "paused", "completed", "cancelled", "archived"];
     return order.indexOf(a.status) - order.indexOf(b.status);
   });
 
