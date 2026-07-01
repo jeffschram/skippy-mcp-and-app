@@ -68,7 +68,7 @@ export type SkippyClient = {
     input: {
       title: string;
       summary?: string;
-      status?: "idea" | "planned" | "in_progress" | "paused" | "completed" | "cancelled";
+      status?: "idea" | "planned" | "in_progress" | "paused" | "completed" | "cancelled" | "archived";
       priorityReason?: string;
       createdBy?: string;
     },
@@ -358,7 +358,7 @@ function isActiveFocusItem(entityType: EntityType, item: Record<string, any>) {
   }
 
   if (entityType === "project") {
-    return item.status !== "completed" && item.status !== "cancelled";
+    return !["completed", "cancelled", "archived"].includes(item.status);
   }
 
   if (entityType === "goal") {

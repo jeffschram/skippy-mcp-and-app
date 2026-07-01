@@ -114,6 +114,16 @@
   outline: none;
 }
 
+.ownerTaskCard {
+  border-color: color-mix(in srgb, var(--gold) 58%, var(--line));
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--gold) 78%, transparent);
+}
+
+.ownerTaskCard:hover,
+.ownerTaskCard:focus-visible {
+  border-color: var(--gold);
+}
+
 .taskCardDragging {
   opacity: 0.55;
   transform: scale(0.99);

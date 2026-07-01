@@ -43,6 +43,7 @@ const PROJECT_STATUS_TONE: Record<string, BadgeTone> = {
   paused: "gold",
   completed: "green",
   cancelled: "red",
+  archived: "neutral",
 };
 
 const EXECUTION_STATE_TONE: Record<string, BadgeTone> = {

@@ -355,7 +355,7 @@ export const reviewSuggestionsForViewer = queryGeneric({
     }
 
     for (const project of projects) {
-      if (["completed", "cancelled"].includes(project.status)) {
+      if (["completed", "cancelled", "archived"].includes(project.status)) {
         continue;
       }
       const projectAge = ageDays(now, project.updatedAt ?? project.createdAt);

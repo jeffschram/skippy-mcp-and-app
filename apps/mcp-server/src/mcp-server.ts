@@ -1217,7 +1217,7 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
         title: z.string().describe("Project title from the user's explicit instruction."),
         summary: z.string().optional().describe("Short project summary."),
         status: z
-          .enum(["idea", "planned", "in_progress", "paused", "completed", "cancelled"])
+          .enum(["idea", "planned", "in_progress", "paused", "completed", "cancelled", "archived"])
           .optional()
           .describe("Project status. Defaults to planned."),
         priorityReason: z.string().optional().describe("Why this project matters or belongs in the current roadmap."),

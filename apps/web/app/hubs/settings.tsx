@@ -1,15 +1,86 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
+import { useMutation, useQuery } from "convex/react";
+import { ArchiveRestore, FolderKanban } from "lucide-react";
+import { api } from "../../lib/skippy-api";
 import { LiveGate } from "../live-auth";
-import { Card, Tabs } from "../components";
+import { Badge, Button, Card, EmptyState, LoadingRow, Tabs, useToast } from "../components";
 import { LiveIngestionLogsContent, LiveSettingsContent } from "../live-pages";
+import { projectStatusTone } from "../../lib/display";
+import { useViewerReady } from "./use-viewer";
 
 const TABS = [
   { key: "settings", label: "Settings" },
+  { key: "archived-projects", label: "Archived projects" },
   { key: "logs", label: "Activity logs" },
   { key: "about", label: "About" },
 ];
+
+type AnyRecord = Record<string, any>;
+
+function ArchivedProjects() {
+  const viewerReady = useViewerReady();
+  const archivedProjects = useQuery(api.projects.archivedProjectsForViewer, viewerReady ? {} : "skip") as
+    | AnyRecord[]
+    | undefined;
+  const updateProject = useMutation(api.projects.updateProjectForViewer);
+  const toast = useToast();
+
+  const restoreProject = async (projectId: string) => {
+    try {
+      await updateProject({ projectId: projectId as any, status: "planned" } as any);
+      toast("Project restored.", "success");
+    } catch (error) {
+      toast(error instanceof Error ? error.message : "Could not restore project", "error");
+    }
+  };
+
+  if (archivedProjects === undefined) {
+    return (
+      <Card>
+        <LoadingRow label="Loading archived projects..." />
+      </Card>
+    );
+  }
+
+  if (!archivedProjects.length) {
+    return (
+      <Card>
+        <EmptyState icon={<ArchiveRestore size={20} aria-hidden />} title="No archived projects">
+          Archived projects will appear here when you need to restore one.
+        </EmptyState>
+      </Card>
+    );
+  }
+
+  return (
+    <Card>
+      <div style={{ display: "grid", gap: 10 }}>
+        {archivedProjects.map((project: AnyRecord) => (
+          <div key={project._id} className="item project-row" style={{ gridTemplateColumns: "auto 1fr auto" }}>
+            <span className="item-icon">
+              <FolderKanban size={17} aria-hidden />
+            </span>
+            <div>
+              <p className="item-title">
+                <Link href={`/projects/${project._id}`}>{project.title}</Link>
+              </p>
+              <p className="item-meta">{project.summary || "Archived project"}</p>
+            </div>
+            <span className="project-row-side">
+              <Badge tone={projectStatusTone(project.status)}>archived</Badge>
+              <Button small onClick={() => void restoreProject(project._id)}>
+                Restore
+              </Button>
+            </span>
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+}
 
 function About() {
   return (
@@ -51,6 +122,7 @@ export function SettingsContent() {
       </div>
 
       {tab === "settings" ? <LiveSettingsContent /> : null}
+      {tab === "archived-projects" ? <ArchivedProjects /> : null}
       {tab === "logs" ? <LiveIngestionLogsContent /> : null}
       {tab === "about" ? <About /> : null}
     </LiveGate>

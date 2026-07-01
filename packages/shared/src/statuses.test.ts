@@ -18,6 +18,7 @@ describe("domain statuses and relationships", () => {
       "paused",
       "completed",
       "cancelled",
+      "archived",
     ]);
     expect(TASK_STATUSES).toEqual(["todo", "in_progress", "waiting", "done", "cancelled"]);
     expect(LINK_STATUSES).toEqual(["unread", "read", "saved", "discarded"]);

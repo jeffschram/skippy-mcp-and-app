@@ -23,7 +23,7 @@ const entityTypes = ["goal", "project", "task", "note", "person", "company", "li
 
 const statusOptions: Record<string, string[]> = {
   goal: ["active", "paused", "achieved", "abandoned"],
-  project: ["idea", "planned", "in_progress", "paused", "completed", "cancelled"],
+  project: ["idea", "planned", "in_progress", "paused", "completed", "cancelled", "archived"],
   task: ["todo", "in_progress", "waiting", "done", "cancelled"],
   link: ["unread", "read", "saved", "discarded"],
 };

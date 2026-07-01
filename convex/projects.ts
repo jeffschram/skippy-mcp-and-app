@@ -362,8 +362,9 @@ async function applyTaskResult(
 export const projectBoardForViewer = queryGeneric({
   args: { projectId: v.id("projects") },
   handler: async (ctx, args) => {
-    const { brain } = await requireOwnedBrain(ctx);
-    return buildBoard(ctx.db, brain._id, args.projectId);
+    const { user, brain } = await requireOwnedBrain(ctx);
+    const board = await buildBoard(ctx.db, brain._id, args.projectId);
+    return board ? { ...board, ownerName: user.displayName ?? "Owner" } : null;
   },
 });
 
@@ -385,13 +386,36 @@ export const activeProjectsForViewer = queryGeneric({
       .filter((q: any) => q.eq(q.field("processingState"), "accepted"))
       .collect();
     return projects
-      .filter((project: any) => project.status !== "completed" && project.status !== "cancelled")
+      .filter((project: any) => !["completed", "cancelled", "archived"].includes(project.status))
       .sort((a: any, b: any) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
       .map((project: any) => ({
         _id: project._id,
         title: project.title,
         status: project.status,
         kind: project.kind,
+      }));
+  },
+});
+
+export const archivedProjectsForViewer = queryGeneric({
+  args: {},
+  handler: async (ctx) => {
+    const { brain } = await requireOwnedBrain(ctx);
+    const projects = await ctx.db
+      .query("projects")
+      .withIndex("by_brain_state", (q: any) => q.eq("brainInstanceId", brain._id))
+      .filter((q: any) => q.eq(q.field("processingState"), "accepted"))
+      .collect();
+    return projects
+      .filter((project: any) => project.status === "archived")
+      .sort((a: any, b: any) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
+      .map((project: any) => ({
+        _id: project._id,
+        title: project.title,
+        summary: project.summary,
+        status: project.status,
+        kind: project.kind,
+        updatedAt: project.updatedAt,
       }));
   },
 });
@@ -476,10 +500,20 @@ const taskKindValidator = v.union(
   v.literal("planning"),
 );
 
+function provisionalTitleFromProposal(proposalText: string): string {
+  const firstLine = proposalText
+    .replace(/[#*_`>[\]()]/g, "")
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .find(Boolean);
+  if (!firstLine) return "Untitled proposal";
+  return firstLine.length > 72 ? `${firstLine.slice(0, 69).trim()}...` : firstLine;
+}
+
 export const createTaskProposalForViewer = mutationGeneric({
   args: {
     projectId: v.id("projects"),
-    title: v.string(),
+    title: v.optional(v.string()),
     proposalText: v.string(),
     kind: v.optional(taskKindValidator),
   },
@@ -489,10 +523,9 @@ export const createTaskProposalForViewer = mutationGeneric({
     if (!project || project.brainInstanceId !== brain._id) {
       throw new Error("project not found");
     }
-    const title = args.title.trim();
     const proposalText = args.proposalText.trim();
-    if (!title) throw new Error("task title cannot be empty");
     if (!proposalText) throw new Error("proposal cannot be empty");
+    const title = args.title?.trim() || provisionalTitleFromProposal(proposalText);
 
     const now = Date.now();
     const taskId = await ctx.db.insert("tasks", {
@@ -549,6 +582,7 @@ export const updateProjectForViewer = mutationGeneric({
         v.literal("paused"),
         v.literal("completed"),
         v.literal("cancelled"),
+        v.literal("archived"),
       ),
     ),
     kind: v.optional(v.union(v.literal("code"), v.literal("general"))),

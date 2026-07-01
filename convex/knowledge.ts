@@ -1541,7 +1541,7 @@ export const dashboardForViewer = queryGeneric({
         .query("projects")
         .filter(acceptedFilter)
         .take(20)
-    ).filter((project) => project.status !== "completed" && project.status !== "cancelled");
+    ).filter((project) => !["completed", "cancelled", "archived"].includes(project.status));
     const tasks = (
       await ctx.db
       .query("tasks")
@@ -1882,12 +1882,14 @@ export const projectsAndTasksForViewer = queryGeneric({
       .query("brainConfigs")
       .withIndex("by_brain", (q) => q.eq("brainInstanceId", brain._id))
       .first();
-    const projects = await ctx.db
-      .query("projects")
-      .filter((q) =>
-        q.and(q.eq(q.field("brainInstanceId"), brain._id), q.eq(q.field("processingState"), "accepted")),
-      )
-      .collect();
+    const projects = (
+      await ctx.db
+        .query("projects")
+        .filter((q) =>
+          q.and(q.eq(q.field("brainInstanceId"), brain._id), q.eq(q.field("processingState"), "accepted")),
+        )
+        .collect()
+    ).filter((project) => project.status !== "archived");
     const tasks = (
       await ctx.db
       .query("tasks")
@@ -2060,6 +2062,7 @@ export const createProjectForViewer = mutationGeneric({
         v.literal("paused"),
         v.literal("completed"),
         v.literal("cancelled"),
+        v.literal("archived"),
       ),
     ),
   },
@@ -3330,6 +3333,7 @@ export const createProjectDirect = mutationGeneric({
         v.literal("paused"),
         v.literal("completed"),
         v.literal("cancelled"),
+        v.literal("archived"),
       ),
     ),
     priorityReason: v.optional(v.string()),

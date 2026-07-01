@@ -29,6 +29,7 @@ export const PROJECT_STATUSES = [
   "paused",
   "completed",
   "cancelled",
+  "archived",
 ] as const;
 export type ProjectStatus = (typeof PROJECT_STATUSES)[number];
 

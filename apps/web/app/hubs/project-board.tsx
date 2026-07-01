@@ -5,6 +5,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useAction, useMutation, useQuery } from "convex/react";
 import {
   ArrowLeft,
+  Archive,
+  ArchiveRestore,
   ClipboardCopy,
   Folder,
   GitBranch,
@@ -89,7 +91,6 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
 
   // Task proposal dialog
   const [proposalOpen, setProposalOpen] = useState(false);
-  const [proposalTitle, setProposalTitle] = useState("");
   const [proposalText, setProposalText] = useState("");
   const [proposalKind, setProposalKind] = useState("coding");
   const [proposalBusy, setProposalBusy] = useState(false);
@@ -126,6 +127,7 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
 
   const project = board?.project;
   const agentName = board?.agentName ?? "Agent";
+  const ownerName = board?.ownerName ?? "Owner";
   const openSettings = () => {
     if (!project) return;
     setPKind(project.kind ?? "general");
@@ -157,25 +159,21 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
   };
 
   const proposeTask = async () => {
-    const title = proposalTitle.trim();
     const text = proposalText.trim();
-    if (!title || !text) {
-      toast("Add a title and proposal notes first.", "error");
+    if (!text) {
+      toast("Add proposal notes first.", "error");
       return;
     }
     setProposalBusy(true);
     try {
-      const created = (await createTaskProposal({
+      await createTaskProposal({
         projectId: projectId as any,
-        title,
         proposalText: text,
         kind: proposalKind as any,
-      })) as AnyRecord;
+      });
       setProposalOpen(false);
-      setProposalTitle("");
       setProposalText("");
       setProposalKind("coding");
-      setSelectedId(created.taskId);
       toast("Task proposed.", "success");
     } catch (error) {
       toast(error instanceof Error ? error.message : "Could not propose task", "error");
@@ -196,11 +194,17 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
     }
   };
 
-  const moveTo = async (taskId: string, state: string) => {
+  const moveTo = async (taskId: string, state: string, taskOverride?: AnyRecord | null) => {
+    const task = taskOverride ?? board?.tasks?.find((candidate: AnyRecord) => candidate._id === taskId);
     setBusy(true);
     try {
-      await setExecState({ taskId: taskId as any, executionState: state as any });
-      toast(`Moved to ${titleCase(state)}.`, "info");
+      if (task?.executionState === "proposed" && state === "briefed") {
+        await briefTaskProposal({ taskId: taskId as any });
+        toast("Brief created.", "success");
+      } else {
+        await setExecState({ taskId: taskId as any, executionState: state as any });
+        toast(`Moved to ${titleCase(state)}.`, "info");
+      }
     } catch (error) {
       toast(error instanceof Error ? error.message : "Could not move task", "error");
     } finally {
@@ -230,7 +234,7 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
     setDraggedTaskId(null);
     setDragOverState(null);
     if (!task || task.executionState === state) return;
-    await moveTo(draggedTaskId, state);
+    await moveTo(draggedTaskId, state, task);
   };
 
   const saveBrief = async (taskId: string) => {
@@ -293,6 +297,35 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
     }
   };
 
+  const archiveProject = async () => {
+    if (!project) return;
+    if (!window.confirm(`Archive "${project.title}"? It will disappear from primary project lists, but you can restore it from Settings.`)) {
+      return;
+    }
+    setBusy(true);
+    try {
+      await updateProject({ projectId: projectId as any, status: "archived" } as any);
+      toast("Project archived.", "success");
+      setSettingsOpen(false);
+    } catch (error) {
+      toast(error instanceof Error ? error.message : "Could not archive project", "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const restoreProject = async () => {
+    setBusy(true);
+    try {
+      await updateProject({ projectId: projectId as any, status: "planned" } as any);
+      toast("Project restored.", "success");
+    } catch (error) {
+      toast(error instanceof Error ? error.message : "Could not restore project", "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <LiveGate>
       {board === undefined ? (
@@ -317,6 +350,11 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
               <div>
                 <p className="eyebrow">{project.kind === "code" ? "Code project" : "Project"}</p>
                 <h1>{project.title}</h1>
+                {project.status === "archived" ? (
+                  <p className="muted" style={{ maxWidth: 640 }}>
+                    This project is archived. It is hidden from primary project lists until restored.
+                  </p>
+                ) : null}
                 {project.summary ? <p className="muted" style={{ maxWidth: 640 }}>{project.summary}</p> : null}
                 {project.repoUrl || project.localPath ? (
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
@@ -403,9 +441,10 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                       {tasks.map((task: AnyRecord) => (
                         <button
                           key={task._id}
-                          className={`${boardStyles.taskCard} ${draggedTaskId === task._id ? boardStyles.taskCardDragging : ""}`}
+                          className={`${boardStyles.taskCard} ${task.ownerType === "owner" ? boardStyles.ownerTaskCard : ""} ${draggedTaskId === task._id ? boardStyles.taskCardDragging : ""}`}
                           draggable
                           aria-grabbed={draggedTaskId === task._id}
+                          aria-label={`${task.title}. ${task.ownerType === "owner" ? `${ownerName} owned task` : `${agentName} owned task`}.`}
                           onDragStart={(event) => {
                             setDraggedTaskId(task._id);
                             event.dataTransfer.effectAllowed = "move";
@@ -420,6 +459,7 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                         >
                           <span className={boardStyles.taskTitle}>{task.title}</span>
                           <span className={boardStyles.taskMeta}>
+                            {task.ownerType === "owner" ? <Badge tone="gold">{ownerName}</Badge> : null}
                             {task.kind ? <Badge tone="neutral">{task.kind}</Badge> : null}
                             {task.agentRequestStatus === "requested" ? (
                               <Badge tone="blue">Queued for {task.requestedHarness ?? agentName}</Badge>
@@ -482,7 +522,8 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                   <Badge tone={executionStateTone(selected.executionState)} dot>
                     {titleCase(selected.executionState)}
                   </Badge>
-                  {titleCase(selected.status) !== titleCase(selected.executionState) ? (
+                  {selected.executionState !== "proposed" &&
+                  titleCase(selected.status) !== titleCase(selected.executionState) ? (
                     <Badge tone={taskStatusTone(selected.status)}>Status: {titleCase(selected.status)}</Badge>
                   ) : null}
                   {selected.kind ? <Badge tone="neutral">{selected.kind}</Badge> : null}
@@ -497,7 +538,7 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                   <Select
                     value={selected.executionState}
                     disabled={busy}
-                    onChange={(event) => void moveTo(selected._id, event.target.value)}
+                    onChange={(event) => void moveTo(selected._id, event.target.value, selected)}
                     style={{ maxWidth: 200 }}
                   >
                     {EXECUTION_COLUMNS.map((column) => (
@@ -652,23 +693,27 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
               <Field label="Summary">
                 <TextArea value={pSummary} onChange={(event) => setPSummary(event.target.value)} />
               </Field>
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-                <Button onClick={() => setSettingsOpen(false)}>Cancel</Button>
-                <Button variant="primary" disabled={busy} onClick={() => void saveSettings()}>
-                  Save
-                </Button>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+                {project.status === "archived" ? (
+                  <Button disabled={busy} onClick={() => void restoreProject()}>
+                    <ArchiveRestore size={16} aria-hidden /> Restore project
+                  </Button>
+                ) : (
+                  <Button variant="danger" disabled={busy} onClick={() => void archiveProject()}>
+                    <Archive size={16} aria-hidden /> Archive project
+                  </Button>
+                )}
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+                  <Button onClick={() => setSettingsOpen(false)}>Cancel</Button>
+                  <Button variant="primary" disabled={busy} onClick={() => void saveSettings()}>
+                    Save
+                  </Button>
+                </div>
               </div>
             </div>
           </Dialog>
           <Dialog open={proposalOpen} onClose={() => setProposalOpen(false)} title="New task proposal">
             <div style={{ display: "grid", gap: 14 }}>
-              <Field label="Title">
-                <TextInput
-                  value={proposalTitle}
-                  onChange={(event) => setProposalTitle(event.target.value)}
-                  placeholder="Render bullets as markdown"
-                />
-              </Field>
               <Field label="Kind">
                 <Select value={proposalKind} onChange={(event) => setProposalKind(event.target.value)}>
                   <option value="coding">Coding</option>
@@ -693,7 +738,7 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                 </Button>
                 <Button
                   variant="primary"
-                  disabled={proposalBusy || !proposalTitle.trim() || !proposalText.trim()}
+                  disabled={proposalBusy || !proposalText.trim()}
                   onClick={() => void proposeTask()}
                 >
                   <Plus size={16} aria-hidden /> {proposalBusy ? "Proposing…" : "Propose Task"}

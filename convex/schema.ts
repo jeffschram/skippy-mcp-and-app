@@ -212,6 +212,7 @@ export default defineSchema({
       v.literal("paused"),
       v.literal("completed"),
       v.literal("cancelled"),
+      v.literal("archived"),
     ),
     // "code" projects have a GitHub repo + local folder and follow the branch->PR agent workflow.
     kind: v.optional(v.union(v.literal("code"), v.literal("general"))),
