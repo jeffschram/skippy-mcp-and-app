@@ -217,6 +217,7 @@ export default defineSchema({
     // "code" projects have a GitHub repo + local folder and follow the branch->PR agent workflow.
     kind: v.optional(v.union(v.literal("code"), v.literal("general"))),
     repoUrl: v.optional(v.string()),
+    defaultBaseBranch: v.optional(v.string()),
     // Local folder path for output files/assets (all projects may have one).
     localPath: v.optional(v.string()),
     ...priorityMetadata,
@@ -256,6 +257,11 @@ export default defineSchema({
     orderIndex: v.optional(v.number()),
     briefReadyAt: v.optional(v.number()),
     planRunId: v.optional(v.id("projectPlans")),
+    gitBranchName: v.optional(v.string()),
+    prUrl: v.optional(v.string()),
+    prNumber: v.optional(v.number()),
+    prStatus: v.optional(v.union(v.literal("open"), v.literal("merged"), v.literal("closed"))),
+    lastPrCreatedAt: v.optional(v.number()),
     resultSummary: v.optional(v.string()),
     resultUrl: v.optional(v.string()),
     resultRecordedAt: v.optional(v.number()),

@@ -133,7 +133,17 @@ export type SkippyClient = {
   getTaskBrief(brainInstanceId: string, input: { taskId: string }): Promise<unknown>;
   recordTaskResult(
     brainInstanceId: string,
-    input: { taskId: string; resultSummary?: string; resultUrl?: string; markDone?: boolean; actorId?: string },
+    input: {
+      taskId: string;
+      resultSummary?: string;
+      resultUrl?: string;
+      gitBranchName?: string;
+      prUrl?: string;
+      prNumber?: number;
+      prStatus?: "open" | "merged" | "closed";
+      markDone?: boolean;
+      actorId?: string;
+    },
   ): Promise<unknown>;
   captureThought(brainInstanceId: string, input: CaptureThoughtInput): Promise<unknown>;
   recordMemory(brainInstanceId: string, input: RecordMemoryInput): Promise<unknown>;
@@ -923,6 +933,10 @@ export function createSkippyToolHandlers(client: SkippyClient, brainInstanceId: 
       taskId: string;
       resultSummary?: string;
       resultUrl?: string;
+      gitBranchName?: string;
+      prUrl?: string;
+      prNumber?: number;
+      prStatus?: "open" | "merged" | "closed";
       markDone?: boolean;
     }) {
       return await client.recordTaskResult(brainInstanceId, {

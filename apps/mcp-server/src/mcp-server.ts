@@ -1352,6 +1352,10 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
         taskId: z.string().describe("Task ID that was executed."),
         resultSummary: z.string().optional().describe("Short summary of what was done."),
         resultUrl: z.string().optional().describe("PR, commit, or artifact URL."),
+        gitBranchName: z.string().optional().describe("Git branch used for this task, such as agent/task-abc-title."),
+        prUrl: z.string().optional().describe("GitHub pull request URL for reviewing this task."),
+        prNumber: z.number().optional().describe("GitHub pull request number."),
+        prStatus: z.enum(["open", "merged", "closed"]).optional().describe("Current pull request status."),
         markDone: z
           .boolean()
           .optional()
@@ -1361,7 +1365,16 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
     async (args) =>
       toolResult(
         await tools.recordTaskResult(
-          stripUndefined(args) as { taskId: string; resultSummary?: string; resultUrl?: string; markDone?: boolean },
+          stripUndefined(args) as {
+            taskId: string;
+            resultSummary?: string;
+            resultUrl?: string;
+            gitBranchName?: string;
+            prUrl?: string;
+            prNumber?: number;
+            prStatus?: "open" | "merged" | "closed";
+            markDone?: boolean;
+          },
         ),
       ),
   );

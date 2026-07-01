@@ -67,6 +67,11 @@ async function buildBoard(db: any, brainInstanceId: any, projectId: string) {
       agentRequestedBy: task.agentRequestedBy,
       agentRequestMessage: task.agentRequestMessage,
       dueAt: task.dueAt,
+      gitBranchName: task.gitBranchName,
+      prUrl: task.prUrl,
+      prNumber: task.prNumber,
+      prStatus: task.prStatus,
+      lastPrCreatedAt: task.lastPrCreatedAt,
       resultSummary: task.resultSummary,
       resultUrl: task.resultUrl,
       startedBy: task.startedBy,
@@ -96,6 +101,7 @@ async function buildBoard(db: any, brainInstanceId: any, projectId: string) {
       status: project.status,
       kind: project.kind ?? "general",
       repoUrl: project.repoUrl,
+      defaultBaseBranch: project.defaultBaseBranch,
       localPath: project.localPath,
     },
     tasks,
@@ -203,7 +209,17 @@ async function taskBrief(db: any, brainInstanceId: any, taskId: string) {
   let project = null;
   if (belongs && belongs.to.entityType === "project") {
     const projectDoc = await db.get(belongs.to.entityId);
-    if (projectDoc) project = { _id: projectDoc._id, title: projectDoc.title, summary: projectDoc.summary };
+    if (projectDoc) {
+      project = {
+        _id: projectDoc._id,
+        title: projectDoc.title,
+        summary: projectDoc.summary,
+        kind: projectDoc.kind,
+        repoUrl: projectDoc.repoUrl,
+        defaultBaseBranch: projectDoc.defaultBaseBranch,
+        localPath: projectDoc.localPath,
+      };
+    }
   }
 
   return {
@@ -220,6 +236,11 @@ async function taskBrief(db: any, brainInstanceId: any, taskId: string) {
     agentRequestMessage: task.agentRequestMessage,
     executionBrief: task.executionBrief,
     acceptanceCriteria: task.acceptanceCriteria,
+    gitBranchName: task.gitBranchName,
+    prUrl: task.prUrl,
+    prNumber: task.prNumber,
+    prStatus: task.prStatus,
+    lastPrCreatedAt: task.lastPrCreatedAt,
     resultSummary: task.resultSummary,
     resultUrl: task.resultUrl,
     project,
@@ -310,7 +331,16 @@ async function moveTaskToProject(
 async function applyTaskResult(
   db: any,
   brainInstanceId: any,
-  args: { taskId: string; resultSummary?: string; resultUrl?: string; markDone?: boolean },
+  args: {
+    taskId: string;
+    resultSummary?: string;
+    resultUrl?: string;
+    markDone?: boolean;
+    gitBranchName?: string;
+    prUrl?: string;
+    prNumber?: number;
+    prStatus?: "open" | "merged" | "closed";
+  },
   actor: { actorType: string; actorId?: string },
 ) {
   const task = await db.get(args.taskId);
@@ -321,6 +351,10 @@ async function applyTaskResult(
   const patch: Record<string, unknown> = {
     resultSummary: args.resultSummary?.trim() || task.resultSummary,
     resultUrl: args.resultUrl?.trim() || task.resultUrl,
+    gitBranchName: args.gitBranchName?.trim() || task.gitBranchName,
+    prUrl: args.prUrl?.trim() || task.prUrl || (args.resultUrl?.includes("github.com") ? args.resultUrl.trim() : undefined),
+    prNumber: args.prNumber ?? task.prNumber,
+    prStatus: args.prStatus ?? task.prStatus,
     resultRecordedAt: now,
     agentRequestStatus: undefined,
     requestedHarness: undefined,
@@ -334,6 +368,10 @@ async function applyTaskResult(
     patch.executionState = "done";
   } else {
     patch.executionState = "in_review";
+  }
+  if (patch.prUrl && !task.prUrl) {
+    patch.prStatus = patch.prStatus ?? "open";
+    patch.lastPrCreatedAt = now;
   }
   await db.patch(args.taskId, patch);
 
@@ -349,7 +387,7 @@ async function applyTaskResult(
     actorId: actor.actorId,
     timestamp: now,
     summary: `${args.markDone ? "Completed" : "Submitted for review"}: ${task.title}`,
-    metadata: { resultUrl: args.resultUrl, promoted },
+    metadata: { resultUrl: args.resultUrl, prUrl: patch.prUrl, gitBranchName: patch.gitBranchName, promoted },
   });
 
   return { taskId: args.taskId, executionState: patch.executionState, promotedTaskIds: promoted };
@@ -433,6 +471,10 @@ export const recordTaskResultForViewer = mutationGeneric({
     taskId: v.id("tasks"),
     resultSummary: v.optional(v.string()),
     resultUrl: v.optional(v.string()),
+    gitBranchName: v.optional(v.string()),
+    prUrl: v.optional(v.string()),
+    prNumber: v.optional(v.number()),
+    prStatus: v.optional(v.union(v.literal("open"), v.literal("merged"), v.literal("closed"))),
     markDone: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
@@ -444,6 +486,10 @@ export const recordTaskResultForViewer = mutationGeneric({
         taskId: args.taskId,
         ...(args.resultSummary !== undefined ? { resultSummary: args.resultSummary } : {}),
         ...(args.resultUrl !== undefined ? { resultUrl: args.resultUrl } : {}),
+        ...(args.gitBranchName !== undefined ? { gitBranchName: args.gitBranchName } : {}),
+        ...(args.prUrl !== undefined ? { prUrl: args.prUrl } : {}),
+        ...(args.prNumber !== undefined ? { prNumber: args.prNumber } : {}),
+        ...(args.prStatus !== undefined ? { prStatus: args.prStatus } : {}),
         ...(args.markDone !== undefined ? { markDone: args.markDone } : {}),
       },
       { actorType: "user", actorId: user._id },
@@ -587,6 +633,7 @@ export const updateProjectForViewer = mutationGeneric({
     ),
     kind: v.optional(v.union(v.literal("code"), v.literal("general"))),
     repoUrl: v.optional(v.string()),
+    defaultBaseBranch: v.optional(v.string()),
     localPath: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
@@ -606,6 +653,7 @@ export const updateProjectForViewer = mutationGeneric({
     if (args.status !== undefined) patch.status = args.status;
     if (args.kind !== undefined) patch.kind = args.kind;
     if (args.repoUrl !== undefined) patch.repoUrl = args.repoUrl.trim() || undefined;
+    if (args.defaultBaseBranch !== undefined) patch.defaultBaseBranch = args.defaultBaseBranch.trim() || undefined;
     if (args.localPath !== undefined) patch.localPath = args.localPath.trim() || undefined;
     await ctx.db.patch(args.projectId, patch);
     return { projectId: args.projectId, status: "updated" };
@@ -878,6 +926,10 @@ export const recordTaskResultForBrain = mutationGeneric({
     taskId: v.id("tasks"),
     resultSummary: v.optional(v.string()),
     resultUrl: v.optional(v.string()),
+    gitBranchName: v.optional(v.string()),
+    prUrl: v.optional(v.string()),
+    prNumber: v.optional(v.number()),
+    prStatus: v.optional(v.union(v.literal("open"), v.literal("merged"), v.literal("closed"))),
     markDone: v.optional(v.boolean()),
     actorId: v.optional(v.string()),
   },
@@ -889,6 +941,10 @@ export const recordTaskResultForBrain = mutationGeneric({
         taskId: args.taskId,
         ...(args.resultSummary !== undefined ? { resultSummary: args.resultSummary } : {}),
         ...(args.resultUrl !== undefined ? { resultUrl: args.resultUrl } : {}),
+        ...(args.gitBranchName !== undefined ? { gitBranchName: args.gitBranchName } : {}),
+        ...(args.prUrl !== undefined ? { prUrl: args.prUrl } : {}),
+        ...(args.prNumber !== undefined ? { prNumber: args.prNumber } : {}),
+        ...(args.prStatus !== undefined ? { prStatus: args.prStatus } : {}),
         ...(args.markDone !== undefined ? { markDone: args.markDone } : {}),
       },
       { actorType: "harness", ...(args.actorId ? { actorId: args.actorId } : {}) },
