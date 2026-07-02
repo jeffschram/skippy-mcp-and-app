@@ -64,6 +64,7 @@ function createFakeClient(overrides: Partial<SkippyClient> = {}): SkippyClient {
     listReadyTasks: async () => [],
     listRequestedReadyTasks: async () => [],
     getTaskBrief: async (_brainInstanceId, input) => ({ _id: input.taskId, title: "Task", executionBrief: "do it" }),
+    briefTask: async (_brainInstanceId, input) => ({ taskId: input.taskId, executionState: "briefed" }),
     recordTaskResult: async (_brainInstanceId, input) => ({ taskId: input.taskId, executionState: "in_review" }),
     captureThought: async (_brainInstanceId, input) => ({
       status: input.reviewBehavior === "submit_for_review" ? "submitted_for_review" : "captured",
@@ -246,6 +247,7 @@ describe("Skippy MCP manifest", () => {
       const getMemoryDetail = tools.find((tool) => tool.name === "get_memory_detail");
       const linkMemory = tools.find((tool) => tool.name === "link_memory");
       const listRequestedReadyTasks = tools.find((tool) => tool.name === "list_requested_ready_tasks");
+      const briefTask = tools.find((tool) => tool.name === "brief_task");
       const listInterviewTemplates = tools.find((tool) => tool.name === "list_interview_templates");
       const startInterview = tools.find((tool) => tool.name === "start_interview");
       const answerInterviewQuestion = tools.find((tool) => tool.name === "answer_interview_question");
@@ -260,6 +262,9 @@ describe("Skippy MCP manifest", () => {
       expect(createTask?.inputSchema.properties?.ownerType).toBeDefined();
       expect(createTask?.inputSchema.properties?.kind).toBeDefined();
       expect(listRequestedReadyTasks?.description).toContain("explicitly requested");
+      expect(briefTask?.description).toContain("Ground the brief in the actual repo");
+      expect(briefTask?.inputSchema.properties?.executionBrief).toBeDefined();
+      expect(briefTask?.inputSchema.properties?.acceptanceCriteria).toBeDefined();
       expect(capture?.description).toContain("accepted note directly");
       expect(ask?.annotations?.readOnlyHint).toBe(true);
       expect(refreshFocusSummary?.description).toContain("Generate and store");
@@ -333,6 +338,7 @@ describe("Skippy MCP manifest", () => {
       if (harnessBootstrap.messages[0]?.content.type === "text") {
         expect(harnessBootstrap.messages[0].content.text).toContain("You are Claude Code");
         expect(harnessBootstrap.messages[0].content.text).toContain("First 5 Minutes");
+        expect(harnessBootstrap.messages[0].content.text).toContain("`brief_task`");
         expect(harnessBootstrap.messages[0].content.text).toContain("Consent And Capture Rules");
         expect(harnessBootstrap.messages[0].content.text).toContain("docs/codex-heartbeat.md");
       }
@@ -646,6 +652,61 @@ describe("Skippy MCP manifest", () => {
         status: "done",
         entityType: "task",
         taskId: "task_123",
+        reviewUrl: "http://127.0.0.1:3000/projects",
+      });
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
+  it("returns chat-friendly confirmations for task briefing", async () => {
+    const briefCalls: Array<{ brainInstanceId: string; input: unknown }> = [];
+    const server = createMcpServer(
+      createFakeClient({
+        briefTask: async (brainInstanceId, input) => {
+          briefCalls.push({ brainInstanceId, input });
+          return { taskId: input.taskId, executionState: "briefed" };
+        },
+      }),
+      "brain_123",
+    );
+    const client = new Client({ name: "brief-task-test", version: "0.1.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    try {
+      await server.connect(serverTransport);
+      await client.connect(clientTransport);
+
+      const result = await client.callTool({
+        name: "brief_task",
+        arguments: {
+          taskId: "task_123",
+          executionBrief: "  Add the mutation in convex/planning.ts following writeTaskBrief.  ",
+          acceptanceCriteria: ["Ownership is validated.", "Task moves to briefed."],
+          title: "Add brief_task MCP tool",
+          kind: "coding",
+        },
+      });
+
+      expect(briefCalls).toEqual([
+        {
+          brainInstanceId: "brain_123",
+          input: {
+            taskId: "task_123",
+            executionBrief: "Add the mutation in convex/planning.ts following writeTaskBrief.",
+            acceptanceCriteria: ["Ownership is validated.", "Task moves to briefed."],
+            title: "Add brief_task MCP tool",
+            kind: "coding",
+            actorId: "skippy_mcp",
+          },
+        },
+      ]);
+      expect(textResult(result)).toMatchObject({
+        status: "briefed",
+        entityType: "task",
+        taskId: "task_123",
+        executionState: "briefed",
         reviewUrl: "http://127.0.0.1:3000/projects",
       });
     } finally {

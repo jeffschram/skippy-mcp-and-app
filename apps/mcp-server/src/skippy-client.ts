@@ -45,6 +45,7 @@ const planProjectForBrainRef = makeFunctionReference<"action">("planning:planPro
 const readyTasksForBrainRef = makeFunctionReference<"query">("projects:readyTasksForBrain");
 const requestedReadyTasksForBrainRef = makeFunctionReference<"query">("projects:requestedReadyTasksForBrain");
 const getTaskBriefForBrainRef = makeFunctionReference<"query">("projects:getTaskBriefForBrain");
+const briefTaskForBrainRef = makeFunctionReference<"mutation">("planning:briefTaskForBrain");
 const recordTaskResultForBrainRef = makeFunctionReference<"mutation">("projects:recordTaskResultForBrain");
 const getSkillForBrainRef = makeFunctionReference<"query">("skills:getSkillForBrain");
 const captureThoughtForBrainRef = makeFunctionReference<"mutation">("knowledge:captureThoughtForBrain");
@@ -125,6 +126,8 @@ export function createConvexSkippyClient(convexUrl: string, authToken?: string):
       client.query(requestedReadyTasksForBrainRef, { brainInstanceId, ...input }),
     getTaskBrief: (brainInstanceId, input) =>
       client.query(getTaskBriefForBrainRef, { brainInstanceId, ...input }),
+    briefTask: (brainInstanceId, input) =>
+      client.mutation(briefTaskForBrainRef, { brainInstanceId, ...input }),
     getSkill: (brainInstanceId, input) =>
       client.query(getSkillForBrainRef, { brainInstanceId, ...input }),
     recordTaskResult: (brainInstanceId, input) =>
