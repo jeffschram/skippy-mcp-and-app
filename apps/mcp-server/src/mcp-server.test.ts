@@ -224,6 +224,8 @@ describe("Skippy MCP manifest", () => {
       await client.connect(clientTransport);
 
       expect(client.getInstructions()).toContain("importance rubric");
+      expect(client.getInstructions()).toContain("status defaults to 'saved'");
+      expect(client.getInstructions()).toContain("Links are reference material, not a reading queue.");
 
       const { tools } = await client.listTools();
       const ingestObject = tools.find((tool) => tool.name === "ingest_object");
@@ -253,8 +255,15 @@ describe("Skippy MCP manifest", () => {
       const answerInterviewQuestion = tools.find((tool) => tool.name === "answer_interview_question");
       const completeInterview = tools.find((tool) => tool.name === "complete_interview");
       const getSkill = tools.find((tool) => tool.name === "get_skill");
+      const upsertLink = tools.find((tool) => tool.name === "upsert_link");
+      const upsertNote = tools.find((tool) => tool.name === "upsert_note");
 
       expect(ingestObject?.description).toContain("importance rubric");
+      expect(ingestObject?.description).toContain("default to 'saved'");
+      expect(ingestObject?.description).toContain("pass status 'unread' only for explicit read-later intent");
+      expect(upsertLink?.description).toContain("status defaults to 'saved'");
+      expect(upsertLink?.description).toContain("use submit_candidate_object");
+      expect(upsertNote?.description).not.toContain("status defaults to 'saved'");
       expect(ingestObject?.inputSchema.properties?.rubricDecision).toBeDefined();
       expect(submitCandidate?.description).toContain("Legacy fallback");
       expect(submitCandidate?.inputSchema.properties?.reviewReason).toBeDefined();

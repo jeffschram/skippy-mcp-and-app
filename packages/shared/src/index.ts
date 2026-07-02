@@ -45,9 +45,10 @@ export type LinkStatus = (typeof LINK_STATUSES)[number];
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
- * Unread links auto-age out of focus context after this many days. They stay stored and
- * searchable; they just stop feeding focus-summary generation (owner principle: the link
- * surface is for occasional management, not another queue to groom).
+ * Explicit read-later ("unread") links auto-age out of focus context after this many days.
+ * They stay stored and searchable; they just stop feeding focus-summary generation (owner
+ * principle: the link surface is for occasional management, not another queue to groom).
+ * Ingested links default to "saved", which never ages and carries no attention hint.
  */
 export const UNREAD_LINK_FOCUS_MAX_AGE_DAYS = 21;
 export const UNREAD_LINK_FOCUS_MAX_AGE_MS = UNREAD_LINK_FOCUS_MAX_AGE_DAYS * DAY_MS;
@@ -59,7 +60,9 @@ export type LinkFocusFields = {
 
 /**
  * Whether a link should feed focus-summary context. Discarded links never qualify, and
- * unread links older than the cutoff age out automatically.
+ * explicit read-later ("unread") links older than the cutoff age out automatically.
+ * "saved" links (the ingestion default) are passive reference: always candidates, never
+ * aged, never flagged for attention.
  */
 export function isLinkFocusCandidate(
   link: LinkFocusFields,
@@ -629,7 +632,10 @@ export function normalizeAcceptedEntityPayload<T extends EntityType>(
         title: firstString(payload.title),
         summary: firstString(payload.summary, payload.sourceSummary),
         whyItMatters: firstString(payload.whyItMatters, payload.priorityReason),
-        status: oneOfValue(LINK_STATUSES, payload.status) ?? "unread",
+        // Links are reference material, not a reading queue: ingested links default to
+        // "saved" (passive, no user interaction expected). "unread" is reserved for
+        // explicit read-later intent passed through by the harness.
+        status: oneOfValue(LINK_STATUSES, payload.status) ?? "saved",
         enrichmentStatus: oneOfValue(["none", "queued", "completed", "failed"] as const, payload.enrichmentStatus),
         enrichedAt: timestampValue(payload.enrichedAt),
         enrichmentMethod: firstString(payload.enrichmentMethod),
