@@ -13,6 +13,8 @@ import {
   type PendingActionStatus,
   type RelationshipInput,
   type SourceRefInput,
+  isLinkFocusCandidate,
+  linkAgeDays,
   normalizeCandidateObject,
 } from "@skippy/shared";
 import webPush from "web-push";
@@ -410,7 +412,9 @@ function isActiveFocusItem(entityType: EntityType, item: Record<string, any>) {
   }
 
   if (entityType === "link") {
-    return item.status !== "discarded";
+    // Links auto-age: unread links older than the cutoff stop being focus candidates
+    // (they stay stored and searchable; the Brain's Links tab remains their home).
+    return isLinkFocusCandidate(item);
   }
 
   return true;
@@ -423,11 +427,19 @@ function contextItemsFromEntityList(
   return (items ?? [])
     .filter((item) => isActiveFocusItem(entityType, item))
     .map((item) => {
+      let reason = item.priorityReason ?? item.reviewReason ?? item.status;
+      if (entityType === "link" && item.status === "unread" && reason === item.status) {
+        // Age hint so the synthesis model can weigh how fresh an unread link is.
+        const ageDays = typeof item.ageDays === "number" ? item.ageDays : linkAgeDays(item);
+        if (ageDays !== undefined) {
+          reason = `unread (added ${ageDays === 0 ? "today" : `${ageDays}d ago`})`;
+        }
+      }
       const contextItem: SynthesisContextItem = {
         entityRef: { entityType, entityId: item._id },
         title: item.title ?? item.name ?? item.url ?? item.body ?? "Untitled",
         summary: itemSummary(item),
-        reason: item.priorityReason ?? item.reviewReason ?? item.status,
+        reason,
       };
       const emailLink = emailLinkFromSourceRefs(item.sourceRefs);
       if (emailLink) {
