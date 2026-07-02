@@ -277,6 +277,40 @@ describe("Skippy MCP tool handlers", () => {
     expect(emailLinkFor("No email source")).toBeUndefined();
   });
 
+  it("ages stale unread links out of focus context and keeps fresh ones with an age hint", async () => {
+    const DAY_MS = 24 * 60 * 60 * 1000;
+    const now = Date.now();
+    const { client } = createFakeClient();
+    const tools = createSkippyToolHandlers(
+      {
+        ...client,
+        getAiContext: async () => ({
+          config: { llmProviderMode: "none" },
+          links: [
+            { _id: "link_fresh", title: "Fresh unread link", status: "unread", createdAt: now - 3 * DAY_MS },
+            { _id: "link_stale", title: "Stale unread link", status: "unread", createdAt: now - 30 * DAY_MS },
+            { _id: "link_saved", title: "Old saved link", status: "saved", createdAt: now - 90 * DAY_MS },
+            { _id: "link_discarded", title: "Discarded link", status: "discarded", createdAt: now },
+          ],
+        }),
+      },
+      "brain_123",
+    );
+
+    const result = (await tools.refreshFocusSummary()) as {
+      contextItems?: Array<{ title: string; reason?: string }>;
+    };
+    const titles = (result.contextItems ?? []).map((item) => item.title);
+
+    expect(titles).toContain("Fresh unread link");
+    expect(titles).toContain("Old saved link");
+    expect(titles).not.toContain("Stale unread link");
+    expect(titles).not.toContain("Discarded link");
+    expect(result.contextItems?.find((item) => item.title === "Fresh unread link")?.reason).toBe(
+      "unread (added 3d ago)",
+    );
+  });
+
   it("records accepted entity reviews with trimmed summaries", async () => {
     const { client, calls } = createFakeClient();
     const tools = createSkippyToolHandlers(client, "brain_123");

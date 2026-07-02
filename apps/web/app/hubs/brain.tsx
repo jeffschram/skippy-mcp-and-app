@@ -11,10 +11,12 @@ import {
 } from "../live-pages";
 import { LiveContextMapContent } from "../context-map/context-map-content";
 import { LiveInterviewsIndex } from "../interviews/ui";
+import { LiveLinksAndNotesContent } from "../links-notes";
 
 const TABS = [
   { key: "library", label: "Library" },
   { key: "inbox", label: "Inbox" },
+  { key: "links", label: "Links" },
   { key: "contacts", label: "Contacts" },
   { key: "goals", label: "Goals" },
   { key: "interviews", label: "Interviews" },
@@ -42,6 +44,7 @@ export function BrainContent() {
 
       {tab === "library" ? <LiveMemoryLibraryContent /> : null}
       {tab === "inbox" ? <LiveMemoryInboxContent /> : null}
+      {tab === "links" ? <LiveLinksAndNotesContent /> : null}
       {tab === "contacts" ? <LiveContactsContent /> : null}
       {tab === "goals" ? <LiveGoalsContent /> : null}
       {tab === "interviews" ? <LiveInterviewsIndex /> : null}

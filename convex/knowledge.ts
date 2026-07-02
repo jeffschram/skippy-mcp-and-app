@@ -6,6 +6,8 @@ import {
   PROJECT_STATUSES,
   TASK_STATUSES,
   candidateFingerprint,
+  isLinkFocusCandidate,
+  linkAgeDays,
   normalizeAcceptedEntityPayload,
 } from "@skippy/shared";
 import { requireOwnedBrain } from "./auth";
@@ -1550,9 +1552,11 @@ export const dashboardForViewer = queryGeneric({
     ).filter((task) => task.status !== "done" && task.status !== "cancelled");
     const people = await ctx.db.query("people").filter(acceptedFilter).take(20);
     const companies = await ctx.db.query("companies").filter(acceptedFilter).take(20);
+    // Links auto-age: unread links older than the cutoff stop feeding focus context
+    // (they stay stored and searchable in the Brain's Links tab).
     const links = (
       await ctx.db.query("links").filter(acceptedFilter).take(20)
-    ).filter((link) => link.status !== "discarded");
+    ).filter((link) => isLinkFocusCandidate(link));
     const notes = await ctx.db.query("notes").filter(acceptedFilter).take(20);
     const sourceSyncStatuses = await ctx.db
       .query("sourceSyncStatuses")
@@ -2122,6 +2126,75 @@ export const setContactFavoriteForViewer = mutationGeneric({
     });
 
     return { personId: args.personId, favorite: args.favorite };
+  },
+});
+
+export const listLinksForViewer = queryGeneric({
+  args: {},
+  handler: async (ctx) => {
+    const { brain } = await requireOwnedBrain(ctx);
+    const links = (
+      await ctx.db
+        .query("links")
+        .filter((q) =>
+          q.and(q.eq(q.field("brainInstanceId"), brain._id), q.eq(q.field("processingState"), "accepted")),
+        )
+        .collect()
+    ).sort((left, right) => right.createdAt - left.createdAt);
+
+    return { brain, links };
+  },
+});
+
+export const listNotesForViewer = queryGeneric({
+  args: {},
+  handler: async (ctx) => {
+    const { brain } = await requireOwnedBrain(ctx);
+    const notes = (
+      await ctx.db
+        .query("notes")
+        .filter((q) =>
+          q.and(q.eq(q.field("brainInstanceId"), brain._id), q.eq(q.field("processingState"), "accepted")),
+        )
+        .collect()
+    ).sort((left, right) => right.createdAt - left.createdAt);
+
+    return { brain, notes };
+  },
+});
+
+const linkStatusValidator = v.union(
+  v.literal("unread"),
+  v.literal("read"),
+  v.literal("saved"),
+  v.literal("discarded"),
+);
+
+export const updateLinkStatusForViewer = mutationGeneric({
+  args: {
+    linkId: v.id("links"),
+    status: linkStatusValidator,
+  },
+  handler: async (ctx, args) => {
+    const { user, brain } = await requireOwnedBrain(ctx);
+    const link = await ctx.db.get(args.linkId);
+    if (!link || link.brainInstanceId !== brain._id) {
+      throw new Error("link not found");
+    }
+    const now = Date.now();
+    await ctx.db.patch(args.linkId, { status: args.status, updatedAt: now });
+
+    await ctx.db.insert("activityEvents", {
+      brainInstanceId: brain._id,
+      entityRef: { entityType: "link", entityId: args.linkId },
+      activityType: "link_status_updated",
+      actorType: "user",
+      actorId: user._id,
+      timestamp: now,
+      summary: `Link marked ${args.status}: ${link.title ?? link.url}`,
+    });
+
+    return { linkId: args.linkId, status: args.status };
   },
 });
 
@@ -3835,12 +3908,22 @@ export const aiContextForBrain = queryGeneric({
         q.and(q.eq(q.field("brainInstanceId"), brainInstanceId), q.eq(q.field("processingState"), "accepted")),
       )
       .take(20);
-    const links = await db
-      .query("links")
-      .filter((q) =>
-        q.and(q.eq(q.field("brainInstanceId"), brainInstanceId), q.eq(q.field("processingState"), "accepted")),
-      )
-      .take(20);
+    // Links auto-age: discarded links and unread links past the cutoff never reach the
+    // synthesis LLM. Fresh candidates carry an ageDays hint so the model can weigh recency.
+    const now = Date.now();
+    const links = (
+      await db
+        .query("links")
+        .filter((q) =>
+          q.and(q.eq(q.field("brainInstanceId"), brainInstanceId), q.eq(q.field("processingState"), "accepted")),
+        )
+        .take(20)
+    )
+      .filter((link) => isLinkFocusCandidate(link, now))
+      .map((link) => {
+        const ageDays = linkAgeDays(link, now);
+        return ageDays === undefined ? link : { ...link, ageDays };
+      });
     const notes = await db
       .query("notes")
       .filter((q) =>

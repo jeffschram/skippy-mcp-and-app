@@ -42,6 +42,47 @@ export type TaskOwnerType = (typeof TASK_OWNER_TYPES)[number];
 export const LINK_STATUSES = ["unread", "read", "saved", "discarded"] as const;
 export type LinkStatus = (typeof LINK_STATUSES)[number];
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Unread links auto-age out of focus context after this many days. They stay stored and
+ * searchable; they just stop feeding focus-summary generation (owner principle: the link
+ * surface is for occasional management, not another queue to groom).
+ */
+export const UNREAD_LINK_FOCUS_MAX_AGE_DAYS = 21;
+export const UNREAD_LINK_FOCUS_MAX_AGE_MS = UNREAD_LINK_FOCUS_MAX_AGE_DAYS * DAY_MS;
+
+export type LinkFocusFields = {
+  status?: string;
+  createdAt?: number;
+};
+
+/**
+ * Whether a link should feed focus-summary context. Discarded links never qualify, and
+ * unread links older than the cutoff age out automatically.
+ */
+export function isLinkFocusCandidate(
+  link: LinkFocusFields,
+  now: number = Date.now(),
+  maxUnreadAgeMs: number = UNREAD_LINK_FOCUS_MAX_AGE_MS,
+): boolean {
+  if (link.status === "discarded") {
+    return false;
+  }
+  if (link.status === "unread" && typeof link.createdAt === "number" && now - link.createdAt >= maxUnreadAgeMs) {
+    return false;
+  }
+  return true;
+}
+
+/** Whole days since the link was created, for age hints in LLM context. */
+export function linkAgeDays(link: { createdAt?: number }, now: number = Date.now()): number | undefined {
+  if (typeof link.createdAt !== "number") {
+    return undefined;
+  }
+  return Math.max(0, Math.floor((now - link.createdAt) / DAY_MS));
+}
+
 export const RELATIONSHIP_TYPES = [
   "belongs_to",
   "supports",
