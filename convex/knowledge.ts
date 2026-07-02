@@ -2669,6 +2669,103 @@ export const archiveMemoryForViewer = mutationGeneric({
   },
 });
 
+// Pending-review memory candidates should mostly resolve themselves: anything left
+// unreviewed past this cutoff is auto-archived so the inbox never demands manual triage.
+export const MEMORY_REVIEW_EXPIRY_MS = 14 * 24 * 60 * 60 * 1000;
+
+async function pendingReviewMemoriesForBrain(db: any, brainInstanceId: any) {
+  return await db
+    .query("memories")
+    .withIndex("by_brain_review_state", (q: any) =>
+      q.eq("brainInstanceId", brainInstanceId).eq("reviewState", "pending_review"),
+    )
+    .collect();
+}
+
+export const expireStaleMemoryCandidatesForViewer = mutationGeneric({
+  args: {
+    maxAgeMs: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const { brain } = await requireOwnedBrain(ctx);
+    const now = Date.now();
+    const maxAgeMs = args.maxAgeMs ?? MEMORY_REVIEW_EXPIRY_MS;
+    const cutoff = now - maxAgeMs;
+    const pending = await pendingReviewMemoriesForBrain(ctx.db, brain._id);
+    const stale = pending.filter((memory: any) => memory.createdAt < cutoff);
+
+    for (const memory of stale) {
+      await ctx.db.patch(memory._id, {
+        status: "archived",
+        reviewState: "archived",
+        archivedAt: now,
+        archiveReason: `Auto-expired after ${Math.round(maxAgeMs / (24 * 60 * 60 * 1000))} days pending review`,
+        updatedAt: now,
+      });
+
+      await ctx.db.insert("activityEvents", {
+        brainInstanceId: brain._id,
+        activityType: "memory_review_candidate_auto_expired",
+        actorType: "system",
+        timestamp: now,
+        summary: `Memory review candidate auto-expired: ${memory.title}`,
+        metadata: { memoryId: memory._id, maxAgeMs, createdAt: memory.createdAt },
+        sourceRefIds: memory.sourceRefIds,
+      });
+    }
+
+    return { expiredCount: stale.length };
+  },
+});
+
+export const bulkResolveMemoryCandidatesForViewer = mutationGeneric({
+  args: {
+    resolution: v.union(v.literal("accept"), v.literal("archive")),
+  },
+  handler: async (ctx, args) => {
+    const { user, brain } = await requireOwnedBrain(ctx);
+    const now = Date.now();
+    const pending = await pendingReviewMemoriesForBrain(ctx.db, brain._id);
+
+    for (const memory of pending) {
+      if (args.resolution === "accept") {
+        await ctx.db.patch(memory._id, {
+          status: "accepted",
+          reviewState: "accepted",
+          reviewedBy: user._id,
+          reviewedAt: now,
+          acceptedAt: memory.acceptedAt ?? now,
+          updatedAt: now,
+        });
+      } else {
+        await ctx.db.patch(memory._id, {
+          status: "archived",
+          reviewState: "archived",
+          archivedAt: now,
+          archiveReason: "Bulk archived from memory inbox",
+          updatedAt: now,
+        });
+      }
+
+      await ctx.db.insert("activityEvents", {
+        brainInstanceId: brain._id,
+        activityType: args.resolution === "accept" ? "memory_accepted" : "memory_archived",
+        actorType: "user",
+        actorId: user._id,
+        timestamp: now,
+        summary:
+          args.resolution === "accept"
+            ? `Memory accepted (bulk): ${memory.title}`
+            : `Memory archived (bulk): ${memory.title}`,
+        metadata: { memoryId: memory._id, bulk: true },
+        sourceRefIds: memory.sourceRefIds,
+      });
+    }
+
+    return { resolvedCount: pending.length, resolution: args.resolution };
+  },
+});
+
 export const linkMemoryToEntitiesForViewer = mutationGeneric({
   args: {
     memoryId: v.id("memories"),

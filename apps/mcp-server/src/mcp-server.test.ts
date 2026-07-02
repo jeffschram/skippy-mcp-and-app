@@ -277,6 +277,7 @@ describe("Skippy MCP manifest", () => {
       expect(recordDecision?.description).toContain("durable decision memory");
       expect(recordPrinciple?.description).toContain("operating principle");
       expect(submitMemoryReviewCandidate?.description).toContain("Queue a possible memory");
+      expect(submitMemoryReviewCandidate?.description).toContain("transient alerts");
       expect(listMemory?.annotations?.readOnlyHint).toBe(true);
       expect(getContextBundle?.description).toContain("context bundle");
       expect(getContextBundle?.inputSchema.properties?.relatedEntityRefs).toBeDefined();
