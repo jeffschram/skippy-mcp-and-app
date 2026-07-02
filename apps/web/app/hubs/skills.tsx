@@ -92,6 +92,17 @@ export function SkillDetailContent({ slug }: { slug: string }) {
   const [description, setDescription] = useState("");
   const [body, setBody] = useState("");
   const [busy, setBusy] = useState(false);
+  const publicSkillUrl = `https://skippy.jeffschram.dev/skills/${slug}`;
+  const schedulerInstructions = [
+    "If your harness supports Skippy MCP prompts:",
+    "Use the prompt `skippy_task_heartbeat`.",
+    "",
+    "If your harness doesn't support Skippy MCP prompts but supports Skippy MCP tools:",
+    `Call \`get_skill\` with slug \`${slug}\``,
+    "",
+    "If neither of those work load the Skippy skill at:",
+    publicSkillUrl,
+  ].join("\n");
 
   const openEditor = () => {
     if (!skill) return;
@@ -167,11 +178,22 @@ export function SkillDetailContent({ slug }: { slug: string }) {
             <MarkdownBlock text={skill.body} />
           </Card>
           <Card>
-            <h2 style={{ marginTop: 0 }}>Harness usage</h2>
-            <p className="muted" style={{ marginBottom: 0 }}>
-              Use the MCP prompt <span className="code">skippy_task_heartbeat</span>, the MCP tool{" "}
-              <span className="code">get_skill</span> with slug <span className="code">{slug}</span>, or this page URL as a
-              human-readable fallback.
+            <h2 style={{ marginTop: 0 }}>How to use this skill</h2>
+            <p className="muted">
+              Use this skill when you want an AI harness like Codex, Claude, or Hermes to periodically check Skippy
+              for Ready agent tasks and report results back to Skippy.
+            </p>
+            <p className="muted">In your harness scheduler paste the following:</p>
+            <TextArea
+              aria-label="Harness scheduler instructions"
+              readOnly
+              value={schedulerInstructions}
+              style={{ minHeight: 210, marginBottom: 12 }}
+            />
+            <p style={{ margin: 0 }}>
+              <Button onClick={() => copyText(schedulerInstructions, toast)}>
+                <ClipboardCopy size={16} aria-hidden /> Copy scheduler instructions
+              </Button>
             </p>
           </Card>
           <Card>
