@@ -66,6 +66,11 @@ function createFakeClient(overrides: Partial<SkippyClient> = {}): SkippyClient {
     getTaskBrief: async (_brainInstanceId, input) => ({ _id: input.taskId, title: "Task", executionBrief: "do it" }),
     briefTask: async (_brainInstanceId, input) => ({ taskId: input.taskId, executionState: "briefed" }),
     recordTaskResult: async (_brainInstanceId, input) => ({ taskId: input.taskId, executionState: "in_review" }),
+    updateLinkStatus: async (_brainInstanceId, input) => ({
+      linkId: input.linkId,
+      title: "Stored link",
+      status: input.status,
+    }),
     captureThought: async (_brainInstanceId, input) => ({
       status: input.reviewBehavior === "submit_for_review" ? "submitted_for_review" : "captured",
       memoryId: "memory_123",
@@ -257,6 +262,7 @@ describe("Skippy MCP manifest", () => {
       const getSkill = tools.find((tool) => tool.name === "get_skill");
       const upsertLink = tools.find((tool) => tool.name === "upsert_link");
       const upsertNote = tools.find((tool) => tool.name === "upsert_note");
+      const updateLinkStatus = tools.find((tool) => tool.name === "update_link_status");
 
       expect(ingestObject?.description).toContain("importance rubric");
       expect(ingestObject?.description).toContain("default to 'saved'");
@@ -274,6 +280,11 @@ describe("Skippy MCP manifest", () => {
       expect(briefTask?.description).toContain("Ground the brief in the actual repo");
       expect(briefTask?.inputSchema.properties?.executionBrief).toBeDefined();
       expect(briefTask?.inputSchema.properties?.acceptanceCriteria).toBeDefined();
+      expect(updateLinkStatus?.description).toContain("genuine lifecycle changes");
+      expect(updateLinkStatus?.description).toContain("Never use it to fake user engagement");
+      expect(updateLinkStatus?.inputSchema.properties?.linkId).toBeDefined();
+      expect(updateLinkStatus?.inputSchema.properties?.status).toBeDefined();
+      expect(updateLinkStatus?.inputSchema.properties?.reason).toBeDefined();
       expect(capture?.description).toContain("accepted note directly");
       expect(ask?.annotations?.readOnlyHint).toBe(true);
       expect(refreshFocusSummary?.description).toContain("Generate and store");
@@ -718,6 +729,57 @@ describe("Skippy MCP manifest", () => {
         taskId: "task_123",
         executionState: "briefed",
         reviewUrl: "http://127.0.0.1:3000/projects",
+      });
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
+  it("returns chat-friendly confirmations for link status updates", async () => {
+    const updateCalls: Array<{ brainInstanceId: string; input: unknown }> = [];
+    const server = createMcpServer(
+      createFakeClient({
+        updateLinkStatus: async (brainInstanceId, input) => {
+          updateCalls.push({ brainInstanceId, input });
+          return { linkId: input.linkId, title: "Interesting article", status: input.status };
+        },
+      }),
+      "brain_123",
+    );
+    const client = new Client({ name: "update-link-status-test", version: "0.1.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    try {
+      await server.connect(serverTransport);
+      await client.connect(clientTransport);
+
+      const result = await client.callTool({
+        name: "update_link_status",
+        arguments: {
+          linkId: "link_123",
+          status: "read",
+          reason: "Ingested the article content during a sync.",
+        },
+      });
+
+      expect(updateCalls).toEqual([
+        {
+          brainInstanceId: "brain_123",
+          input: {
+            linkId: "link_123",
+            status: "read",
+            reason: "Ingested the article content during a sync.",
+            actorId: "skippy_mcp",
+          },
+        },
+      ]);
+      expect(textResult(result)).toMatchObject({
+        status: "read",
+        entityType: "link",
+        linkId: "link_123",
+        title: "Interesting article",
+        reviewUrl: "http://127.0.0.1:3000/brain",
       });
     } finally {
       await client.close();

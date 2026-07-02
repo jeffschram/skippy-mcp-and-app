@@ -2287,6 +2287,35 @@ const linkStatusValidator = v.union(
   v.literal("discarded"),
 );
 
+async function applyLinkStatusUpdate(
+  db: any,
+  brainInstanceId: any,
+  linkId: any,
+  status: (typeof LINK_STATUSES)[number],
+  actor: { actorType: "user" | "harness"; actorId?: string | undefined },
+  metadata?: Record<string, unknown>,
+) {
+  const link = await db.get(linkId);
+  if (!link || link.brainInstanceId !== brainInstanceId) {
+    throw new Error("link not found");
+  }
+  const now = Date.now();
+  await db.patch(linkId, { status, updatedAt: now });
+
+  await db.insert("activityEvents", {
+    brainInstanceId,
+    entityRef: { entityType: "link", entityId: linkId },
+    activityType: "link_status_updated",
+    actorType: actor.actorType,
+    actorId: actor.actorId,
+    timestamp: now,
+    summary: `Link marked ${status}: ${link.title ?? link.url}`,
+    ...(metadata ? { metadata } : {}),
+  });
+
+  return { linkId, title: link.title ?? link.url, status };
+}
+
 export const updateLinkStatusForViewer = mutationGeneric({
   args: {
     linkId: v.id("links"),
@@ -2294,24 +2323,10 @@ export const updateLinkStatusForViewer = mutationGeneric({
   },
   handler: async (ctx, args) => {
     const { user, brain } = await requireOwnedBrain(ctx);
-    const link = await ctx.db.get(args.linkId);
-    if (!link || link.brainInstanceId !== brain._id) {
-      throw new Error("link not found");
-    }
-    const now = Date.now();
-    await ctx.db.patch(args.linkId, { status: args.status, updatedAt: now });
-
-    await ctx.db.insert("activityEvents", {
-      brainInstanceId: brain._id,
-      entityRef: { entityType: "link", entityId: args.linkId },
-      activityType: "link_status_updated",
+    return await applyLinkStatusUpdate(ctx.db, brain._id, args.linkId, args.status, {
       actorType: "user",
       actorId: user._id,
-      timestamp: now,
-      summary: `Link marked ${args.status}: ${link.title ?? link.url}`,
     });
-
-    return { linkId: args.linkId, status: args.status };
   },
 });
 
@@ -2998,6 +3013,27 @@ export const linkMemoryToEntitiesForViewer = mutationGeneric({
     });
 
     return { memoryId: args.memoryId, relatedEntityRefs };
+  },
+});
+
+export const updateLinkStatusForBrain = mutationGeneric({
+  args: {
+    brainInstanceId: v.id("brainInstances"),
+    linkId: v.id("links"),
+    status: linkStatusValidator,
+    reason: v.optional(v.string()),
+    actorId: v.optional(v.string()),
+  },
+  handler: async ({ db }, args) => {
+    const reason = optionalTrimmed(args.reason);
+    return await applyLinkStatusUpdate(
+      db,
+      args.brainInstanceId,
+      args.linkId,
+      args.status,
+      { actorType: "harness", actorId: args.actorId },
+      reason ? { reason } : undefined,
+    );
   },
 });
 
