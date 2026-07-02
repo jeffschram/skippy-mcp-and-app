@@ -131,6 +131,18 @@ export type SkippyClient = {
   listReadyTasks(brainInstanceId: string, input: { limit?: number }): Promise<unknown>;
   listRequestedReadyTasks(brainInstanceId: string, input: { limit?: number }): Promise<unknown>;
   getTaskBrief(brainInstanceId: string, input: { taskId: string }): Promise<unknown>;
+  briefTask(
+    brainInstanceId: string,
+    input: {
+      taskId: string;
+      executionBrief: string;
+      acceptanceCriteria?: string[];
+      title?: string;
+      description?: string;
+      kind?: "coding" | "review" | "research" | "design" | "manual" | "planning";
+      actorId?: string;
+    },
+  ): Promise<unknown>;
   getSkill(brainInstanceId: string, input: { slug: string }): Promise<unknown>;
   recordTaskResult(
     brainInstanceId: string,
@@ -928,6 +940,22 @@ export function createSkippyToolHandlers(client: SkippyClient, brainInstanceId: 
 
     async getTaskBrief(input: { taskId: string }) {
       return await client.getTaskBrief(brainInstanceId, input);
+    },
+
+    async briefTask(input: {
+      taskId: string;
+      executionBrief: string;
+      acceptanceCriteria?: string[];
+      title?: string;
+      description?: string;
+      kind?: "coding" | "review" | "research" | "design" | "manual" | "planning";
+    }) {
+      const executionBrief = normalizeRequiredText(input.executionBrief, "executionBrief");
+      return await client.briefTask(brainInstanceId, {
+        ...input,
+        executionBrief,
+        actorId: "skippy_mcp",
+      });
     },
 
     async getSkill(input: { slug: string }) {

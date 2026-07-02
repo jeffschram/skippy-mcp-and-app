@@ -35,6 +35,7 @@ Before capture or retrieval work that may create durable memory, read `reference
    - `link_entities`: only after accepted entity IDs are known.
    - `get_current_context`: resolve what the user has open in the web app. Call this when the user says "this project", "here", or "add a task to this project" without naming it; use the returned active project's id.
    - `plan_project`: decompose an accepted project into executable tasks. Requires an LLM provider on the brain.
+   - `brief_task`: write a repo-grounded execution brief plus acceptance criteria for a Proposed task and move it to Briefed.
    - `list_ready_tasks` / `get_task_brief`: find the next unblocked task and fetch its hand-off brief to execute.
    - `record_task_result`: report an executed task's outcome (summary + PR/commit URL) for owner review.
    - `mark_task_done`: only when the user says the Skippy task is complete.
@@ -62,9 +63,10 @@ Before capture or retrieval work that may create durable memory, read `reference
 Skippy is a supervised software-project dashboard: **Skippy plans, a coding agent executes.** Skippy never writes code itself.
 
 1. `plan_project` decomposes an accepted project into ordered tasks, each with an execution brief, acceptance criteria, and `depends_on` links. The owning project moves to `in_progress`.
-2. `list_ready_tasks` returns agent-owned tasks whose dependencies are all done (execution state `ready`) — the next work to pick up.
-3. `get_task_brief` returns one task's self-contained brief. Execute it (write code, open a PR) outside Skippy.
-4. `record_task_result` reports the outcome. By default the task moves to `in_review` for the owner to approve; pass `markDone: true` to complete it, which unblocks dependent tasks.
+2. `brief_task` moves a Proposed task to Briefed: list the proposed tasks, write an execution brief grounded in the actual repo (approach, key files, verification steps), then call `brief_task` with the brief and acceptance criteria. Briefed tasks wait for the owner to promote them to Ready.
+3. `list_ready_tasks` returns agent-owned tasks whose dependencies are all done (execution state `ready`) — the next work to pick up.
+4. `get_task_brief` returns one task's self-contained brief. Execute it (write code, open a PR) outside Skippy.
+5. `record_task_result` reports the outcome. By default the task moves to `in_review` for the owner to approve; pass `markDone: true` to complete it, which unblocks dependent tasks.
 
 Keep the human in the loop: surface the plan and each result for review instead of silently completing work. If the brain has no LLM provider, `plan_project` fails — tell the user to configure one in Settings.
 

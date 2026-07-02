@@ -48,6 +48,7 @@ function createFakeClient(): { client: SkippyClient; calls: Array<{ name: string
       listReadyTasks: (brainInstanceId, input) => record("listReadyTasks", brainInstanceId, input),
       listRequestedReadyTasks: (brainInstanceId, input) => record("listRequestedReadyTasks", brainInstanceId, input),
       getTaskBrief: (brainInstanceId, input) => record("getTaskBrief", brainInstanceId, input),
+      briefTask: (brainInstanceId, input) => record("briefTask", brainInstanceId, input),
       recordTaskResult: (brainInstanceId, input) => record("recordTaskResult", brainInstanceId, input),
       captureThought: (brainInstanceId, input) => record("captureThought", brainInstanceId, input),
       recordMemory: (brainInstanceId, input) => record("recordMemory", brainInstanceId, input),
@@ -156,6 +157,32 @@ describe("Skippy MCP tool handlers", () => {
           ownerType: "agent",
           kind: "review",
           createdBy: "skippy_mcp",
+        },
+      ],
+    });
+  });
+
+  it("briefs proposed tasks with harness attribution", async () => {
+    const { client, calls } = createFakeClient();
+    const tools = createSkippyToolHandlers(client, "brain_123");
+
+    await tools.briefTask({
+      taskId: "task_123",
+      executionBrief: "  Implement the endpoint following existing patterns.  ",
+      acceptanceCriteria: ["The endpoint validates ownership."],
+      kind: "coding",
+    });
+
+    expect(calls[0]).toMatchObject({
+      name: "briefTask",
+      args: [
+        "brain_123",
+        {
+          taskId: "task_123",
+          executionBrief: "Implement the endpoint following existing patterns.",
+          acceptanceCriteria: ["The endpoint validates ownership."],
+          kind: "coding",
+          actorId: "skippy_mcp",
         },
       ],
     });

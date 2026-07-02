@@ -3,6 +3,7 @@ import {
   internalMutationGeneric,
   internalQueryGeneric,
   makeFunctionReference,
+  mutationGeneric,
 } from "convex/server";
 import { v } from "convex/values";
 import {
@@ -302,6 +303,55 @@ export const writePlan = internalMutationGeneric({
   },
 });
 
+async function applyTaskBrief(
+  db: any,
+  args: {
+    brainInstanceId: string;
+    taskId: string;
+    title?: string | undefined;
+    description?: string | undefined;
+    kind?: string | undefined;
+    executionBrief: string;
+    acceptanceCriteria?: string[] | undefined;
+  },
+  actor: {
+    actorType: "user" | "harness" | "skippy_ai" | "system";
+    actorId?: string | undefined;
+    metadata?: Record<string, unknown> | undefined;
+  },
+) {
+  const task = await db.get(args.taskId);
+  if (!task || task.brainInstanceId !== args.brainInstanceId) {
+    throw new Error("task not found for brain instance");
+  }
+  const now = Date.now();
+  const criteria = (args.acceptanceCriteria ?? []).map((item) => item.trim()).filter(Boolean);
+  const patch: Record<string, unknown> = {
+    executionState: "briefed",
+    executionBrief: args.executionBrief.trim(),
+    acceptanceCriteria: criteria.length ? criteria : undefined,
+    briefReadyAt: now,
+    updatedAt: now,
+  };
+  if (args.title?.trim()) patch.title = args.title.trim();
+  if (args.description?.trim()) patch.description = args.description.trim();
+  if (args.kind) patch.kind = args.kind;
+  await db.patch(args.taskId, patch);
+
+  await db.insert("activityEvents", {
+    brainInstanceId: args.brainInstanceId,
+    entityRef: { entityType: "task", entityId: args.taskId },
+    activityType: "task_brief_created",
+    actorType: actor.actorType,
+    actorId: actor.actorId,
+    timestamp: now,
+    summary: `Created brief for task proposal: ${task.title}`,
+    metadata: actor.metadata,
+  });
+
+  return { taskId: args.taskId, executionState: "briefed" };
+}
+
 export const writeTaskBrief = internalMutationGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
@@ -316,36 +366,30 @@ export const writeTaskBrief = internalMutationGeneric({
     createdByUserId: v.optional(v.id("users")),
   },
   handler: async ({ db }, args) => {
-    const task = await db.get(args.taskId);
-    if (!task || task.brainInstanceId !== args.brainInstanceId) {
-      throw new Error("task not found for brain instance");
-    }
-    const now = Date.now();
-    const criteria = (args.acceptanceCriteria ?? []).map((item) => item.trim()).filter(Boolean);
-    const patch: Record<string, unknown> = {
-      executionState: "briefed",
-      executionBrief: args.executionBrief.trim(),
-      acceptanceCriteria: criteria.length ? criteria : undefined,
-      briefReadyAt: now,
-      updatedAt: now,
-    };
-    if (args.title?.trim()) patch.title = args.title.trim();
-    if (args.description?.trim()) patch.description = args.description.trim();
-    if (args.kind) patch.kind = args.kind;
-    await db.patch(args.taskId, patch);
-
-    await db.insert("activityEvents", {
-      brainInstanceId: args.brainInstanceId,
-      entityRef: { entityType: "task", entityId: args.taskId },
-      activityType: "task_brief_created",
+    return applyTaskBrief(db, args, {
       actorType: args.provider === "fallback" ? "user" : "skippy_ai",
       actorId: args.createdByUserId,
-      timestamp: now,
-      summary: `Created brief for task proposal: ${task.title}`,
       metadata: { provider: args.provider, model: args.model },
     });
+  },
+});
 
-    return { taskId: args.taskId, executionState: "briefed" };
+export const briefTaskForBrain = mutationGeneric({
+  args: {
+    brainInstanceId: v.id("brainInstances"),
+    taskId: v.id("tasks"),
+    title: v.optional(v.string()),
+    description: v.optional(v.string()),
+    kind: v.optional(taskKindValidator),
+    executionBrief: v.string(),
+    acceptanceCriteria: v.optional(v.array(v.string())),
+    actorId: v.optional(v.string()),
+  },
+  handler: async ({ db }, args) => {
+    return applyTaskBrief(db, args, {
+      actorType: "harness",
+      actorId: args.actorId,
+    });
   },
 });
 

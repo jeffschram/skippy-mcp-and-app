@@ -197,9 +197,10 @@ function buildSkillsMessage() {
     "Skippy plans; you (or a coding agent like Claude Code) execute. Skippy never writes code itself.",
     "",
     "1. `plan_project` decomposes an accepted project into ordered tasks, each with an execution brief, acceptance criteria, and dependency links. Requires an LLM provider configured for the brain.",
-    "2. `list_ready_tasks` returns tasks whose dependencies are all done — the next work to pick up.",
-    "3. `get_task_brief` returns one task's self-contained brief. Execute it (write code, open a PR) outside Skippy.",
-    "4. `record_task_result` reports the outcome (summary + PR/commit URL). By default the task moves to `in_review` for the owner to approve; pass `markDone: true` to complete it, which unblocks dependent tasks.",
+    "2. `brief_task` promotes a Proposed task to Briefed: list the proposed tasks, write an execution brief grounded in the actual repo (key files, approach, verification), and call it with the brief plus acceptance criteria.",
+    "3. `list_ready_tasks` returns tasks whose dependencies are all done — the next work to pick up.",
+    "4. `get_task_brief` returns one task's self-contained brief. Execute it (write code, open a PR) outside Skippy.",
+    "5. `record_task_result` reports the outcome (summary + PR/commit URL). By default the task moves to `in_review` for the owner to approve; pass `markDone: true` to complete it, which unblocks dependent tasks.",
     "Keep the human in the loop: surface plans and results for review rather than silently completing work.",
     "",
     "Use the `skippy_slash_commands` prompt/resource when the harness wants the standalone command reference.",
@@ -312,7 +313,7 @@ function buildHarnessBootstrapMessage({
     "",
     "## Core Workflow",
     "",
-    "- Proposed tasks stay Proposed until promoted/briefed by Skippy or the owner.",
+    "- Proposed tasks stay Proposed until briefed: list them, ground an execution brief in the actual repo, then call `brief_task` to move them to Briefed.",
     "- Ready is the agent queue; requested Ready tasks are the safest automation queue.",
     "- Agent work should end in `in_review` unless the owner explicitly allows automatic completion.",
     "- Coding tasks should produce a branch, verification, and PR when the project has a GitHub repo.",
@@ -322,6 +323,7 @@ function buildHarnessBootstrapMessage({
     "- `get_current_context`: resolve active app route/project.",
     "- `create_task` / `create_project`: explicit user-created items.",
     "- `plan_project`: decompose accepted projects.",
+    "- `brief_task`: write a repo-grounded execution brief plus acceptance criteria for a proposed task and move it to Briefed.",
     "- `list_ready_tasks` / `list_requested_ready_tasks`: find executable work.",
     "- `get_task_brief`: get the handoff brief.",
     "- `record_task_result`: report PR/artifact/result for review.",
@@ -484,6 +486,19 @@ function directCreateConfirmation(result: unknown, fallbackEntityType: "project"
     projectTitle: resultRecord.projectTitle,
     relationshipId: resultRecord.relationshipId,
     reviewUrl: reviewUrl("/projects"),
+  };
+}
+
+function taskBriefedConfirmation(result: unknown) {
+  const resultRecord = objectResult(result);
+  return {
+    status: "briefed",
+    entityType: "task",
+    taskId: resultRecord.taskId,
+    executionState: resultRecord.executionState ?? "briefed",
+    reviewUrl: reviewUrl("/projects"),
+    nextAction:
+      "The task now has an execution brief and shows as Briefed in Skippy. The owner promotes it to Ready when it should enter the agent queue.",
   };
 }
 
@@ -1540,6 +1555,37 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
       }),
     },
     async (args) => toolResult(await tools.getTaskBrief(stripUndefined(args) as { taskId: string })),
+  );
+
+  server.registerTool(
+    "brief_task",
+    {
+      title: "Brief a proposed task",
+      description:
+        "Write an execution brief for a proposed task and move it to 'briefed'. Ground the brief in the actual repo: name concrete files, existing patterns, and verification steps a coding agent can follow. Optionally sharpen the title, description, and kind. Briefed tasks wait for the owner to promote them to Ready.",
+      annotations: { destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: z.object({
+        taskId: z.string().describe("Proposed task ID to brief."),
+        executionBrief: z
+          .string()
+          .describe("Self-contained execution brief: approach, key files, steps, and how to verify the change."),
+        acceptanceCriteria: z
+          .array(z.string())
+          .describe("Concrete, verifiable acceptance criteria for the task."),
+        title: z.string().optional().describe("Optional sharper task title."),
+        description: z.string().optional().describe("Optional refreshed task description."),
+        kind: z
+          .enum(["coding", "review", "research", "design", "manual", "planning"])
+          .optional()
+          .describe("Optional task kind. Use coding for repo work."),
+      }),
+    },
+    async (args) =>
+      toolResult(
+        taskBriefedConfirmation(
+          await tools.briefTask(stripUndefined(args) as Parameters<typeof tools.briefTask>[0]),
+        ),
+      ),
   );
 
   server.registerTool(
