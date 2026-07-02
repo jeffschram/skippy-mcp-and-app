@@ -3755,7 +3755,51 @@ export const aiContextForBrain = queryGeneric({
       .withIndex("by_brain", (q) => q.eq("brainInstanceId", brainInstanceId))
       .take(200);
 
-    return { config, focusSummary, projects, tasks, people, companies, links, notes, embeddings };
+    // Join source provenance (deep links, message ids) onto each entity so synthesis
+    // context can reference the originating email or document.
+    const entitySourceRefLinks = await db
+      .query("entitySourceRefs")
+      .filter((q) => q.eq(q.field("brainInstanceId"), brainInstanceId))
+      .take(500);
+    const sourceRefsById = new Map<string, any>();
+    for (const link of entitySourceRefLinks) {
+      if (!sourceRefsById.has(link.sourceRefId)) {
+        sourceRefsById.set(link.sourceRefId, await db.get(link.sourceRefId));
+      }
+    }
+    const sourceRefsByEntity = new Map<string, Array<Record<string, any>>>();
+    for (const link of entitySourceRefLinks) {
+      const sourceRef = sourceRefsById.get(link.sourceRefId);
+      if (!sourceRef) {
+        continue;
+      }
+      const key = `${link.entityRef.entityType}:${link.entityRef.entityId}`;
+      const refs = sourceRefsByEntity.get(key) ?? [];
+      refs.push({
+        sourceSystem: sourceRef.sourceSystem,
+        messageId: sourceRef.messageId,
+        threadId: sourceRef.threadId,
+        url: sourceRef.url,
+        deepLink: sourceRef.deepLink,
+      });
+      sourceRefsByEntity.set(key, refs);
+    }
+    const withSourceRefs = (entityTypeName: string) => (entity: Record<string, any>) => {
+      const refs = sourceRefsByEntity.get(`${entityTypeName}:${entity._id}`);
+      return refs?.length ? { ...entity, sourceRefs: refs } : entity;
+    };
+
+    return {
+      config,
+      focusSummary,
+      projects: projects.map(withSourceRefs("project")),
+      tasks: tasks.map(withSourceRefs("task")),
+      people: people.map(withSourceRefs("person")),
+      companies: companies.map(withSourceRefs("company")),
+      links: links.map(withSourceRefs("link")),
+      notes: notes.map(withSourceRefs("note")),
+      embeddings,
+    };
   },
 });
 

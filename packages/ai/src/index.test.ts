@@ -100,6 +100,39 @@ describe("AI provider abstractions", () => {
     expect(body.instructions).toContain("identity facts");
   });
 
+  it("passes email deep links into focus context and forbids invented URLs", async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    const fetchMock = async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response(
+        JSON.stringify({
+          output: [{ type: "message", content: [{ type: "output_text", text: "- Reply to the Chase email." }] }],
+        }),
+        { status: 200 },
+      );
+    };
+    const client = createLlmClient(
+      { mode: "openai" },
+      { apiKey: "test-key", fetch: fetchMock as typeof fetch },
+    );
+
+    await client.generateFocusSummary({
+      generatedAt: 123,
+      items: [
+        {
+          entityRef: { entityType: "task", entityId: "task_123" },
+          title: "Reply to Chase statement email",
+          emailLink: "https://mail.google.com/mail/u/0/#all/18f2c3a",
+        },
+      ],
+    });
+
+    const body = JSON.parse(String(calls[0]?.init.body));
+    expect(body.input).toContain("Email link: https://mail.google.com/mail/u/0/#all/18f2c3a");
+    expect(body.instructions).toContain("markdown link");
+    expect(body.instructions).toContain("Never invent");
+  });
+
   it("calls Anthropic Messages API for synthesis", async () => {
     const calls: Array<{ url: string; init: RequestInit }> = [];
     const fetchMock = async (url: string | URL | Request, init?: RequestInit) => {

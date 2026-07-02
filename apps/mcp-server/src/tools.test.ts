@@ -211,6 +211,45 @@ describe("Skippy MCP tool handlers", () => {
     });
   });
 
+  it("derives email deep links for focus context items from gmail source refs", async () => {
+    const { client } = createFakeClient();
+    const tools = createSkippyToolHandlers(
+      {
+        ...client,
+        getAiContext: async () => ({
+          config: { llmProviderMode: "none" },
+          tasks: [
+            {
+              _id: "task_1",
+              title: "Reply to Chase statement email",
+              status: "todo",
+              sourceRefs: [{ sourceSystem: "gmail", messageId: "18f2c3a" }],
+            },
+            {
+              _id: "task_2",
+              title: "Review deep-linked email",
+              status: "todo",
+              sourceRefs: [
+                { sourceSystem: "gmail", messageId: "18f2c3b", deepLink: "https://mail.google.com/mail/u/0/#inbox/18f2c3b" },
+              ],
+            },
+            { _id: "task_3", title: "No email source", status: "todo" },
+          ],
+        }),
+      },
+      "brain_123",
+    );
+
+    const result = (await tools.refreshFocusSummary()) as {
+      contextItems?: Array<{ title: string; emailLink?: string }>;
+    };
+    const emailLinkFor = (title: string) => result.contextItems?.find((item) => item.title === title)?.emailLink;
+
+    expect(emailLinkFor("Reply to Chase statement email")).toBe("https://mail.google.com/mail/u/0/#all/18f2c3a");
+    expect(emailLinkFor("Review deep-linked email")).toBe("https://mail.google.com/mail/u/0/#inbox/18f2c3b");
+    expect(emailLinkFor("No email source")).toBeUndefined();
+  });
+
   it("records accepted entity reviews with trimmed summaries", async () => {
     const { client, calls } = createFakeClient();
     const tools = createSkippyToolHandlers(client, "brain_123");

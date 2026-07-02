@@ -36,6 +36,16 @@ describe("tokenizeInlineMarkdown", () => {
     ]);
   });
 
+  it("parses Gmail deep links with hash fragments", () => {
+    expect(
+      tokenizeInlineMarkdown("Reply to [Chase statement](https://mail.google.com/mail/u/0/#all/18f2c3a) before Friday."),
+    ).toEqual([
+      { type: "text", value: "Reply to " },
+      { type: "link", value: "Chase statement", href: "https://mail.google.com/mail/u/0/#all/18f2c3a" },
+      { type: "text", value: " before Friday." },
+    ]);
+  });
+
   it("leaves plain text untouched", () => {
     expect(tokenizeInlineMarkdown("just a normal sentence.")).toEqual([
       { type: "text", value: "just a normal sentence." },

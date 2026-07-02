@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { focusSummaryPresentation, isActionableFocusItem } from "./focus-summary";
+import { focusSummaryPresentation, isActionableFocusItem, parseFocusSummary } from "./focus-summary";
 
 describe("focus summary presentation", () => {
   it("filters standing context out of the Now action list", () => {
@@ -53,5 +53,18 @@ describe("focus summary presentation", () => {
   it("classifies the confusing context prompt as non-actionable", () => {
     expect(isActionableFocusItem("Use **Jeff Schram** as the ongoing owner context.")).toBe(false);
     expect(isActionableFocusItem("Monitor **Vercel/GitHub PR #5** preview build/deployment status.")).toBe(true);
+  });
+
+  it("preserves markdown email links in parsed bullets", () => {
+    const { headline, bullets } = parseFocusSummary(
+      [
+        "Summary: Reply to the outstanding statement email.",
+        "- Reply to [Chase statement](https://mail.google.com/mail/u/0/#all/18f2c3a) before Friday.",
+        "- Review today's calendar for prep needs.",
+      ].join("\n"),
+    );
+
+    expect(headline).toBe("Reply to the outstanding statement email.");
+    expect(bullets[0]).toBe("Reply to [Chase statement](https://mail.google.com/mail/u/0/#all/18f2c3a) before Friday.");
   });
 });

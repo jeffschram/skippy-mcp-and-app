@@ -23,7 +23,7 @@ export function InlineMarkdown({ children }: { children: string }): ReactNode {
             );
           case "link":
             return (
-              <a key={index} href={token.href} target="_blank" rel="noreferrer">
+              <a key={index} href={token.href} target="_blank" rel="noopener noreferrer">
                 {token.value}
               </a>
             );
