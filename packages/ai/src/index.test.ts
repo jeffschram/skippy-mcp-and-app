@@ -101,6 +101,62 @@ describe("AI provider abstractions", () => {
     expect(body.instructions).toContain("identity facts");
   });
 
+  it("includes recently dismissed focus items with a do-not-re-raise instruction", async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    const fetchMock = async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response(
+        JSON.stringify({
+          output: [{ type: "message", content: [{ type: "output_text", text: "- Monitor deployment." }] }],
+        }),
+        { status: 200 },
+      );
+    };
+    const client = createLlmClient(
+      { mode: "openai" },
+      { apiKey: "test-key", fetch: fetchMock as typeof fetch },
+    );
+
+    await client.generateFocusSummary({
+      generatedAt: 123,
+      items: [{ title: "Deploy app", summary: "Remote MCP is live." }],
+      recentlyDismissedItems: ["Review the Chase statement email.", "  ", "Renew the MGM+ trial decision."],
+    });
+
+    const body = JSON.parse(String(calls[0]?.init.body));
+    expect(body.input).toContain("Recently dismissed focus items");
+    expect(body.input).toContain("- Review the Chase statement email.");
+    expect(body.input).toContain("- Renew the MGM+ trial decision.");
+    expect(body.input).not.toMatch(/^- \s*$/m);
+    expect(body.instructions).toContain("Recently dismissed focus items");
+    expect(body.instructions).toContain("materially new");
+  });
+
+  it("omits the dismissed section when there are no recent dismissals", async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    const fetchMock = async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response(
+        JSON.stringify({
+          output: [{ type: "message", content: [{ type: "output_text", text: "- Monitor deployment." }] }],
+        }),
+        { status: 200 },
+      );
+    };
+    const client = createLlmClient(
+      { mode: "openai" },
+      { apiKey: "test-key", fetch: fetchMock as typeof fetch },
+    );
+
+    await client.generateFocusSummary({
+      generatedAt: 123,
+      items: [{ title: "Deploy app", summary: "Remote MCP is live." }],
+    });
+
+    const body = JSON.parse(String(calls[0]?.init.body));
+    expect(body.input).not.toContain("Recently dismissed focus items");
+  });
+
   it("passes email deep links into focus context and forbids invented URLs", async () => {
     const calls: Array<{ url: string; init: RequestInit }> = [];
     const fetchMock = async (url: string | URL | Request, init?: RequestInit) => {

@@ -42,8 +42,13 @@ export function TodayContent() {
   const actionedKeys = useMemo(() => {
     const set = new Set<string>();
     for (const action of data?.focusItemActions ?? []) set.add(action.itemKey);
+    // Dismissals from recent prior summaries: regenerated bullets with the exact same
+    // text must never flash back.
+    for (const dismissal of data?.recentFocusDismissals ?? []) {
+      if (dismissal.itemKey) set.add(dismissal.itemKey);
+    }
     return set;
-  }, [data?.focusItemActions]);
+  }, [data?.focusItemActions, data?.recentFocusDismissals]);
   const visibleBullets = useMemo(
     () => bullets.map((text) => ({ text, key: focusItemKey(text) })).filter((item) => !actionedKeys.has(item.key)),
     [bullets, actionedKeys],

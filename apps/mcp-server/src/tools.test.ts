@@ -277,6 +277,103 @@ describe("Skippy MCP tool handlers", () => {
     expect(emailLinkFor("No email source")).toBeUndefined();
   });
 
+  it("excludes focus-snoozed entities from focus context until the snooze expires", async () => {
+    const { client } = createFakeClient();
+    const tools = createSkippyToolHandlers(
+      {
+        ...client,
+        getAiContext: async () => ({
+          config: { llmProviderMode: "none" },
+          tasks: [
+            { _id: "task_snoozed", title: "Snoozed task", status: "todo", focusSnoozedUntil: Date.now() + 60_000 },
+            { _id: "task_expired", title: "Expired snooze task", status: "todo", focusSnoozedUntil: Date.now() - 60_000 },
+            { _id: "task_active", title: "Active task", status: "todo" },
+          ],
+        }),
+      },
+      "brain_123",
+    );
+
+    const result = (await tools.refreshFocusSummary()) as { contextItems?: Array<{ title: string }> };
+    const titles = (result.contextItems ?? []).map((item) => item.title);
+
+    expect(titles).not.toContain("Snoozed task");
+    expect(titles).toContain("Expired snooze task");
+    expect(titles).toContain("Active task");
+  });
+
+  it("surfaces recently dismissed focus items for harness generation when internal AI is disabled", async () => {
+    const { client } = createFakeClient();
+    const tools = createSkippyToolHandlers(
+      {
+        ...client,
+        getAiContext: async () => ({
+          config: { llmProviderMode: "none" },
+          recentFocusDismissals: [
+            { itemKey: "review-the-chase-statement-email", itemText: "Review the Chase statement email.", dismissedAt: 1780850000000 },
+            { itemText: "  Renew the MGM+ trial decision.  " },
+            { itemText: "" },
+          ],
+          tasks: [{ _id: "task_1", title: "Active task", status: "todo" }],
+        }),
+      },
+      "brain_123",
+    );
+
+    await expect(tools.refreshFocusSummary()).resolves.toMatchObject({
+      status: "not_configured",
+      recentlyDismissedItems: [
+        "Review the Chase statement email.",
+        "Renew the MGM+ trial decision.",
+      ],
+    });
+  });
+
+  it("passes recently dismissed focus items into internal focus generation", async () => {
+    const { client } = createFakeClient();
+    const originalFetch = globalThis.fetch;
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response(
+        JSON.stringify({
+          output: [{ type: "message", content: [{ type: "output_text", text: "- Monitor deployment." }] }],
+        }),
+        { status: 200 },
+      );
+    }) as typeof fetch;
+    const previousApiKey = process.env.OPENAI_API_KEY;
+    process.env.OPENAI_API_KEY = "test-key";
+
+    try {
+      const tools = createSkippyToolHandlers(
+        {
+          ...client,
+          getAiContext: async () => ({
+            config: { llmProviderMode: "openai" },
+            recentFocusDismissals: [{ itemText: "Review the Chase statement email." }],
+            tasks: [{ _id: "task_1", title: "Deploy app", status: "todo" }],
+          }),
+        },
+        "brain_123",
+      );
+
+      await expect(tools.refreshFocusSummary()).resolves.toMatchObject({ status: "generated" });
+      const focusCall = calls.find((call) => call.url.includes("api.openai.com"));
+      const body = JSON.parse(String(focusCall?.init.body));
+      expect(body.input).toContain("Recently dismissed focus items");
+      expect(body.input).toContain("- Review the Chase statement email.");
+      expect(body.instructions).toContain("materially new");
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (previousApiKey === undefined) {
+        delete process.env.OPENAI_API_KEY;
+      } else {
+        process.env.OPENAI_API_KEY = previousApiKey;
+      }
+    }
+  });
+
   it("records accepted entity reviews with trimmed summaries", async () => {
     const { client, calls } = createFakeClient();
     const tools = createSkippyToolHandlers(client, "brain_123");

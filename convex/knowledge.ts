@@ -6,6 +6,7 @@ import {
   PROJECT_STATUSES,
   TASK_STATUSES,
   candidateFingerprint,
+  matchDismissedFocusItem,
   normalizeAcceptedEntityPayload,
 } from "@skippy/shared";
 import { requireOwnedBrain } from "./auth";
@@ -945,6 +946,99 @@ async function contextBundleForBrainId(
   };
 }
 
+const FOCUS_DISMISSAL_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+const FOCUS_DISMISSAL_CONTEXT_LIMIT = 25;
+const FOCUS_SNOOZE_MS = 14 * 24 * 60 * 60 * 1000;
+const FOCUS_SNOOZABLE_ENTITY_TYPES = new Set(["project", "task", "note", "company", "person"]);
+
+/**
+ * Focus items the user dismissed across ALL summaries in the last 30 days, most recent
+ * first, capped for prompt-context use. Dismissals are durable signal: generation must not
+ * re-raise these topics, and the client must not re-show their exact text.
+ */
+async function recentDismissedFocusItems(db: any, brainInstanceId: any, now: number) {
+  const cutoff = now - FOCUS_DISMISSAL_WINDOW_MS;
+  const dismissals = (
+    await db
+      .query("focusItemActions")
+      .withIndex("by_brain_focus", (q: any) => q.eq("brainInstanceId", brainInstanceId))
+      .filter((q: any) => q.eq(q.field("action"), "dismissed"))
+      .collect()
+  )
+    .filter((action: any) => (action.updatedAt ?? action.createdAt) >= cutoff)
+    .sort((left: any, right: any) => (right.updatedAt ?? right.createdAt) - (left.updatedAt ?? left.createdAt))
+    .slice(0, FOCUS_DISMISSAL_CONTEXT_LIMIT);
+
+  return dismissals.map((action: any) => ({
+    itemKey: action.itemKey,
+    itemText: action.itemText,
+    dismissedAt: action.updatedAt ?? action.createdAt,
+    focusSummaryId: action.focusSummaryId,
+  }));
+}
+
+function isFocusSnoozed(entity: Record<string, any>, now: number) {
+  return typeof entity.focusSnoozedUntil === "number" && entity.focusSnoozedUntil > now;
+}
+
+/**
+ * Resolve a dismissed focus bullet to the entity it was about (via the summary's topItems)
+ * and make the dismissal durable: matched links are discarded (the schema's dismissed
+ * status), other supported entity types get focusSnoozedUntil = now + 14 days with their
+ * real status untouched. Skips silently when no clear single topItem matches.
+ */
+async function resolveDismissedFocusItemEntity(
+  db: any,
+  brainInstanceId: any,
+  focusSummary: Record<string, any>,
+  itemText: string,
+  now: number,
+): Promise<{ entityRef: { entityType: string; entityId: string }; resolution: "link_discarded" | "focus_snoozed"; focusSnoozedUntil?: number } | null> {
+  const candidates: Array<{
+    entityRef: { entityType: keyof typeof entityTableByType; entityId: string };
+    reason?: string;
+    entityTitle?: string;
+    entity: Record<string, any>;
+  }> = [];
+  for (const topItem of focusSummary.topItems ?? []) {
+    const entityRef = topItem.entityRef as { entityType: keyof typeof entityTableByType; entityId: string };
+    if (!entityTableByType[entityRef.entityType]) {
+      continue;
+    }
+    const entity = await db.get(entityRef.entityId as any);
+    if (!entity || entity.brainInstanceId !== brainInstanceId) {
+      continue;
+    }
+    candidates.push({
+      entityRef,
+      reason: topItem.reason,
+      entityTitle: entity.title ?? entity.name ?? entity.url ?? entity.body,
+      entity,
+    });
+  }
+
+  const match = matchDismissedFocusItem(itemText, candidates);
+  if (!match) {
+    return null;
+  }
+
+  if (match.entityRef.entityType === "link") {
+    // "discarded" is the links status vocabulary's dismissed-equivalent (see LINK_STATUSES).
+    if (match.entity.status !== "discarded") {
+      await db.patch(match.entity._id, { status: "discarded", updatedAt: now });
+    }
+    return { entityRef: match.entityRef, resolution: "link_discarded" };
+  }
+
+  if (FOCUS_SNOOZABLE_ENTITY_TYPES.has(match.entityRef.entityType)) {
+    const focusSnoozedUntil = now + FOCUS_SNOOZE_MS;
+    await db.patch(match.entity._id, { focusSnoozedUntil, updatedAt: now });
+    return { entityRef: match.entityRef, resolution: "focus_snoozed", focusSnoozedUntil };
+  }
+
+  return null;
+}
+
 async function cancelDuplicateFocusCreatedTasks(db: any, brainInstanceId: any, actorId?: string) {
   const now = Date.now();
   const activeTasks = (
@@ -1526,6 +1620,9 @@ export const dashboardForViewer = queryGeneric({
           .filter((q) => q.eq(q.field("focusSummaryId"), focusSummary._id))
           .collect()
       : [];
+    // Dismissals from recent prior summaries so re-generated bullets with the exact same
+    // text never flash back on the client.
+    const recentFocusDismissals = await recentDismissedFocusItems(ctx.db, brain._id, Date.now());
     const triageItems = await ctx.db
       .query("triageItems")
       .filter((q) => q.and(q.eq(q.field("brainInstanceId"), brain._id), q.eq(q.field("status"), "pending")))
@@ -1563,6 +1660,7 @@ export const dashboardForViewer = queryGeneric({
       brain,
       focusSummary,
       focusItemActions,
+      recentFocusDismissals,
       sourceSyncStatuses,
       triageItems,
       pendingActions,
@@ -1731,6 +1829,13 @@ export const recordFocusItemActionForViewer = mutationGeneric({
           createdAt: now,
         });
 
+    // One X click is the whole interaction: a dismissal also teaches the system by
+    // resolving the bullet back to its entity (discard link / snooze from focus).
+    const dismissalResolution =
+      args.action === "dismissed"
+        ? await resolveDismissedFocusItemEntity(ctx.db, brain._id, focusSummary, args.itemText, now)
+        : null;
+
     await ctx.db.insert("activityEvents", {
       brainInstanceId: brain._id,
       activityType: args.action === "dismissed" ? "focus_item_dismissed" : "focus_item_marked_done",
@@ -1739,10 +1844,22 @@ export const recordFocusItemActionForViewer = mutationGeneric({
       timestamp: now,
       summary: `${args.action === "dismissed" ? "Dismissed" : "Marked handled"} focus item: ${args.itemText}`,
       focusSummaryId: args.focusSummaryId,
-      metadata: { focusItemActionId, itemKey: args.itemKey },
+      metadata: {
+        focusItemActionId,
+        itemKey: args.itemKey,
+        ...(dismissalResolution
+          ? {
+              matchedEntityRef: dismissalResolution.entityRef,
+              resolution: dismissalResolution.resolution,
+              ...(dismissalResolution.focusSnoozedUntil
+                ? { focusSnoozedUntil: dismissalResolution.focusSnoozedUntil }
+                : {}),
+            }
+          : {}),
+      },
     });
 
-    return { focusItemActionId, status: args.action };
+    return { focusItemActionId, status: args.action, dismissalResolution };
   },
 });
 
@@ -3705,6 +3822,8 @@ export const aiContextForBrain = queryGeneric({
     brainInstanceId: v.id("brainInstances"),
   },
   handler: async ({ db }, { brainInstanceId }) => {
+    const now = Date.now();
+    const notFocusSnoozed = (entity: Record<string, any>) => !isFocusSnoozed(entity, now);
     const config = await db
       .query("brainConfigs")
       .filter((q) => q.eq(q.field("brainInstanceId"), brainInstanceId))
@@ -3714,6 +3833,7 @@ export const aiContextForBrain = queryGeneric({
       .filter((q) => q.eq(q.field("brainInstanceId"), brainInstanceId))
       .order("desc")
       .first();
+    const recentFocusDismissals = await recentDismissedFocusItems(db, brainInstanceId, now);
     const projects = await db
       .query("projects")
       .filter((q) =>
@@ -3792,12 +3912,13 @@ export const aiContextForBrain = queryGeneric({
     return {
       config,
       focusSummary,
-      projects: projects.map(withSourceRefs("project")),
-      tasks: tasks.map(withSourceRefs("task")),
-      people: people.map(withSourceRefs("person")),
-      companies: companies.map(withSourceRefs("company")),
+      recentFocusDismissals,
+      projects: projects.filter(notFocusSnoozed).map(withSourceRefs("project")),
+      tasks: tasks.filter(notFocusSnoozed).map(withSourceRefs("task")),
+      people: people.filter(notFocusSnoozed).map(withSourceRefs("person")),
+      companies: companies.filter(notFocusSnoozed).map(withSourceRefs("company")),
       links: links.map(withSourceRefs("link")),
-      notes: notes.map(withSourceRefs("note")),
+      notes: notes.filter(notFocusSnoozed).map(withSourceRefs("note")),
       embeddings,
     };
   },

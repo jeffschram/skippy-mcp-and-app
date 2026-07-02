@@ -240,6 +240,9 @@ export default defineSchema({
     defaultBaseBranch: v.optional(v.string()),
     // Local folder path for output files/assets (all projects may have one).
     localPath: v.optional(v.string()),
+    // Dismissing a focus bullet about this entity hides it from focus generation until
+    // this epoch-ms timestamp, without changing the entity's real status.
+    focusSnoozedUntil: v.optional(v.number()),
     ...priorityMetadata,
     createdAt: v.number(),
     updatedAt: v.number(),
@@ -285,6 +288,7 @@ export default defineSchema({
     resultSummary: v.optional(v.string()),
     resultUrl: v.optional(v.string()),
     resultRecordedAt: v.optional(v.number()),
+    focusSnoozedUntil: v.optional(v.number()),
     ...priorityMetadata,
     createdAt: v.number(),
     updatedAt: v.number(),
@@ -300,6 +304,7 @@ export default defineSchema({
     title: v.optional(v.string()),
     body: v.string(),
     ...processingMetadata,
+    focusSnoozedUntil: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number(),
   }).index("by_brain_state", ["brainInstanceId", "processingState"]),
@@ -314,6 +319,7 @@ export default defineSchema({
     relationshipContext: v.optional(v.string()),
     notes: v.optional(v.string()),
     favorite: v.optional(v.boolean()),
+    focusSnoozedUntil: v.optional(v.number()),
     ...processingMetadata,
     createdAt: v.number(),
     updatedAt: v.number(),
@@ -335,6 +341,7 @@ export default defineSchema({
         v.literal("other"),
       ),
     ),
+    focusSnoozedUntil: v.optional(v.number()),
     ...processingMetadata,
     createdAt: v.number(),
     updatedAt: v.number(),

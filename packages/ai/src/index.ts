@@ -52,6 +52,11 @@ export type FocusSummaryRequest = {
   items: SynthesisContextItem[];
   generatedAt: number;
   policyVersion?: string;
+  /**
+   * Focus bullets the user recently dismissed (most recent first). Generation must not
+   * re-raise these topics unless something materially new happened since the dismissal.
+   */
+  recentlyDismissedItems?: string[];
 };
 
 export type EmbeddingRequest = {
@@ -141,7 +146,7 @@ export const DEFAULT_ANTHROPIC_SYNTHESIS_MODEL = "claude-sonnet-4-20250514";
 export const DEFAULT_OPENROUTER_SYNTHESIS_MODEL = "openai/gpt-4.1-mini";
 export const DEFAULT_LOCAL_SYNTHESIS_MODEL = "local-model";
 const FOCUS_SUMMARY_INSTRUCTIONS =
-  "Write a concise Skippy focus summary using only the supplied context. Start with exactly one line beginning with 'Summary:' that captures the overall theme of ALL the bullets in a single sentence (not just the first item). Then return 3-5 short markdown bullet lines. The app renders these bullets under its own 'Now' heading, so write each bullet as a plain sentence with no category label and never prefix a bullet with 'Now:' or any other label. Include actionable next moves only: concrete things the user or Skippy should monitor, review, decide, prepare, follow up on, or complete. Do not turn standing context, identity facts, relationships, user preferences, or assumptions into bullets; those belong in memory/topItems, not the Now action list. When a bullet references an email whose context item includes an 'Email link:' URL, format the email reference as a markdown link, e.g. [subject or sender](email-link-url), using that exact URL. Never invent, guess, or modify URLs; only use URLs present in the supplied context. If there are no clear actions, return exactly: Nothing new needs focus right now.";
+  "Write a concise Skippy focus summary using only the supplied context. Start with exactly one line beginning with 'Summary:' that captures the overall theme of ALL the bullets in a single sentence (not just the first item). Then return 3-5 short markdown bullet lines. The app renders these bullets under its own 'Now' heading, so write each bullet as a plain sentence with no category label and never prefix a bullet with 'Now:' or any other label. Include actionable next moves only: concrete things the user or Skippy should monitor, review, decide, prepare, follow up on, or complete. Do not turn standing context, identity facts, relationships, user preferences, or assumptions into bullets; those belong in memory/topItems, not the Now action list. When a bullet references an email whose context item includes an 'Email link:' URL, format the email reference as a markdown link, e.g. [subject or sender](email-link-url), using that exact URL. Never invent, guess, or modify URLs; only use URLs present in the supplied context. If there are no clear actions, return exactly: Nothing new needs focus right now. If the input includes a 'Recently dismissed focus items' section, the user recently dismissed those focus items: do not generate bullets about those topics unless something materially new happened since the dismissal.";
 
 function getEnvironmentValue(name: string): string | undefined {
   const maybeProcess = globalThis as typeof globalThis & {
@@ -240,6 +245,27 @@ function chatCompletionOutputText(json: Record<string, any>): string {
   return "";
 }
 
+/**
+ * Compose the focus-summary user input: ranked context items plus a section listing the
+ * user's recently dismissed focus items so generation treats dismissals as durable signal.
+ */
+function focusSummaryInputText(request: FocusSummaryRequest) {
+  const base = contextText(request.items) || "No context available.";
+  const dismissedItems = (request.recentlyDismissedItems ?? [])
+    .map((item) => item.trim())
+    .filter(Boolean);
+  if (dismissedItems.length === 0) {
+    return base;
+  }
+
+  return [
+    base,
+    `Recently dismissed focus items (most recent first; the user dismissed these — do not generate bullets about these topics unless something materially new happened since):\n${dismissedItems
+      .map((item) => `- ${item}`)
+      .join("\n")}`,
+  ].join("\n\n");
+}
+
 function topItemsForFocus(request: FocusSummaryRequest) {
   return request.items
     .filter((item) => item.entityRef)
@@ -306,7 +332,7 @@ export function createOpenAiLlmClient(config: AiProviderConfig, options?: AiClie
         body: JSON.stringify({
           model,
           instructions: FOCUS_SUMMARY_INSTRUCTIONS,
-          input: contextText(request.items) || "No context available.",
+          input: focusSummaryInputText(request),
         }),
       });
       const json = await parseJsonResponse(response, "OpenAI");
@@ -410,7 +436,7 @@ export function createAnthropicLlmClient(config: AiProviderConfig, options?: AiC
     async generateFocusSummary(request) {
       const result = await createMessage(
         FOCUS_SUMMARY_INSTRUCTIONS,
-        contextText(request.items) || "No context available.",
+        focusSummaryInputText(request),
         "focus_summary",
         request.policyVersion,
       );
@@ -504,7 +530,7 @@ function createChatCompletionLlmClient({
     async generateFocusSummary(request) {
       const result = await createChat(
         FOCUS_SUMMARY_INSTRUCTIONS,
-        contextText(request.items) || "No context available.",
+        focusSummaryInputText(request),
         "focus_summary",
         request.policyVersion,
       );
