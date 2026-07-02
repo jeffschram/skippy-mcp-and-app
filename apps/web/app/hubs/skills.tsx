@@ -91,24 +91,19 @@ export function SkillDetailContent({ slug }: { slug: string }) {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [body, setBody] = useState("");
+  const [usageDescription, setUsageDescription] = useState("");
+  const [usageLeadIn, setUsageLeadIn] = useState("");
+  const [schedulerInstructions, setSchedulerInstructions] = useState("");
   const [busy, setBusy] = useState(false);
-  const publicSkillUrl = `https://skippy.jeffschram.dev/skills/${slug}`;
-  const schedulerInstructions = [
-    "If you support Skippy MCP prompts:",
-    "Use the prompt `skippy_task_heartbeat`.",
-    "",
-    "If you do not support Skippy MCP prompts but do support Skippy MCP tools:",
-    `Call \`get_skill\` with slug \`${slug}\``,
-    "",
-    "If neither of those work, load the Skippy skill at:",
-    publicSkillUrl,
-  ].join("\n");
 
   const openEditor = () => {
     if (!skill) return;
     setTitle(skill.title ?? "");
     setDescription(skill.description ?? "");
     setBody(skill.body ?? "");
+    setUsageDescription(skill.usageDescription ?? "");
+    setUsageLeadIn(skill.usageLeadIn ?? "");
+    setSchedulerInstructions(skill.schedulerInstructions ?? "");
     setEditing(true);
   };
 
@@ -120,6 +115,9 @@ export function SkillDetailContent({ slug }: { slug: string }) {
         title,
         description,
         body,
+        usageDescription,
+        usageLeadIn,
+        schedulerInstructions,
         visibility: "public",
       });
       toast("Skill saved.", "success");
@@ -179,19 +177,16 @@ export function SkillDetailContent({ slug }: { slug: string }) {
           </Card>
           <Card>
             <h2 style={{ marginTop: 0 }}>How to use this skill</h2>
-            <p className="muted">
-              Use this skill when you want an AI harness like Codex, Claude, or Hermes to periodically check Skippy
-              for Ready agent tasks and report results back to Skippy.
-            </p>
-            <p className="muted">In your harness scheduler paste the following:</p>
+            {skill.usageDescription ? <p className="muted">{skill.usageDescription}</p> : null}
+            {skill.usageLeadIn ? <p className="muted">{skill.usageLeadIn}</p> : null}
             <TextArea
               aria-label="Harness scheduler instructions"
               readOnly
-              value={schedulerInstructions}
+              value={skill.schedulerInstructions ?? ""}
               style={{ minHeight: 210, marginBottom: 12 }}
             />
             <p style={{ margin: 0 }}>
-              <Button onClick={() => copyText(schedulerInstructions, toast)}>
+              <Button onClick={() => copyText(skill.schedulerInstructions ?? "", toast)}>
                 <ClipboardCopy size={16} aria-hidden /> Copy scheduler instructions
               </Button>
             </p>
@@ -237,6 +232,23 @@ export function SkillDetailContent({ slug }: { slug: string }) {
           </Field>
           <Field label="Prompt body">
             <TextArea value={body} onChange={(event) => setBody(event.target.value)} style={{ minHeight: 300 }} />
+          </Field>
+          <Field label="Usage description">
+            <TextArea
+              value={usageDescription}
+              onChange={(event) => setUsageDescription(event.target.value)}
+              style={{ minHeight: 110 }}
+            />
+          </Field>
+          <Field label="Scheduler lead-in">
+            <TextInput value={usageLeadIn} onChange={(event) => setUsageLeadIn(event.target.value)} />
+          </Field>
+          <Field label="Scheduler instructions">
+            <TextArea
+              value={schedulerInstructions}
+              onChange={(event) => setSchedulerInstructions(event.target.value)}
+              style={{ minHeight: 210 }}
+            />
           </Field>
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
             <Button onClick={() => setEditing(false)} disabled={busy}>

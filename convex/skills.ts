@@ -31,12 +31,29 @@ const TASK_HEARTBEAT_BODY = [
   "If a task becomes blocked or unsafe to continue, record a clear result or status for that task and continue with the next queued task only when it is independent and safe to do so.",
 ].join("\n");
 
+const TASK_HEARTBEAT_USAGE_DESCRIPTION =
+  "Use this skill when you want an AI harness like Codex, Claude, or Hermes to periodically check Skippy for Ready agent tasks and report results back to Skippy.";
+
+const TASK_HEARTBEAT_SCHEDULER_INSTRUCTIONS = [
+  "If you support Skippy MCP prompts:",
+  "Use the prompt `skippy_task_heartbeat`.",
+  "",
+  "If you do not support Skippy MCP prompts but do support Skippy MCP tools:",
+  "Call `get_skill` with slug `task-heartbeat`",
+  "",
+  "If neither of those work, load the Skippy skill at:",
+  "https://skippy.jeffschram.dev/skills/task-heartbeat",
+].join("\n");
+
 const DEFAULT_SKILLS = [
   {
     slug: "task-heartbeat",
     title: "Task heartbeat",
     description: "Portable instructions for harnesses that execute requested Ready agent tasks from Skippy.",
     body: TASK_HEARTBEAT_BODY,
+    usageDescription: TASK_HEARTBEAT_USAGE_DESCRIPTION,
+    usageLeadIn: "In your harness scheduler paste the following:",
+    schedulerInstructions: TASK_HEARTBEAT_SCHEDULER_INSTRUCTIONS,
     visibility: "public" as const,
     version: 1,
   },
@@ -75,6 +92,9 @@ function toPublicSkill(skill: any, fallback?: (typeof DEFAULT_SKILLS)[number]) {
     title: skill?.title ?? fallback?.title,
     description: skill?.description ?? fallback?.description,
     body: skill?.body ?? fallback?.body,
+    usageDescription: skill?.usageDescription ?? fallback?.usageDescription,
+    usageLeadIn: skill?.usageLeadIn ?? fallback?.usageLeadIn,
+    schedulerInstructions: skill?.schedulerInstructions ?? fallback?.schedulerInstructions,
     visibility: skill?.visibility ?? fallback?.visibility ?? "public",
     version: skill?.version ?? fallback?.version ?? 1,
     isDefault: !skill,
@@ -154,6 +174,9 @@ export const saveSkillForViewer = mutationGeneric({
     title: v.string(),
     description: v.optional(v.string()),
     body: v.string(),
+    usageDescription: v.optional(v.string()),
+    usageLeadIn: v.optional(v.string()),
+    schedulerInstructions: v.optional(v.string()),
     visibility: v.optional(v.union(v.literal("public"), v.literal("private"))),
   },
   handler: async (ctx, args) => {
@@ -177,6 +200,11 @@ export const saveSkillForViewer = mutationGeneric({
       title,
       description: args.description?.trim() || undefined,
       body,
+      usageDescription:
+        args.usageDescription?.trim() || existing?.usageDescription || fallbackSkill(slug)?.usageDescription,
+      usageLeadIn: args.usageLeadIn?.trim() || existing?.usageLeadIn || fallbackSkill(slug)?.usageLeadIn,
+      schedulerInstructions:
+        args.schedulerInstructions?.trim() || existing?.schedulerInstructions || fallbackSkill(slug)?.schedulerInstructions,
       visibility: args.visibility ?? existing?.visibility ?? fallbackSkill(slug)?.visibility ?? "public",
       version: (existing?.version ?? fallbackSkill(slug)?.version ?? 0) + 1,
       isCurrent: true,
