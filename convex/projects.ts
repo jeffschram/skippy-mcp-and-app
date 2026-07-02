@@ -663,6 +663,7 @@ export const updateProjectForViewer = mutationGeneric({
 export const updateTaskBriefForViewer = mutationGeneric({
   args: {
     taskId: v.id("tasks"),
+    title: v.optional(v.string()),
     executionBrief: v.optional(v.string()),
     acceptanceCriteria: v.optional(v.array(v.string())),
     description: v.optional(v.string()),
@@ -675,6 +676,11 @@ export const updateTaskBriefForViewer = mutationGeneric({
     }
     const now = Date.now();
     const patch: Record<string, unknown> = { updatedAt: now };
+    if (args.title !== undefined) {
+      const title = args.title.trim();
+      if (!title) throw new Error("task title cannot be empty");
+      patch.title = title;
+    }
     if (args.executionBrief !== undefined) patch.executionBrief = args.executionBrief.trim() || undefined;
     if (args.description !== undefined) patch.description = args.description.trim() || undefined;
     if (args.acceptanceCriteria !== undefined) {
