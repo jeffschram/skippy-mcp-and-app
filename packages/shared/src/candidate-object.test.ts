@@ -92,6 +92,27 @@ describe("candidate object normalization", () => {
     });
   });
 
+  it("defaults ingested links to saved reference status", () => {
+    expect(
+      normalizeAcceptedEntityPayload("link", {
+        url: "https://example.com/article",
+        title: "Useful reference",
+      }),
+    ).toMatchObject({
+      url: "https://example.com/article",
+      status: "saved",
+    });
+  });
+
+  it("passes explicit link statuses through unchanged", () => {
+    expect(
+      normalizeAcceptedEntityPayload("link", { url: "https://example.com/read-later", status: "unread" }),
+    ).toMatchObject({ status: "unread" });
+    expect(
+      normalizeAcceptedEntityPayload("link", { url: "https://example.com/done", status: "read" }),
+    ).toMatchObject({ status: "read" });
+  });
+
   it("builds stable fingerprints from normalized accepted payloads", () => {
     expect(
       candidateFingerprint("task", {

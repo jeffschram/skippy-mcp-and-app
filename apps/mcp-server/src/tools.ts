@@ -419,8 +419,10 @@ function isActiveFocusItem(entityType: EntityType, item: Record<string, any>) {
   }
 
   if (entityType === "link") {
-    // Links auto-age: unread links older than the cutoff stop being focus candidates
-    // (they stay stored and searchable; the Brain's Links tab remains their home).
+    // Links auto-age: explicit read-later ("unread") links older than the cutoff stop
+    // being focus candidates (they stay stored and searchable; the Brain's Links tab
+    // remains their home). Ingested links default to "saved", which is passive
+    // reference — never aged and never flagged for attention.
     return isLinkFocusCandidate(item);
   }
 
@@ -436,7 +438,9 @@ function contextItemsFromEntityList(
     .map((item) => {
       let reason = item.priorityReason ?? item.reviewReason ?? item.status;
       if (entityType === "link" && item.status === "unread" && reason === item.status) {
-        // Age hint so the synthesis model can weigh how fresh an unread link is.
+        // Age hint so the synthesis model can weigh how fresh a read-later link is.
+        // Only explicit "unread" links get this needs-attention hint; "saved" links
+        // (the ingestion default) stay passive reference with no hint.
         const ageDays = typeof item.ageDays === "number" ? item.ageDays : linkAgeDays(item);
         if (ageDays !== undefined) {
           reason = `unread (added ${ageDays === 0 ? "today" : `${ageDays}d ago`})`;

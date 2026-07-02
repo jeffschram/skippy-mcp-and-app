@@ -45,10 +45,12 @@ Use for organizations.
 
 ## Link
 
-Use for URLs the user may want to read, save, or reference later.
+Use for URLs the user may want to read, save, or reference later. Links are reference material, not a reading queue.
 
 - Required: `url`
 - Optional: `title`, `summary`, `whyItMatters`, `status`
+- `status` defaults to `saved` (passive reference; no user interaction expected). Pass `unread` only when the user explicitly wants to read the link later.
+- If genuinely uncertain whether the link is valid or important, use `submit_candidate_object` instead so it lands in Review for a one-tap decision.
 - Prefer harness-provided metadata; Skippy may enrich links later.
 
 ## Knowledge Object

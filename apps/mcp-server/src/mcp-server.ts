@@ -64,6 +64,7 @@ const skippyInstructions = [
   "For direct ingestion, call ingest_object and include a concise rubricDecision explaining why the item clears the importance bar.",
   "Use submit_candidate_object only as a legacy fallback when the harness cannot decide whether the item belongs in Skippy.",
   "Extract useful objects, not raw dumps. Prefer task, project, person, company, link, note, goal, or knowledgeObject records.",
+  "Links are reference material, not a reading queue. Confident, rubric-clearing links: ingest directly (status defaults to 'saved'; no user interaction expected). Pass status 'unread' only when the user explicitly wants to read it later. Genuinely uncertain whether a link is valid or important: use submit_candidate_object so it lands in Review for a one-tap decision.",
   "Include lightweight sourceRefs whenever possible: sourceSystem, messageId/threadId/eventId, timestamp, participants, URL/deepLink, summary, and a short excerpt.",
   "Avoid storing full raw emails, full calendar descriptions, or unnecessary private text. Store concise summaries and fields needed for future retrieval/focus.",
   "For noisy sources, submit only items that are actionable, relationship-building, deadline-bearing, decision-relevant, or clearly useful later.",
@@ -164,6 +165,7 @@ function buildSkillsMessage() {
     "",
     "3. Choose the narrowest tool.",
     "   - `ingest_object`: primary accepted write for source-backed tasks, projects, people, companies, links, notes, goals, or knowledge objects. Include `rubricDecision`.",
+    "   - Link routing: links are reference material, not a reading queue. Confident, rubric-clearing links go straight through `ingest_object` (status defaults to `saved`; no user interaction expected). Pass `status: \"unread\"` only when the user explicitly wants to read it later. Genuinely uncertain whether a link is valid or important? Use `submit_candidate_object` so it lands in Review for a one-tap decision.",
     "   - `record_memory`, `record_decision`, `record_principle`: durable second-brain memory when the harness can explain why it belongs.",
     "   - `capture_thought`: explicit user thought or preference that should become memory or review.",
     "   - `submit_memory_review_candidate`: possible memory that seems useful but uncertain.",
@@ -1358,7 +1360,7 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
     {
       title: "Ingest accepted object",
       description:
-        "Primary write tool for source-derived knowledge under the user's importance rubric. Use when the harness can explain why the item is worth storing. Creates an accepted Skippy object directly; does not create a fallback review item. Include sourceRefs and a concise rubricDecision.",
+        "Primary write tool for source-derived knowledge under the user's importance rubric. Use when the harness can explain why the item is worth storing. Creates an accepted Skippy object directly; does not create a fallback review item. Include sourceRefs and a concise rubricDecision. Links ingested without an explicit status default to 'saved' (passive reference; no user interaction expected) — pass status 'unread' only for explicit read-later intent, and use submit_candidate_object when genuinely uncertain a link is valid or important.",
       annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: true },
       inputSchema: z.object({
         candidateEntityType: z
@@ -1626,12 +1628,16 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
       ),
   );
 
+  const upsertDescriptionNotes: Partial<Record<(typeof entityTypeValues)[number], string>> = {
+    link: " Links are reference material: status defaults to 'saved' (no user interaction expected). Pass status 'unread' only when the user explicitly wants to read it later; if genuinely uncertain the link is valid or important, use submit_candidate_object so it lands in Review for a one-tap decision.",
+  };
+
   for (const entityType of entityTypeValues) {
     server.registerTool(
       `upsert_${entityType}`,
       {
         title: `Submit ${entityType}`,
-        description: `Convenience ingestion tool for a single accepted ${entityType}. This writes directly to accepted knowledge, so use it only when the item clearly clears the user's importance rubric. Prefer ingest_object when you can include sourceRefs and a specific rubricDecision.`,
+        description: `Convenience ingestion tool for a single accepted ${entityType}. This writes directly to accepted knowledge, so use it only when the item clearly clears the user's importance rubric. Prefer ingest_object when you can include sourceRefs and a specific rubricDecision.${upsertDescriptionNotes[entityType] ?? ""}`,
         annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: true },
         inputSchema: jsonObjectSchema,
       },
