@@ -32,6 +32,8 @@ export type SynthesisContextItem = {
   title: string;
   summary?: string;
   reason?: string;
+  /** Deep link to the referenced source email (stored sourceRef deepLink or a Gmail URL built from its messageId). */
+  emailLink?: string;
 };
 
 export type SynthesisRequest = {
@@ -139,7 +141,7 @@ export const DEFAULT_ANTHROPIC_SYNTHESIS_MODEL = "claude-sonnet-4-20250514";
 export const DEFAULT_OPENROUTER_SYNTHESIS_MODEL = "openai/gpt-4.1-mini";
 export const DEFAULT_LOCAL_SYNTHESIS_MODEL = "local-model";
 const FOCUS_SUMMARY_INSTRUCTIONS =
-  "Write a concise Skippy focus summary using only the supplied context. Start with exactly one line beginning with 'Summary:' that captures the overall theme of ALL the bullets in a single sentence (not just the first item). Then return 3-5 short markdown bullet lines. Use Now for actionable next moves only: concrete things the user or Skippy should monitor, review, decide, prepare, follow up on, or complete. Do not turn standing context, identity facts, relationships, user preferences, or assumptions into bullets; those belong in memory/topItems, not the Now action list. If there are no clear actions, return exactly: Nothing new needs focus right now.";
+  "Write a concise Skippy focus summary using only the supplied context. Start with exactly one line beginning with 'Summary:' that captures the overall theme of ALL the bullets in a single sentence (not just the first item). Then return 3-5 short markdown bullet lines. Use Now for actionable next moves only: concrete things the user or Skippy should monitor, review, decide, prepare, follow up on, or complete. Do not turn standing context, identity facts, relationships, user preferences, or assumptions into bullets; those belong in memory/topItems, not the Now action list. When a bullet references an email whose context item includes an 'Email link:' URL, format the email reference as a markdown link, e.g. [subject or sender](email-link-url), using that exact URL. Never invent, guess, or modify URLs; only use URLs present in the supplied context. If there are no clear actions, return exactly: Nothing new needs focus right now.";
 
 function getEnvironmentValue(name: string): string | undefined {
   const maybeProcess = globalThis as typeof globalThis & {
@@ -189,6 +191,7 @@ function contextText(items: SynthesisContextItem[]) {
         item.entityRef ? `Entity: ${item.entityRef.entityType}:${item.entityRef.entityId}` : undefined,
         item.summary ? `Summary: ${item.summary}` : undefined,
         item.reason ? `Reason: ${item.reason}` : undefined,
+        item.emailLink ? `Email link: ${item.emailLink}` : undefined,
       ]
         .filter(Boolean)
         .join("\n"),

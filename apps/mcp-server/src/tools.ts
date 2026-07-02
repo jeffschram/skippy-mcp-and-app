@@ -371,6 +371,27 @@ function itemSummary(item: Record<string, any>) {
   return item.summary ?? item.description ?? item.priorityReason ?? item.body ?? item.notes ?? item.relationshipContext;
 }
 
+const EMAIL_SOURCE_SYSTEM_PATTERN = /gmail|email/i;
+
+/**
+ * Deep link to the email backing an entity, if any. Prefers the stored sourceRef deepLink and
+ * otherwise builds a Gmail link from the messageId. Never fabricates links for non-email sources.
+ */
+function emailLinkFromSourceRefs(sourceRefs: Array<Record<string, any>> | undefined): string | undefined {
+  for (const sourceRef of sourceRefs ?? []) {
+    if (typeof sourceRef?.sourceSystem !== "string" || !EMAIL_SOURCE_SYSTEM_PATTERN.test(sourceRef.sourceSystem)) {
+      continue;
+    }
+    if (typeof sourceRef.deepLink === "string" && sourceRef.deepLink.trim()) {
+      return sourceRef.deepLink.trim();
+    }
+    if (typeof sourceRef.messageId === "string" && sourceRef.messageId.trim()) {
+      return `https://mail.google.com/mail/u/0/#all/${sourceRef.messageId.trim()}`;
+    }
+  }
+  return undefined;
+}
+
 function isActiveFocusItem(entityType: EntityType, item: Record<string, any>) {
   if (item.processingState && item.processingState !== "accepted") {
     return false;
@@ -401,12 +422,19 @@ function contextItemsFromEntityList(
 ): SynthesisContextItem[] {
   return (items ?? [])
     .filter((item) => isActiveFocusItem(entityType, item))
-    .map((item) => ({
-      entityRef: { entityType, entityId: item._id },
-      title: item.title ?? item.name ?? item.url ?? item.body ?? "Untitled",
-      summary: itemSummary(item),
-      reason: item.priorityReason ?? item.reviewReason ?? item.status,
-    }));
+    .map((item) => {
+      const contextItem: SynthesisContextItem = {
+        entityRef: { entityType, entityId: item._id },
+        title: item.title ?? item.name ?? item.url ?? item.body ?? "Untitled",
+        summary: itemSummary(item),
+        reason: item.priorityReason ?? item.reviewReason ?? item.status,
+      };
+      const emailLink = emailLinkFromSourceRefs(item.sourceRefs);
+      if (emailLink) {
+        contextItem.emailLink = emailLink;
+      }
+      return contextItem;
+    });
 }
 
 function synthesisItems(context: AiContextRecord): SynthesisContextItem[] {

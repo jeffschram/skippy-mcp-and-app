@@ -1687,7 +1687,7 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
     {
       title: "Generate focus summary",
       description:
-        "Store a synthesized focus summary for the user-facing dashboard. Use accepted entities and current context; do not invent tasks or entities here. Summary bullets should be actionable next moves only, not standing context, identity facts, relationship assumptions, or permission requests. If you discover new important items while summarizing, ingest them separately with sourceRefs and a rubricDecision.",
+        "Store a synthesized focus summary for the user-facing dashboard. Use accepted entities and current context; do not invent tasks or entities here. Summary bullets should be actionable next moves only, not standing context, identity facts, relationship assumptions, or permission requests. When a bullet references an email, include a markdown link to it, e.g. [subject or sender](gmail-url), using the stored sourceRef deepLink or a Gmail link built from its messageId (https://mail.google.com/mail/u/0/#all/{messageId}); never invent URLs. If you discover new important items while summarizing, ingest them separately with sourceRefs and a rubricDecision.",
       annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: false },
       inputSchema: z.object({
         generatedAt: z.number().describe("Epoch milliseconds when this summary was generated."),
