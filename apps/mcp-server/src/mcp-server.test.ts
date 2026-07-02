@@ -177,6 +177,15 @@ function createFakeClient(overrides: Partial<SkippyClient> = {}): SkippyClient {
       recentDeliveries: [],
     }),
     recordNotificationDelivery: async () => ({ ok: true }),
+    getSkill: async (_brainInstanceId, input) => ({
+      slug: input.slug,
+      title: "Task heartbeat",
+      description: "Portable heartbeat instructions.",
+      body: "# Skippy Task Heartbeat\n\nCheck Skippy for requested Ready agent tasks.",
+      visibility: "public",
+      version: 1,
+      isDefault: true,
+    }),
   };
 
   return { ...client, ...overrides };
@@ -230,6 +239,7 @@ describe("Skippy MCP manifest", () => {
       const startInterview = tools.find((tool) => tool.name === "start_interview");
       const answerInterviewQuestion = tools.find((tool) => tool.name === "answer_interview_question");
       const completeInterview = tools.find((tool) => tool.name === "complete_interview");
+      const getSkill = tools.find((tool) => tool.name === "get_skill");
 
       expect(ingestObject?.description).toContain("importance rubric");
       expect(ingestObject?.inputSchema.properties?.rubricDecision).toBeDefined();
@@ -260,6 +270,7 @@ describe("Skippy MCP manifest", () => {
       expect(startInterview?.description).toContain("one question at a time in chat");
       expect(answerInterviewQuestion?.description).toContain("current interview question");
       expect(completeInterview?.description).toContain("Complete a guided interview");
+      expect(getSkill?.description).toContain("Skippy-hosted harness skill");
 
       const prompts = await client.listPrompts();
       expect(prompts.prompts.find((prompt) => prompt.name === "skippy_intro")?.description).toContain(
@@ -267,6 +278,9 @@ describe("Skippy MCP manifest", () => {
       );
       expect(prompts.prompts.find((prompt) => prompt.name === "skippy_skills")?.description).toContain(
         "Portable harness instructions",
+      );
+      expect(prompts.prompts.find((prompt) => prompt.name === "skippy_task_heartbeat")?.description).toContain(
+        "Ready agent tasks",
       );
       expect(prompts.prompts.find((prompt) => prompt.name === "skippy_slash_commands")?.description).toContain(
         "slash command",
@@ -288,6 +302,13 @@ describe("Skippy MCP manifest", () => {
         expect(skills.messages[0].content.text).toContain("Use `get_importance_rubric`");
         expect(skills.messages[0].content.text).toContain("/task ...");
         expect(skills.messages[0].content.text).toContain("mark_task_done");
+      }
+
+      const taskHeartbeat = await client.getPrompt({ name: "skippy_task_heartbeat" });
+      expect(taskHeartbeat.messages[0]?.content.type).toBe("text");
+      if (taskHeartbeat.messages[0]?.content.type === "text") {
+        expect(taskHeartbeat.messages[0].content.text).toContain("Skippy Task Heartbeat");
+        expect(taskHeartbeat.messages[0].content.text).toContain("requested Ready agent tasks");
       }
 
       const slashCommands = await client.getPrompt({ name: "skippy_slash_commands" });

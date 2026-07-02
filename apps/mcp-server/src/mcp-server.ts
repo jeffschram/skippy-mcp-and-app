@@ -315,6 +315,11 @@ function toolResult(value: unknown) {
   };
 }
 
+function skillText(value: unknown, fallback: string) {
+  const record = objectResult(value);
+  return typeof record.body === "string" && record.body.trim() ? record.body : fallback;
+}
+
 function objectResult(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
@@ -589,6 +594,25 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
   );
 
   server.registerResource(
+    "skippy_task_heartbeat",
+    "skippy://skills/task-heartbeat",
+    {
+      title: "Skippy task heartbeat skill",
+      description: "Portable heartbeat instructions for harnesses that execute requested Ready agent tasks.",
+      mimeType: "text/markdown",
+    },
+    async (uri) => ({
+      contents: [
+        {
+          uri: uri.href,
+          mimeType: "text/markdown",
+          text: skillText(await tools.getSkill({ slug: "task-heartbeat" }), buildSkillsMessage()),
+        },
+      ],
+    }),
+  );
+
+  server.registerResource(
     "skippy_skills",
     "skippy://guide/skills",
     {
@@ -640,6 +664,27 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
           uri: uri.href,
           mimeType: "text/plain",
           text: buildIntroMessage(),
+        },
+      ],
+    }),
+  );
+
+  server.registerPrompt(
+    "skippy_task_heartbeat",
+    {
+      title: "Load Skippy Task Heartbeat",
+      description:
+        "Portable heartbeat instructions for harnesses that execute requested Ready agent tasks and report results back to Skippy.",
+    },
+    async () => ({
+      description: "Teach the connected harness how to run Skippy requested Ready agent tasks.",
+      messages: [
+        {
+          role: "assistant",
+          content: {
+            type: "text",
+            text: skillText(await tools.getSkill({ slug: "task-heartbeat" }), buildSkillsMessage()),
+          },
         },
       ],
     }),
@@ -705,6 +750,20 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
         },
       ],
     }),
+  );
+
+  server.registerTool(
+    "get_skill",
+    {
+      title: "Get Skippy-hosted skill",
+      description:
+        "Read a portable Skippy-hosted harness skill by slug, such as task-heartbeat. Use this to load the latest canonical instructions instead of relying on copied prompt text.",
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: z.object({
+        slug: z.string().describe("Skill slug, for example task-heartbeat."),
+      }),
+    },
+    async (args) => toolResult(await tools.getSkill(stripUndefined(args) as { slug: string })),
   );
 
   server.registerTool(

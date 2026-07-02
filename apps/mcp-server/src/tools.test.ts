@@ -71,6 +71,7 @@ function createFakeClient(): { client: SkippyClient; calls: Array<{ name: string
       getNotificationDispatchContext: (brainInstanceId) => record("getNotificationDispatchContext", brainInstanceId),
       recordNotificationDelivery: (brainInstanceId, delivery) =>
         record("recordNotificationDelivery", brainInstanceId, delivery),
+      getSkill: (brainInstanceId, input) => record("getSkill", brainInstanceId, input),
     },
   };
 }

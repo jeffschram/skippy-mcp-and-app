@@ -131,6 +131,7 @@ export type SkippyClient = {
   listReadyTasks(brainInstanceId: string, input: { limit?: number }): Promise<unknown>;
   listRequestedReadyTasks(brainInstanceId: string, input: { limit?: number }): Promise<unknown>;
   getTaskBrief(brainInstanceId: string, input: { taskId: string }): Promise<unknown>;
+  getSkill(brainInstanceId: string, input: { slug: string }): Promise<unknown>;
   recordTaskResult(
     brainInstanceId: string,
     input: {
@@ -927,6 +928,10 @@ export function createSkippyToolHandlers(client: SkippyClient, brainInstanceId: 
 
     async getTaskBrief(input: { taskId: string }) {
       return await client.getTaskBrief(brainInstanceId, input);
+    },
+
+    async getSkill(input: { slug: string }) {
+      return await client.getSkill(brainInstanceId, input);
     },
 
     async recordTaskResult(input: {
