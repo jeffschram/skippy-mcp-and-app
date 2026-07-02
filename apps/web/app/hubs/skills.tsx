@@ -94,13 +94,13 @@ export function SkillDetailContent({ slug }: { slug: string }) {
   const [busy, setBusy] = useState(false);
   const publicSkillUrl = `https://skippy.jeffschram.dev/skills/${slug}`;
   const schedulerInstructions = [
-    "If your harness supports Skippy MCP prompts:",
+    "If you support Skippy MCP prompts:",
     "Use the prompt `skippy_task_heartbeat`.",
     "",
-    "If your harness doesn't support Skippy MCP prompts but supports Skippy MCP tools:",
+    "If you do not support Skippy MCP prompts but do support Skippy MCP tools:",
     `Call \`get_skill\` with slug \`${slug}\``,
     "",
-    "If neither of those work load the Skippy skill at:",
+    "If neither of those work, load the Skippy skill at:",
     publicSkillUrl,
   ].join("\n");
 
