@@ -18,6 +18,7 @@ import type * as planning from "../planning.js";
 import type * as projects from "../projects.js";
 import type * as resurfacing from "../resurfacing.js";
 import type * as settings from "../settings.js";
+import type * as skills from "../skills.js";
 import type * as taskExecution from "../taskExecution.js";
 
 import type {
@@ -37,6 +38,7 @@ declare const fullApi: ApiFromModules<{
   projects: typeof projects;
   resurfacing: typeof resurfacing;
   settings: typeof settings;
+  skills: typeof skills;
   taskExecution: typeof taskExecution;
 }>;
 

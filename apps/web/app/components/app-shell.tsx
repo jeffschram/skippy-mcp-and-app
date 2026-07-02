@@ -8,6 +8,7 @@ import {
   CalendarCheck,
   FolderKanban,
   Inbox,
+  ScrollText,
   Settings,
   type LucideIcon,
 } from "lucide-react";
@@ -46,6 +47,12 @@ export const hubs: Array<{
     label: "Review",
     icon: Inbox,
     match: (p) => p.startsWith("/review"),
+  },
+  {
+    href: "/skills",
+    label: "Skills",
+    icon: ScrollText,
+    match: (p) => p.startsWith("/skills"),
   },
   {
     href: "/settings",

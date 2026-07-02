@@ -183,6 +183,26 @@ export default defineSchema({
     updatedAt: v.number(),
   }).index("by_brain", ["brainInstanceId"]),
 
+  harnessSkills: defineTable({
+    brainInstanceId: v.id("brainInstances"),
+    slug: v.string(),
+    title: v.string(),
+    description: v.optional(v.string()),
+    body: v.string(),
+    usageDescription: v.optional(v.string()),
+    usageLeadIn: v.optional(v.string()),
+    schedulerInstructions: v.optional(v.string()),
+    visibility: v.union(v.literal("public"), v.literal("private")),
+    version: v.number(),
+    isCurrent: v.boolean(),
+    createdByUserId: v.optional(v.id("users")),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_brain_slug_current", ["brainInstanceId", "slug", "isCurrent"])
+    .index("by_brain_current", ["brainInstanceId", "isCurrent"])
+    .index("by_brain_slug", ["brainInstanceId", "slug"]),
+
   goals: defineTable({
     brainInstanceId: v.id("brainInstances"),
     title: v.string(),
