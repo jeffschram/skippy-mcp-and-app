@@ -10,6 +10,7 @@ import {
   type EntityRef,
   type EntityType,
   type FocusSummary,
+  type LinkStatus,
   type PendingActionStatus,
   type RelationshipInput,
   type SourceRefInput,
@@ -158,6 +159,15 @@ export type SkippyClient = {
       prNumber?: number;
       prStatus?: "open" | "merged" | "closed";
       markDone?: boolean;
+      actorId?: string;
+    },
+  ): Promise<unknown>;
+  updateLinkStatus(
+    brainInstanceId: string,
+    input: {
+      linkId: string;
+      status: LinkStatus;
+      reason?: string;
       actorId?: string;
     },
   ): Promise<unknown>;
@@ -1031,6 +1041,13 @@ export function createSkippyToolHandlers(client: SkippyClient, brainInstanceId: 
       markDone?: boolean;
     }) {
       return await client.recordTaskResult(brainInstanceId, {
+        ...input,
+        actorId: "skippy_mcp",
+      });
+    },
+
+    async updateLinkStatus(input: { linkId: string; status: LinkStatus; reason?: string }) {
+      return await client.updateLinkStatus(brainInstanceId, {
         ...input,
         actorId: "skippy_mcp",
       });

@@ -50,6 +50,7 @@ function createFakeClient(): { client: SkippyClient; calls: Array<{ name: string
       getTaskBrief: (brainInstanceId, input) => record("getTaskBrief", brainInstanceId, input),
       briefTask: (brainInstanceId, input) => record("briefTask", brainInstanceId, input),
       recordTaskResult: (brainInstanceId, input) => record("recordTaskResult", brainInstanceId, input),
+      updateLinkStatus: (brainInstanceId, input) => record("updateLinkStatus", brainInstanceId, input),
       captureThought: (brainInstanceId, input) => record("captureThought", brainInstanceId, input),
       recordMemory: (brainInstanceId, input) => record("recordMemory", brainInstanceId, input),
       submitMemoryReviewCandidate: (brainInstanceId, input) =>
@@ -182,6 +183,30 @@ describe("Skippy MCP tool handlers", () => {
           executionBrief: "Implement the endpoint following existing patterns.",
           acceptanceCriteria: ["The endpoint validates ownership."],
           kind: "coding",
+          actorId: "skippy_mcp",
+        },
+      ],
+    });
+  });
+
+  it("updates link status with harness attribution", async () => {
+    const { client, calls } = createFakeClient();
+    const tools = createSkippyToolHandlers(client, "brain_123");
+
+    await tools.updateLinkStatus({
+      linkId: "link_123",
+      status: "read",
+      reason: "Ingested the article content during a sync.",
+    });
+
+    expect(calls[0]).toMatchObject({
+      name: "updateLinkStatus",
+      args: [
+        "brain_123",
+        {
+          linkId: "link_123",
+          status: "read",
+          reason: "Ingested the article content during a sync.",
           actorId: "skippy_mcp",
         },
       ],

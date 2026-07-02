@@ -504,6 +504,17 @@ function taskBriefedConfirmation(result: unknown) {
   };
 }
 
+function linkStatusUpdatedConfirmation(input: { status: string }, result: unknown) {
+  const resultRecord = objectResult(result);
+  return {
+    status: resultRecord.status ?? input.status,
+    entityType: "link",
+    linkId: resultRecord.linkId,
+    title: resultRecord.title,
+    reviewUrl: reviewUrl("/brain"),
+  };
+}
+
 function taskDoneConfirmation(result: unknown) {
   const resultRecord = objectResult(result);
   return {
@@ -1654,6 +1665,31 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
       },
     );
   }
+
+  server.registerTool(
+    "update_link_status",
+    {
+      title: "Update link status",
+      description:
+        "Update a stored link's lifecycle status. Use only for genuine lifecycle changes: mark 'read' after the harness has actually ingested or read the link's content (for example during a sync), 'saved' when reclassifying it as reference material, or 'discarded' when cleaning up dead or irrelevant links. Never use it to fake user engagement or clear the user's reading queue without cause.",
+      annotations: { destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: z.object({
+        linkId: z.string().describe("Accepted link entity ID to update."),
+        status: z
+          .enum(["unread", "read", "saved", "discarded"])
+          .describe("New lifecycle status for the link."),
+        reason: z.string().optional().describe("Short reason recorded in the link's activity history."),
+      }),
+    },
+    async (args) => {
+      const input = stripUndefined(args) as {
+        linkId: string;
+        status: "unread" | "read" | "saved" | "discarded";
+        reason?: string;
+      };
+      return toolResult(linkStatusUpdatedConfirmation(input, await tools.updateLinkStatus(input)));
+    },
+  );
 
   server.registerTool(
     "add_source_ref",
