@@ -168,6 +168,12 @@ export function ProgressBar({ value, tone }: { value: number; tone?: "blue" | "g
   );
 }
 
+/* ---------------- ActivityBar ---------------- */
+/** Skinny indeterminate progress bar — shows that background work (brief generation, agent execution) is running. */
+export function ActivityBar({ label = "Working…", className }: { label?: string; className?: string }) {
+  return <div className={cx(styles.activity, className)} role="progressbar" aria-label={label} />;
+}
+
 /* ---------------- Fields ---------------- */
 export function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
