@@ -8,6 +8,7 @@ export {
   Spinner,
   LoadingRow,
   ProgressBar,
+  ActivityBar,
   Field,
   TextInput,
   TextArea,

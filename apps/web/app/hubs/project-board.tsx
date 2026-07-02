@@ -21,6 +21,7 @@ import {
 import { api } from "../../lib/skippy-api";
 import { LiveGate } from "../live-auth";
 import {
+  ActivityBar,
   Badge,
   Button,
   Card,
@@ -83,6 +84,7 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
   const [resultUrl, setResultUrl] = useState("");
   const [resultSummary, setResultSummary] = useState("");
   const [busy, setBusy] = useState(false);
+  const [briefingTaskIds, setBriefingTaskIds] = useState<Set<string>>(new Set());
   const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
   const [dragOverState, setDragOverState] = useState<string | null>(null);
 
@@ -186,8 +188,23 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
     }
   };
 
+  // Track in-flight brief generation per task so the activity bar survives closing the sidepanel.
+  const setTaskBriefing = (taskId: string, briefing: boolean) => {
+    setBriefingTaskIds((previous) => {
+      const next = new Set(previous);
+      if (briefing) next.add(taskId);
+      else next.delete(taskId);
+      return next;
+    });
+  };
+
+  // Briefing (transient, client-side) or executing (persistent, from board data) — both show the activity bar.
+  const isTaskActive = (task: AnyRecord) => briefingTaskIds.has(task._id) || task.executionState === "in_progress";
+  const activityLabel = (task: AnyRecord) => (briefingTaskIds.has(task._id) ? "Generating brief…" : "In progress…");
+
   const createBriefForTask = async (taskId: string) => {
     setBusy(true);
+    setTaskBriefing(taskId, true);
     try {
       await briefTaskProposal({ taskId: taskId as any });
       toast("Brief created.", "success");
@@ -195,14 +212,17 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
       toast(error instanceof Error ? error.message : "Could not create brief", "error");
     } finally {
       setBusy(false);
+      setTaskBriefing(taskId, false);
     }
   };
 
   const moveTo = async (taskId: string, state: string, taskOverride?: AnyRecord | null) => {
     const task = taskOverride ?? board?.tasks?.find((candidate: AnyRecord) => candidate._id === taskId);
+    const briefing = task?.executionState === "proposed" && state === "briefed";
     setBusy(true);
+    if (briefing) setTaskBriefing(taskId, true);
     try {
-      if (task?.executionState === "proposed" && state === "briefed") {
+      if (briefing) {
         await briefTaskProposal({ taskId: taskId as any });
         toast("Brief created.", "success");
       } else {
@@ -213,6 +233,7 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
       toast(error instanceof Error ? error.message : "Could not move task", "error");
     } finally {
       setBusy(false);
+      if (briefing) setTaskBriefing(taskId, false);
     }
   };
 
@@ -472,6 +493,7 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                             {task.dependsOn?.length ? <Badge tone="gold">{task.dependsOn.length} dep</Badge> : null}
                             {task.resultUrl ? <Badge tone="green">result</Badge> : null}
                           </span>
+                          {isTaskActive(task) ? <ActivityBar label={activityLabel(task)} /> : null}
                         </button>
                       ))}
                       {tasks.length === 0 ? <p className={boardStyles.columnEmpty}>—</p> : null}
@@ -523,6 +545,7 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
           >
             {selected ? (
               <div style={{ display: "grid", gap: 16 }}>
+                {isTaskActive(selected) ? <ActivityBar label={activityLabel(selected)} /> : null}
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
                   <Badge tone={executionStateTone(selected.executionState)} dot>
                     {titleCase(selected.executionState)}

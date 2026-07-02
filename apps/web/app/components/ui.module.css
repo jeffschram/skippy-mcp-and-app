@@ -284,6 +284,31 @@
   background: #4a9a68;
 }
 
+/* ---------- ActivityBar ---------- */
+.activity {
+  width: 100%;
+  height: 4px;
+  border-radius: 999px;
+  background-color: light-dark(#e8e2d3, #333);
+  background-image: linear-gradient(
+    90deg,
+    light-dark(#e8e2d3, #333) 0%,
+    color-mix(in srgb, var(--blue) 72%, light-dark(#e8e2d3, #333)) 50%,
+    light-dark(#e8e2d3, #333) 100%
+  );
+  background-size: 200% 100%;
+  animation: ui-activity-shimmer 1.3s linear infinite;
+}
+
+@keyframes ui-activity-shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: 0% 0;
+  }
+}
+
 /* ---------- Fields ---------- */
 .field {
   display: grid;
