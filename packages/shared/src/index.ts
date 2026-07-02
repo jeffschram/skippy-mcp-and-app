@@ -692,3 +692,73 @@ export function candidateFingerprint(entityType: EntityType, rawPayload: unknown
   const canonicalText = JSON.stringify(canonicalFingerprintValue(canonicalPayload));
   return `${entityType}:${fingerprintHash(canonicalText)}`;
 }
+
+/**
+ * A focus-summary topItem candidate that a dismissed bullet may resolve to. `reason` is the
+ * stored topItem reason and `entityTitle` is the referenced entity's title/name/url.
+ */
+export type DismissedFocusItemCandidate = {
+  entityRef: EntityRef;
+  reason?: string;
+  entityTitle?: string;
+};
+
+const FOCUS_MATCH_STOPWORDS = new Set([
+  "the", "a", "an", "and", "or", "to", "of", "for", "in", "on", "at", "with", "from", "by",
+  "is", "are", "was", "be", "been", "it", "its", "this", "that", "these", "those", "your",
+  "you", "their", "his", "her", "has", "have", "had", "will", "should", "can", "not", "new",
+]);
+
+function focusMatchTokens(value: string): Set<string> {
+  return new Set(
+    value
+      .toLowerCase()
+      .replace(/https?:\/\/\S+/g, " ")
+      .split(/[^a-z0-9]+/)
+      .filter((token) => token.length > 2 && !FOCUS_MATCH_STOPWORDS.has(token)),
+  );
+}
+
+/**
+ * Best-match a dismissed focus bullet against a summary's topItems using normalized
+ * token overlap between the bullet text and each candidate's reason + entity title.
+ * Returns undefined unless there is one clear winner: a sufficiently strong overlap that
+ * also clearly beats the runner-up. Ambiguous or weak matches are skipped on purpose so a
+ * dismissal never mutates the wrong entity.
+ */
+export function matchDismissedFocusItem<T extends DismissedFocusItemCandidate>(
+  itemText: string,
+  candidates: T[],
+): T | undefined {
+  const itemTokens = focusMatchTokens(itemText);
+  if (itemTokens.size === 0) {
+    return undefined;
+  }
+
+  const scored = candidates
+    .map((candidate) => {
+      const candidateTokens = focusMatchTokens(
+        [candidate.reason, candidate.entityTitle].filter(Boolean).join(" "),
+      );
+      let overlap = 0;
+      for (const token of itemTokens) {
+        if (candidateTokens.has(token)) {
+          overlap += 1;
+        }
+      }
+      return { candidate, overlap, score: overlap / Math.min(itemTokens.size, 8) };
+    })
+    .sort((left, right) => right.score - left.score);
+
+  const best = scored[0];
+  if (!best || best.overlap < 2 || best.score < 0.4) {
+    return undefined;
+  }
+
+  const runnerUp = scored[1];
+  if (runnerUp && runnerUp.overlap >= 2 && runnerUp.score * 2 > best.score) {
+    return undefined;
+  }
+
+  return best.candidate;
+}

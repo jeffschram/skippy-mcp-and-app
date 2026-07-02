@@ -28,6 +28,7 @@ type AiContextRecord = {
     embeddingModel?: string;
   } | null;
   focusSummary?: FocusSummary | null;
+  recentFocusDismissals?: Array<{ itemKey?: string; itemText: string; dismissedAt?: number }>;
   projects?: Array<Record<string, any>>;
   tasks?: Array<Record<string, any>>;
   people?: Array<Record<string, any>>;
@@ -396,6 +397,12 @@ function emailLinkFromSourceRefs(sourceRefs: Array<Record<string, any>> | undefi
 
 function isActiveFocusItem(entityType: EntityType, item: Record<string, any>) {
   if (item.processingState && item.processingState !== "accepted") {
+    return false;
+  }
+
+  // Dismissing a focus bullet snoozes the underlying entity from focus context without
+  // changing its real status.
+  if (typeof item.focusSnoozedUntil === "number" && item.focusSnoozedUntil > Date.now()) {
     return false;
   }
 
@@ -794,6 +801,11 @@ export function createSkippyToolHandlers(client: SkippyClient, brainInstanceId: 
     async refreshFocusSummary(input: FocusSummaryRefreshInput = {}) {
       const context = (await client.getAiContext(brainInstanceId)) as AiContextRecord;
       const config = aiConfigFromContext(context);
+      // Dismissals are durable signal: recently dismissed bullet texts ride along so
+      // generation does not re-raise those topics.
+      const recentlyDismissedItems = (context.recentFocusDismissals ?? [])
+        .map((dismissal) => (typeof dismissal?.itemText === "string" ? dismissal.itemText.trim() : ""))
+        .filter(Boolean);
       let contextItems = synthesisItems(context);
       let embeddingRanking: Awaited<ReturnType<typeof rankContextItemsWithEmbeddings>>["embeddingRanking"];
       let embeddingError: string | undefined;
@@ -818,6 +830,7 @@ export function createSkippyToolHandlers(client: SkippyClient, brainInstanceId: 
           status: "not_configured",
           message: "Internal focus summary generation requires llmProviderMode=openai.",
           contextItems,
+          recentlyDismissedItems,
           embeddingRanking,
           embeddingError,
         };
@@ -829,6 +842,7 @@ export function createSkippyToolHandlers(client: SkippyClient, brainInstanceId: 
         items: contextItems,
         generatedAt,
         policyVersion,
+        recentlyDismissedItems,
       });
       const summaryToStore: FocusSummary = {
         ...focusSummary,
