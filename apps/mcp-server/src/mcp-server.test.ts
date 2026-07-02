@@ -177,15 +177,26 @@ function createFakeClient(overrides: Partial<SkippyClient> = {}): SkippyClient {
       recentDeliveries: [],
     }),
     recordNotificationDelivery: async () => ({ ok: true }),
-    getSkill: async (_brainInstanceId, input) => ({
-      slug: input.slug,
-      title: "Task heartbeat",
-      description: "Portable heartbeat instructions.",
-      body: "# Skippy Task Heartbeat\n\nCheck Skippy for requested Ready agent tasks.",
-      visibility: "public",
-      version: 1,
-      isDefault: true,
-    }),
+    getSkill: async (_brainInstanceId, input) =>
+      input.slug === "harness-bootstrap"
+        ? {
+            slug: input.slug,
+            title: "Harness bootstrap",
+            description: "Portable bootstrap instructions.",
+            body: "# Skippy Harness Bootstrap\n\nYou are an AI harness connected to Skippy MCP.",
+            visibility: "public",
+            version: 1,
+            isDefault: true,
+          }
+        : {
+            slug: input.slug,
+            title: "Task heartbeat",
+            description: "Portable heartbeat instructions.",
+            body: "# Skippy Task Heartbeat\n\nCheck Skippy for requested Ready agent tasks.",
+            visibility: "public",
+            version: 1,
+            isDefault: true,
+          },
   };
 
   return { ...client, ...overrides };
@@ -282,6 +293,9 @@ describe("Skippy MCP manifest", () => {
       expect(prompts.prompts.find((prompt) => prompt.name === "skippy_task_heartbeat")?.description).toContain(
         "Ready agent tasks",
       );
+      expect(prompts.prompts.find((prompt) => prompt.name === "skippy_harness_bootstrap")?.description).toContain(
+        "newly connected harness",
+      );
       expect(prompts.prompts.find((prompt) => prompt.name === "skippy_slash_commands")?.description).toContain(
         "slash command",
       );
@@ -309,6 +323,18 @@ describe("Skippy MCP manifest", () => {
       if (taskHeartbeat.messages[0]?.content.type === "text") {
         expect(taskHeartbeat.messages[0].content.text).toContain("Skippy Task Heartbeat");
         expect(taskHeartbeat.messages[0].content.text).toContain("requested Ready agent tasks");
+      }
+
+      const harnessBootstrap = await client.getPrompt({
+        name: "skippy_harness_bootstrap",
+        arguments: { harnessName: "Claude Code", verbosity: "detailed" },
+      });
+      expect(harnessBootstrap.messages[0]?.content.type).toBe("text");
+      if (harnessBootstrap.messages[0]?.content.type === "text") {
+        expect(harnessBootstrap.messages[0].content.text).toContain("You are Claude Code");
+        expect(harnessBootstrap.messages[0].content.text).toContain("First 5 Minutes");
+        expect(harnessBootstrap.messages[0].content.text).toContain("Consent And Capture Rules");
+        expect(harnessBootstrap.messages[0].content.text).toContain("docs/codex-heartbeat.md");
       }
 
       const slashCommands = await client.getPrompt({ name: "skippy_slash_commands" });
