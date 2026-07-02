@@ -67,4 +67,38 @@ describe("focus summary presentation", () => {
     expect(headline).toBe("Reply to the outstanding statement email.");
     expect(bullets[0]).toBe("Reply to [Chase statement](https://mail.google.com/mail/u/0/#all/18f2c3a) before Friday.");
   });
+
+  it("strips a leading 'Now:' label from stored bullets", () => {
+    const { bullets } = parseFocusSummary(
+      [
+        "Summary: Keep the build moving.",
+        "- Now: Monitor the Vercel preview deployment.",
+        "- now: pay the card statement before Friday.",
+        "- NOW - Review today's calendar for prep needs.",
+        "- Draft the release notes.",
+      ].join("\n"),
+    );
+
+    expect(bullets).toEqual([
+      "Monitor the Vercel preview deployment.",
+      "pay the card statement before Friday.",
+      "Review today's calendar for prep needs.",
+      "Draft the release notes.",
+    ]);
+  });
+
+  it("keeps bullets that merely start with the word 'Now'", () => {
+    const { bullets } = parseFocusSummary(
+      [
+        "Summary: Follow up on the merge.",
+        "- Now that the PR merged, verify the production deploy.",
+        "- Review the follow-up tasks.",
+      ].join("\n"),
+    );
+
+    expect(bullets).toEqual([
+      "Now that the PR merged, verify the production deploy.",
+      "Review the follow-up tasks.",
+    ]);
+  });
 });

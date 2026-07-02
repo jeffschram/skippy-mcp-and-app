@@ -96,6 +96,7 @@ describe("AI provider abstractions", () => {
 
     const body = JSON.parse(String(calls[0]?.init.body));
     expect(body.instructions).toContain("actionable next moves only");
+    expect(body.instructions).toContain("never prefix a bullet with 'Now:'");
     expect(body.instructions).toContain("standing context");
     expect(body.instructions).toContain("identity facts");
   });
