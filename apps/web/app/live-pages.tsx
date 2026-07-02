@@ -102,7 +102,8 @@ function editablePayloadFor(type: string, payload: AnyRecord) {
         title: textValue(payload.title),
         summary: textValue(payload.summary, payload.sourceSummary),
         whyItMatters: textValue(payload.whyItMatters, payload.priorityReason),
-        status: textValue(payload.status) || "unread",
+        // Approving a candidate marks it valid reference material, not read-later homework.
+        status: textValue(payload.status) || "saved",
       };
     case "knowledgeObject":
       return {
