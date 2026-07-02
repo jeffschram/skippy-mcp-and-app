@@ -31,6 +31,16 @@ export function splitTopLevelList(value: string) {
   return items.map((item) => item.replace(/^and\s+/i, "").trim()).filter(Boolean);
 }
 
+/**
+ * Strip a redundant leading "Now:" / "Now -" label from a bullet. The app already renders
+ * bullets under a "Now" heading, so older stored summaries that labeled each bullet should
+ * render clean. Only strips when "now" is followed by a ':' or '-' separator, so sentences
+ * that merely start with the word "Now" (e.g. "Now that the PR merged...") are untouched.
+ */
+function stripNowLabel(bullet: string) {
+  return bullet.replace(/^now\s*:\s*|^now\s+[-–—]\s+/i, "").trim();
+}
+
 export function focusSummaryBullets(summaryText: string | undefined) {
   if (!summaryText?.trim()) {
     return ["No stored focus summary yet. A harness can generate one through the MCP."];
@@ -41,7 +51,9 @@ export function focusSummaryBullets(summaryText: string | undefined) {
     .split(/\n+/)
     .map((line) => line.replace(/^[-*]\s+|^\d+\.\s+/, "").trim())
     .filter(Boolean)
-    .filter((line) => !/^summary:/i.test(line));
+    .filter((line) => !/^summary:/i.test(line))
+    .map(stripNowLabel)
+    .filter(Boolean);
   if (markdownBullets.length > 1) {
     return markdownBullets;
   }
@@ -61,6 +73,7 @@ export function focusSummaryBullets(summaryText: string | undefined) {
   }
 
   return bullets
+    .map(stripNowLabel)
     .map((bullet) => bullet.replace(/\.$/, "").trim())
     .filter(Boolean)
     .map((bullet) => `${bullet[0]?.toUpperCase() ?? ""}${bullet.slice(1)}.`);
