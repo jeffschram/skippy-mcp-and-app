@@ -93,6 +93,11 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
   const [briefDraft, setBriefDraft] = useState("");
   const [criteriaDraft, setCriteriaDraft] = useState("");
 
+  // Proposal editing (proposed tasks: title + proposal text)
+  const [editingProposal, setEditingProposal] = useState(false);
+  const [titleDraft, setTitleDraft] = useState("");
+  const [proposalDraft, setProposalDraft] = useState("");
+
   // Task proposal dialog
   const [proposalOpen, setProposalOpen] = useState(false);
   const [proposalText, setProposalText] = useState("");
@@ -124,9 +129,12 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
   // Reset edit state whenever a different task is opened.
   useEffect(() => {
     setEditingBrief(false);
+    setEditingProposal(false);
     if (selected) {
       setBriefDraft(selected.executionBrief ?? "");
       setCriteriaDraft((selected.acceptanceCriteria ?? []).join("\n"));
+      setTitleDraft(selected.title ?? "");
+      setProposalDraft(selected.description ?? "");
     }
   }, [selectedId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -277,6 +285,27 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
       setEditingBrief(false);
     } catch (error) {
       toast(error instanceof Error ? error.message : "Could not save brief", "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const saveProposal = async (taskId: string) => {
+    if (!titleDraft.trim()) {
+      toast("Title cannot be empty.", "error");
+      return;
+    }
+    setBusy(true);
+    try {
+      await updateBrief({
+        taskId: taskId as any,
+        title: titleDraft,
+        description: proposalDraft,
+      } as any);
+      toast("Proposal updated.", "success");
+      setEditingProposal(false);
+    } catch (error) {
+      toast(error instanceof Error ? error.message : "Could not save proposal", "error");
     } finally {
       setBusy(false);
     }
@@ -577,15 +606,65 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                   </Select>
                 </label>
 
-                {selected.description ? <p style={{ margin: 0 }}>{selected.description}</p> : null}
+                {selected.description && selected.executionState !== "proposed" ? (
+                  <p style={{ margin: 0 }}>{selected.description}</p>
+                ) : null}
 
                 {selected.executionState === "proposed" ? (
                   <section>
-                    <h3 style={{ marginTop: 0 }}>Proposal</h3>
-                    <p className={boardStyles.brief}>{selected.description ?? selected.title}</p>
-                    <p className="muted" style={{ fontSize: 14 }}>
-                      Create a brief to turn this proposal into an editable, hand-off-ready task.
-                    </p>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                      <h3 style={{ margin: 0 }}>Proposal</h3>
+                      {!editingProposal ? (
+                        <Button
+                          small
+                          onClick={() => {
+                            setTitleDraft(selected.title ?? "");
+                            setProposalDraft(selected.description ?? "");
+                            setEditingProposal(true);
+                          }}
+                        >
+                          <Pencil size={14} aria-hidden /> Edit
+                        </Button>
+                      ) : null}
+                    </div>
+                    {editingProposal ? (
+                      <div style={{ display: "grid", gap: 10, marginTop: 8 }}>
+                        <Field label="Title">
+                          <TextInput
+                            value={titleDraft}
+                            onChange={(event) => setTitleDraft(event.target.value)}
+                            placeholder="Task title"
+                          />
+                        </Field>
+                        <Field label="Proposal">
+                          <TextArea
+                            value={proposalDraft}
+                            onChange={(event) => setProposalDraft(event.target.value)}
+                            placeholder="Describe the idea, problem, constraints, or proposed solution."
+                            style={{ minHeight: 120 }}
+                          />
+                        </Field>
+                        <div style={{ display: "flex", gap: 8 }}>
+                          <Button disabled={busy} onClick={() => setEditingProposal(false)}>
+                            Cancel
+                          </Button>
+                          <Button
+                            variant="primary"
+                            disabled={busy || !titleDraft.trim()}
+                            onClick={() => void saveProposal(selected._id)}
+                          >
+                            Save proposal
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <p className={boardStyles.brief}>{selected.description ?? selected.title}</p>
+                        <p className="muted" style={{ fontSize: 14 }}>
+                          Create a brief to turn this proposal into an editable, hand-off-ready task.
+                        </p>
+                      </>
+                    )}
                   </section>
                 ) : null}
 
