@@ -1,13 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { useConvexAuth, useMutation, useQuery } from "convex/react";
 import { api } from "../lib/skippy-api";
 import { focusItemKey, focusSummaryBullets, focusSummaryPresentation } from "./focus-summary";
 import { LiveGate } from "./live-auth";
 import { icons } from "./ui";
-import { InlineMarkdown } from "./components";
+import { IconButton, InlineMarkdown, useToast } from "./components";
 
 type AnyRecord = Record<string, any>;
 type MergeOption = AnyRecord & {
@@ -1143,6 +1143,67 @@ function relatedEntityMeta(entity: AnyRecord) {
   return textValue(ref?.entityType, entity.entityType, entity.type, entity.relationship, entity.reason) || "related";
 }
 
+// Mirrors MEMORY_REVIEW_EXPIRY_MS in convex/knowledge.ts; the server enforces its own default.
+const MEMORY_REVIEW_EXPIRY_MS = 14 * 24 * 60 * 60 * 1000;
+
+function memoryIsPendingReview(memory: AnyRecord) {
+  return memory.reviewState === "pending_review";
+}
+
+function MemoryReviewActions({ memory, small }: { memory: AnyRecord; small?: boolean }) {
+  const toast = useToast();
+  const acceptMemory = useMutation(expectedMemoryApi.acceptMemoryForViewer);
+  const rejectMemory = useMutation(expectedMemoryApi.rejectMemoryForViewer);
+  const [busy, setBusy] = useState(false);
+  const title = memoryTitle(memory);
+  const memoryId = textValue(memory._id, memory.id);
+
+  const resolve = async (event: MouseEvent, action: "accept" | "reject") => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!memoryId || busy) {
+      return;
+    }
+    setBusy(true);
+    try {
+      if (action === "accept") {
+        await acceptMemory({ memoryId: memoryId as any });
+        toast(`Memory accepted: ${title}`, "success");
+      } else {
+        await rejectMemory({ memoryId: memoryId as any });
+        toast(`Memory rejected: ${title}`, "success");
+      }
+    } catch (error) {
+      toast(error instanceof Error ? error.message : `Could not ${action} memory.`, "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <IconButton
+        small={small ?? false}
+        title="Accept memory"
+        aria-label={`Accept ${title}`}
+        disabled={busy}
+        onClick={(event) => void resolve(event, "accept")}
+      >
+        <icons.Check size={15} aria-hidden />
+      </IconButton>
+      <IconButton
+        small={small ?? false}
+        title="Reject memory"
+        aria-label={`Reject ${title}`}
+        disabled={busy}
+        onClick={(event) => void resolve(event, "reject")}
+      >
+        <icons.X size={15} aria-hidden />
+      </IconButton>
+    </>
+  );
+}
+
 function MemoryRow({ memory, variant = "library" }: { memory: AnyRecord; variant?: "inbox" | "library" }) {
   const state = memoryState(memory);
   const reason = memoryReason(memory);
@@ -1169,6 +1230,7 @@ function MemoryRow({ memory, variant = "library" }: { memory: AnyRecord; variant
         <InlineRelatedEntities entities={arrayValue(memory.relatedEntities)} />
       </div>
       <span className="project-row-side">
+        {variant === "inbox" && memoryIsPendingReview(memory) ? <MemoryReviewActions memory={memory} small /> : null}
         <span className={`badge ${badgeColorForState(state)}`}>{state}</span>
         <icons.ChevronRight size={18} aria-hidden />
       </span>
@@ -1264,11 +1326,64 @@ function RelatedEntityList({ entities }: { entities: AnyRecord[] }) {
 
 export function LiveMemoryInboxContent() {
   const viewerReady = useViewerReady();
+  const toast = useToast();
   const data = useQuery(expectedMemoryApi.listMemoryInboxForViewer, viewerReady ? { limit: 50 } : "skip") as
     | AnyRecord
     | AnyRecord[]
     | undefined;
   const items = collectionItems(data);
+  const expireStaleCandidates = useMutation(expectedMemoryApi.expireStaleMemoryCandidatesForViewer);
+  const bulkResolveCandidates = useMutation(expectedMemoryApi.bulkResolveMemoryCandidatesForViewer);
+  const [bulkBusy, setBulkBusy] = useState(false);
+
+  const hasStaleCandidates = items.some(
+    (memory) =>
+      memoryIsPendingReview(memory) &&
+      typeof memory.createdAt === "number" &&
+      memory.createdAt < Date.now() - MEMORY_REVIEW_EXPIRY_MS,
+  );
+
+  const expiryTriggered = useRef(false);
+  useEffect(() => {
+    if (!viewerReady || !hasStaleCandidates || expiryTriggered.current) {
+      return;
+    }
+    expiryTriggered.current = true;
+    void (async () => {
+      try {
+        const result = (await expireStaleCandidates({})) as AnyRecord | undefined;
+        const expiredCount = Number(result?.expiredCount ?? 0);
+        if (expiredCount > 0) {
+          toast(`Auto-archived ${expiredCount} stale review ${expiredCount === 1 ? "candidate" : "candidates"}.`);
+        }
+      } catch {
+        // Auto-expiry is best-effort; the inbox stays usable if it fails.
+      }
+    })();
+  }, [viewerReady, hasStaleCandidates, expireStaleCandidates, toast]);
+
+  const bulkResolve = async (resolution: "accept" | "archive") => {
+    if (bulkBusy) {
+      return;
+    }
+    setBulkBusy(true);
+    try {
+      const result = (await bulkResolveCandidates({ resolution })) as AnyRecord | undefined;
+      const resolvedCount = Number(result?.resolvedCount ?? 0);
+      toast(
+        resolution === "accept"
+          ? `Accepted ${resolvedCount} review ${resolvedCount === 1 ? "candidate" : "candidates"}.`
+          : `Archived ${resolvedCount} review ${resolvedCount === 1 ? "candidate" : "candidates"}.`,
+        "success",
+      );
+    } catch (error) {
+      toast(error instanceof Error ? error.message : "Bulk action failed.", "error");
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
+  const pendingCount = items.filter((memory) => memoryIsPendingReview(memory)).length;
 
   return (
     <LiveGate>
@@ -1283,11 +1398,36 @@ export function LiveMemoryInboxContent() {
           <p className="muted">No captured memory objects need review right now.</p>
         </section>
       ) : (
-        <div className="item-list">
-          {items.map((memory) => (
-            <MemoryRow key={textValue(memory._id, memory.id, memoryTitle(memory))} memory={memory} variant="inbox" />
-          ))}
-        </div>
+        <>
+          {pendingCount > 0 ? (
+            <div className="toolbar" style={{ marginBottom: 12 }}>
+              <button
+                className="text-button compact"
+                type="button"
+                disabled={bulkBusy}
+                onClick={() => void bulkResolve("accept")}
+              >
+                Accept all
+              </button>
+              <button
+                className="text-button compact"
+                type="button"
+                disabled={bulkBusy}
+                onClick={() => void bulkResolve("archive")}
+              >
+                Archive all
+              </button>
+              <span className="muted">
+                Unreviewed candidates auto-archive after {Math.round(MEMORY_REVIEW_EXPIRY_MS / (24 * 60 * 60 * 1000))} days.
+              </span>
+            </div>
+          ) : null}
+          <div className="item-list">
+            {items.map((memory) => (
+              <MemoryRow key={textValue(memory._id, memory.id, memoryTitle(memory))} memory={memory} variant="inbox" />
+            ))}
+          </div>
+        </>
       )}
     </LiveGate>
   );
@@ -1379,7 +1519,10 @@ export function LiveMemoryDetailContent({ memoryId }: { memoryId: string }) {
                 <h2>{memoryTitle(memory)}</h2>
                 <p className="muted">{memorySummary(memory)}</p>
               </div>
-              <span className={`badge ${badgeColorForState(memoryState(memory))}`}>{memoryState(memory)}</span>
+              <span className="project-row-side">
+                {memoryIsPendingReview(memory) ? <MemoryReviewActions memory={memory} /> : null}
+                <span className={`badge ${badgeColorForState(memoryState(memory))}`}>{memoryState(memory)}</span>
+              </span>
             </div>
             <div className="toolbar">
               <span className="badge blue">{memoryKind(memory)}</span>

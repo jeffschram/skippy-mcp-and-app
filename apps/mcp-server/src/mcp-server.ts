@@ -69,7 +69,7 @@ const skippyInstructions = [
   "For noisy sources, submit only items that are actionable, relationship-building, deadline-bearing, decision-relevant, or clearly useful later.",
   "Use pending actions only for external side effects that need separate approval/execution. Do not send email, edit calendars, or mark source systems changed through Skippy.",
   "Use capture_thought, record_memory, record_decision, and record_principle for durable second-brain memory. Include source refs, related entity refs, confidence, captureReason/rubricDecision, and reviewBehavior when available.",
-  "Use submit_memory_review_candidate when a possible memory is useful but uncertain. Use list_memory/get_context_bundle/get_memory_detail before adding likely duplicates or answering from memory, and link_memory to attach memories to accepted entities.",
+  "Use submit_memory_review_candidate when a possible memory is useful but uncertain. Do not queue transient alerts (balance notifications, promo deadlines, ToS notices); skip them or record directly with expiry context. Use list_memory/get_context_bundle/get_memory_detail before adding likely duplicates or answering from memory, and link_memory to attach memories to accepted entities.",
   "Use list_interview_templates/start_interview/get_interview/answer_interview_question/complete_interview/archive_interview to run guided second-brain interviews inside the harness chat. Ask one question at a time in chat, using the assistantDisplayName returned by Skippy.",
   "Use ask/summarize_focus/list_pending_actions for retrieval. Internal AI synthesis may be disabled, so expect structured context rather than polished answers.",
 ].join("\n");
@@ -1064,7 +1064,7 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
     {
       title: "Submit memory review candidate",
       description:
-        "Queue a possible memory for user review when the harness is unsure it should be stored directly. Prefer record_memory, record_decision, or record_principle when the item clearly clears the rubric.",
+        "Queue a possible memory for user review when the harness is unsure it should be stored directly. Prefer record_memory, record_decision, or record_principle when the item clearly clears the rubric. Do NOT queue transient alerts (balance notifications, promo deadlines, ToS/policy notices, expiring offers): skip them, or if genuinely useful, record them directly with expiry context in the body. Unreviewed candidates auto-archive after 14 days, so only queue items worth a durable memory.",
       annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: true },
       inputSchema: z.object({
         content: z.string().describe("Concise proposed memory content."),
