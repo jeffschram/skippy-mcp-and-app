@@ -67,6 +67,8 @@ type Aggregates = {
   totalOutgoingCents: number;
   totalIncomingCents: number;
   netCents: number;
+  /** Transfers In minus Transfers Out (signed). Excluded from outgoing/incoming/net. */
+  transferNetCents: number;
   categoryPercentOfOutgoing: Record<string, number>;
   typePercentOfOutgoing: Record<string, number>;
 };
@@ -83,6 +85,7 @@ type MonthlyReport = {
     totalOutgoingCents: number;
     totalIncomingCents: number;
     netCents: number;
+    transferNetCents: number;
     categoryTotalsCents: Record<string, number>;
     typeTotalsCents: Record<string, number>;
   };
@@ -122,6 +125,7 @@ const BAND_CLASS: Record<TxType, string> = {
   Spending: styles.bandSpending!,
   Food: styles.bandFood!,
   Income: styles.bandIncome!,
+  Transfer: styles.bandTransfer!,
 };
 
 const BAND_LABEL: Record<TxType, string> = {
@@ -129,11 +133,18 @@ const BAND_LABEL: Record<TxType, string> = {
   Spending: "Spending",
   Food: "Food",
   Income: "INCOME",
+  Transfer: "Transfers",
 };
 
+// Band order follows TX_TYPES (shared taxonomy order): Fixed, Spending, Food,
+// Income, then Transfer LAST — the neutral band sits after the colored ones.
 const GRID_CATEGORIES: Array<{ category: TxCategory; type: TxType }> = TX_TYPES.flatMap((type) =>
   TX_TYPE_CATEGORIES[type].map((category) => ({ category: category as TxCategory, type })),
 );
+
+// Budgets never target transfers: the budget editor hides the Transfer band.
+const BUDGET_TX_TYPES = TX_TYPES.filter((type) => type !== "Transfer");
+const BUDGET_CATEGORIES = GRID_CATEGORIES.filter(({ type }) => type !== "Transfer");
 
 /** Date column + balance column + one column per category. */
 const GRID_COLUMN_COUNT = GRID_CATEGORIES.length + 2;
@@ -400,11 +411,11 @@ function BudgetDrawer({
     setScope(budget && !budget.isDefault ? "month" : "default");
     setCategoryFields(
       Object.fromEntries(
-        GRID_CATEGORIES.map(({ category }) => [category, centsToField(budget?.categoryTargets?.[category])]),
+        BUDGET_CATEGORIES.map(({ category }) => [category, centsToField(budget?.categoryTargets?.[category])]),
       ),
     );
     setTypeFields(
-      Object.fromEntries(TX_TYPES.map((type) => [type, centsToField(budget?.typeTargets?.[type])])),
+      Object.fromEntries(BUDGET_TX_TYPES.map((type) => [type, centsToField(budget?.typeTargets?.[type])])),
     );
     setOutgoing(centsToField(budget?.targetOutgoingCents));
     setIncoming(centsToField(budget?.targetIncomingCents));
@@ -414,7 +425,7 @@ function BudgetDrawer({
 
   const save = async () => {
     const categoryTargets: Record<string, number> = {};
-    for (const { category } of GRID_CATEGORIES) {
+    for (const { category } of BUDGET_CATEGORIES) {
       const raw = (categoryFields[category] ?? "").trim();
       if (!raw) continue;
       const cents = parseDollarsToCents(raw);
@@ -422,7 +433,7 @@ function BudgetDrawer({
       categoryTargets[category] = cents;
     }
     const typeTargets: Record<string, number> = {};
-    for (const type of TX_TYPES) {
+    for (const type of BUDGET_TX_TYPES) {
       const raw = (typeFields[type] ?? "").trim();
       if (!raw) continue;
       const cents = parseDollarsToCents(raw);
@@ -489,7 +500,7 @@ function BudgetDrawer({
 
       <div className={styles.budgetSection}>
         <p className={styles.budgetSectionTitle}>Per category</p>
-        {GRID_CATEGORIES.map(({ category, type }) => (
+        {BUDGET_CATEGORIES.map(({ category, type }) => (
           <div key={category} className={styles.budgetRow}>
             <span className={styles.budgetRowLabel}>
               <span className={cx(styles.budgetTypeTag, BAND_CLASS[type])}>{type}</span>
@@ -510,7 +521,7 @@ function BudgetDrawer({
 
       <div className={styles.budgetSection}>
         <p className={styles.budgetSectionTitle}>Per type</p>
-        {TX_TYPES.map((type) => (
+        {BUDGET_TX_TYPES.map((type) => (
           <div key={type} className={styles.budgetRow}>
             <span className={styles.budgetRowLabel}>
               <span className={cx(styles.budgetTypeTag, BAND_CLASS[type])}>{BAND_LABEL[type]}</span>
@@ -644,7 +655,7 @@ function MonthlyGrid({ report, onEditTransaction }: { report: MonthlyReport; onE
     [report.monthKey, report.transactions],
   );
   // Stored end-of-day balance snapshots keyed by day of month. Never derived
-  // from the grid's transactions (which exclude internal transfers).
+  // from the grid's transactions (the recorded rows may not cover the full raw feed).
   const dayBalances = useMemo(
     () => balancesByDay(report.monthKey, report.balances ?? []),
     [report.monthKey, report.balances],
@@ -796,6 +807,7 @@ function MonthlyGrid({ report, onEditTransaction }: { report: MonthlyReport; onE
             {TX_TYPES.map((type) => {
               const budgetDelta = budget?.comparison.typeDeltas[type];
               const isIncome = type === "Income";
+              const isTransfer = type === "Transfer";
               const percent = report.current.typePercentOfOutgoing[type] ?? 0;
               return (
                 <td
@@ -805,7 +817,18 @@ function MonthlyGrid({ report, onEditTransaction }: { report: MonthlyReport; onE
                 >
                   <span className={styles.totalAmount}>
                     {BAND_LABEL[type]} {formatCents(report.current.typeTotalsCents[type] ?? 0)}
-                    {!isIncome && report.current.totalOutgoingCents > 0 ? (
+                    {isTransfer ? (
+                      // Transfers are excluded from outgoing, so show their net
+                      // movement instead of a share of outgoing.
+                      <span
+                        className={cx(
+                          styles.totalPercent,
+                          report.current.transferNetCents < 0 && styles.netNegative,
+                        )}
+                      >
+                        Net {formatSignedCents(report.current.transferNetCents)}
+                      </span>
+                    ) : !isIncome && report.current.totalOutgoingCents > 0 ? (
                       <span className={styles.totalPercent}>{percent}% of outgoing</span>
                     ) : null}
                   </span>

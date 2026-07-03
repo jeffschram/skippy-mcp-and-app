@@ -2,7 +2,7 @@
    Type band colors are derived from existing tokens (never spreadsheet
    literals) via color-mix so they tint correctly in light and dark themes:
    Fixed = muted purple (blue+red mix), Spending = blue, Food = amber (gold),
-   Income = green. */
+   Income = green, Transfer = neutral gray (muted). */
 
 .controls {
   display: flex;
@@ -144,6 +144,12 @@
 
 .bandIncome {
   --band: color-mix(in srgb, var(--green) 70%, var(--blue) 30%);
+}
+
+/* Transfers are budget-neutral: a plain gray tint, distinct from the four
+   colored bands, derived from the theme-aware muted token. */
+.bandTransfer {
+  --band: var(--muted);
 }
 
 .bandStrong {

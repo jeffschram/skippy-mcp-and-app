@@ -325,9 +325,14 @@ describe("Skippy MCP manifest", () => {
       expect(recordFinancialTransactions?.description).toContain("INTEGER CENTS");
       expect(recordFinancialTransactions?.description).toContain("externalIds for idempotency");
       expect(recordFinancialTransactions?.description).toContain("Fixed: Mortgage, HOA, Mortgage Loan | Recurring Bills");
+      expect(recordFinancialTransactions?.description).toContain("Transfer: Transfers In | Transfers Out");
+      expect(recordFinancialTransactions?.description).toContain(
+        "Transfers between the owner's own accounts (tracked or untracked, e.g. business checking or a partner's external account) are txType 'Transfer' with category 'Transfers In' or 'Transfers Out' — never Income or Spending",
+      );
+      expect(recordFinancialTransactions?.description).toContain("automatically excluded from budget totals");
       expect(recordFinancialTransactions?.inputSchema.properties?.transactions).toBeDefined();
       expect(recordFinancialBalances?.description).toContain("FULL raw Plaid transaction feed");
-      expect(recordFinancialBalances?.description).toContain("internal transfers that budget ingestion skips");
+      expect(recordFinancialBalances?.description).toContain("NEVER derive balances by summing recorded budget transactions");
       expect(recordFinancialBalances?.description).toContain("one snapshot per account+day");
       expect(recordFinancialBalances?.description).toContain("INTEGER CENTS");
       expect(recordFinancialBalances?.inputSchema.properties?.balances).toBeDefined();
