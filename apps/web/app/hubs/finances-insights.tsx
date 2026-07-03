@@ -73,121 +73,81 @@ function monthTickLabel(monthKey: string): string {
 }
 
 /* ------------------------------------------------------------------ */
-/* Compact delta indicator (same semantics as the grid's DeltaLine)    */
+/* Month matrix: Income / Fixed / Spending / Food / Net x months       */
 /* ------------------------------------------------------------------ */
 
-function WindowDelta({
-  label,
-  deltaCents,
-  goodWhenPositive,
-}: {
-  label: string;
-  deltaCents: number;
-  /** Income/Net: up = good (green). Outgoing types: up = bad (red). */
-  goodWhenPositive?: boolean;
-}) {
-  const tone =
-    deltaCents === 0
-      ? null
-      : (deltaCents > 0) === Boolean(goodWhenPositive)
-        ? styles.comparisonUnder
-        : styles.comparisonOver;
-  return (
-    <span className={cx(styles.comparison, tone)}>
-      {label} {formatSignedCents(deltaCents)}
-    </span>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/* Summary table: Income / Fixed / Spending / Food / Net x windows     */
-/* ------------------------------------------------------------------ */
-
-function SummaryTable({ insights }: { insights: FinancialInsights }) {
-  const windows = insights.windows;
+/**
+ * Type x month matrix: each cell is that month's total, colored green when it
+ * moved in the good direction vs the previous month (higher for Income/Net,
+ * lower for Fixed/Spending/Food) and red when it moved the wrong way.
+ */
+function MonthMatrix({ months, currentMonthKey }: { months: InsightsMonth[]; currentMonthKey: string }) {
+  const rows: Array<{ label: string; goodWhenHigher: boolean; value: (m: InsightsMonth) => number }> = [
+    { label: "Income", goodWhenHigher: true, value: (m) => m.typeTotalsCents.Income ?? 0 },
+    { label: "Fixed", goodWhenHigher: false, value: (m) => m.typeTotalsCents.Fixed ?? 0 },
+    { label: "Spending", goodWhenHigher: false, value: (m) => m.typeTotalsCents.Spending ?? 0 },
+    { label: "Food", goodWhenHigher: false, value: (m) => m.typeTotalsCents.Food ?? 0 },
+    { label: "Net", goodWhenHigher: true, value: (m) => m.netCents },
+  ];
   return (
     <Card>
       <p className={styles.cardTitle}>
-        Averages by type
-        <span className={cx("muted", styles.cardTitleNote)}>complete months only</span>
+        Type by month
+        <span className={cx("muted", styles.cardTitleNote)}>
+          green = better than the previous month
+        </span>
       </p>
       <div className={styles.statsTableWrap}>
-        <table className={styles.statsTable} aria-label="Type averages across trend windows">
+        <table className={styles.statsTable} aria-label="Monthly totals by type">
           <thead>
             <tr>
               <th scope="col" className={styles.statsHead} />
-              {windows.map((window) => (
-                <th
-                  key={window.windowMonths}
-                  scope="col"
-                  className={cx(styles.statsHead, styles.statsValueCol)}
-                >
-                  {windowLabel(window.windowMonths, window.monthsUsed)}
+              {months.map((month) => (
+                <th key={month.monthKey} scope="col" className={cx(styles.statsHead, styles.statsValueCol)}>
+                  {monthTickLabel(month.monthKey)}
+                  {month.monthKey === currentMonthKey ? (
+                    <span className={styles.statSub}>MTD</span>
+                  ) : null}
                 </th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {INSIGHT_TYPES.map((type) => {
-              const isIncome = type === "Income";
-              return (
-                <tr key={type}>
-                  <th scope="row" className={styles.statsLabelCell}>
-                    <span className={cx(styles.budgetTypeTag, BAND_CLASS[type])}>{type}</span>
-                  </th>
-                  {windows.map((window, index) => {
-                    const stat = window.typeStats[type];
-                    const delta = index > 0 ? insights.deltas[index - 1] : null;
-                    return (
-                      <td key={window.windowMonths} className={styles.statsValueCol}>
-                        <span className={styles.statValue}>{formatCents(stat.meanCents)}</span>
-                        {isIncome ? (
-                          <span className={styles.statSub}>median {formatCents(stat.medianCents)}</span>
-                        ) : null}
-                        {delta ? (
-                          <span className={styles.statSub}>
-                            <WindowDelta
-                              label={`vs ${delta.fromWindowMonths}-mo`}
-                              deltaCents={delta.typeMeanDeltaCents[type]}
-                              goodWhenPositive={isIncome}
-                            />
-                          </span>
-                        ) : null}
-                      </td>
-                    );
-                  })}
-                </tr>
-              );
-            })}
-            <tr className={styles.netRowTop}>
-              <th scope="row" className={styles.statsLabelCell}>
-                Net
-              </th>
-              {windows.map((window, index) => {
-                const delta = index > 0 ? insights.deltas[index - 1] : null;
-                return (
-                  <td key={window.windowMonths} className={styles.statsValueCol}>
-                    <span
-                      className={cx(
-                        styles.statValue,
-                        window.net.meanCents >= 0 ? styles.netPositive : styles.netNegative,
-                      )}
-                    >
-                      {formatCents(window.net.meanCents)}
-                    </span>
-                    {delta ? (
-                      <span className={styles.statSub}>
-                        <WindowDelta
-                          label={`vs ${delta.fromWindowMonths}-mo`}
-                          deltaCents={delta.netMeanDeltaCents}
-                          goodWhenPositive
-                        />
+            {rows.map((row) => (
+              <tr key={row.label} className={row.label === "Net" ? styles.netRowTop : undefined}>
+                <th scope="row" className={styles.statsLabelCell}>
+                  {row.label === "Net" ? (
+                    "Net"
+                  ) : (
+                    <span className={cx(styles.budgetTypeTag, BAND_CLASS[row.label as TxType])}>{row.label}</span>
+                  )}
+                </th>
+                {months.map((month, index) => {
+                  const value = row.value(month);
+                  const prev = index > 0 ? row.value(months[index - 1]!) : null;
+                  const tone =
+                    prev === null || value === prev
+                      ? null
+                      : (value > prev) === row.goodWhenHigher
+                        ? styles.comparisonUnder
+                        : styles.comparisonOver;
+                  return (
+                    <td key={month.monthKey} className={styles.statsValueCol}>
+                      <span
+                        className={cx(styles.statValue, tone)}
+                        title={
+                          prev === null
+                            ? monthKeyLabel(month.monthKey)
+                            : `${monthKeyLabel(month.monthKey)}: ${formatSignedCents(value - prev)} vs previous month`
+                        }
+                      >
+                        {formatCents(value)}
                       </span>
-                    ) : null}
-                  </td>
-                );
-              })}
-            </tr>
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>
@@ -545,7 +505,7 @@ export function FinancesInsightsView({ accounts }: { accounts: InsightsAccount[]
             </p>
           ) : null}
 
-          <SummaryTable insights={insights} />
+          <MonthMatrix months={data.months} currentMonthKey={data.currentMonthKey} />
 
           <div className={styles.chartsGrid}>
             {INSIGHT_TYPES.map((type) => (
