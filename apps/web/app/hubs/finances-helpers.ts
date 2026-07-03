@@ -179,3 +179,28 @@ export function bucketTransactionsByDay(monthKey: string, transactions: GridTran
 export function dayRowHasEntries(row: DayRow): boolean {
   return Object.values(row.cells).some((cell) => cell.length > 0);
 }
+
+export type DailyBalance = {
+  /** Snapshot day: epoch ms at UTC midnight. */
+  date: number;
+  /** End-of-day balance in integer cents; may be negative. */
+  endOfDayBalanceCents: number;
+};
+
+/**
+ * Maps a month's end-of-day balance snapshots to day-of-month -> integer
+ * cents for grid rendering. Days are computed in UTC; snapshots dated outside
+ * the month are ignored (they cannot occur through validated write paths,
+ * which derive the monthKey from the date). Duplicate days keep the last row.
+ */
+export function balancesByDay(monthKey: string, balances: DailyBalance[]): Map<number, number> {
+  const { year, month } = assertMonthKey(monthKey);
+  const byDay = new Map<number, number>();
+  for (const balance of balances) {
+    const date = new Date(balance.date);
+    if (date.getUTCFullYear() === year && date.getUTCMonth() + 1 === month) {
+      byDay.set(date.getUTCDate(), balance.endOfDayBalanceCents);
+    }
+  }
+  return byDay;
+}

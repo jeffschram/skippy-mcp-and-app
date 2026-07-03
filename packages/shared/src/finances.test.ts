@@ -9,9 +9,12 @@ import {
   isFinancialAccountType,
   isValidMonthKey,
   isValidTxTypeCategory,
+  dayStartUtc,
+  isBalanceSource,
   monthKeyFromDate,
   planBulkTransactionWrites,
   previousMonthKey,
+  summarizeMonthBalances,
 } from "./index";
 
 describe("fixed transaction taxonomy", () => {
@@ -256,5 +259,68 @@ describe("planBulkTransactionWrites", () => {
     expect(plan.inserts).toHaveLength(3);
     expect(plan.updates).toEqual([]);
     expect(plan.skipped).toBe(0);
+  });
+});
+
+describe("summarizeMonthBalances", () => {
+  const day = (dayOfMonth: number, monthIndex = 5) => Date.UTC(2026, monthIndex, dayOfMonth);
+
+  it("returns nulls and an empty list for a month with no snapshots", () => {
+    expect(summarizeMonthBalances([])).toEqual({
+      balances: [],
+      startingBalanceCents: null,
+      endingBalanceCents: null,
+    });
+  });
+
+  it("sorts the month's snapshots ascending and picks the latest as the ending balance", () => {
+    const summary = summarizeMonthBalances([
+      { date: day(15), endOfDayBalanceCents: 120_000 },
+      { date: day(2), endOfDayBalanceCents: 90_000 },
+      { date: day(30), endOfDayBalanceCents: -4_500 },
+    ]);
+
+    expect(summary.balances.map((row) => row.date)).toEqual([day(2), day(15), day(30)]);
+    expect(summary.endingBalanceCents).toBe(-4_500);
+    expect(summary.startingBalanceCents).toBeNull();
+  });
+
+  it("takes the starting balance from the previous month's latest snapshot", () => {
+    const summary = summarizeMonthBalances(
+      [{ date: day(3), endOfDayBalanceCents: 80_000 }],
+      [
+        { date: day(20, 4), endOfDayBalanceCents: 70_000 },
+        { date: day(31, 4), endOfDayBalanceCents: 75_500 },
+        { date: day(5, 4), endOfDayBalanceCents: 60_000 },
+      ],
+    );
+
+    expect(summary.startingBalanceCents).toBe(75_500);
+    expect(summary.endingBalanceCents).toBe(80_000);
+  });
+
+  it("handles a partial month: previous snapshots but none in the current month", () => {
+    const summary = summarizeMonthBalances([], [{ date: day(28, 4), endOfDayBalanceCents: 12_345 }]);
+
+    expect(summary.balances).toEqual([]);
+    expect(summary.startingBalanceCents).toBe(12_345);
+    expect(summary.endingBalanceCents).toBeNull();
+  });
+});
+
+describe("dayStartUtc", () => {
+  it("normalizes any time of day to UTC midnight of that day", () => {
+    const afternoon = Date.UTC(2026, 5, 14, 17, 45, 12, 250);
+    expect(dayStartUtc(afternoon)).toBe(Date.UTC(2026, 5, 14));
+    expect(dayStartUtc(Date.UTC(2026, 5, 14))).toBe(Date.UTC(2026, 5, 14));
+  });
+});
+
+describe("isBalanceSource", () => {
+  it("accepts only the fixed balance sources", () => {
+    expect(isBalanceSource("plaid_derived")).toBe(true);
+    expect(isBalanceSource("manual")).toBe(true);
+    expect(isBalanceSource("plaid")).toBe(false);
+    expect(isBalanceSource(undefined)).toBe(false);
   });
 });

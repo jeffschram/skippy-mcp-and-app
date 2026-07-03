@@ -851,6 +851,24 @@ export default defineSchema({
     .index("by_brain_account_month", ["brainInstanceId", "accountId", "monthKey"])
     .index("by_brain_external", ["brainInstanceId", "externalId"]),
 
+  // End-of-day balance snapshots. Deliberately NOT derived from
+  // financialTransactions: budget ingestion excludes internal transfers, so
+  // running sums drift from reality. The harness computes these externally
+  // from the full raw Plaid feed anchored to the live current balance.
+  financialDailyBalances: defineTable({
+    brainInstanceId: v.id("brainInstances"),
+    accountId: v.id("financialAccounts"),
+    // Snapshot day: epoch ms at UTC midnight. One row per account+day; writes upsert.
+    date: v.number(),
+    // 'YYYY-MM' month bucket (derived from date, UTC).
+    monthKey: v.string(),
+    // End-of-day balance in INTEGER CENTS; may be negative (overdraft).
+    endOfDayBalanceCents: v.number(),
+    source: v.union(v.literal("plaid_derived"), v.literal("manual")),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_brain_account_month", ["brainInstanceId", "accountId", "monthKey"]),
+
   financialBudgets: defineTable({
     brainInstanceId: v.id("brainInstances"),
     accountId: v.id("financialAccounts"),

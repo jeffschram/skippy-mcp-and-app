@@ -1016,6 +1016,76 @@ export function computeMonthlyFinancialReport(input: MonthlyFinancialReportInput
   };
 }
 
+/* ------------------------------------------------------------------ */
+/* Finances: daily end-of-day balance snapshots                        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Where a daily balance snapshot came from. Balances are NEVER derived from
+ * financialTransactions (budget ingestion deliberately excludes internal
+ * transfers, so running sums drift): the harness computes end-of-day balances
+ * externally from the full raw Plaid feed anchored to the live current balance.
+ */
+export const BALANCE_SOURCES = ["plaid_derived", "manual"] as const;
+export type BalanceSource = (typeof BALANCE_SOURCES)[number];
+
+export function isBalanceSource(value: unknown): value is BalanceSource {
+  return isOneOf(BALANCE_SOURCES, value);
+}
+
+/** Epoch ms of UTC midnight for the day containing `epochMs`. */
+export function dayStartUtc(epochMs: number): number {
+  const date = new Date(epochMs);
+  return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
+}
+
+export type DailyBalanceInput = {
+  /** Snapshot day: epoch ms at UTC midnight. */
+  date: number;
+  /** End-of-day balance in integer cents; may be negative. */
+  endOfDayBalanceCents: number;
+};
+
+export type MonthBalanceSummary = {
+  /** The month's snapshots sorted ascending by date. */
+  balances: DailyBalanceInput[];
+  /**
+   * The balance entering the month: latest end-of-day balance from the
+   * previous month's rows, or null when the previous month has none.
+   */
+  startingBalanceCents: number | null;
+  /** Latest end-of-day balance within the month, or null when the month has none. */
+  endingBalanceCents: number | null;
+};
+
+function latestBalance(rows: readonly DailyBalanceInput[]): DailyBalanceInput | null {
+  let latest: DailyBalanceInput | null = null;
+  for (const row of rows) {
+    if (!latest || row.date > latest.date) latest = row;
+  }
+  return latest;
+}
+
+/**
+ * Pure selection of a month's balance summary from stored daily snapshots:
+ * the month's rows sorted ascending, the starting balance (entering the month,
+ * from the previous month's latest snapshot), and the ending balance (the
+ * month's latest snapshot). Missing data yields nulls, never fabricated sums.
+ */
+export function summarizeMonthBalances(
+  monthRows: readonly DailyBalanceInput[],
+  previousMonthRows: readonly DailyBalanceInput[] = [],
+): MonthBalanceSummary {
+  const balances = monthRows
+    .map((row) => ({ date: row.date, endOfDayBalanceCents: row.endOfDayBalanceCents }))
+    .sort((a, b) => a.date - b.date);
+  return {
+    balances,
+    startingBalanceCents: latestBalance(previousMonthRows)?.endOfDayBalanceCents ?? null,
+    endingBalanceCents: latestBalance(monthRows)?.endOfDayBalanceCents ?? null,
+  };
+}
+
 export type BulkTransactionWritePlan<T> = {
   /** Rows with no externalId, or an externalId not seen before. */
   inserts: T[];

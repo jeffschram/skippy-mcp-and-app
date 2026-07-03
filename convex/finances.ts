@@ -6,11 +6,13 @@ import {
   assertIntegerCents,
   assertValidTxTypeCategory,
   computeMonthlyFinancialReport,
+  dayStartUtc,
   isFinancialAccountType,
   isValidMonthKey,
   monthKeyFromDate,
   planBulkTransactionWrites,
   previousMonthKey,
+  summarizeMonthBalances,
 } from "@skippy/shared";
 import { requireOwnedBrain } from "./auth";
 
@@ -40,6 +42,13 @@ const txCategoryValidator = v.union(
 );
 
 const txSourceValidator = v.union(v.literal("plaid"), v.literal("manual"), v.literal("harness"));
+
+const balanceSourceValidator = v.union(v.literal("plaid_derived"), v.literal("manual"));
+
+const dailyBalanceValidator = v.object({
+  date: v.number(),
+  endOfDayBalanceCents: v.number(),
+});
 
 const bulkTransactionValidator = v.object({
   date: v.number(),
@@ -308,6 +317,105 @@ async function recordTransactionsBulk(
   return { accountId: args.accountId, accountName: account.name, source, ...counts };
 }
 
+async function monthBalances(db: any, brainInstanceId: any, accountId: string, monthKey: string) {
+  return await db
+    .query("financialDailyBalances")
+    .withIndex("by_brain_account_month", (q: any) =>
+      q.eq("brainInstanceId", brainInstanceId).eq("accountId", accountId).eq("monthKey", monthKey),
+    )
+    .collect();
+}
+
+/**
+ * Bulk end-of-day balance snapshot ingestion, idempotent on account+day:
+ * each snapshot's date is normalized to UTC midnight, and an existing row for
+ * that account+day is updated in place, never duplicated. Balances come from
+ * the harness (full raw Plaid feed anchored to the live current balance) —
+ * NEVER from summing financialTransactions. Returns {inserted, updated}.
+ */
+async function recordDailyBalancesBulk(
+  db: any,
+  brainInstanceId: any,
+  args: {
+    accountId: string;
+    source?: "plaid_derived" | "manual";
+    balances: Array<{ date: number; endOfDayBalanceCents: number }>;
+  },
+  actor: Actor,
+) {
+  const account = await requireAccount(db, brainInstanceId, args.accountId);
+  const source = args.source ?? "plaid_derived";
+  const now = Date.now();
+
+  // Validate + normalize the whole batch up front (clear errors, nothing written).
+  const rowsByDay = new Map<number, { date: number; monthKey: string; endOfDayBalanceCents: number }>();
+  args.balances.forEach((balance, index) => {
+    try {
+      if (!Number.isFinite(balance.date)) {
+        throw new Error("date must be epoch milliseconds");
+      }
+      assertIntegerCents(balance.endOfDayBalanceCents, "endOfDayBalanceCents");
+      const date = dayStartUtc(balance.date);
+      // Later entries for the same day win (one snapshot per account+day).
+      rowsByDay.set(date, {
+        date,
+        monthKey: monthKeyFromDate(date),
+        endOfDayBalanceCents: balance.endOfDayBalanceCents,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`balances[${index}]: ${message}`);
+    }
+  });
+  const rows = [...rowsByDay.values()];
+
+  // Existing rows for every month touched by the batch (brain+account scoped).
+  const existingByDay = new Map<number, any>();
+  for (const monthKey of new Set(rows.map((row) => row.monthKey))) {
+    for (const existing of await monthBalances(db, brainInstanceId, args.accountId, monthKey)) {
+      existingByDay.set(existing.date, existing);
+    }
+  }
+
+  let inserted = 0;
+  let updated = 0;
+  for (const row of rows) {
+    const existing = existingByDay.get(row.date);
+    if (existing) {
+      await db.patch(existing._id, {
+        endOfDayBalanceCents: row.endOfDayBalanceCents,
+        source,
+        updatedAt: now,
+      });
+      updated += 1;
+    } else {
+      await db.insert("financialDailyBalances", {
+        brainInstanceId,
+        accountId: args.accountId,
+        date: row.date,
+        monthKey: row.monthKey,
+        endOfDayBalanceCents: row.endOfDayBalanceCents,
+        source,
+        createdAt: now,
+        updatedAt: now,
+      });
+      inserted += 1;
+    }
+  }
+
+  await db.insert("activityEvents", {
+    brainInstanceId,
+    activityType: "financial_balances_recorded",
+    actorType: actor.actorType,
+    actorId: actor.actorId,
+    timestamp: now,
+    summary: `Recorded ${rows.length} daily balance${rows.length === 1 ? "" : "s"} for ${account.name} (${inserted} new, ${updated} updated)`,
+    metadata: { accountId: args.accountId, source, inserted, updated },
+  });
+
+  return { accountId: args.accountId, accountName: account.name, source, inserted, updated };
+}
+
 async function monthTransactions(db: any, brainInstanceId: any, accountId: string, monthKey: string) {
   return await db
     .query("financialTransactions")
@@ -335,6 +443,15 @@ async function buildMonthlyReport(db: any, brainInstanceId: any, accountId: stri
     brainInstanceId,
     accountId,
     previousMonthKey(monthKey),
+  );
+
+  // Daily balance snapshots (stored, harness-computed) — never derived from
+  // the transactions above, which deliberately exclude internal transfers.
+  const currentBalances = await monthBalances(db, brainInstanceId, accountId, monthKey);
+  const previousBalances = await monthBalances(db, brainInstanceId, accountId, previousMonthKey(monthKey));
+  const balanceSummary = summarizeMonthBalances(
+    currentBalances.map((row: any) => ({ date: row.date, endOfDayBalanceCents: row.endOfDayBalanceCents })),
+    previousBalances.map((row: any) => ({ date: row.date, endOfDayBalanceCents: row.endOfDayBalanceCents })),
   );
 
   const budgets = await db
@@ -385,6 +502,9 @@ async function buildMonthlyReport(db: any, brainInstanceId: any, accountId: stri
       institution: account.institution,
     },
     ...report,
+    balances: balanceSummary.balances,
+    startingBalanceCents: balanceSummary.startingBalanceCents,
+    endingBalanceCents: balanceSummary.endingBalanceCents,
     transactions: currentTransactions
       .map((transaction: any) => ({
         _id: transaction._id,
@@ -707,6 +827,28 @@ export const recordFinancialTransactionsForBrain = mutationGeneric({
         accountId: args.accountId,
         ...(args.source !== undefined ? { source: args.source } : {}),
         transactions: args.transactions,
+      },
+      { actorType: "harness", ...(args.actorId ? { actorId: args.actorId } : {}) },
+    );
+  },
+});
+
+export const recordDailyBalancesForBrain = mutationGeneric({
+  args: {
+    brainInstanceId: v.id("brainInstances"),
+    accountId: v.id("financialAccounts"),
+    source: v.optional(balanceSourceValidator),
+    balances: v.array(dailyBalanceValidator),
+    actorId: v.optional(v.string()),
+  },
+  handler: async ({ db }, args) => {
+    return recordDailyBalancesBulk(
+      db,
+      args.brainInstanceId,
+      {
+        accountId: args.accountId,
+        ...(args.source !== undefined ? { source: args.source } : {}),
+        balances: args.balances,
       },
       { actorType: "harness", ...(args.actorId ? { actorId: args.actorId } : {}) },
     );
