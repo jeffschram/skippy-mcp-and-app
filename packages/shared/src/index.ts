@@ -918,9 +918,21 @@ export type FinancialBudgetTargets = {
   categoryTargets?: Record<string, number>;
   /** transaction type -> target integer cents. */
   typeTargets?: Record<string, number>;
+  /**
+   * category -> target as a percent of the month's ACTUAL totalIncomingCents
+   * (plain number, 50 = 50%). Resolved to cents at read time, so the same
+   * percent plan adapts to variable month-to-month income (Conscious Spending
+   * Plan style). When both a cents and a percent target exist for the same
+   * key, THE PERCENT TARGET WINS.
+   */
+  categoryPercentTargets?: Record<string, number>;
+  /** transaction type -> percent of actual income. Same rules as categoryPercentTargets. */
+  typePercentTargets?: Record<string, number>;
   targetOutgoingCents?: number;
   targetIncomingCents?: number;
   targetNetCents?: number;
+  /** Net target as a percent of actual income. Wins over targetNetCents when both are set. */
+  targetNetPercent?: number;
 };
 
 export type BudgetTargetDelta = {
@@ -928,6 +940,11 @@ export type BudgetTargetDelta = {
   actualCents: number;
   /** actualCents - targetCents. Positive = over target. */
   deltaCents: number;
+  /**
+   * Present when targetCents was derived from a percent-of-income target:
+   * the source percent (50 = 50%), so UIs can label 'target (50% of income)'.
+   */
+  targetPercent?: number;
 };
 
 export type FinancialBudgetComparison = {
@@ -942,29 +959,69 @@ function targetDelta(targetCents: number, actualCents: number): BudgetTargetDelt
   return { targetCents, actualCents, deltaCents: actualCents - targetCents };
 }
 
+/** Percent of income (50 = 50%) -> integer cents against the month's actual income. */
+export function percentOfIncomeCents(percent: number, totalIncomingCents: number): number {
+  return Math.round((totalIncomingCents * percent) / 100);
+}
+
 /**
  * Per-target deltas between a budget and a month's actual aggregates.
  * Budgets never target transfers: any Transfer type/category targets are
  * silently ignored so transfers stay out of budget math end to end.
+ *
+ * Percent-of-income targets (categoryPercentTargets / typePercentTargets /
+ * targetNetPercent) resolve against the aggregates' ACTUAL totalIncomingCents
+ * at read time:
+ * - PRECEDENCE: when a key has both a cents target and a percent target, the
+ *   PERCENT TARGET WINS (the cents target is ignored, it does not resurface).
+ * - Percent-derived deltas carry `targetPercent` so UIs can label the source.
+ * - Months with zero (or negative) income cannot resolve a percent target:
+ *   those keys produce NO comparison row at all (absent, not a zero target).
  */
 export function compareBudgetToAggregates(
   budget: FinancialBudgetTargets,
   aggregates: FinancialMonthAggregates,
 ): FinancialBudgetComparison {
   const transferCategories: readonly string[] = TX_TYPE_CATEGORIES[TRANSFER_TX_TYPE];
+  const incomeCents = aggregates.totalIncomingCents;
+  const percentResolvable = incomeCents > 0;
+  const percentDelta = (percent: number, actualCents: number): BudgetTargetDelta => ({
+    ...targetDelta(percentOfIncomeCents(percent, incomeCents), actualCents),
+    targetPercent: percent,
+  });
 
   const categoryDeltas: Record<string, BudgetTargetDelta> = {};
-  for (const [category, target] of Object.entries(budget.categoryTargets ?? {})) {
+  const categoryKeys = new Set([
+    ...Object.keys(budget.categoryTargets ?? {}),
+    ...Object.keys(budget.categoryPercentTargets ?? {}),
+  ]);
+  for (const category of categoryKeys) {
     if (transferCategories.includes(category)) continue;
     const actual = (aggregates.categoryTotalsCents as Record<string, number | undefined>)[category] ?? 0;
-    categoryDeltas[category] = targetDelta(target, actual);
+    const percent = budget.categoryPercentTargets?.[category];
+    if (percent !== undefined) {
+      // Percent wins over a coexisting cents target for the same category.
+      if (percentResolvable) categoryDeltas[category] = percentDelta(percent, actual);
+      continue;
+    }
+    categoryDeltas[category] = targetDelta(budget.categoryTargets![category]!, actual);
   }
 
   const typeDeltas: Record<string, BudgetTargetDelta> = {};
-  for (const [type, target] of Object.entries(budget.typeTargets ?? {})) {
+  const typeKeys = new Set([
+    ...Object.keys(budget.typeTargets ?? {}),
+    ...Object.keys(budget.typePercentTargets ?? {}),
+  ]);
+  for (const type of typeKeys) {
     if (type === TRANSFER_TX_TYPE) continue;
     const actual = (aggregates.typeTotalsCents as Record<string, number | undefined>)[type] ?? 0;
-    typeDeltas[type] = targetDelta(target, actual);
+    const percent = budget.typePercentTargets?.[type];
+    if (percent !== undefined) {
+      // Percent wins over a coexisting cents target for the same type.
+      if (percentResolvable) typeDeltas[type] = percentDelta(percent, actual);
+      continue;
+    }
+    typeDeltas[type] = targetDelta(budget.typeTargets![type]!, actual);
   }
 
   const comparison: FinancialBudgetComparison = { categoryDeltas, typeDeltas };
@@ -974,7 +1031,10 @@ export function compareBudgetToAggregates(
   if (budget.targetIncomingCents !== undefined) {
     comparison.incoming = targetDelta(budget.targetIncomingCents, aggregates.totalIncomingCents);
   }
-  if (budget.targetNetCents !== undefined) {
+  if (budget.targetNetPercent !== undefined) {
+    // Percent wins over targetNetCents; unresolvable (no income) -> no net row.
+    if (percentResolvable) comparison.net = percentDelta(budget.targetNetPercent, aggregates.netCents);
+  } else if (budget.targetNetCents !== undefined) {
     comparison.net = targetDelta(budget.targetNetCents, aggregates.netCents);
   }
   return comparison;

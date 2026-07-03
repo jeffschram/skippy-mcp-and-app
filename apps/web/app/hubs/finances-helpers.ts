@@ -1,4 +1,4 @@
-import { TX_CATEGORIES, isValidMonthKey, type TxCategory } from "@skippy/shared";
+import { TX_CATEGORIES, isValidMonthKey, percentOfIncomeCents, type TxCategory } from "@skippy/shared";
 
 /* ------------------------------------------------------------------ */
 /* Pure helpers for the Finances hub: currency formatting, month-key   */
@@ -73,6 +73,37 @@ export function parseDollarsToCents(input: string): number | null {
   const [wholePart, fractionPart = ""] = (negative ? cleaned.slice(1) : cleaned).split(".");
   const cents = Number(wholePart) * 100 + Number(fractionPart.padEnd(2, "0") || "0");
   return negative ? -cents : cents;
+}
+
+/**
+ * Percent string ('22', '22.5', '50%') -> percent number (0-100, up to one
+ * decimal), or null when the input is not a valid percent-of-income target.
+ */
+export function parsePercentInput(input: string): number | null {
+  const cleaned = input.replace(/[%\s]/g, "");
+  if (!/^\d+(\.\d)?$/.test(cleaned)) return null;
+  const percent = Number(cleaned);
+  return percent > 100 ? null : percent;
+}
+
+/** Percent target -> input-field string (22 -> '22', 22.5 -> '22.5', undefined -> ''). */
+export function percentToField(percent: number | undefined): string {
+  return percent === undefined ? "" : String(percent);
+}
+
+/**
+ * Preview line for a percent-of-income target against a known recent month's
+ * income: (22, 1_200_000, 'May') -> '22% ≈ $2,640.00 on May income'.
+ * Returns null when the income is unknown or non-positive (a percent target
+ * cannot resolve without income).
+ */
+export function percentPreviewLabel(
+  percent: number,
+  incomeCents: number | null | undefined,
+  incomeMonthLabel: string,
+): string | null {
+  if (incomeCents === null || incomeCents === undefined || incomeCents <= 0) return null;
+  return `${percent}% ≈ ${formatCents(percentOfIncomeCents(percent, incomeCents))} on ${incomeMonthLabel} income`;
 }
 
 /** 'YYYY-MM' month key for `now` (epoch ms), computed in UTC. */

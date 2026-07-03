@@ -5,7 +5,9 @@ import {
   TX_TYPE_CATEGORIES,
   aggregateMonthTransactions,
   assertValidTxTypeCategory,
+  compareBudgetToAggregates,
   computeMonthlyFinancialReport,
+  percentOfIncomeCents,
   isFinancialAccountType,
   isValidMonthKey,
   isValidTxTypeCategory,
@@ -337,6 +339,159 @@ describe("computeMonthlyFinancialReport", () => {
       actualCents: 500_000,
       deltaCents: 50_000,
     });
+  });
+});
+
+describe("percent-of-income budget targets", () => {
+  // June actuals: income 800_000, Food 130_000, Groceries 90_000, net 300_000.
+  const juneAggregates = aggregateMonthTransactions(juneTransactions);
+
+  it("rounds percent-of-income to integer cents", () => {
+    expect(percentOfIncomeCents(50, 800_000)).toBe(400_000);
+    expect(percentOfIncomeCents(22, 1_200_000)).toBe(264_000);
+    expect(percentOfIncomeCents(50, 333_333)).toBe(166_667);
+    expect(percentOfIncomeCents(0, 800_000)).toBe(0);
+  });
+
+  it("resolves percent targets against the month's actual income", () => {
+    const comparison = compareBudgetToAggregates(
+      {
+        categoryPercentTargets: { Groceries: 10 },
+        typePercentTargets: { Food: 20 },
+        targetNetPercent: 25,
+      },
+      juneAggregates,
+    );
+
+    // 10% of $8,000 income = $800 target vs $900 actual.
+    expect(comparison.categoryDeltas["Groceries"]).toEqual({
+      targetCents: 80_000,
+      actualCents: 90_000,
+      deltaCents: 10_000,
+      targetPercent: 10,
+    });
+    // 20% of $8,000 = $1,600 target vs $1,300 actual.
+    expect(comparison.typeDeltas["Food"]).toEqual({
+      targetCents: 160_000,
+      actualCents: 130_000,
+      deltaCents: -30_000,
+      targetPercent: 20,
+    });
+    // 25% of $8,000 = $2,000 net target vs $3,000 actual.
+    expect(comparison.net).toEqual({
+      targetCents: 200_000,
+      actualCents: 300_000,
+      deltaCents: 100_000,
+      targetPercent: 25,
+    });
+  });
+
+  it("percent targets win over cents targets for the same key", () => {
+    const comparison = compareBudgetToAggregates(
+      {
+        categoryTargets: { Groceries: 999_999 },
+        categoryPercentTargets: { Groceries: 10 },
+        typeTargets: { Food: 999_999 },
+        typePercentTargets: { Food: 20 },
+        targetNetCents: 999_999,
+        targetNetPercent: 25,
+      },
+      juneAggregates,
+    );
+
+    expect(comparison.categoryDeltas["Groceries"]?.targetCents).toBe(80_000);
+    expect(comparison.categoryDeltas["Groceries"]?.targetPercent).toBe(10);
+    expect(comparison.typeDeltas["Food"]?.targetCents).toBe(160_000);
+    expect(comparison.typeDeltas["Food"]?.targetPercent).toBe(20);
+    expect(comparison.net?.targetCents).toBe(200_000);
+    expect(comparison.net?.targetPercent).toBe(25);
+  });
+
+  it("produces NO comparison rows for percent targets when the month has no income", () => {
+    const noIncomeAggregates = aggregateMonthTransactions([
+      { txType: "Food", category: "Groceries", amountCents: 90_000 },
+    ]);
+    const comparison = compareBudgetToAggregates(
+      {
+        categoryTargets: { Restaurants: 50_000 },
+        categoryPercentTargets: { Groceries: 10 },
+        typePercentTargets: { Food: 20 },
+        targetNetCents: 100_000,
+        targetNetPercent: 25,
+      },
+      noIncomeAggregates,
+    );
+
+    // Percent-derived rows are absent entirely (not zero targets)...
+    expect(comparison.categoryDeltas["Groceries"]).toBeUndefined();
+    expect(comparison.typeDeltas["Food"]).toBeUndefined();
+    // ...including net: the percent wins over targetNetCents even when it
+    // cannot resolve, so there is no net row at all.
+    expect(comparison.net).toBeUndefined();
+    // Cents-only targets are unaffected by missing income.
+    expect(comparison.categoryDeltas["Restaurants"]).toEqual({
+      targetCents: 50_000,
+      actualCents: 0,
+      deltaCents: -50_000,
+    });
+  });
+
+  it("supports mixed budgets: cents for some keys, percent for others", () => {
+    const comparison = compareBudgetToAggregates(
+      {
+        categoryTargets: { Restaurants: 50_000 },
+        categoryPercentTargets: { Groceries: 10 },
+        typeTargets: { Fixed: 300_000 },
+        typePercentTargets: { Food: 20 },
+      },
+      juneAggregates,
+    );
+
+    expect(comparison.categoryDeltas["Restaurants"]).toEqual({
+      targetCents: 50_000,
+      actualCents: 40_000,
+      deltaCents: -10_000,
+    });
+    expect(comparison.categoryDeltas["Groceries"]?.targetPercent).toBe(10);
+    expect(comparison.typeDeltas["Fixed"]).toEqual({
+      targetCents: 300_000,
+      actualCents: 290_000,
+      deltaCents: -10_000,
+    });
+    expect(comparison.typeDeltas["Food"]?.targetPercent).toBe(20);
+  });
+
+  it("still ignores Transfer percent targets end to end", () => {
+    const comparison = compareBudgetToAggregates(
+      {
+        categoryPercentTargets: { "Transfers In": 10, "Transfers Out": 10, Groceries: 10 },
+        typePercentTargets: { Transfer: 10, Food: 20 },
+      },
+      aggregateMonthTransactions([...juneTransactions, ...juneTransfers]),
+    );
+
+    expect(comparison.categoryDeltas["Transfers In"]).toBeUndefined();
+    expect(comparison.categoryDeltas["Transfers Out"]).toBeUndefined();
+    expect(comparison.typeDeltas["Transfer"]).toBeUndefined();
+    expect(comparison.categoryDeltas["Groceries"]).toBeDefined();
+    expect(comparison.typeDeltas["Food"]).toBeDefined();
+  });
+
+  it("flows percent-derived deltas through computeMonthlyFinancialReport", () => {
+    const report = computeMonthlyFinancialReport({
+      monthKey: "2026-06",
+      transactions: juneTransactions,
+      budget: { typePercentTargets: { Food: 20 }, targetNetPercent: 25 },
+      budgetIsDefault: true,
+    });
+
+    expect(report.budget?.comparison.typeDeltas["Food"]).toEqual({
+      targetCents: 160_000,
+      actualCents: 130_000,
+      deltaCents: -30_000,
+      targetPercent: 20,
+    });
+    expect(report.budget?.comparison.net?.targetPercent).toBe(25);
   });
 });
 

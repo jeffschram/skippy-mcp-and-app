@@ -40,6 +40,9 @@ import {
   monthKeyLabel,
   monthKeyShortLabel,
   parseDollarsToCents,
+  parsePercentInput,
+  percentPreviewLabel,
+  percentToField,
   shiftMonthKey,
   type DailyBalance,
   type GridTransaction,
@@ -75,7 +78,13 @@ type Aggregates = {
   typePercentOfOutgoing: Record<string, number>;
 };
 
-type TargetDelta = { targetCents: number; actualCents: number; deltaCents: number };
+type TargetDelta = {
+  targetCents: number;
+  actualCents: number;
+  deltaCents: number;
+  /** Present when the target was derived from a percent-of-income budget target. */
+  targetPercent?: number;
+};
 
 type MonthlyReport = {
   account: AccountRow;
@@ -96,9 +105,13 @@ type MonthlyReport = {
         monthKey?: string;
         categoryTargets?: Record<string, number>;
         typeTargets?: Record<string, number>;
+        /** Percent-of-income targets (50 = 50% of the month's actual income). Win over cents targets. */
+        categoryPercentTargets?: Record<string, number>;
+        typePercentTargets?: Record<string, number>;
         targetOutgoingCents?: number;
         targetIncomingCents?: number;
         targetNetCents?: number;
+        targetNetPercent?: number;
         isDefault: boolean;
         comparison: {
           categoryDeltas: Record<string, TargetDelta>;
@@ -160,11 +173,18 @@ function DeltaLine({
   label,
   deltaCents,
   goodWhenPositive,
+  target,
 }: {
   label: string;
   deltaCents: number;
   /** Income-side numbers: a positive delta is good (green); outgoing: bad. */
   goodWhenPositive?: boolean;
+  /**
+   * The underlying budget target, when this line is a budget comparison.
+   * Percent-derived targets get the percent in the label and the resolved
+   * dollar target in the hover title.
+   */
+  target?: TargetDelta;
 }) {
   const tone =
     deltaCents === 0
@@ -172,9 +192,17 @@ function DeltaLine({
       : (deltaCents > 0) === Boolean(goodWhenPositive)
         ? styles.comparisonUnder
         : styles.comparisonOver;
+  const percent = target?.targetPercent;
+  const title =
+    target !== undefined
+      ? percent !== undefined
+        ? `Target: ${percent}% of this month's income = ${formatCents(target.targetCents)}`
+        : `Target: ${formatCents(target.targetCents)}`
+      : undefined;
   return (
-    <span className={cx(styles.comparison, tone)}>
-      {label}: {formatSignedCents(deltaCents)}
+    <span className={cx(styles.comparison, tone)} title={title}>
+      {label}
+      {percent !== undefined ? ` (${percent}%)` : ""}: {formatSignedCents(deltaCents)}
     </span>
   );
 }
@@ -384,27 +412,43 @@ function centsToField(cents: number | undefined): string {
   return cents === undefined ? "" : (cents / 100).toFixed(2);
 }
 
+/** Recent actual income used to preview percent targets ('22% ≈ $2,640 on May income'). */
+type RecentIncome = { monthLabel: string; incomeCents: number };
+
+function PercentPreview({ raw, recentIncome }: { raw: string; recentIncome: RecentIncome | null }) {
+  if (!recentIncome || !raw.trim()) return null;
+  const percent = parsePercentInput(raw);
+  if (percent === null) return null;
+  const preview = percentPreviewLabel(percent, recentIncome.incomeCents, recentIncome.monthLabel);
+  return preview ? <span className={cx("muted", styles.budgetPercentPreview)}>{preview}</span> : null;
+}
+
 function BudgetDrawer({
   open,
   onClose,
   accountId,
   monthKey,
   budget,
+  recentIncome,
 }: {
   open: boolean;
   onClose: () => void;
   accountId: string;
   monthKey: string;
   budget: MonthlyReport["budget"];
+  recentIncome: RecentIncome | null;
 }) {
   const toast = useToast();
   const setBudget = useMutation(api.finances.setBudgetForViewer);
   const [scope, setScope] = useState<"default" | "month">("default");
   const [categoryFields, setCategoryFields] = useState<Record<string, string>>({});
   const [typeFields, setTypeFields] = useState<Record<string, string>>({});
+  const [categoryPercentFields, setCategoryPercentFields] = useState<Record<string, string>>({});
+  const [typePercentFields, setTypePercentFields] = useState<Record<string, string>>({});
   const [outgoing, setOutgoing] = useState("");
   const [incoming, setIncoming] = useState("");
   const [net, setNet] = useState("");
+  const [netPercent, setNetPercent] = useState("");
   const [busy, setBusy] = useState(false);
 
   // Seed the editor from the applicable budget each time the drawer opens.
@@ -419,28 +463,58 @@ function BudgetDrawer({
     setTypeFields(
       Object.fromEntries(BUDGET_TX_TYPES.map((type) => [type, centsToField(budget?.typeTargets?.[type])])),
     );
+    setCategoryPercentFields(
+      Object.fromEntries(
+        BUDGET_CATEGORIES.map(({ category }) => [
+          category,
+          percentToField(budget?.categoryPercentTargets?.[category]),
+        ]),
+      ),
+    );
+    setTypePercentFields(
+      Object.fromEntries(
+        BUDGET_TX_TYPES.map((type) => [type, percentToField(budget?.typePercentTargets?.[type])]),
+      ),
+    );
     setOutgoing(centsToField(budget?.targetOutgoingCents));
     setIncoming(centsToField(budget?.targetIncomingCents));
     setNet(centsToField(budget?.targetNetCents));
+    setNetPercent(percentToField(budget?.targetNetPercent));
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reseed only on open
   }, [open]);
 
   const save = async () => {
     const categoryTargets: Record<string, number> = {};
+    const categoryPercentTargets: Record<string, number> = {};
     for (const { category } of BUDGET_CATEGORIES) {
       const raw = (categoryFields[category] ?? "").trim();
-      if (!raw) continue;
-      const cents = parseDollarsToCents(raw);
-      if (cents === null) return toast(`Invalid amount for ${category}.`, "error");
-      categoryTargets[category] = cents;
+      if (raw) {
+        const cents = parseDollarsToCents(raw);
+        if (cents === null) return toast(`Invalid amount for ${category}.`, "error");
+        categoryTargets[category] = cents;
+      }
+      const rawPercent = (categoryPercentFields[category] ?? "").trim();
+      if (rawPercent) {
+        const percent = parsePercentInput(rawPercent);
+        if (percent === null) return toast(`Invalid percent for ${category} (use 0-100).`, "error");
+        categoryPercentTargets[category] = percent;
+      }
     }
     const typeTargets: Record<string, number> = {};
+    const typePercentTargets: Record<string, number> = {};
     for (const type of BUDGET_TX_TYPES) {
       const raw = (typeFields[type] ?? "").trim();
-      if (!raw) continue;
-      const cents = parseDollarsToCents(raw);
-      if (cents === null) return toast(`Invalid amount for ${type}.`, "error");
-      typeTargets[type] = cents;
+      if (raw) {
+        const cents = parseDollarsToCents(raw);
+        if (cents === null) return toast(`Invalid amount for ${type}.`, "error");
+        typeTargets[type] = cents;
+      }
+      const rawPercent = (typePercentFields[type] ?? "").trim();
+      if (rawPercent) {
+        const percent = parsePercentInput(rawPercent);
+        if (percent === null) return toast(`Invalid percent for ${type} (use 0-100).`, "error");
+        typePercentTargets[type] = percent;
+      }
     }
     const totals: Record<string, number> = {};
     for (const [label, raw, key] of [
@@ -453,6 +527,11 @@ function BudgetDrawer({
       if (cents === null) return toast(`Invalid amount for ${label}.`, "error");
       totals[key] = cents;
     }
+    if (netPercent.trim()) {
+      const percent = parsePercentInput(netPercent);
+      if (percent === null) return toast("Invalid percent for net (use 0-100).", "error");
+      totals["targetNetPercent"] = percent;
+    }
 
     setBusy(true);
     try {
@@ -461,6 +540,8 @@ function BudgetDrawer({
         ...(scope === "month" ? { monthKey } : {}),
         ...(Object.keys(categoryTargets).length > 0 ? { categoryTargets } : {}),
         ...(Object.keys(typeTargets).length > 0 ? { typeTargets } : {}),
+        ...(Object.keys(categoryPercentTargets).length > 0 ? { categoryPercentTargets } : {}),
+        ...(Object.keys(typePercentTargets).length > 0 ? { typePercentTargets } : {}),
         ...totals,
       });
       toast(scope === "month" ? `Budget saved for ${monthKeyLabel(monthKey)}.` : "Default budget saved.", "success");
@@ -496,7 +577,9 @@ function BudgetDrawer({
           <option value="month">{monthKeyLabel(monthKey)} only</option>
         </Select>
         <p className="muted" style={{ margin: 0, fontSize: 13 }}>
-          Leave a field blank to skip that target. Saving replaces the previous targets for this scope.
+          Leave a field blank to skip that target. Saving replaces the previous targets for this scope. A %
+          target overrides the $ target for the same row and is computed from each month&apos;s actual income
+          — so a percent plan tracks variable income automatically.
         </p>
       </div>
 
@@ -517,6 +600,16 @@ function BudgetDrawer({
                 setCategoryFields((current) => ({ ...current, [category]: event.target.value }))
               }
             />
+            <TextInput
+              inputMode="decimal"
+              placeholder="%"
+              aria-label={`${category} percent-of-income target`}
+              value={categoryPercentFields[category] ?? ""}
+              onChange={(event) =>
+                setCategoryPercentFields((current) => ({ ...current, [category]: event.target.value }))
+              }
+            />
+            <PercentPreview raw={categoryPercentFields[category] ?? ""} recentIncome={recentIncome} />
           </div>
         ))}
       </div>
@@ -535,6 +628,16 @@ function BudgetDrawer({
               value={typeFields[type] ?? ""}
               onChange={(event) => setTypeFields((current) => ({ ...current, [type]: event.target.value }))}
             />
+            <TextInput
+              inputMode="decimal"
+              placeholder="%"
+              aria-label={`${type} percent-of-income target`}
+              value={typePercentFields[type] ?? ""}
+              onChange={(event) =>
+                setTypePercentFields((current) => ({ ...current, [type]: event.target.value }))
+              }
+            />
+            <PercentPreview raw={typePercentFields[type] ?? ""} recentIncome={recentIncome} />
           </div>
         ))}
       </div>
@@ -550,6 +653,7 @@ function BudgetDrawer({
             value={outgoing}
             onChange={(event) => setOutgoing(event.target.value)}
           />
+          <span aria-hidden />
         </div>
         <div className={styles.budgetRow}>
           <span className={styles.budgetRowLabel}>Total income</span>
@@ -560,6 +664,7 @@ function BudgetDrawer({
             value={incoming}
             onChange={(event) => setIncoming(event.target.value)}
           />
+          <span aria-hidden />
         </div>
         <div className={styles.budgetRow}>
           <span className={styles.budgetRowLabel}>Net (after income)</span>
@@ -570,6 +675,14 @@ function BudgetDrawer({
             value={net}
             onChange={(event) => setNet(event.target.value)}
           />
+          <TextInput
+            inputMode="decimal"
+            placeholder="%"
+            aria-label="Net percent-of-income target"
+            value={netPercent}
+            onChange={(event) => setNetPercent(event.target.value)}
+          />
+          <PercentPreview raw={netPercent} recentIncome={recentIncome} />
         </div>
       </div>
     </Drawer>
@@ -786,7 +899,12 @@ function MonthlyGrid({ report, onEditTransaction }: { report: MonthlyReport; onE
                   {(budgetDelta || hasPrev) && (
                     <span className={styles.comparisons}>
                       {budgetDelta ? (
-                        <DeltaLine label="vs budget" deltaCents={budgetDelta.deltaCents} goodWhenPositive={isIncome} />
+                        <DeltaLine
+                          label="vs budget"
+                          deltaCents={budgetDelta.deltaCents}
+                          goodWhenPositive={isIncome}
+                          target={budgetDelta}
+                        />
                       ) : null}
                       {hasPrev ? (
                         <DeltaLine
@@ -837,7 +955,12 @@ function MonthlyGrid({ report, onEditTransaction }: { report: MonthlyReport; onE
                   {(budgetDelta || hasPrev) && (
                     <span className={styles.comparisons}>
                       {budgetDelta ? (
-                        <DeltaLine label="vs budget" deltaCents={budgetDelta.deltaCents} goodWhenPositive={isIncome} />
+                        <DeltaLine
+                          label="vs budget"
+                          deltaCents={budgetDelta.deltaCents}
+                          goodWhenPositive={isIncome}
+                          target={budgetDelta}
+                        />
                       ) : null}
                       {hasPrev ? (
                         <DeltaLine
@@ -860,7 +983,11 @@ function MonthlyGrid({ report, onEditTransaction }: { report: MonthlyReport; onE
                 <span className={cx(styles.totalLabel, styles.summaryRowLabel)}>Account total (outgoing)</span>
                 <span className={styles.summaryValue}>{formatCents(report.current.totalOutgoingCents)}</span>
                 {budget?.comparison.outgoing ? (
-                  <DeltaLine label="vs budget" deltaCents={budget.comparison.outgoing.deltaCents} />
+                  <DeltaLine
+                    label="vs budget"
+                    deltaCents={budget.comparison.outgoing.deltaCents}
+                    target={budget.comparison.outgoing}
+                  />
                 ) : null}
                 {hasPrev ? (
                   <DeltaLine label={`vs ${prevLabel}`} deltaCents={report.monthOverMonth.totalOutgoingCents} />
@@ -875,7 +1002,12 @@ function MonthlyGrid({ report, onEditTransaction }: { report: MonthlyReport; onE
                 <span className={cx(styles.totalLabel, styles.summaryRowLabel)}>Account total (income)</span>
                 <span className={styles.summaryValue}>{formatCents(report.current.totalIncomingCents)}</span>
                 {budget?.comparison.incoming ? (
-                  <DeltaLine label="vs budget" deltaCents={budget.comparison.incoming.deltaCents} goodWhenPositive />
+                  <DeltaLine
+                    label="vs budget"
+                    deltaCents={budget.comparison.incoming.deltaCents}
+                    goodWhenPositive
+                    target={budget.comparison.incoming}
+                  />
                 ) : null}
                 {hasPrev ? (
                   <DeltaLine
@@ -896,7 +1028,12 @@ function MonthlyGrid({ report, onEditTransaction }: { report: MonthlyReport; onE
                   {formatCents(report.current.netCents)}
                 </span>
                 {budget?.comparison.net ? (
-                  <DeltaLine label="vs budget" deltaCents={budget.comparison.net.deltaCents} goodWhenPositive />
+                  <DeltaLine
+                    label="vs budget"
+                    deltaCents={budget.comparison.net.deltaCents}
+                    goodWhenPositive
+                    target={budget.comparison.net}
+                  />
                 ) : null}
                 {hasPrev ? (
                   <DeltaLine label={`vs ${prevLabel}`} deltaCents={report.monthOverMonth.netCents} goodWhenPositive />
@@ -949,6 +1086,25 @@ export function FinancesContent() {
     api.finances.monthlyReportForViewer,
     viewerReady && accountId ? { accountId: accountId as any, monthKey } : "skip",
   ) as MonthlyReport | undefined;
+
+  // Most recent COMPLETE month's actual income, for percent-target previews in
+  // the budget drawer. Uses data the loaded report already carries: a past
+  // month is complete itself; for the current month, its previous month is the
+  // most recent complete one. Future months get no preview.
+  const recentIncome = useMemo(() => {
+    if (!report) return null;
+    const nowKey = currentMonthKey();
+    if (report.monthKey < nowKey) {
+      return { monthLabel: monthKeyShortLabel(report.monthKey), incomeCents: report.current.totalIncomingCents };
+    }
+    if (report.monthKey === nowKey) {
+      return {
+        monthLabel: monthKeyShortLabel(report.previousMonthKey),
+        incomeCents: report.previous.totalIncomingCents,
+      };
+    }
+    return null;
+  }, [report]);
 
   const openAdd = () => {
     setEditingTx(null);
@@ -1098,6 +1254,7 @@ export function FinancesContent() {
           accountId={accountId}
           monthKey={monthKey}
           budget={report?.budget ?? null}
+          recentIncome={recentIncome}
         />
       ) : null}
       <AccountDialog open={accountDialogOpen} onClose={() => setAccountDialogOpen(false)} />

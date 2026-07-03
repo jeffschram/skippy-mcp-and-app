@@ -1,8 +1,10 @@
 import { mutationGeneric, queryGeneric } from "convex/server";
 import { v } from "convex/values";
 import {
+  TRANSFER_TX_TYPE,
   TX_CATEGORIES,
   TX_TYPES,
+  TX_TYPE_CATEGORIES,
   aggregateMonthTransactions,
   assertIntegerCents,
   assertValidTxTypeCategory,
@@ -484,6 +486,12 @@ async function buildMonthlyReport(db: any, brainInstanceId: any, accountId: stri
             ...(budget.monthKey !== undefined ? { monthKey: budget.monthKey } : {}),
             ...(budget.categoryTargets !== undefined ? { categoryTargets: budget.categoryTargets } : {}),
             ...(budget.typeTargets !== undefined ? { typeTargets: budget.typeTargets } : {}),
+            ...(budget.categoryPercentTargets !== undefined
+              ? { categoryPercentTargets: budget.categoryPercentTargets }
+              : {}),
+            ...(budget.typePercentTargets !== undefined
+              ? { typePercentTargets: budget.typePercentTargets }
+              : {}),
             ...(budget.targetOutgoingCents !== undefined
               ? { targetOutgoingCents: budget.targetOutgoingCents }
               : {}),
@@ -491,6 +499,7 @@ async function buildMonthlyReport(db: any, brainInstanceId: any, accountId: stri
               ? { targetIncomingCents: budget.targetIncomingCents }
               : {}),
             ...(budget.targetNetCents !== undefined ? { targetNetCents: budget.targetNetCents } : {}),
+            ...(budget.targetNetPercent !== undefined ? { targetNetPercent: budget.targetNetPercent } : {}),
           },
           budgetIsDefault: !monthBudget && !!defaultBudget,
         }
@@ -620,13 +629,25 @@ function latestMonthBalance(rows: any[]): any | null {
   return latest;
 }
 
-function validateBudgetTargets(input: {
-  categoryTargets?: Record<string, number>;
-  typeTargets?: Record<string, number>;
-  targetOutgoingCents?: number;
-  targetIncomingCents?: number;
-  targetNetCents?: number;
-}) {
+type BudgetTargetsInput = {
+  categoryTargets?: Record<string, number> | undefined;
+  typeTargets?: Record<string, number> | undefined;
+  categoryPercentTargets?: Record<string, number> | undefined;
+  typePercentTargets?: Record<string, number> | undefined;
+  targetOutgoingCents?: number | undefined;
+  targetIncomingCents?: number | undefined;
+  targetNetCents?: number | undefined;
+  targetNetPercent?: number | undefined;
+};
+
+function assertPercentTarget(value: number, fieldName: string): void {
+  if (!Number.isFinite(value) || value < 0 || value > 100) {
+    throw new Error(`${fieldName} must be a percent between 0 and 100 (50 = 50% of the month's income)`);
+  }
+}
+
+function validateBudgetTargets(input: BudgetTargetsInput) {
+  const transferCategories: readonly string[] = TX_TYPE_CATEGORIES[TRANSFER_TX_TYPE];
   for (const [category, target] of Object.entries(input.categoryTargets ?? {})) {
     if (!(TX_CATEGORIES as readonly string[]).includes(category)) {
       throw new Error(`invalid budget category "${category}". Valid categories: ${TX_CATEGORIES.join(" | ")}`);
@@ -639,10 +660,99 @@ function validateBudgetTargets(input: {
     }
     assertIntegerCents(target, `typeTargets["${type}"]`);
   }
+  // Percent-of-income targets: Transfer and its categories are REJECTED here
+  // (budgets never target transfers), and values must be 0-100.
+  for (const [category, percent] of Object.entries(input.categoryPercentTargets ?? {})) {
+    if (!(TX_CATEGORIES as readonly string[]).includes(category) || transferCategories.includes(category)) {
+      const valid = TX_CATEGORIES.filter((c) => !transferCategories.includes(c));
+      throw new Error(
+        `invalid percent-target category "${category}". Valid categories: ${valid.join(" | ")}`,
+      );
+    }
+    assertPercentTarget(percent, `categoryPercentTargets["${category}"]`);
+  }
+  for (const [type, percent] of Object.entries(input.typePercentTargets ?? {})) {
+    if (!(TX_TYPES as readonly string[]).includes(type) || type === TRANSFER_TX_TYPE) {
+      const valid = TX_TYPES.filter((t) => t !== TRANSFER_TX_TYPE);
+      throw new Error(`invalid percent-target transaction type "${type}". Valid types: ${valid.join(" | ")}`);
+    }
+    assertPercentTarget(percent, `typePercentTargets["${type}"]`);
+  }
   for (const field of ["targetOutgoingCents", "targetIncomingCents", "targetNetCents"] as const) {
     const value = input[field];
     if (value !== undefined) assertIntegerCents(value, field);
   }
+  if (input.targetNetPercent !== undefined) {
+    assertPercentTarget(input.targetNetPercent, "targetNetPercent");
+  }
+}
+
+/**
+ * Create or replace the budget for an account+scope (monthKey, or the default
+ * budget when monthKey is absent). REPLACE semantics: every target field is
+ * overwritten from the input, so omitted fields are cleared.
+ */
+async function setBudget(
+  db: any,
+  brainInstanceId: any,
+  args: BudgetTargetsInput & { accountId: string; monthKey?: string | undefined },
+  actor: Actor,
+) {
+  await requireAccount(db, brainInstanceId, args.accountId);
+  if (args.monthKey !== undefined && !isValidMonthKey(args.monthKey)) {
+    throw new Error(`invalid monthKey "${args.monthKey}". Expected 'YYYY-MM'.`);
+  }
+  validateBudgetTargets(args);
+
+  const now = Date.now();
+  const budgets = await db
+    .query("financialBudgets")
+    .withIndex("by_brain_account", (q: any) =>
+      q.eq("brainInstanceId", brainInstanceId).eq("accountId", args.accountId),
+    )
+    .collect();
+  const existing = budgets.find((budget: any) => budget.monthKey === args.monthKey);
+
+  const fields = {
+    monthKey: args.monthKey,
+    categoryTargets: args.categoryTargets,
+    typeTargets: args.typeTargets,
+    categoryPercentTargets: args.categoryPercentTargets,
+    typePercentTargets: args.typePercentTargets,
+    targetOutgoingCents: args.targetOutgoingCents,
+    targetIncomingCents: args.targetIncomingCents,
+    targetNetCents: args.targetNetCents,
+    targetNetPercent: args.targetNetPercent,
+    updatedAt: now,
+  };
+
+  let budgetId: string;
+  let status: "created" | "updated";
+  if (existing) {
+    await db.patch(existing._id, fields);
+    budgetId = existing._id;
+    status = "updated";
+  } else {
+    budgetId = await db.insert("financialBudgets", {
+      brainInstanceId,
+      accountId: args.accountId,
+      ...fields,
+      createdAt: now,
+    });
+    status = "created";
+  }
+
+  await db.insert("activityEvents", {
+    brainInstanceId,
+    activityType: "financial_budget_set",
+    actorType: actor.actorType,
+    actorId: actor.actorId,
+    timestamp: now,
+    summary: `Budget ${status} for ${args.monthKey ?? "default (recurring)"}`,
+    metadata: { accountId: args.accountId, budgetId, monthKey: args.monthKey },
+  });
+
+  return { budgetId, status, monthKey: args.monthKey ?? null };
 }
 
 /* ------------------------------------------------------------------ */
@@ -812,64 +922,18 @@ export const setBudgetForViewer = mutationGeneric({
     monthKey: v.optional(v.string()),
     categoryTargets: v.optional(v.record(v.string(), v.number())),
     typeTargets: v.optional(v.record(v.string(), v.number())),
+    // Percent-of-income targets (50 = 50% of the month's actual income).
+    // A percent target wins over a cents target for the same key.
+    categoryPercentTargets: v.optional(v.record(v.string(), v.number())),
+    typePercentTargets: v.optional(v.record(v.string(), v.number())),
     targetOutgoingCents: v.optional(v.number()),
     targetIncomingCents: v.optional(v.number()),
     targetNetCents: v.optional(v.number()),
+    targetNetPercent: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const { user, brain } = await requireOwnedBrain(ctx);
-    await requireAccount(ctx.db, brain._id, args.accountId);
-    if (args.monthKey !== undefined && !isValidMonthKey(args.monthKey)) {
-      throw new Error(`invalid monthKey "${args.monthKey}". Expected 'YYYY-MM'.`);
-    }
-    validateBudgetTargets(args);
-
-    const now = Date.now();
-    const budgets = await ctx.db
-      .query("financialBudgets")
-      .withIndex("by_brain_account", (q: any) =>
-        q.eq("brainInstanceId", brain._id).eq("accountId", args.accountId),
-      )
-      .collect();
-    const existing = budgets.find((budget: any) => budget.monthKey === args.monthKey);
-
-    const fields = {
-      monthKey: args.monthKey,
-      categoryTargets: args.categoryTargets,
-      typeTargets: args.typeTargets,
-      targetOutgoingCents: args.targetOutgoingCents,
-      targetIncomingCents: args.targetIncomingCents,
-      targetNetCents: args.targetNetCents,
-      updatedAt: now,
-    };
-
-    let budgetId: string;
-    let status: "created" | "updated";
-    if (existing) {
-      await ctx.db.patch(existing._id, fields);
-      budgetId = existing._id;
-      status = "updated";
-    } else {
-      budgetId = await ctx.db.insert("financialBudgets", {
-        brainInstanceId: brain._id,
-        accountId: args.accountId,
-        ...fields,
-        createdAt: now,
-      });
-      status = "created";
-    }
-
-    await ctx.db.insert("activityEvents", {
-      brainInstanceId: brain._id,
-      activityType: "financial_budget_set",
-      actorType: "user",
-      actorId: user._id,
-      timestamp: now,
-      summary: `Budget ${status} for ${args.monthKey ?? "default (recurring)"}`,
-      metadata: { accountId: args.accountId, budgetId, monthKey: args.monthKey },
-    });
-
-    return { budgetId, status, monthKey: args.monthKey ?? null };
+    return setBudget(ctx.db, brain._id, args, { actorType: "user", actorId: user._id });
   },
 });
 
@@ -967,6 +1031,33 @@ export const recordDailyBalancesForBrain = mutationGeneric({
       },
       { actorType: "harness", ...(args.actorId ? { actorId: args.actorId } : {}) },
     );
+  },
+});
+
+export const setBudgetForBrain = mutationGeneric({
+  args: {
+    brainInstanceId: v.id("brainInstances"),
+    accountId: v.id("financialAccounts"),
+    // Absent monthKey = the default/recurring budget for this account.
+    monthKey: v.optional(v.string()),
+    categoryTargets: v.optional(v.record(v.string(), v.number())),
+    typeTargets: v.optional(v.record(v.string(), v.number())),
+    // Percent-of-income targets (50 = 50% of the month's actual income).
+    // A percent target wins over a cents target for the same key.
+    categoryPercentTargets: v.optional(v.record(v.string(), v.number())),
+    typePercentTargets: v.optional(v.record(v.string(), v.number())),
+    targetOutgoingCents: v.optional(v.number()),
+    targetIncomingCents: v.optional(v.number()),
+    targetNetCents: v.optional(v.number()),
+    targetNetPercent: v.optional(v.number()),
+    actorId: v.optional(v.string()),
+  },
+  handler: async ({ db }, args) => {
+    const { brainInstanceId, actorId, ...budgetArgs } = args;
+    return setBudget(db, brainInstanceId, budgetArgs, {
+      actorType: "harness",
+      ...(actorId ? { actorId } : {}),
+    });
   },
 });
 

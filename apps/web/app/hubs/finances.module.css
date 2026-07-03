@@ -342,13 +342,22 @@
 
 .budgetRow {
   display: grid;
-  grid-template-columns: 1fr 130px;
+  /* label | $ input | compact % input */
+  grid-template-columns: 1fr 96px 64px;
   align-items: center;
   gap: 10px;
 }
 
 .budgetRowLabel {
   font-size: 13px;
+}
+
+/* '22% ≈ $2,640 on May income' line under a percent input. */
+.budgetPercentPreview {
+  grid-column: 2 / -1;
+  margin-top: -4px;
+  font-size: 12px;
+  text-align: right;
 }
 
 .budgetTypeTag {

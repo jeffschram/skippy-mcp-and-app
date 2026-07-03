@@ -884,9 +884,18 @@ export default defineSchema({
     categoryTargets: v.optional(v.record(v.string(), v.number())),
     // transaction type -> target integer cents.
     typeTargets: v.optional(v.record(v.string(), v.number())),
+    // category -> target as a percent of the month's ACTUAL income (plain
+    // number, 50 = 50% of that month's totalIncomingCents). Resolved to cents
+    // at read time by the shared comparison; a percent target WINS over a
+    // cents target for the same key. Transfer keys are rejected in mutations.
+    categoryPercentTargets: v.optional(v.record(v.string(), v.number())),
+    // transaction type -> percent of actual income (same rules as above).
+    typePercentTargets: v.optional(v.record(v.string(), v.number())),
     targetOutgoingCents: v.optional(v.number()),
     targetIncomingCents: v.optional(v.number()),
     targetNetCents: v.optional(v.number()),
+    // Net target as a percent of actual income; wins over targetNetCents.
+    targetNetPercent: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number(),
   }).index("by_brain_account", ["brainInstanceId", "accountId"]),
