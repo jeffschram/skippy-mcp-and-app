@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  balancesByDay,
   bucketTransactionsByDay,
   currentMonthKey,
   dateInputToEpochMs,
@@ -183,5 +184,36 @@ describe("dayRowHasEntries", () => {
     ]);
     expect(dayRowHasEntries(rows[8]!)).toBe(true);
     expect(dayRowHasEntries(rows[9]!)).toBe(false);
+  });
+});
+
+describe("balancesByDay", () => {
+  it("maps snapshots to their UTC day of month", () => {
+    const byDay = balancesByDay("2026-04", [
+      { date: Date.UTC(2026, 3, 1), endOfDayBalanceCents: 100000 },
+      { date: Date.UTC(2026, 3, 15), endOfDayBalanceCents: -2500 },
+      { date: Date.UTC(2026, 3, 30), endOfDayBalanceCents: 98765 },
+    ]);
+
+    expect(byDay.get(1)).toBe(100000);
+    expect(byDay.get(15)).toBe(-2500);
+    expect(byDay.get(30)).toBe(98765);
+    expect(byDay.get(2)).toBeUndefined();
+    expect(byDay.size).toBe(3);
+  });
+
+  it("ignores snapshots dated outside the month", () => {
+    const byDay = balancesByDay("2026-04", [
+      { date: Date.UTC(2026, 2, 31), endOfDayBalanceCents: 50000 },
+      { date: Date.UTC(2026, 4, 1), endOfDayBalanceCents: 60000 },
+      { date: Date.UTC(2026, 3, 10), endOfDayBalanceCents: 70000 },
+    ]);
+
+    expect(byDay.size).toBe(1);
+    expect(byDay.get(10)).toBe(70000);
+  });
+
+  it("returns an empty map for a month without snapshots", () => {
+    expect(balancesByDay("2026-04", []).size).toBe(0);
   });
 });

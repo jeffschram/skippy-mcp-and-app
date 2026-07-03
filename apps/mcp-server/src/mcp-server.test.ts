@@ -218,6 +218,13 @@ function createFakeClient(overrides: Partial<SkippyClient> = {}): SkippyClient {
       updated: 0,
       skipped: 0,
     }),
+    recordFinancialBalances: async (_brainInstanceId, input) => ({
+      accountId: input.accountId,
+      accountName: "Chase Checking",
+      source: input.source ?? "plaid_derived",
+      inserted: input.balances.length,
+      updated: 0,
+    }),
     getFinancialReport: async (_brainInstanceId, input) => ({
       monthKey: input.monthKey,
       previousMonthKey: "2026-05",
@@ -286,6 +293,7 @@ describe("Skippy MCP manifest", () => {
       const updateLinkStatus = tools.find((tool) => tool.name === "update_link_status");
       const upsertFinancialAccount = tools.find((tool) => tool.name === "upsert_financial_account");
       const recordFinancialTransactions = tools.find((tool) => tool.name === "record_financial_transactions");
+      const recordFinancialBalances = tools.find((tool) => tool.name === "record_financial_balances");
       const getFinancialReport = tools.find((tool) => tool.name === "get_financial_report");
 
       expect(ingestObject?.description).toContain("importance rubric");
@@ -318,6 +326,11 @@ describe("Skippy MCP manifest", () => {
       expect(recordFinancialTransactions?.description).toContain("externalIds for idempotency");
       expect(recordFinancialTransactions?.description).toContain("Fixed: Mortgage, HOA, Mortgage Loan | Recurring Bills");
       expect(recordFinancialTransactions?.inputSchema.properties?.transactions).toBeDefined();
+      expect(recordFinancialBalances?.description).toContain("FULL raw Plaid transaction feed");
+      expect(recordFinancialBalances?.description).toContain("internal transfers that budget ingestion skips");
+      expect(recordFinancialBalances?.description).toContain("one snapshot per account+day");
+      expect(recordFinancialBalances?.description).toContain("INTEGER CENTS");
+      expect(recordFinancialBalances?.inputSchema.properties?.balances).toBeDefined();
       expect(getFinancialReport?.annotations?.readOnlyHint).toBe(true);
       expect(getFinancialReport?.description).toContain("previous-month deltas");
       expect(getFinancialReport?.inputSchema.properties?.monthKey).toBeDefined();
@@ -1074,6 +1087,86 @@ describe("Skippy MCP manifest", () => {
       expect(invalidPair.isError).toBe(true);
       expect(JSON.stringify(invalidPair.content)).toContain("invalid category");
       expect(transactionCalls).toHaveLength(1);
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
+  it("wires daily balance ingestion with idempotent upsert counts", async () => {
+    const balanceCalls: Array<{ brainInstanceId: string; input: unknown }> = [];
+    const server = createMcpServer(
+      createFakeClient({
+        recordFinancialBalances: async (brainInstanceId, input) => {
+          balanceCalls.push({ brainInstanceId, input });
+          return {
+            accountId: input.accountId,
+            accountName: "Chase Checking",
+            source: input.source ?? "plaid_derived",
+            inserted: 2,
+            updated: 1,
+          };
+        },
+      }),
+      "brain_123",
+    );
+    const client = new Client({ name: "financial-balances-test", version: "0.1.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    try {
+      await server.connect(serverTransport);
+      await client.connect(clientTransport);
+
+      const result = await client.callTool({
+        name: "record_financial_balances",
+        arguments: {
+          accountId: "financial_account_123",
+          balances: [
+            { date: 1780790400000, endOfDayBalanceCents: 123456 },
+            { date: 1780876800000, endOfDayBalanceCents: 120000 },
+            { date: 1780963200000, endOfDayBalanceCents: -4500 },
+          ],
+        },
+      });
+
+      expect(balanceCalls).toEqual([
+        {
+          brainInstanceId: "brain_123",
+          input: {
+            accountId: "financial_account_123",
+            source: "plaid_derived",
+            actorId: "skippy_mcp",
+            balances: [
+              { date: 1780790400000, endOfDayBalanceCents: 123456 },
+              { date: 1780876800000, endOfDayBalanceCents: 120000 },
+              { date: 1780963200000, endOfDayBalanceCents: -4500 },
+            ],
+          },
+        },
+      ]);
+      expect(textResult(result)).toMatchObject({
+        status: "recorded",
+        entityType: "financial_balances",
+        accountId: "financial_account_123",
+        title: "Chase Checking",
+        source: "plaid_derived",
+        submitted: 3,
+        inserted: 2,
+        updated: 1,
+        reviewUrl: "http://127.0.0.1:3000/finances",
+      });
+
+      const invalidCents = await client.callTool({
+        name: "record_financial_balances",
+        arguments: {
+          accountId: "financial_account_123",
+          balances: [{ date: 1780790400000, endOfDayBalanceCents: 1234.56 }],
+        },
+      });
+      expect(invalidCents.isError).toBe(true);
+      // Rejected by the zod .int() input schema or the handler's integer-cents guard.
+      expect(JSON.stringify(invalidCents.content)).toMatch(/int/i);
+      expect(balanceCalls).toHaveLength(1);
     } finally {
       await client.close();
       await server.close();

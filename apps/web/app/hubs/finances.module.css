@@ -111,6 +111,24 @@
   vertical-align: bottom;
 }
 
+/* Balance column: sticky immediately after the 76px day column so the date
+   and end-of-day balance pin together during horizontal scroll. Same
+   background/z-index approach as .dayCell, with the day column's stronger
+   right border. Declared after .categoryHead so its width wins on the
+   'Balance' header cell. */
+.balanceCell {
+  position: sticky;
+  left: 76px;
+  z-index: 2;
+  width: 96px;
+  min-width: 96px;
+  background: var(--panel);
+  border-right: 1px solid var(--line);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
 /* Band tint variables (token-derived, theme-aware). */
 .bandFixed {
   --band: color-mix(in srgb, var(--blue) 55%, var(--red) 45%);

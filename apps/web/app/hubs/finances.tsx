@@ -27,6 +27,7 @@ import {
 } from "../components";
 import { useViewerReady } from "./use-viewer";
 import {
+  balancesByDay,
   bucketTransactionsByDay,
   currentMonthKey,
   dayRowHasEntries,
@@ -38,6 +39,7 @@ import {
   monthKeyShortLabel,
   parseDollarsToCents,
   shiftMonthKey,
+  type DailyBalance,
   type GridTransaction,
 } from "./finances-helpers";
 import styles from "./finances.module.css";
@@ -103,6 +105,12 @@ type MonthlyReport = {
       }
     | null;
   transactions: GridTransaction[];
+  /** Stored end-of-day balance snapshots for the month (never derived from transactions). */
+  balances: DailyBalance[];
+  /** Balance entering the month (previous month's latest snapshot), or null. */
+  startingBalanceCents: number | null;
+  /** Latest snapshot within the month, or null. */
+  endingBalanceCents: number | null;
 };
 
 /* ------------------------------------------------------------------ */
@@ -127,8 +135,8 @@ const GRID_CATEGORIES: Array<{ category: TxCategory; type: TxType }> = TX_TYPES.
   TX_TYPE_CATEGORIES[type].map((category) => ({ category: category as TxCategory, type })),
 );
 
-/** Date column + one column per category. */
-const GRID_COLUMN_COUNT = GRID_CATEGORIES.length + 1;
+/** Date column + balance column + one column per category. */
+const GRID_COLUMN_COUNT = GRID_CATEGORIES.length + 2;
 /** The full-width summary rows split the table into a label half and a value half. */
 
 /* ------------------------------------------------------------------ */
@@ -635,6 +643,12 @@ function MonthlyGrid({ report, onEditTransaction }: { report: MonthlyReport; onE
     () => bucketTransactionsByDay(report.monthKey, report.transactions).filter(dayRowHasEntries),
     [report.monthKey, report.transactions],
   );
+  // Stored end-of-day balance snapshots keyed by day of month. Never derived
+  // from the grid's transactions (which exclude internal transfers).
+  const dayBalances = useMemo(
+    () => balancesByDay(report.monthKey, report.balances ?? []),
+    [report.monthKey, report.balances],
+  );
   const prevLabel = monthKeyShortLabel(report.previousMonthKey);
   const hasPrev = report.previous.transactionCount > 0;
   const budget = report.budget;
@@ -646,6 +660,7 @@ function MonthlyGrid({ report, onEditTransaction }: { report: MonthlyReport; onE
           {/* Type band headers */}
           <tr>
             <td className={cx(styles.cell, styles.dayCell, styles.cornerCell, styles.bandHead)} />
+            <td className={cx(styles.cell, styles.balanceCell, styles.cornerCell, styles.bandHead)} />
             {TX_TYPES.map((type) => (
               <th
                 key={type}
@@ -661,6 +676,9 @@ function MonthlyGrid({ report, onEditTransaction }: { report: MonthlyReport; onE
           {/* Category sub-headers */}
           <tr>
             <td className={cx(styles.cell, styles.dayCell, styles.cornerCell)} />
+            <th scope="col" className={cx(styles.cell, styles.categoryHead, styles.balanceCell, styles.cornerCell)}>
+              Balance
+            </th>
             {GRID_CATEGORIES.map(({ category, type }) => (
               <th
                 key={category}
@@ -675,36 +693,68 @@ function MonthlyGrid({ report, onEditTransaction }: { report: MonthlyReport; onE
 
         {/* One row per day that has at least one transaction */}
         <tbody>
-          {rows.map((row) => (
-            <tr key={row.day}>
+          {/* Balance entering the month (previous month's latest snapshot) */}
+          {report.startingBalanceCents !== null ? (
+            <tr>
               <th scope="row" className={cx(styles.cell, styles.dayCell)}>
-                {row.label}
+                Start
               </th>
-              {GRID_CATEGORIES.map(({ category, type }) => {
-                const entries = row.cells[category];
-                return (
-                  <td key={category} className={cx(styles.cell, BAND_CLASS[type], styles.bandFaint)}>
-                    {entries.length > 0 ? (
-                      <div className={styles.cellStack}>
-                        {entries.map((entry) => (
-                          <button
-                            key={entry._id}
-                            type="button"
-                            className={styles.entry}
-                            onClick={() => onEditTransaction(entry)}
-                            title={`${entry.description} — ${formatCents(entry.amountCents)} (click to edit)`}
-                          >
-                            <span className={styles.entryDesc}>{entry.description}</span>
-                            <span className={styles.entryAmount}>{formatCents(entry.amountCents)}</span>
-                          </button>
-                        ))}
-                      </div>
-                    ) : null}
-                  </td>
-                );
-              })}
+              <td
+                className={cx(
+                  styles.cell,
+                  styles.balanceCell,
+                  report.startingBalanceCents < 0 && styles.netNegative,
+                )}
+              >
+                {formatCents(report.startingBalanceCents)}
+              </td>
+              {GRID_CATEGORIES.map(({ category, type }) => (
+                <td key={category} className={cx(styles.cell, BAND_CLASS[type], styles.bandFaint)} />
+              ))}
             </tr>
-          ))}
+          ) : null}
+          {rows.map((row) => {
+            const balance = dayBalances.get(row.day);
+            return (
+              <tr key={row.day}>
+                <th scope="row" className={cx(styles.cell, styles.dayCell)}>
+                  {row.label}
+                </th>
+                <td
+                  className={cx(
+                    styles.cell,
+                    styles.balanceCell,
+                    balance !== undefined && balance < 0 && styles.netNegative,
+                  )}
+                >
+                  {balance !== undefined ? formatCents(balance) : null}
+                </td>
+                {GRID_CATEGORIES.map(({ category, type }) => {
+                  const entries = row.cells[category];
+                  return (
+                    <td key={category} className={cx(styles.cell, BAND_CLASS[type], styles.bandFaint)}>
+                      {entries.length > 0 ? (
+                        <div className={styles.cellStack}>
+                          {entries.map((entry) => (
+                            <button
+                              key={entry._id}
+                              type="button"
+                              className={styles.entry}
+                              onClick={() => onEditTransaction(entry)}
+                              title={`${entry.description} — ${formatCents(entry.amountCents)} (click to edit)`}
+                            >
+                              <span className={styles.entryDesc}>{entry.description}</span>
+                              <span className={styles.entryAmount}>{formatCents(entry.amountCents)}</span>
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
+                    </td>
+                  );
+                })}
+              </tr>
+            );
+          })}
         </tbody>
 
         <tfoot>
@@ -713,6 +763,7 @@ function MonthlyGrid({ report, onEditTransaction }: { report: MonthlyReport; onE
             <th scope="row" className={cx(styles.cell, styles.dayCell, styles.totalCell, styles.totalLabel)}>
               Totals
             </th>
+            <td className={cx(styles.cell, styles.balanceCell, styles.totalCell)} />
             {GRID_CATEGORIES.map(({ category, type }) => {
               const budgetDelta = budget?.comparison.categoryDeltas[category];
               const isIncome = type === "Income";
@@ -741,6 +792,7 @@ function MonthlyGrid({ report, onEditTransaction }: { report: MonthlyReport; onE
           {/* Per-type totals (banded) */}
           <tr>
             <td className={cx(styles.cell, styles.dayCell, styles.totalCell)} />
+            <td className={cx(styles.cell, styles.balanceCell, styles.totalCell)} />
             {TX_TYPES.map((type) => {
               const budgetDelta = budget?.comparison.typeDeltas[type];
               const isIncome = type === "Income";
@@ -827,6 +879,21 @@ function MonthlyGrid({ report, onEditTransaction }: { report: MonthlyReport; onE
               </div>
             </th>
           </tr>
+
+          {report.endingBalanceCents !== null ? (
+            <tr>
+              <th scope="row" colSpan={GRID_COLUMN_COUNT} className={cx(styles.cell, styles.totalCell, styles.summaryRow)}>
+                <div className={styles.summaryStick}>
+                  <span className={cx(styles.totalLabel, styles.summaryRowLabel)}>Ending balance</span>
+                  <span
+                    className={cx(styles.summaryValue, report.endingBalanceCents < 0 && styles.netNegative)}
+                  >
+                    {formatCents(report.endingBalanceCents)}
+                  </span>
+                </div>
+              </th>
+            </tr>
+          ) : null}
         </tfoot>
       </table>
     </div>

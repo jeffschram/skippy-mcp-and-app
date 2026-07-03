@@ -6,6 +6,7 @@ import {
   createLlmClient,
 } from "@skippy/ai";
 import {
+  type BalanceSource,
   type CandidateObjectInput,
   type EntityRef,
   type EntityType,
@@ -243,6 +244,10 @@ export type SkippyClient = {
     brainInstanceId: string,
     input: RecordFinancialTransactionsInput,
   ): Promise<unknown>;
+  recordFinancialBalances(
+    brainInstanceId: string,
+    input: RecordFinancialBalancesInput,
+  ): Promise<unknown>;
   getFinancialReport(brainInstanceId: string, input: { accountId: string; monthKey: string }): Promise<unknown>;
 };
 
@@ -274,6 +279,20 @@ export type RecordFinancialTransactionsInput = {
   accountId: string;
   source?: TxSource;
   transactions: FinancialTransactionRow[];
+  actorId?: string;
+};
+
+export type DailyBalanceRow = {
+  /** Snapshot day in epoch milliseconds (normalized to UTC midnight server-side). */
+  date: number;
+  /** End-of-day balance in integer cents; may be negative. */
+  endOfDayBalanceCents: number;
+};
+
+export type RecordFinancialBalancesInput = {
+  accountId: string;
+  source?: BalanceSource;
+  balances: DailyBalanceRow[];
   actorId?: string;
 };
 
@@ -1265,6 +1284,28 @@ export function createSkippyToolHandlers(client: SkippyClient, brainInstanceId: 
       return await client.recordFinancialTransactions(brainInstanceId, {
         ...input,
         source: input.source ?? "plaid",
+        actorId: input.actorId ?? "skippy_mcp",
+      });
+    },
+
+    async recordFinancialBalances(input: RecordFinancialBalancesInput) {
+      if (!input.balances.length) {
+        throw new Error("balances must contain at least one item");
+      }
+      input.balances.forEach((balance, index) => {
+        try {
+          if (!Number.isFinite(balance.date)) {
+            throw new Error("date must be epoch milliseconds");
+          }
+          assertIntegerCents(balance.endOfDayBalanceCents, "endOfDayBalanceCents");
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          throw new Error(`balances[${index}]: ${message}`);
+        }
+      });
+      return await client.recordFinancialBalances(brainInstanceId, {
+        ...input,
+        source: input.source ?? "plaid_derived",
         actorId: input.actorId ?? "skippy_mcp",
       });
     },

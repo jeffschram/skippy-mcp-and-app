@@ -15,6 +15,7 @@ import {
   type MemoryListInput,
   type MemoryReviewBehavior,
   type MemoryReviewCandidateInput,
+  type RecordFinancialBalancesInput,
   type RecordFinancialTransactionsInput,
   type RecordMemoryInput,
   type SkippyClient,
@@ -22,6 +23,7 @@ import {
   type UpsertFinancialAccountInput,
 } from "./tools.js";
 import {
+  BALANCE_SOURCES,
   FINANCIAL_ACCOUNT_TYPES,
   MONTH_KEY_PATTERN,
   TX_CATEGORIES,
@@ -555,6 +557,21 @@ function financialTransactionsConfirmation(input: RecordFinancialTransactionsInp
     inserted: resultRecord.inserted,
     updated: resultRecord.updated,
     skipped: resultRecord.skipped,
+    reviewUrl: reviewUrl("/finances"),
+  };
+}
+
+function financialBalancesConfirmation(input: RecordFinancialBalancesInput, result: unknown) {
+  const resultRecord = objectResult(result);
+  return {
+    status: "recorded",
+    entityType: "financial_balances",
+    accountId: resultRecord.accountId ?? input.accountId,
+    title: resultRecord.accountName,
+    source: resultRecord.source ?? input.source ?? "plaid_derived",
+    submitted: input.balances.length,
+    inserted: resultRecord.inserted,
+    updated: resultRecord.updated,
     reviewUrl: reviewUrl("/finances"),
   };
 }
@@ -1822,11 +1839,48 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
   );
 
   server.registerTool(
+    "record_financial_balances",
+    {
+      title: "Record daily account balances (bulk)",
+      description:
+        "Bulk-record end-of-day account balance snapshots, one per day. The harness computes these from the FULL raw Plaid transaction feed walked backward from the /accounts/balance/get current balance — including internal transfers that budget ingestion skips — so NEVER derive balances by summing recorded budget transactions. Balances are INTEGER CENTS and may be negative. Idempotent upsert: one snapshot per account+day; re-sending a day updates the stored snapshot instead of duplicating it. Returns {inserted, updated} counts.",
+      annotations: { destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: z.object({
+        accountId: z.string().describe("Financial account ID from upsert_financial_account."),
+        source: z
+          .enum(BALANCE_SOURCES)
+          .optional()
+          .describe("Where the snapshots came from. Defaults to plaid_derived."),
+        balances: z
+          .array(
+            z.object({
+              date: z
+                .number()
+                .describe("Snapshot day in epoch milliseconds (normalized to UTC midnight server-side)."),
+              endOfDayBalanceCents: z
+                .number()
+                .int()
+                .describe("End-of-day balance in integer cents (e.g. $1,234.56 -> 123456). May be negative."),
+            }),
+          )
+          .min(1)
+          .describe("End-of-day balance snapshots to record."),
+      }),
+    },
+    async (args) => {
+      const input = stripUndefined(args) as RecordFinancialBalancesInput;
+      return toolResult(
+        financialBalancesConfirmation(input, await tools.recordFinancialBalances(input)),
+      );
+    },
+  );
+
+  server.registerTool(
     "get_financial_report",
     {
       title: "Get monthly financial report",
       description:
-        "Read-only monthly report for one account, computed at read time from stored transactions: totals per category and type, outgoing (Fixed+Spending+Food), incoming (Income), net, percentages of outgoing, previous-month deltas, and the applicable budget (month-specific if present, else the default) with per-target deltas. All amounts are integer cents.",
+        "Read-only monthly report for one account, computed at read time from stored transactions: totals per category and type, outgoing (Fixed+Spending+Food), incoming (Income), net, percentages of outgoing, previous-month deltas, and the applicable budget (month-specific if present, else the default) with per-target deltas. Also includes stored daily balance snapshots plus the month's starting and ending balances (null when no snapshots exist). All amounts are integer cents.",
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: z.object({
         accountId: z.string().describe("Financial account ID."),

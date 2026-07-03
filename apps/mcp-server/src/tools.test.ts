@@ -77,6 +77,8 @@ function createFakeClient(): { client: SkippyClient; calls: Array<{ name: string
       upsertFinancialAccount: (brainInstanceId, input) => record("upsertFinancialAccount", brainInstanceId, input),
       recordFinancialTransactions: (brainInstanceId, input) =>
         record("recordFinancialTransactions", brainInstanceId, input),
+      recordFinancialBalances: (brainInstanceId, input) =>
+        record("recordFinancialBalances", brainInstanceId, input),
       getFinancialReport: (brainInstanceId, input) => record("getFinancialReport", brainInstanceId, input),
     },
   };
@@ -702,6 +704,60 @@ describe("Skippy MCP tool handlers", () => {
         ],
       }),
     ).rejects.toThrow(/integer number of cents/);
+
+    expect(calls).toHaveLength(0);
+  });
+
+  it("records daily balances with plaid_derived defaults", async () => {
+    const { client, calls } = createFakeClient();
+    const tools = createSkippyToolHandlers(client, "brain_123");
+
+    await tools.recordFinancialBalances({
+      accountId: "account_123",
+      balances: [
+        { date: 1780850000000, endOfDayBalanceCents: 123456 },
+        { date: 1780936400000, endOfDayBalanceCents: -4500 },
+      ],
+    });
+
+    expect(calls[0]).toMatchObject({
+      name: "recordFinancialBalances",
+      args: [
+        "brain_123",
+        {
+          accountId: "account_123",
+          source: "plaid_derived",
+          actorId: "skippy_mcp",
+          balances: [
+            { date: 1780850000000, endOfDayBalanceCents: 123456 },
+            { date: 1780936400000, endOfDayBalanceCents: -4500 },
+          ],
+        },
+      ],
+    });
+  });
+
+  it("rejects empty balance batches and non-integer balance cents before calling the backend", async () => {
+    const { client, calls } = createFakeClient();
+    const tools = createSkippyToolHandlers(client, "brain_123");
+
+    await expect(
+      tools.recordFinancialBalances({ accountId: "account_123", balances: [] }),
+    ).rejects.toThrow(/at least one item/);
+
+    await expect(
+      tools.recordFinancialBalances({
+        accountId: "account_123",
+        balances: [{ date: 1780850000000, endOfDayBalanceCents: 1234.56 }],
+      }),
+    ).rejects.toThrow(/balances\[0\].*integer number of cents/);
+
+    await expect(
+      tools.recordFinancialBalances({
+        accountId: "account_123",
+        balances: [{ date: Number.NaN, endOfDayBalanceCents: 1000 }],
+      }),
+    ).rejects.toThrow(/balances\[0\].*epoch milliseconds/);
 
     expect(calls).toHaveLength(0);
   });

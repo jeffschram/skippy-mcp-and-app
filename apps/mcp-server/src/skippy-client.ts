@@ -75,6 +75,9 @@ const upsertFinancialAccountForBrainRef = makeFunctionReference<"mutation">("fin
 const recordFinancialTransactionsForBrainRef = makeFunctionReference<"mutation">(
   "finances:recordFinancialTransactionsForBrain",
 );
+const recordDailyBalancesForBrainRef = makeFunctionReference<"mutation">(
+  "finances:recordDailyBalancesForBrain",
+);
 const monthlyReportForBrainRef = makeFunctionReference<"query">("finances:monthlyReportForBrain");
 
 export function createConvexSkippyClient(convexUrl: string, authToken?: string): SkippyClient {
@@ -184,6 +187,8 @@ export function createConvexSkippyClient(convexUrl: string, authToken?: string):
       client.mutation(upsertFinancialAccountForBrainRef, { brainInstanceId, ...input }),
     recordFinancialTransactions: (brainInstanceId, input) =>
       client.mutation(recordFinancialTransactionsForBrainRef, { brainInstanceId, ...input }),
+    recordFinancialBalances: (brainInstanceId, input) =>
+      client.mutation(recordDailyBalancesForBrainRef, { brainInstanceId, ...input }),
     getFinancialReport: (brainInstanceId, input) =>
       client.query(monthlyReportForBrainRef, { brainInstanceId, ...input }),
   };
