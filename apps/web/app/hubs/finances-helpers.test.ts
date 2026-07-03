@@ -13,6 +13,9 @@ import {
   monthKeyLabel,
   monthKeyShortLabel,
   parseDollarsToCents,
+  parsePercentInput,
+  percentPreviewLabel,
+  percentToField,
   shiftMonthKey,
   type GridTransaction,
 } from "./finances-helpers";
@@ -66,6 +69,49 @@ describe("parseDollarsToCents", () => {
     expect(parseDollarsToCents("1.234")).toBeNull();
     expect(parseDollarsToCents("1.2.3")).toBeNull();
     expect(parseDollarsToCents(".")).toBeNull();
+  });
+});
+
+describe("parsePercentInput", () => {
+  it("parses plain and decorated percent strings", () => {
+    expect(parsePercentInput("22")).toBe(22);
+    expect(parsePercentInput("22.5")).toBe(22.5);
+    expect(parsePercentInput("50%")).toBe(50);
+    expect(parsePercentInput(" 7 % ")).toBe(7);
+    expect(parsePercentInput("0")).toBe(0);
+    expect(parsePercentInput("100")).toBe(100);
+  });
+
+  it("rejects out-of-range, negative, and malformed input", () => {
+    expect(parsePercentInput("101")).toBeNull();
+    expect(parsePercentInput("-5")).toBeNull();
+    expect(parsePercentInput("22.55")).toBeNull(); // at most one decimal
+    expect(parsePercentInput("abc")).toBeNull();
+    expect(parsePercentInput("")).toBeNull();
+    expect(parsePercentInput("%")).toBeNull();
+  });
+});
+
+describe("percentToField", () => {
+  it("round-trips percent targets into input strings", () => {
+    expect(percentToField(22)).toBe("22");
+    expect(percentToField(22.5)).toBe("22.5");
+    expect(percentToField(0)).toBe("0");
+    expect(percentToField(undefined)).toBe("");
+  });
+});
+
+describe("percentPreviewLabel", () => {
+  it("previews the percent against a recent month's income", () => {
+    expect(percentPreviewLabel(22, 1_200_000, "May")).toBe("22% ≈ $2,640.00 on May income");
+    expect(percentPreviewLabel(50, 333_333, "Jun")).toBe("50% ≈ $1,666.67 on Jun income");
+  });
+
+  it("returns null when income is unknown or non-positive", () => {
+    expect(percentPreviewLabel(22, null, "May")).toBeNull();
+    expect(percentPreviewLabel(22, undefined, "May")).toBeNull();
+    expect(percentPreviewLabel(22, 0, "May")).toBeNull();
+    expect(percentPreviewLabel(22, -100, "May")).toBeNull();
   });
 });
 
