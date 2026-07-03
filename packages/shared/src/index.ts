@@ -708,7 +708,7 @@ export function candidateFingerprint(entityType: EntityType, rawPayload: unknown
  * Every write path (Convex mutations, MCP tools) must enforce this pairing via
  * isValidTxTypeCategory / assertValidTxTypeCategory.
  */
-export const TX_TYPES = ["Fixed", "Spending", "Food", "Income"] as const;
+export const TX_TYPES = ["Fixed", "Spending", "Food", "Income", "Transfer"] as const;
 export type TxType = (typeof TX_TYPES)[number];
 
 export const TX_TYPE_CATEGORIES = {
@@ -716,6 +716,10 @@ export const TX_TYPE_CATEGORIES = {
   Spending: ["Subscriptions", "Gas, Amazon, Home Depot, Etc", "Misc."],
   Food: ["Groceries", "Restaurants"],
   Income: ["Jeff", "Holly"],
+  // Transfers between the owner's own accounts (tracked or untracked). Amounts
+  // are positive magnitudes — direction IS the category. Visible in the grid
+  // but excluded from outgoing/incoming/net and every budget total.
+  Transfer: ["Transfers In", "Transfers Out"],
 } as const;
 
 export type TxCategory = (typeof TX_TYPE_CATEGORIES)[TxType][number];
@@ -731,12 +735,23 @@ export const TX_CATEGORIES = [
   "Restaurants",
   "Jeff",
   "Holly",
+  "Transfers In",
+  "Transfers Out",
 ] as const satisfies readonly TxCategory[];
 
-/** Transaction types that count toward money going out. */
+/** Transaction types that count toward money going out. Transfer is excluded. */
 export const OUTGOING_TX_TYPES = ["Fixed", "Spending", "Food"] as const;
-/** Transaction types that count toward money coming in. */
+/** Transaction types that count toward money coming in. Transfer is excluded. */
 export const INCOMING_TX_TYPES = ["Income"] as const;
+
+/**
+ * The transfer type and its categories are excluded from budget math entirely:
+ * transfers move money between the owner's own accounts, so they are neither
+ * income nor spending and never count toward budget totals or targets.
+ */
+export const TRANSFER_TX_TYPE = "Transfer" as const;
+export const TRANSFER_IN_CATEGORY = "Transfers In" as const;
+export const TRANSFER_OUT_CATEGORY = "Transfers Out" as const;
 
 export const FINANCIAL_ACCOUNT_TYPES = ["Jeff Personal", "Family Shared"] as const;
 export type FinancialAccountType = (typeof FINANCIAL_ACCOUNT_TYPES)[number];
@@ -820,15 +835,17 @@ export type FinancialMonthAggregates = {
   transactionCount: number;
   categoryTotalsCents: Record<TxCategory, number>;
   typeTotalsCents: Record<TxType, number>;
-  /** Sum of Fixed + Spending + Food amounts (integer cents). */
+  /** Sum of Fixed + Spending + Food amounts (integer cents). Transfers are excluded. */
   totalOutgoingCents: number;
-  /** Sum of Income amounts (integer cents). */
+  /** Sum of Income amounts (integer cents). Transfers are excluded. */
   totalIncomingCents: number;
-  /** totalIncomingCents - totalOutgoingCents. */
+  /** totalIncomingCents - totalOutgoingCents. Transfers are excluded. */
   netCents: number;
-  /** Percent of total outgoing per category (0-100, one decimal). Income categories are 0. */
+  /** Transfers In minus Transfers Out (integer cents, signed). Not part of netCents. */
+  transferNetCents: number;
+  /** Percent of total outgoing per category (0-100, one decimal). Income and Transfer categories are 0. */
   categoryPercentOfOutgoing: Record<TxCategory, number>;
-  /** Percent of total outgoing per type (0-100, one decimal). Income is 0. */
+  /** Percent of total outgoing per type (0-100, one decimal). Income and Transfer are 0. */
   typePercentOfOutgoing: Record<TxType, number>;
 };
 
@@ -848,6 +865,10 @@ function roundPercent(value: number): number {
  * Pure month aggregation used by monthlyReport: totals per category and type,
  * outgoing/incoming/net, and share of outgoing per category and type.
  * Transactions with invalid type/category pairs are rejected loudly.
+ * Transfer rows appear in category/type totals (so the grid renders them) but
+ * are excluded from outgoing/incoming/net and every percent-of-outgoing
+ * numerator and denominator; their net movement is reported separately as
+ * transferNetCents.
  */
 export function aggregateMonthTransactions(transactions: MonthTransactionInput[]): FinancialMonthAggregates {
   const categoryTotalsCents = zeroCategoryRecord();
@@ -885,6 +906,7 @@ export function aggregateMonthTransactions(transactions: MonthTransactionInput[]
     totalOutgoingCents,
     totalIncomingCents,
     netCents: totalIncomingCents - totalOutgoingCents,
+    transferNetCents: categoryTotalsCents[TRANSFER_IN_CATEGORY] - categoryTotalsCents[TRANSFER_OUT_CATEGORY],
     categoryPercentOfOutgoing,
     typePercentOfOutgoing,
   };
@@ -920,19 +942,27 @@ function targetDelta(targetCents: number, actualCents: number): BudgetTargetDelt
   return { targetCents, actualCents, deltaCents: actualCents - targetCents };
 }
 
-/** Per-target deltas between a budget and a month's actual aggregates. */
+/**
+ * Per-target deltas between a budget and a month's actual aggregates.
+ * Budgets never target transfers: any Transfer type/category targets are
+ * silently ignored so transfers stay out of budget math end to end.
+ */
 export function compareBudgetToAggregates(
   budget: FinancialBudgetTargets,
   aggregates: FinancialMonthAggregates,
 ): FinancialBudgetComparison {
+  const transferCategories: readonly string[] = TX_TYPE_CATEGORIES[TRANSFER_TX_TYPE];
+
   const categoryDeltas: Record<string, BudgetTargetDelta> = {};
   for (const [category, target] of Object.entries(budget.categoryTargets ?? {})) {
+    if (transferCategories.includes(category)) continue;
     const actual = (aggregates.categoryTotalsCents as Record<string, number | undefined>)[category] ?? 0;
     categoryDeltas[category] = targetDelta(target, actual);
   }
 
   const typeDeltas: Record<string, BudgetTargetDelta> = {};
   for (const [type, target] of Object.entries(budget.typeTargets ?? {})) {
+    if (type === TRANSFER_TX_TYPE) continue;
     const actual = (aggregates.typeTotalsCents as Record<string, number | undefined>)[type] ?? 0;
     typeDeltas[type] = targetDelta(target, actual);
   }
@@ -970,6 +1000,8 @@ export type MonthlyFinancialReport = {
     totalOutgoingCents: number;
     totalIncomingCents: number;
     netCents: number;
+    /** Change in Transfers In minus Transfers Out (signed integer cents). */
+    transferNetCents: number;
     categoryTotalsCents: Record<TxCategory, number>;
     typeTotalsCents: Record<TxType, number>;
   };
@@ -1003,6 +1035,7 @@ export function computeMonthlyFinancialReport(input: MonthlyFinancialReportInput
       totalOutgoingCents: current.totalOutgoingCents - previous.totalOutgoingCents,
       totalIncomingCents: current.totalIncomingCents - previous.totalIncomingCents,
       netCents: current.netCents - previous.netCents,
+      transferNetCents: current.transferNetCents - previous.transferNetCents,
       categoryTotalsCents,
       typeTotalsCents,
     },
@@ -1022,8 +1055,8 @@ export function computeMonthlyFinancialReport(input: MonthlyFinancialReportInput
 
 /**
  * Where a daily balance snapshot came from. Balances are NEVER derived from
- * financialTransactions (budget ingestion deliberately excludes internal
- * transfers, so running sums drift): the harness computes end-of-day balances
+ * financialTransactions (recorded transactions may not cover every raw feed
+ * row, so running sums drift): the harness computes end-of-day balances
  * externally from the full raw Plaid feed anchored to the live current balance.
  */
 export const BALANCE_SOURCES = ["plaid_derived", "manual"] as const;

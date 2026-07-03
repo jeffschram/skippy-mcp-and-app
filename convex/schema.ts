@@ -149,6 +149,7 @@ const financialTxType = v.union(
   v.literal("Spending"),
   v.literal("Food"),
   v.literal("Income"),
+  v.literal("Transfer"),
 );
 
 const financialTxCategory = v.union(
@@ -161,6 +162,8 @@ const financialTxCategory = v.union(
   v.literal("Restaurants"),
   v.literal("Jeff"),
   v.literal("Holly"),
+  v.literal("Transfers In"),
+  v.literal("Transfers Out"),
 );
 
 const financialTxSource = v.union(v.literal("plaid"), v.literal("manual"), v.literal("harness"));
@@ -836,7 +839,8 @@ export default defineSchema({
     // 'YYYY-MM' month bucket for month queries (derived from date unless supplied).
     monthKey: v.string(),
     // All amounts are INTEGER CENTS to avoid float drift. Positive magnitudes;
-    // direction is determined by txType (Income = incoming, everything else = outgoing).
+    // direction is determined by txType (Income = incoming, Fixed/Spending/Food =
+    // outgoing; Transfer direction is the category and is excluded from budget totals).
     amountCents: v.number(),
     description: v.string(),
     txType: financialTxType,
@@ -852,7 +856,7 @@ export default defineSchema({
     .index("by_brain_external", ["brainInstanceId", "externalId"]),
 
   // End-of-day balance snapshots. Deliberately NOT derived from
-  // financialTransactions: budget ingestion excludes internal transfers, so
+  // financialTransactions: recorded rows may not cover every raw feed row, so
   // running sums drift from reality. The harness computes these externally
   // from the full raw Plaid feed anchored to the live current balance.
   financialDailyBalances: defineTable({

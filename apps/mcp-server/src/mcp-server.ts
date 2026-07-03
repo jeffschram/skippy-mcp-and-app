@@ -89,7 +89,7 @@ const skippyInstructions = [
   "Use submit_memory_review_candidate when a possible memory is useful but uncertain. Do not queue transient alerts (balance notifications, promo deadlines, ToS notices); skip them or record directly with expiry context. Use list_memory/get_context_bundle/get_memory_detail before adding likely duplicates or answering from memory, and link_memory to attach memories to accepted entities.",
   "Use list_interview_templates/start_interview/get_interview/answer_interview_question/complete_interview/archive_interview to run guided second-brain interviews inside the harness chat. Ask one question at a time in chat, using the assistantDisplayName returned by Skippy.",
   "Use ask/summarize_focus/list_pending_actions for retrieval. Internal AI synthesis may be disabled, so expect structured context rather than polished answers.",
-  "Financial data from Plaid is ground truth: map it to the fixed transaction taxonomy at ingest time and record it directly with upsert_financial_account/record_financial_transactions (never queue it for review). Amounts are integer cents; pass Plaid transaction_ids as externalIds for idempotency, and store only account last-4 masks, never full account numbers.",
+  "Financial data from Plaid is ground truth: map it to the fixed transaction taxonomy at ingest time and record it directly with upsert_financial_account/record_financial_transactions (never queue it for review). Transfers between the owner's own accounts are txType 'Transfer' ('Transfers In'/'Transfers Out'), never Income or Spending; they are excluded from budget totals automatically. Amounts are integer cents; pass Plaid transaction_ids as externalIds for idempotency, and store only account last-4 masks, never full account numbers.",
 ].join("\n");
 
 function getSkippyAppUrl() {
@@ -1794,7 +1794,7 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
     {
       title: "Record financial transactions (bulk)",
       description:
-        `Bulk-ingest financial transactions for a tracked account. Financial data from Plaid is ground truth — ingest it directly, never queue it for review. The harness maps Plaid data to the FIXED taxonomy at ingest time using its judgment (${taxonomySummary}); the type-category pairing is enforced and invalid pairs are rejected. Pass Plaid transaction_ids as externalIds for idempotency: an existing externalId updates the stored transaction instead of duplicating it. All amounts are INTEGER CENTS (positive magnitudes; txType determines direction). Returns {inserted, updated, skipped} counts.`,
+        `Bulk-ingest financial transactions for a tracked account. Financial data from Plaid is ground truth — ingest it directly, never queue it for review. The harness maps Plaid data to the FIXED taxonomy at ingest time using its judgment (${taxonomySummary}); the type-category pairing is enforced and invalid pairs are rejected. Transfers between the owner's own accounts (tracked or untracked, e.g. business checking or a partner's external account) are txType 'Transfer' with category 'Transfers In' or 'Transfers Out' — never Income or Spending — and are automatically excluded from budget totals. Pass Plaid transaction_ids as externalIds for idempotency: an existing externalId updates the stored transaction instead of duplicating it. All amounts are INTEGER CENTS (positive magnitudes; txType determines direction — for Transfer the direction is the category). Returns {inserted, updated, skipped} counts.`,
       annotations: { destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: z.object({
         accountId: z.string().describe("Financial account ID from upsert_financial_account."),
@@ -1843,7 +1843,7 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
     {
       title: "Record daily account balances (bulk)",
       description:
-        "Bulk-record end-of-day account balance snapshots, one per day. The harness computes these from the FULL raw Plaid transaction feed walked backward from the /accounts/balance/get current balance — including internal transfers that budget ingestion skips — so NEVER derive balances by summing recorded budget transactions. Balances are INTEGER CENTS and may be negative. Idempotent upsert: one snapshot per account+day; re-sending a day updates the stored snapshot instead of duplicating it. Returns {inserted, updated} counts.",
+        "Bulk-record end-of-day account balance snapshots, one per day. The harness computes these from the FULL raw Plaid transaction feed walked backward from the /accounts/balance/get current balance — including any feed rows not recorded as budget transactions — so NEVER derive balances by summing recorded budget transactions. Balances are INTEGER CENTS and may be negative. Idempotent upsert: one snapshot per account+day; re-sending a day updates the stored snapshot instead of duplicating it. Returns {inserted, updated} counts.",
       annotations: { destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: z.object({
         accountId: z.string().describe("Financial account ID from upsert_financial_account."),

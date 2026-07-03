@@ -34,6 +34,20 @@ describe("fixed transaction taxonomy", () => {
     expect(isValidTxTypeCategory("Income", "Restaurants")).toBe(false);
   });
 
+  it("pairs Transfer with exactly Transfers In and Transfers Out", () => {
+    expect(TX_TYPE_CATEGORIES.Transfer).toEqual(["Transfers In", "Transfers Out"]);
+    expect(isValidTxTypeCategory("Transfer", "Transfers In")).toBe(true);
+    expect(isValidTxTypeCategory("Transfer", "Transfers Out")).toBe(true);
+    expect(isValidTxTypeCategory("Transfer", "Groceries")).toBe(false);
+    expect(isValidTxTypeCategory("Transfer", "Jeff")).toBe(false);
+    expect(isValidTxTypeCategory("Income", "Transfers In")).toBe(false);
+    expect(isValidTxTypeCategory("Spending", "Transfers Out")).toBe(false);
+    expect(() => assertValidTxTypeCategory("Transfer", "Misc.")).toThrow(
+      /invalid category "Misc\." for transaction type "Transfer"/,
+    );
+    expect(() => assertValidTxTypeCategory("Transfer", "Transfers Out")).not.toThrow();
+  });
+
   it("rejects unknown types and categories", () => {
     expect(isValidTxTypeCategory("Savings", "Groceries")).toBe(false);
     expect(isValidTxTypeCategory("Food", "Takeout")).toBe(false);
@@ -98,6 +112,15 @@ const mayTransactions = [
   { txType: "Income", category: "Jeff", amountCents: 500_000 },
 ];
 
+// Transfers are positive magnitudes; direction IS the category.
+const juneTransfers = [
+  { txType: "Transfer", category: "Transfers In", amountCents: 200_000 },
+  { txType: "Transfer", category: "Transfers Out", amountCents: 75_000 },
+  { txType: "Transfer", category: "Transfers Out", amountCents: 25_000 },
+];
+
+const mayTransfers = [{ txType: "Transfer", category: "Transfers Out", amountCents: 40_000 }];
+
 describe("aggregateMonthTransactions", () => {
   it("totals per category and per type", () => {
     const aggregates = aggregateMonthTransactions(juneTransactions);
@@ -135,8 +158,60 @@ describe("aggregateMonthTransactions", () => {
     expect(aggregates.totalOutgoingCents).toBe(0);
     expect(aggregates.totalIncomingCents).toBe(0);
     expect(aggregates.netCents).toBe(0);
+    expect(aggregates.transferNetCents).toBe(0);
     expect(aggregates.typePercentOfOutgoing.Fixed).toBe(0);
     expect(aggregates.categoryTotalsCents["Misc."]).toBe(0);
+    expect(aggregates.categoryTotalsCents["Transfers In"]).toBe(0);
+  });
+
+  it("renders transfers in category/type totals but excludes them from outgoing/incoming/net", () => {
+    const withTransfers = aggregateMonthTransactions([...juneTransactions, ...juneTransfers]);
+    const withoutTransfers = aggregateMonthTransactions(juneTransactions);
+
+    // The grid still gets totals for the Transfer band.
+    expect(withTransfers.categoryTotalsCents["Transfers In"]).toBe(200_000);
+    expect(withTransfers.categoryTotalsCents["Transfers Out"]).toBe(100_000);
+    expect(withTransfers.typeTotalsCents.Transfer).toBe(300_000);
+    expect(withTransfers.transactionCount).toBe(12);
+
+    // Budget totals are untouched by transfer rows.
+    expect(withTransfers.totalOutgoingCents).toBe(withoutTransfers.totalOutgoingCents);
+    expect(withTransfers.totalIncomingCents).toBe(withoutTransfers.totalIncomingCents);
+    expect(withTransfers.netCents).toBe(withoutTransfers.netCents);
+  });
+
+  it("keeps transfers out of every percent-of-outgoing numerator and denominator", () => {
+    const withTransfers = aggregateMonthTransactions([...juneTransactions, ...juneTransfers]);
+    const withoutTransfers = aggregateMonthTransactions(juneTransactions);
+
+    // Transfer percents are always 0.
+    expect(withTransfers.typePercentOfOutgoing.Transfer).toBe(0);
+    expect(withTransfers.categoryPercentOfOutgoing["Transfers In"]).toBe(0);
+    expect(withTransfers.categoryPercentOfOutgoing["Transfers Out"]).toBe(0);
+
+    // Non-transfer percents are identical with and without transfer rows.
+    expect(withTransfers.typePercentOfOutgoing).toEqual(withoutTransfers.typePercentOfOutgoing);
+    expect(withTransfers.categoryPercentOfOutgoing).toEqual(withoutTransfers.categoryPercentOfOutgoing);
+  });
+
+  it("computes transferNetCents as Transfers In minus Transfers Out", () => {
+    const aggregates = aggregateMonthTransactions([...juneTransactions, ...juneTransfers]);
+    expect(aggregates.transferNetCents).toBe(100_000); // 200k in - 100k out
+
+    const outOnly = aggregateMonthTransactions(mayTransfers);
+    expect(outOnly.transferNetCents).toBe(-40_000);
+    expect(outOnly.totalOutgoingCents).toBe(0);
+    expect(outOnly.totalIncomingCents).toBe(0);
+    expect(outOnly.netCents).toBe(0);
+  });
+
+  it("rejects transfer categories paired with non-transfer types", () => {
+    expect(() =>
+      aggregateMonthTransactions([{ txType: "Income", category: "Transfers In", amountCents: 100 }]),
+    ).toThrow(/invalid category/);
+    expect(() =>
+      aggregateMonthTransactions([{ txType: "Spending", category: "Transfers Out", amountCents: 100 }]),
+    ).toThrow(/invalid category/);
   });
 
   it("rejects invalid pairs and non-integer amounts", () => {
@@ -214,6 +289,53 @@ describe("computeMonthlyFinancialReport", () => {
       targetCents: 350_000,
       actualCents: 300_000,
       deltaCents: -50_000,
+    });
+  });
+
+  it("reports transferNetCents for the current and previous months plus the delta", () => {
+    const report = computeMonthlyFinancialReport({
+      monthKey: "2026-06",
+      transactions: [...juneTransactions, ...juneTransfers],
+      previousTransactions: [...mayTransactions, ...mayTransfers],
+    });
+
+    expect(report.current.transferNetCents).toBe(100_000);
+    expect(report.previous.transferNetCents).toBe(-40_000);
+    expect(report.monthOverMonth.transferNetCents).toBe(140_000);
+
+    // Transfers stay out of the headline budget totals and their deltas.
+    expect(report.current.totalOutgoingCents).toBe(500_000);
+    expect(report.current.totalIncomingCents).toBe(800_000);
+    expect(report.current.netCents).toBe(300_000);
+    expect(report.monthOverMonth.totalOutgoingCents).toBe(150_000);
+    expect(report.monthOverMonth.netCents).toBe(150_000);
+
+    // But the grid deltas still cover the Transfer band.
+    expect(report.monthOverMonth.typeTotalsCents.Transfer).toBe(260_000);
+    expect(report.monthOverMonth.categoryTotalsCents["Transfers Out"]).toBe(60_000);
+  });
+
+  it("ignores Transfer type and category budget targets in the comparison", () => {
+    const report = computeMonthlyFinancialReport({
+      monthKey: "2026-06",
+      transactions: [...juneTransactions, ...juneTransfers],
+      budget: {
+        categoryTargets: { Groceries: 80_000, "Transfers In": 10_000, "Transfers Out": 20_000 },
+        typeTargets: { Transfer: 50_000, Food: 120_000 },
+        targetOutgoingCents: 450_000,
+      },
+    });
+
+    expect(report.budget?.comparison.categoryDeltas["Groceries"]).toBeDefined();
+    expect(report.budget?.comparison.categoryDeltas["Transfers In"]).toBeUndefined();
+    expect(report.budget?.comparison.categoryDeltas["Transfers Out"]).toBeUndefined();
+    expect(report.budget?.comparison.typeDeltas["Food"]).toBeDefined();
+    expect(report.budget?.comparison.typeDeltas["Transfer"]).toBeUndefined();
+    // Transfer rows do not move the outgoing actual.
+    expect(report.budget?.comparison.outgoing).toEqual({
+      targetCents: 450_000,
+      actualCents: 500_000,
+      deltaCents: 50_000,
     });
   });
 });

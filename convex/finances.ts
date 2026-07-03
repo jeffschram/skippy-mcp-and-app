@@ -27,6 +27,7 @@ const txTypeValidator = v.union(
   v.literal("Spending"),
   v.literal("Food"),
   v.literal("Income"),
+  v.literal("Transfer"),
 );
 
 const txCategoryValidator = v.union(
@@ -39,6 +40,8 @@ const txCategoryValidator = v.union(
   v.literal("Restaurants"),
   v.literal("Jeff"),
   v.literal("Holly"),
+  v.literal("Transfers In"),
+  v.literal("Transfers Out"),
 );
 
 const txSourceValidator = v.union(v.literal("plaid"), v.literal("manual"), v.literal("harness"));
@@ -446,7 +449,7 @@ async function buildMonthlyReport(db: any, brainInstanceId: any, accountId: stri
   );
 
   // Daily balance snapshots (stored, harness-computed) — never derived from
-  // the transactions above, which deliberately exclude internal transfers.
+  // the transactions above, which may not cover every raw feed row.
   const currentBalances = await monthBalances(db, brainInstanceId, accountId, monthKey);
   const previousBalances = await monthBalances(db, brainInstanceId, accountId, previousMonthKey(monthKey));
   const balanceSummary = summarizeMonthBalances(
