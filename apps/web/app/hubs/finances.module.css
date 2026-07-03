@@ -47,37 +47,44 @@
   background: var(--panel);
 }
 
+/* A real <table>: separate borders (collapse breaks sticky-column borders
+   while scrolling) with per-cell bottom/right rules matching the old grid. */
 .grid {
-  display: grid;
-  grid-template-columns: 76px repeat(9, minmax(128px, 1fr));
+  width: 100%;
   min-width: 1240px;
+  border-collapse: separate;
+  border-spacing: 0;
   font-size: 13px;
+}
+
+.grid th {
+  text-align: left;
+}
+
+.grid tr > :last-child {
+  border-right: none;
 }
 
 .cell {
   padding: 6px 8px;
   border-bottom: 1px solid var(--line);
   border-right: 1px solid color-mix(in srgb, var(--line) 55%, transparent);
-  min-height: 30px;
-}
-
-.cell:nth-child(10n) {
-  border-right: none;
+  height: 30px; /* acts as min-height on table cells */
+  vertical-align: top;
 }
 
 .dayCell {
   position: sticky;
   left: 0;
   z-index: 2;
+  width: 76px;
+  min-width: 76px;
   background: var(--panel);
   border-right: 1px solid var(--line);
   color: var(--muted);
+  font-weight: 400;
   font-variant-numeric: tabular-nums;
   font-size: 12px;
-}
-
-.dayCellEmpty {
-  color: color-mix(in srgb, var(--muted) 45%, transparent);
 }
 
 .cornerCell {
@@ -96,12 +103,12 @@
 }
 
 .categoryHead {
+  min-width: 128px;
   font-weight: 700;
   font-size: 12px;
   line-height: 1.3;
   color: var(--ink);
-  display: flex;
-  align-items: flex-end;
+  vertical-align: bottom;
 }
 
 /* Band tint variables (token-derived, theme-aware). */
@@ -196,8 +203,7 @@
   letter-spacing: 0.07em;
   text-transform: uppercase;
   color: var(--muted);
-  display: flex;
-  align-items: center;
+  vertical-align: middle;
 }
 
 .totalAmount {
@@ -234,22 +240,24 @@
 }
 
 .summaryRowLabel {
-  grid-column: 1 / span 5;
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
+  text-align: left;
+  vertical-align: middle;
 }
 
 .summaryRowValue {
-  grid-column: 6 / span 5;
+  text-align: right;
+  vertical-align: middle;
+  font-weight: 800;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.summaryFlex {
   display: flex;
   align-items: baseline;
   justify-content: flex-end;
   gap: 14px;
   flex-wrap: wrap;
-  font-weight: 800;
-  font-size: 14px;
-  font-variant-numeric: tabular-nums;
 }
 
 .netPositive {

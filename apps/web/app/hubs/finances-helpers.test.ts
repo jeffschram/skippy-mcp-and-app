@@ -4,6 +4,7 @@ import {
   currentMonthKey,
   dateInputToEpochMs,
   dayLabel,
+  dayRowHasEntries,
   daysInMonth,
   epochMsToDateInput,
   formatCents,
@@ -120,7 +121,7 @@ describe("date input conversion", () => {
 });
 
 describe("bucketTransactionsByDay", () => {
-  it("renders every day of the month even when empty", () => {
+  it("produces every day of the month even when empty", () => {
     const rows = bucketTransactionsByDay("2026-04", []);
     expect(rows).toHaveLength(30);
     expect(rows[0]!.day).toBe(1);
@@ -156,5 +157,31 @@ describe("bucketTransactionsByDay", () => {
     ]);
     expect(rows[0]!.cells["Groceries"].map((t) => t._id)).toEqual(["before"]);
     expect(rows[29]!.cells["Groceries"].map((t) => t._id)).toEqual(["after"]);
+  });
+});
+
+describe("dayRowHasEntries", () => {
+  it("is false for every row of an empty month", () => {
+    const rows = bucketTransactionsByDay("2026-04", []);
+    expect(rows.some(dayRowHasEntries)).toBe(false);
+    expect(rows.filter(dayRowHasEntries)).toEqual([]);
+  });
+
+  it("keeps only days that hold at least one transaction when used as a filter", () => {
+    const rows = bucketTransactionsByDay("2026-04", [
+      tx({ _id: "a", date: Date.UTC(2026, 3, 2), category: "Groceries", txType: "Food" }),
+      tx({ _id: "b", date: Date.UTC(2026, 3, 17), category: "Jeff", txType: "Income" }),
+    ]);
+    const active = rows.filter(dayRowHasEntries);
+    expect(active.map((row) => row.day)).toEqual([2, 17]);
+    expect(active.map((row) => row.label)).toEqual(["04/02", "04/17"]);
+  });
+
+  it("counts any category in the row, not just the first", () => {
+    const rows = bucketTransactionsByDay("2026-04", [
+      tx({ _id: "only", date: Date.UTC(2026, 3, 9), category: "Holly", txType: "Income" }),
+    ]);
+    expect(dayRowHasEntries(rows[8]!)).toBe(true);
+    expect(dayRowHasEntries(rows[9]!)).toBe(false);
   });
 });

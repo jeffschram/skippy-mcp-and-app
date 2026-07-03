@@ -174,3 +174,8 @@ export function bucketTransactionsByDay(monthKey: string, transactions: GridTran
   }
   return rows;
 }
+
+/** True when at least one category cell in the row holds a transaction. */
+export function dayRowHasEntries(row: DayRow): boolean {
+  return Object.values(row.cells).some((cell) => cell.length > 0);
+}
