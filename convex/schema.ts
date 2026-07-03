@@ -140,6 +140,31 @@ const harnessAutonomyPolicy = v.object({
   notes: v.optional(v.string()),
 });
 
+// Finances: FIXED taxonomy mirrored from @skippy/shared (TX_TYPE_CATEGORIES).
+// The type-category pairing is enforced in every write path via the shared helper.
+const financialAccountType = v.union(v.literal("Jeff Personal"), v.literal("Family Shared"));
+
+const financialTxType = v.union(
+  v.literal("Fixed"),
+  v.literal("Spending"),
+  v.literal("Food"),
+  v.literal("Income"),
+);
+
+const financialTxCategory = v.union(
+  v.literal("Mortgage, HOA, Mortgage Loan"),
+  v.literal("Recurring Bills"),
+  v.literal("Subscriptions"),
+  v.literal("Gas, Amazon, Home Depot, Etc"),
+  v.literal("Misc."),
+  v.literal("Groceries"),
+  v.literal("Restaurants"),
+  v.literal("Jeff"),
+  v.literal("Holly"),
+);
+
+const financialTxSource = v.union(v.literal("plaid"), v.literal("manual"), v.literal("harness"));
+
 export default defineSchema({
   users: defineTable({
     authProvider: v.literal("clerk"),
@@ -787,6 +812,62 @@ export default defineSchema({
       dimensions: 1536,
       filterFields: ["brainInstanceId", "embeddingProvider", "embeddingModel"],
     }),
+
+  financialAccounts: defineTable({
+    brainInstanceId: v.id("brainInstances"),
+    name: v.string(),
+    accountType: financialAccountType,
+    // Last-4 identifier ONLY (e.g. "1234"). Full account numbers are NEVER stored.
+    mask: v.string(),
+    institution: v.optional(v.string()),
+    // Plaid account_id for idempotent mapping of Plaid-sourced accounts.
+    plaidAccountId: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_brain", ["brainInstanceId"])
+    .index("by_brain_plaid", ["brainInstanceId", "plaidAccountId"]),
+
+  financialTransactions: defineTable({
+    brainInstanceId: v.id("brainInstances"),
+    accountId: v.id("financialAccounts"),
+    // Transaction date in epoch milliseconds.
+    date: v.number(),
+    // 'YYYY-MM' month bucket for month queries (derived from date unless supplied).
+    monthKey: v.string(),
+    // All amounts are INTEGER CENTS to avoid float drift. Positive magnitudes;
+    // direction is determined by txType (Income = incoming, everything else = outgoing).
+    amountCents: v.number(),
+    description: v.string(),
+    txType: financialTxType,
+    category: financialTxCategory,
+    // Plaid transaction_id used for idempotent dedupe: re-ingesting the same
+    // externalId updates the existing row instead of duplicating it.
+    externalId: v.optional(v.string()),
+    source: financialTxSource,
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_brain_account_month", ["brainInstanceId", "accountId", "monthKey"])
+    .index("by_brain_external", ["brainInstanceId", "externalId"]),
+
+  financialBudgets: defineTable({
+    brainInstanceId: v.id("brainInstances"),
+    accountId: v.id("financialAccounts"),
+    // Absent monthKey = the default/recurring budget for the account.
+    monthKey: v.optional(v.string()),
+    // category -> target integer cents. v.record supports the taxonomy's dynamic
+    // keys (they contain spaces/commas/periods); key validity is enforced in
+    // mutations against the shared TX_CATEGORIES/TX_TYPES constants.
+    categoryTargets: v.optional(v.record(v.string(), v.number())),
+    // transaction type -> target integer cents.
+    typeTargets: v.optional(v.record(v.string(), v.number())),
+    targetOutgoingCents: v.optional(v.number()),
+    targetIncomingCents: v.optional(v.number()),
+    targetNetCents: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_brain_account", ["brainInstanceId", "accountId"]),
 
   aiProcessingRuns: defineTable({
     brainInstanceId: v.id("brainInstances"),
