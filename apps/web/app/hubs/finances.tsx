@@ -130,8 +130,6 @@ const GRID_CATEGORIES: Array<{ category: TxCategory; type: TxType }> = TX_TYPES.
 /** Date column + one column per category. */
 const GRID_COLUMN_COUNT = GRID_CATEGORIES.length + 1;
 /** The full-width summary rows split the table into a label half and a value half. */
-const SUMMARY_LABEL_SPAN = Math.floor(GRID_COLUMN_COUNT / 2);
-const SUMMARY_VALUE_SPAN = GRID_COLUMN_COUNT - SUMMARY_LABEL_SPAN;
 
 /* ------------------------------------------------------------------ */
 /* Small display helpers                                               */
@@ -778,50 +776,56 @@ function MonthlyGrid({ report, onEditTransaction }: { report: MonthlyReport; onE
             })}
           </tr>
 
-          {/* Account total outgoing */}
+          {/* Account summary rows: label + value pinned to the visible left edge */}
           <tr>
-            <th
-              scope="row"
-              colSpan={SUMMARY_LABEL_SPAN}
-              className={cx(styles.cell, styles.totalCell, styles.totalLabel, styles.summaryRowLabel)}
-            >
-              Account total (outgoing)
-            </th>
-            <td colSpan={SUMMARY_VALUE_SPAN} className={cx(styles.cell, styles.totalCell, styles.summaryRowValue)}>
-              <div className={styles.summaryFlex}>
+            <th scope="row" colSpan={GRID_COLUMN_COUNT} className={cx(styles.cell, styles.totalCell, styles.summaryRow)}>
+              <div className={styles.summaryStick}>
+                <span className={cx(styles.totalLabel, styles.summaryRowLabel)}>Account total (outgoing)</span>
+                <span className={styles.summaryValue}>{formatCents(report.current.totalOutgoingCents)}</span>
                 {budget?.comparison.outgoing ? (
                   <DeltaLine label="vs budget" deltaCents={budget.comparison.outgoing.deltaCents} />
                 ) : null}
                 {hasPrev ? (
                   <DeltaLine label={`vs ${prevLabel}`} deltaCents={report.monthOverMonth.totalOutgoingCents} />
                 ) : null}
-                <span>{formatCents(report.current.totalOutgoingCents)}</span>
               </div>
-            </td>
+            </th>
           </tr>
 
-          {/* Net after income */}
           <tr>
-            <th
-              scope="row"
-              colSpan={SUMMARY_LABEL_SPAN}
-              className={cx(styles.cell, styles.totalCell, styles.totalLabel, styles.summaryRowLabel)}
-            >
-              After income
+            <th scope="row" colSpan={GRID_COLUMN_COUNT} className={cx(styles.cell, styles.totalCell, styles.summaryRow)}>
+              <div className={styles.summaryStick}>
+                <span className={cx(styles.totalLabel, styles.summaryRowLabel)}>Account total (income)</span>
+                <span className={styles.summaryValue}>{formatCents(report.current.totalIncomingCents)}</span>
+                {budget?.comparison.incoming ? (
+                  <DeltaLine label="vs budget" deltaCents={budget.comparison.incoming.deltaCents} goodWhenPositive />
+                ) : null}
+                {hasPrev ? (
+                  <DeltaLine
+                    label={`vs ${prevLabel}`}
+                    deltaCents={report.monthOverMonth.totalIncomingCents}
+                    goodWhenPositive
+                  />
+                ) : null}
+              </div>
             </th>
-            <td colSpan={SUMMARY_VALUE_SPAN} className={cx(styles.cell, styles.totalCell, styles.summaryRowValue)}>
-              <div className={styles.summaryFlex}>
+          </tr>
+
+          <tr>
+            <th scope="row" colSpan={GRID_COLUMN_COUNT} className={cx(styles.cell, styles.totalCell, styles.summaryRow)}>
+              <div className={styles.summaryStick}>
+                <span className={cx(styles.totalLabel, styles.summaryRowLabel)}>After income</span>
+                <span className={cx(styles.summaryValue, report.current.netCents >= 0 ? styles.netPositive : styles.netNegative)}>
+                  {formatCents(report.current.netCents)}
+                </span>
                 {budget?.comparison.net ? (
                   <DeltaLine label="vs budget" deltaCents={budget.comparison.net.deltaCents} goodWhenPositive />
                 ) : null}
                 {hasPrev ? (
                   <DeltaLine label={`vs ${prevLabel}`} deltaCents={report.monthOverMonth.netCents} goodWhenPositive />
                 ) : null}
-                <span className={report.current.netCents >= 0 ? styles.netPositive : styles.netNegative}>
-                  {formatCents(report.current.netCents)}
-                </span>
               </div>
-            </td>
+            </th>
           </tr>
         </tfoot>
       </table>

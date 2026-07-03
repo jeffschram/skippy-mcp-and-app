@@ -239,25 +239,33 @@
   color: light-dark(color-mix(in srgb, var(--green) 42%, var(--near-black)), var(--green));
 }
 
-.summaryRowLabel {
+.summaryRow {
   text-align: left;
   vertical-align: middle;
 }
 
-.summaryRowValue {
-  text-align: right;
-  vertical-align: middle;
+.summaryRowLabel {
+  text-align: left;
+}
+
+/* Pins the summary label + value to the visible left edge of the horizontal
+   scroll container, so totals are readable without scrolling right. */
+.summaryStick {
+  position: sticky;
+  left: 0;
+  width: max-content;
+  max-width: 100%;
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding-right: 12px;
+}
+
+.summaryValue {
   font-weight: 800;
   font-size: 14px;
   font-variant-numeric: tabular-nums;
-}
-
-.summaryFlex {
-  display: flex;
-  align-items: baseline;
-  justify-content: flex-end;
-  gap: 14px;
-  flex-wrap: wrap;
 }
 
 .netPositive {
