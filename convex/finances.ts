@@ -3,6 +3,7 @@ import { v } from "convex/values";
 import {
   TX_CATEGORIES,
   TX_TYPES,
+  aggregateMonthTransactions,
   assertIntegerCents,
   assertValidTxTypeCategory,
   computeMonthlyFinancialReport,
@@ -523,6 +524,102 @@ async function buildMonthlyReport(db: any, brainInstanceId: any, accountId: stri
   };
 }
 
+/**
+ * Multi-month insight rows, COMPUTED AT READ TIME. For the trailing
+ * `monthCount` months ending at the current month (UTC), gathers each month's
+ * transactions per account via by_brain_account_month — merged across all of
+ * the brain's accounts when no accountId is given (safe: the shared report
+ * math excludes Transfer rows from outgoing/incoming/net, so internal
+ * transfers can never double count) — aggregates them with the shared
+ * aggregateMonthTransactions, and attaches the month's combined ending
+ * balance: the latest financialDailyBalances row per account per month,
+ * summed across accounts, or null when no account has a snapshot that month.
+ * Trend/window math (means, medians, movers) lives in the shared
+ * computeFinancialInsights so it stays unit-testable; this returns raw
+ * monthly rows.
+ */
+async function buildInsights(
+  db: any,
+  brainInstanceId: any,
+  args: { accountId?: string; monthCount?: number },
+) {
+  const monthCount = args.monthCount ?? 13;
+  if (!Number.isInteger(monthCount) || monthCount < 1 || monthCount > 60) {
+    throw new Error("monthCount must be an integer between 1 and 60");
+  }
+
+  let accounts: any[];
+  if (args.accountId) {
+    accounts = [await requireAccount(db, brainInstanceId, args.accountId)];
+  } else {
+    const allAccounts = await db
+      .query("financialAccounts")
+      .withIndex("by_brain", (q: any) => q.eq("brainInstanceId", brainInstanceId))
+      .collect();
+    accounts = allAccounts.sort((a: any, b: any) => a.name.localeCompare(b.name));
+  }
+
+  // Trailing month keys ending at the current month (UTC), ascending.
+  const currentKey = monthKeyFromDate(Date.now());
+  const monthKeys: string[] = [currentKey];
+  while (monthKeys.length < monthCount) {
+    monthKeys.unshift(previousMonthKey(monthKeys[0]!));
+  }
+
+  const months = [];
+  for (const monthKey of monthKeys) {
+    const transactions: any[] = [];
+    let balanceSumCents = 0;
+    let hasBalance = false;
+    for (const account of accounts) {
+      transactions.push(...(await monthTransactions(db, brainInstanceId, account._id, monthKey)));
+      const latest = latestMonthBalance(await monthBalances(db, brainInstanceId, account._id, monthKey));
+      if (latest) {
+        balanceSumCents += latest.endOfDayBalanceCents;
+        hasBalance = true;
+      }
+    }
+    const aggregates = aggregateMonthTransactions(
+      transactions.map((transaction: any) => ({
+        txType: transaction.txType,
+        category: transaction.category,
+        amountCents: transaction.amountCents,
+      })),
+    );
+    months.push({
+      monthKey,
+      transactionCount: aggregates.transactionCount,
+      typeTotalsCents: aggregates.typeTotalsCents,
+      categoryTotalsCents: aggregates.categoryTotalsCents,
+      totalOutgoingCents: aggregates.totalOutgoingCents,
+      totalIncomingCents: aggregates.totalIncomingCents,
+      netCents: aggregates.netCents,
+      transferNetCents: aggregates.transferNetCents,
+      endingBalanceCents: hasBalance ? balanceSumCents : null,
+    });
+  }
+
+  return {
+    currentMonthKey: currentKey,
+    months,
+    accounts: accounts.map((account: any) => ({
+      _id: account._id,
+      name: account.name,
+      accountType: account.accountType,
+      mask: account.mask,
+      institution: account.institution,
+    })),
+  };
+}
+
+function latestMonthBalance(rows: any[]): any | null {
+  let latest: any = null;
+  for (const row of rows) {
+    if (!latest || row.date > latest.date) latest = row;
+  }
+  return latest;
+}
+
 function validateBudgetTargets(input: {
   categoryTargets?: Record<string, number>;
   typeTargets?: Record<string, number>;
@@ -784,6 +881,21 @@ export const monthlyReportForViewer = queryGeneric({
   },
 });
 
+export const insightsForViewer = queryGeneric({
+  args: {
+    // Absent accountId = all of the brain's accounts combined.
+    accountId: v.optional(v.id("financialAccounts")),
+    monthCount: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const { brain } = await requireOwnedBrain(ctx);
+    return buildInsights(ctx.db, brain._id, {
+      ...(args.accountId !== undefined ? { accountId: args.accountId } : {}),
+      ...(args.monthCount !== undefined ? { monthCount: args.monthCount } : {}),
+    });
+  },
+});
+
 /* ------------------------------------------------------------------ */
 /* Brain-facing (MCP token routing)                                   */
 /* ------------------------------------------------------------------ */
@@ -866,5 +978,20 @@ export const monthlyReportForBrain = queryGeneric({
   },
   handler: async ({ db }, args) => {
     return buildMonthlyReport(db, args.brainInstanceId, args.accountId, args.monthKey);
+  },
+});
+
+export const insightsForBrain = queryGeneric({
+  args: {
+    brainInstanceId: v.id("brainInstances"),
+    // Absent accountId = all of the brain's accounts combined.
+    accountId: v.optional(v.id("financialAccounts")),
+    monthCount: v.optional(v.number()),
+  },
+  handler: async ({ db }, args) => {
+    return buildInsights(db, args.brainInstanceId, {
+      ...(args.accountId !== undefined ? { accountId: args.accountId } : {}),
+      ...(args.monthCount !== undefined ? { monthCount: args.monthCount } : {}),
+    });
   },
 });

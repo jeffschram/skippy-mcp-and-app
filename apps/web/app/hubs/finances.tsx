@@ -22,10 +22,12 @@ import {
   IconButton,
   LoadingRow,
   Select,
+  Tabs,
   TextInput,
   useToast,
 } from "../components";
 import { useViewerReady } from "./use-viewer";
+import { FinancesInsightsView } from "./finances-insights";
 import {
   balancesByDay,
   bucketTransactionsByDay,
@@ -929,6 +931,7 @@ function MonthlyGrid({ report, onEditTransaction }: { report: MonthlyReport; onE
 
 export function FinancesContent() {
   const viewerReady = useViewerReady();
+  const [view, setView] = useState<"grid" | "insights">("grid");
   const [monthKey, setMonthKey] = useState(() => currentMonthKey());
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
   const [txDialogOpen, setTxDialogOpen] = useState(false);
@@ -986,77 +989,94 @@ export function FinancesContent() {
         </Card>
       ) : (
         <>
-          <div className={styles.controls}>
-            <div className={styles.controlsGroup}>
-              {accounts.length > 1 ? (
-                <Select
-                  aria-label="Account"
-                  value={accountId ?? ""}
-                  onChange={(event) => setSelectedAccountId(event.target.value)}
-                >
-                  {accounts.map((row) => (
-                    <option key={row._id} value={row._id}>
-                      {row.name} (...{row.mask})
-                    </option>
-                  ))}
-                </Select>
-              ) : (
-                <strong>{account?.name}</strong>
-              )}
-              {account ? (
-                <span className={styles.accountMeta}>
-                  {account.accountType}
-                  {account.institution ? ` · ${account.institution}` : ""} · ...{account.mask}
-                </span>
-              ) : null}
-            </div>
-            <div className={styles.controlsGroup}>
-              <div className={styles.monthNav}>
-                <IconButton
-                  small
-                  aria-label="Previous month"
-                  onClick={() => setMonthKey((current) => shiftMonthKey(current, -1))}
-                >
-                  <ChevronLeft size={17} aria-hidden />
-                </IconButton>
-                <span className={styles.monthLabel}>{monthKeyLabel(monthKey)}</span>
-                <IconButton
-                  small
-                  aria-label="Next month"
-                  onClick={() => setMonthKey((current) => shiftMonthKey(current, 1))}
-                >
-                  <ChevronRight size={17} aria-hidden />
-                </IconButton>
-              </div>
-              <Button onClick={() => setBudgetOpen(true)} disabled={!accountId}>
-                <SlidersHorizontal size={15} aria-hidden /> Budget
-              </Button>
-              <Button variant="primary" onClick={openAdd} disabled={!accountId}>
-                <Plus size={16} aria-hidden /> Add transaction
-              </Button>
-              <Button variant="ghost" onClick={() => setAccountDialogOpen(true)} title="Create another account">
-                <Landmark size={15} aria-hidden /> New account
-              </Button>
-            </div>
+          <div className={styles.viewTabs}>
+            <Tabs
+              items={[
+                { key: "grid", label: "Grid" },
+                { key: "insights", label: "Insights" },
+              ]}
+              active={view}
+              onChange={(key) => setView(key as "grid" | "insights")}
+            />
           </div>
 
-          {report === undefined ? (
-            <Card>
-              <LoadingRow label={`Loading ${monthKeyLabel(monthKey)}...`} />
-            </Card>
+          {view === "insights" ? (
+            <FinancesInsightsView accounts={accounts} />
           ) : (
             <>
-              {report.current.transactionCount === 0 ? (
-                <p className="muted" style={{ margin: "0 0 10px", fontSize: 13 }}>
-                  No transactions recorded for {monthKeyLabel(monthKey)} yet.
-                </p>
-              ) : null}
-              <MonthlyGrid report={report} onEditTransaction={openEdit} />
-              {report.budget?.isDefault ? (
-                <p className="muted" style={{ margin: "10px 0 0", fontSize: 13 }}>
-                  Budget comparisons use the account's default (recurring) budget.
-                </p>
-              ) : null}
+              <div className={styles.controls}>
+                <div className={styles.controlsGroup}>
+                  {accounts.length > 1 ? (
+                    <Select
+                      aria-label="Account"
+                      value={accountId ?? ""}
+                      onChange={(event) => setSelectedAccountId(event.target.value)}
+                    >
+                      {accounts.map((row) => (
+                        <option key={row._id} value={row._id}>
+                          {row.name} (...{row.mask})
+                        </option>
+                      ))}
+                    </Select>
+                  ) : (
+                    <strong>{account?.name}</strong>
+                  )}
+                  {account ? (
+                    <span className={styles.accountMeta}>
+                      {account.accountType}
+                      {account.institution ? ` · ${account.institution}` : ""} · ...{account.mask}
+                    </span>
+                  ) : null}
+                </div>
+                <div className={styles.controlsGroup}>
+                  <div className={styles.monthNav}>
+                    <IconButton
+                      small
+                      aria-label="Previous month"
+                      onClick={() => setMonthKey((current) => shiftMonthKey(current, -1))}
+                    >
+                      <ChevronLeft size={17} aria-hidden />
+                    </IconButton>
+                    <span className={styles.monthLabel}>{monthKeyLabel(monthKey)}</span>
+                    <IconButton
+                      small
+                      aria-label="Next month"
+                      onClick={() => setMonthKey((current) => shiftMonthKey(current, 1))}
+                    >
+                      <ChevronRight size={17} aria-hidden />
+                    </IconButton>
+                  </div>
+                  <Button onClick={() => setBudgetOpen(true)} disabled={!accountId}>
+                    <SlidersHorizontal size={15} aria-hidden /> Budget
+                  </Button>
+                  <Button variant="primary" onClick={openAdd} disabled={!accountId}>
+                    <Plus size={16} aria-hidden /> Add transaction
+                  </Button>
+                  <Button variant="ghost" onClick={() => setAccountDialogOpen(true)} title="Create another account">
+                    <Landmark size={15} aria-hidden /> New account
+                  </Button>
+                </div>
+              </div>
+    
+              {report === undefined ? (
+                <Card>
+                  <LoadingRow label={`Loading ${monthKeyLabel(monthKey)}...`} />
+                </Card>
+              ) : (
+                <>
+                  {report.current.transactionCount === 0 ? (
+                    <p className="muted" style={{ margin: "0 0 10px", fontSize: 13 }}>
+                      No transactions recorded for {monthKeyLabel(monthKey)} yet.
+                    </p>
+                  ) : null}
+                  <MonthlyGrid report={report} onEditTransaction={openEdit} />
+                  {report.budget?.isDefault ? (
+                    <p className="muted" style={{ margin: "10px 0 0", fontSize: 13 }}>
+                      Budget comparisons use the account's default (recurring) budget.
+                    </p>
+                  ) : null}
+                </>
+              )}
             </>
           )}
         </>

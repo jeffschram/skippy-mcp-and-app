@@ -1163,6 +1163,232 @@ export function planBulkTransactionWrites<T extends { externalId?: string | unde
   return { inserts, updates, skipped };
 }
 
+/* ------------------------------------------------------------------ */
+/* Finances: multi-window trend insights (12-mo / 6-mo / 2-mo, etc.)   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * One month's aggregates as consumed by computeFinancialInsights. Matches the
+ * per-month rows produced by the insights queries (aggregateMonthTransactions
+ * output plus the month key). Missing type/category keys are treated as zero.
+ */
+export type InsightsMonthRow = {
+  monthKey: string;
+  typeTotalsCents: Record<string, number>;
+  categoryTotalsCents: Record<string, number>;
+  totalOutgoingCents: number;
+  totalIncomingCents: number;
+  netCents: number;
+};
+
+export type InsightsStat = {
+  /** Arithmetic mean of the window's monthly totals, rounded to integer cents. */
+  meanCents: number;
+  /** Median of the window's monthly totals (midpoint average when even), rounded to integer cents. */
+  medianCents: number;
+};
+
+export type InsightsWindowStats = {
+  /** The requested window size in months (e.g. 12). */
+  windowMonths: number;
+  /**
+   * How many complete months actually informed this window. Less than
+   * windowMonths when history is short — the UI labels these honestly,
+   * e.g. '12-mo avg (9 mo)'.
+   */
+  monthsUsed: number;
+  /** The complete month keys used, ascending. */
+  monthKeys: string[];
+  typeStats: Record<TxType, InsightsStat>;
+  categoryStats: Record<TxCategory, InsightsStat>;
+  outgoing: InsightsStat;
+  incoming: InsightsStat;
+  net: InsightsStat;
+};
+
+/**
+ * Mean deltas between two adjacent windows: the shorter (more recent) window's
+ * mean minus the longer window's mean. Positive = the recent pace is higher.
+ */
+export type InsightsWindowDelta = {
+  fromWindowMonths: number;
+  toWindowMonths: number;
+  typeMeanDeltaCents: Record<TxType, number>;
+  categoryMeanDeltaCents: Record<TxCategory, number>;
+  outgoingMeanDeltaCents: number;
+  incomingMeanDeltaCents: number;
+  netMeanDeltaCents: number;
+};
+
+export type InsightsMover = {
+  category: TxCategory;
+  txType: TxType;
+  /** Mean over the longest window (e.g. 12-mo). */
+  longMeanCents: number;
+  /** Mean over the shortest window (e.g. 2-mo). */
+  shortMeanCents: number;
+  /** shortMeanCents - longMeanCents. */
+  deltaCents: number;
+  /** Percent change vs the long-window mean (one decimal), or null when that mean is not > 0. */
+  percentChange: number | null;
+};
+
+export type FinancialInsights = {
+  currentMonthKey: string;
+  /** Complete month keys included in window math, ascending. Excludes currentMonthKey. */
+  completeMonthKeys: string[];
+  /** One entry per requested window, in the order given (longest -> shortest). */
+  windows: InsightsWindowStats[];
+  /** Deltas between adjacent windows: windows[i] -> windows[i+1]. */
+  deltas: InsightsWindowDelta[];
+  /**
+   * Categories ranked by |shortest-window mean - longest-window mean| desc.
+   * Transfer categories are excluded (transfers are neither income nor
+   * spending, consistent with the rest of the budget math). Zero-delta
+   * categories are omitted.
+   */
+  biggestMovers: InsightsMover[];
+};
+
+export type FinancialInsightsOptions = {
+  /** Window sizes in months, longest first. Default [12, 6, 2]. */
+  windows?: number[];
+  /** The in-progress month: its row (when present) is NEVER included in window math. */
+  currentMonthKey: string;
+  /** Maximum number of biggestMovers to return. Default 5. */
+  topMoversCount?: number;
+};
+
+const CATEGORY_TX_TYPE: Record<TxCategory, TxType> = Object.fromEntries(
+  TX_TYPES.flatMap((type) => TX_TYPE_CATEGORIES[type].map((category) => [category, type])),
+) as Record<TxCategory, TxType>;
+
+function meanCents(values: readonly number[]): number {
+  if (values.length === 0) return 0;
+  return Math.round(values.reduce((sum, value) => sum + value, 0) / values.length);
+}
+
+function medianCents(values: readonly number[]): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 1 ? sorted[mid]! : Math.round((sorted[mid - 1]! + sorted[mid]!) / 2);
+}
+
+function insightsStat(values: readonly number[]): InsightsStat {
+  return { meanCents: meanCents(values), medianCents: medianCents(values) };
+}
+
+/**
+ * Pure multi-window trend math over monthly aggregate rows. For each window
+ * (default 12/6/2 months) computes the mean AND median of the monthly totals
+ * per type, per category, and for outgoing/incoming/net — medians are reported
+ * alongside means so volatile series (e.g. income that switched sources
+ * mid-year) stay visible instead of being smoothed away.
+ *
+ * The currentMonthKey row is ALWAYS excluded: partial months never contaminate
+ * averages. When history is shorter than a window, stats are computed over the
+ * available complete months and monthsUsed reports the honest count.
+ */
+export function computeFinancialInsights(
+  monthlyRows: readonly InsightsMonthRow[],
+  options: FinancialInsightsOptions,
+): FinancialInsights {
+  const windows = options.windows ?? [12, 6, 2];
+  if (windows.length === 0) {
+    throw new Error("windows must contain at least one window size");
+  }
+  for (const window of windows) {
+    if (!Number.isInteger(window) || window < 1) {
+      throw new Error(`invalid window size ${window}: windows must be positive integers (months)`);
+    }
+  }
+  if (!isValidMonthKey(options.currentMonthKey)) {
+    throw new Error(`invalid currentMonthKey "${options.currentMonthKey}". Expected 'YYYY-MM'.`);
+  }
+  const topMoversCount = options.topMoversCount ?? 5;
+
+  // Complete months only: the in-progress month (and any future-dated rows)
+  // never participates in window math. 'YYYY-MM' sorts lexicographically.
+  const completeRows = monthlyRows
+    .filter((row) => isValidMonthKey(row.monthKey) && row.monthKey < options.currentMonthKey)
+    .sort((a, b) => a.monthKey.localeCompare(b.monthKey));
+
+  const windowStats: InsightsWindowStats[] = windows.map((windowMonths) => {
+    const rows = completeRows.slice(-windowMonths);
+    const typeStats = Object.fromEntries(
+      TX_TYPES.map((type) => [type, insightsStat(rows.map((row) => row.typeTotalsCents[type] ?? 0))]),
+    ) as Record<TxType, InsightsStat>;
+    const categoryStats = Object.fromEntries(
+      TX_CATEGORIES.map((category) => [
+        category,
+        insightsStat(rows.map((row) => row.categoryTotalsCents[category] ?? 0)),
+      ]),
+    ) as Record<TxCategory, InsightsStat>;
+    return {
+      windowMonths,
+      monthsUsed: rows.length,
+      monthKeys: rows.map((row) => row.monthKey),
+      typeStats,
+      categoryStats,
+      outgoing: insightsStat(rows.map((row) => row.totalOutgoingCents)),
+      incoming: insightsStat(rows.map((row) => row.totalIncomingCents)),
+      net: insightsStat(rows.map((row) => row.netCents)),
+    };
+  });
+
+  const deltas: InsightsWindowDelta[] = [];
+  for (let index = 0; index + 1 < windowStats.length; index += 1) {
+    const from = windowStats[index]!;
+    const to = windowStats[index + 1]!;
+    deltas.push({
+      fromWindowMonths: from.windowMonths,
+      toWindowMonths: to.windowMonths,
+      typeMeanDeltaCents: Object.fromEntries(
+        TX_TYPES.map((type) => [type, to.typeStats[type].meanCents - from.typeStats[type].meanCents]),
+      ) as Record<TxType, number>,
+      categoryMeanDeltaCents: Object.fromEntries(
+        TX_CATEGORIES.map((category) => [
+          category,
+          to.categoryStats[category].meanCents - from.categoryStats[category].meanCents,
+        ]),
+      ) as Record<TxCategory, number>,
+      outgoingMeanDeltaCents: to.outgoing.meanCents - from.outgoing.meanCents,
+      incomingMeanDeltaCents: to.incoming.meanCents - from.incoming.meanCents,
+      netMeanDeltaCents: to.net.meanCents - from.net.meanCents,
+    });
+  }
+
+  const longWindow = windowStats[0]!;
+  const shortWindow = windowStats[windowStats.length - 1]!;
+  const transferCategories: readonly string[] = TX_TYPE_CATEGORIES[TRANSFER_TX_TYPE];
+  const biggestMovers = TX_CATEGORIES.filter((category) => !transferCategories.includes(category))
+    .map((category) => {
+      const longMean = longWindow.categoryStats[category].meanCents;
+      const shortMean = shortWindow.categoryStats[category].meanCents;
+      const deltaCents = shortMean - longMean;
+      return {
+        category,
+        txType: CATEGORY_TX_TYPE[category],
+        longMeanCents: longMean,
+        shortMeanCents: shortMean,
+        deltaCents,
+        percentChange: longMean > 0 ? Math.round((deltaCents / longMean) * 1000) / 10 : null,
+      };
+    })
+    .filter((mover) => mover.deltaCents !== 0)
+    .sort((a, b) => Math.abs(b.deltaCents) - Math.abs(a.deltaCents))
+    .slice(0, topMoversCount);
+
+  return {
+    currentMonthKey: options.currentMonthKey,
+    completeMonthKeys: completeRows.map((row) => row.monthKey),
+    windows: windowStats,
+    deltas,
+    biggestMovers,
+  };
+}
+
 /**
  * A focus-summary topItem candidate that a dismissed bullet may resolve to. `reason` is the
  * stored topItem reason and `entityTitle` is the referenced entity's title/name/url.
