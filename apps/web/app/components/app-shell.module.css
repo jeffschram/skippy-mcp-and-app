@@ -187,9 +187,9 @@
 }
 
 .page {
-  width: min(100% - 32px, 720px);
+  width: 100%;
   margin: 0 auto;
-  padding: 22px 0 64px;
+  padding: 22px 30px 64px;
 }
 
 /* Desktop and up: switch to the sidebar layout. */
@@ -207,7 +207,6 @@
   }
 
   .page {
-    width: min(1080px, calc(100% - 56px));
     padding-top: 30px;
   }
 }
