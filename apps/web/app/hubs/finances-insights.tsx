@@ -14,7 +14,7 @@ import { api } from "../../lib/skippy-api";
 import { Card, LoadingRow, Select } from "../components";
 import { useViewerReady } from "./use-viewer";
 import { formatCents, formatSignedCents, monthKeyLabel, monthKeyShortLabel } from "./finances-helpers";
-import { labelIndices, scaleBarHeights, sparklineSegments, windowLabel } from "./finances-insights-helpers";
+import { windowLabel } from "./finances-insights-helpers";
 import styles from "./finances.module.css";
 
 function cx(...parts: Array<string | false | null | undefined>) {
@@ -156,125 +156,68 @@ function MonthMatrix({ months, currentMonthKey }: { months: InsightsMonth[]; cur
 }
 
 /* ------------------------------------------------------------------ */
-/* Trends: hand-rolled inline SVG bar chart per type                   */
+/* Ending balance by month (matrix, modeled on MonthMatrix)            */
 /* ------------------------------------------------------------------ */
 
-const BAR_H = 96;
-const BAR_LABEL_H = 14;
-const BAR_W = 16;
-const BAR_GAP = 7;
-const BAR_PAD = 4;
-
-function TypeTrendChart({ type, months }: { type: TxType; months: InsightsMonth[] }) {
-  const values = months.map((month) => month.typeTotalsCents[type] ?? 0);
-  const count = months.length;
-  const width = BAR_PAD * 2 + count * BAR_W + Math.max(0, count - 1) * BAR_GAP;
-  const heights = scaleBarHeights(values, BAR_H - 6);
-  const labeled = new Set(labelIndices(count, 5));
-
-  return (
-    <Card className={BAND_CLASS[type]}>
-      <p className={styles.cardTitle}>{type} by month</p>
-      <svg
-        className={styles.chart}
-        viewBox={`0 0 ${width} ${BAR_H + BAR_LABEL_H}`}
-        role="img"
-        aria-label={`${type} monthly totals over the last ${count} complete months`}
-      >
-        <line x1={0} y1={BAR_H} x2={width} y2={BAR_H} className={styles.chartBaseline} />
-        {months.map((month, index) => {
-          const x = BAR_PAD + index * (BAR_W + BAR_GAP);
-          const height = heights[index] ?? 0;
-          return (
-            <g key={month.monthKey}>
-              {/* Zero-data months are honest zero-height bars (no rect). */}
-              {height > 0 ? (
-                <rect
-                  className={styles.chartBar}
-                  x={x}
-                  y={BAR_H - height}
-                  width={BAR_W}
-                  height={height}
-                  rx={1.5}
-                />
-              ) : null}
-              {/* Full-column hover target so exact values are reachable even at zero. */}
-              <rect className={styles.chartHover} x={x - BAR_GAP / 2} y={0} width={BAR_W + BAR_GAP} height={BAR_H}>
-                <title>{`${monthKeyLabel(month.monthKey)} — ${formatCents(values[index] ?? 0)}`}</title>
-              </rect>
-              {labeled.has(index) ? (
-                <text
-                  className={styles.chartAxisLabel}
-                  x={index === 0 ? x : index === count - 1 ? x + BAR_W : x + BAR_W / 2}
-                  y={BAR_H + 10}
-                  textAnchor={index === 0 ? "start" : index === count - 1 ? "end" : "middle"}
-                >
-                  {monthTickLabel(month.monthKey)}
-                </text>
-              ) : null}
-            </g>
-          );
-        })}
-      </svg>
-    </Card>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/* Ending-balance sparkline (combined across the filtered accounts)    */
-/* ------------------------------------------------------------------ */
-
-const SPARK_W = 320;
-const SPARK_H = 64;
-const SPARK_PAD = 6;
-
-function BalanceSparkline({ months }: { months: InsightsMonth[] }) {
-  const values = months.map((month) => month.endingBalanceCents);
-  const present = values.filter((value): value is number => value !== null);
-  const segments = sparklineSegments(values, SPARK_W, SPARK_H, SPARK_PAD);
-
-  let zeroY: number | null = null;
-  if (present.length > 0) {
-    const min = Math.min(...present);
-    const max = Math.max(...present);
-    if (min < 0 && max > 0) {
-      zeroY = SPARK_PAD + ((max - 0) / (max - min)) * (SPARK_H - SPARK_PAD * 2);
-    }
-  }
-
+function BalanceMatrix({ months, currentMonthKey }: { months: InsightsMonth[]; currentMonthKey: string }) {
+  const hasAny = months.some((month) => month.endingBalanceCents !== null);
   return (
     <Card>
       <p className={styles.cardTitle}>
-        Ending balance
-        <span className={cx("muted", styles.cardTitleNote)}>latest snapshot per month, summed across accounts</span>
+        Ending balance by month
+        <span className={cx("muted", styles.cardTitleNote)}>
+          latest snapshot per month, summed across accounts
+        </span>
       </p>
-      {segments.length === 0 ? (
+      {!hasAny ? (
         <p className={styles.insightsNote}>No balance snapshots recorded yet.</p>
       ) : (
-        <svg
-          className={styles.chart}
-          viewBox={`0 0 ${SPARK_W} ${SPARK_H}`}
-          role="img"
-          aria-label="Ending balance by month"
-        >
-          {zeroY !== null ? <line x1={0} y1={zeroY} x2={SPARK_W} y2={zeroY} className={styles.sparkZero} /> : null}
-          {segments.map((segment, segmentIndex) =>
-            segment.length > 1 ? (
-              <polyline
-                key={segmentIndex}
-                className={styles.sparkLine}
-                points={segment.map((point) => `${point.x},${point.y}`).join(" ")}
-              />
-            ) : null,
-          )}
-          {segments.flat().map((point) => (
-            <circle key={point.index} className={styles.sparkDot} cx={point.x} cy={point.y} r={2.2}>
-              <title>{`${monthKeyLabel(months[point.index]!.monthKey)} — ${formatCents(
-                months[point.index]!.endingBalanceCents ?? 0,
-              )}`}</title>
-            </circle>
-          ))}
-        </svg>
+        <div className={styles.statsTableWrap}>
+          <table className={styles.statsTable} aria-label="Ending balance by month">
+            <thead>
+              <tr>
+                <th scope="col" className={styles.statsHead} />
+                {months.map((month) => (
+                  <th key={month.monthKey} scope="col" className={cx(styles.statsHead, styles.statsValueCol)}>
+                    {monthTickLabel(month.monthKey)}
+                    {month.monthKey === currentMonthKey ? <span className={styles.statSub}>MTD</span> : null}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row" className={styles.statsLabelCell}>
+                  Ending balance
+                </th>
+                {months.map((month, index) => {
+                  const value = month.endingBalanceCents;
+                  const prev = index > 0 ? months[index - 1]!.endingBalanceCents : null;
+                  const tone =
+                    value === null || prev === null || value === prev
+                      ? null
+                      : value > prev
+                        ? styles.comparisonUnder
+                        : styles.comparisonOver;
+                  return (
+                    <td key={month.monthKey} className={styles.statsValueCol}>
+                      <span
+                        className={cx(styles.statValue, tone)}
+                        title={
+                          value === null || prev === null
+                            ? monthKeyLabel(month.monthKey)
+                            : `${monthKeyLabel(month.monthKey)}: ${formatSignedCents(value - prev)} vs previous month`
+                        }
+                      >
+                        {value === null ? "—" : formatCents(value)}
+                      </span>
+                    </td>
+                  );
+                })}
+              </tr>
+            </tbody>
+          </table>
+        </div>
       )}
     </Card>
   );
@@ -459,10 +402,6 @@ export function FinancesInsightsView({ accounts }: { accounts: InsightsAccount[]
     [data],
   );
 
-  const completeMonths = useMemo(
-    () => (data ? data.months.filter((month) => month.monthKey < data.currentMonthKey) : []),
-    [data],
-  );
   const currentMonth = data?.months.find((month) => month.monthKey === data.currentMonthKey);
 
   return (
@@ -507,13 +446,7 @@ export function FinancesInsightsView({ accounts }: { accounts: InsightsAccount[]
 
           <MonthMatrix months={data.months} currentMonthKey={data.currentMonthKey} />
 
-          <div className={styles.chartsGrid}>
-            {INSIGHT_TYPES.map((type) => (
-              <TypeTrendChart key={type} type={type} months={completeMonths} />
-            ))}
-          </div>
-
-          <BalanceSparkline months={data.months} />
+          <BalanceMatrix months={data.months} currentMonthKey={data.currentMonthKey} />
 
           <div className={styles.insightsSideGrid}>
             <CategoryTable insights={insights} />
