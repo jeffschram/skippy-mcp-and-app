@@ -29,6 +29,7 @@ import { useViewerReady } from "./use-viewer";
 import {
   bucketTransactionsByDay,
   currentMonthKey,
+  dayRowHasEntries,
   dateInputToEpochMs,
   epochMsToDateInput,
   formatCents,
@@ -125,6 +126,12 @@ const BAND_LABEL: Record<TxType, string> = {
 const GRID_CATEGORIES: Array<{ category: TxCategory; type: TxType }> = TX_TYPES.flatMap((type) =>
   TX_TYPE_CATEGORIES[type].map((category) => ({ category: category as TxCategory, type })),
 );
+
+/** Date column + one column per category. */
+const GRID_COLUMN_COUNT = GRID_CATEGORIES.length + 1;
+/** The full-width summary rows split the table into a label half and a value half. */
+const SUMMARY_LABEL_SPAN = Math.floor(GRID_COLUMN_COUNT / 2);
+const SUMMARY_VALUE_SPAN = GRID_COLUMN_COUNT - SUMMARY_LABEL_SPAN;
 
 /* ------------------------------------------------------------------ */
 /* Small display helpers                                               */
@@ -625,8 +632,9 @@ function AccountDialog({ open, onClose }: { open: boolean; onClose: () => void }
 /* ------------------------------------------------------------------ */
 
 function MonthlyGrid({ report, onEditTransaction }: { report: MonthlyReport; onEditTransaction: (tx: GridTransaction) => void }) {
+  // Only days that actually hold transactions get a row; empty days are hidden.
   const rows = useMemo(
-    () => bucketTransactionsByDay(report.monthKey, report.transactions),
+    () => bucketTransactionsByDay(report.monthKey, report.transactions).filter(dayRowHasEntries),
     [report.monthKey, report.transactions],
   );
   const prevLabel = monthKeyShortLabel(report.previousMonthKey);
@@ -635,37 +643,49 @@ function MonthlyGrid({ report, onEditTransaction }: { report: MonthlyReport; onE
 
   return (
     <div className={styles.gridWrap}>
-      <div className={styles.grid} role="table" aria-label={`Transactions for ${monthKeyLabel(report.monthKey)}`}>
-        {/* Type band headers */}
-        <div className={cx(styles.cell, styles.dayCell, styles.cornerCell, styles.bandHead)} aria-hidden />
-        {TX_TYPES.map((type) => (
-          <div
-            key={type}
-            className={cx(styles.bandHead, BAND_CLASS[type], styles.bandStrong)}
-            style={{ gridColumn: `span ${TX_TYPE_CATEGORIES[type].length}` }}
-          >
-            {BAND_LABEL[type]}
-          </div>
-        ))}
+      <table className={styles.grid} aria-label={`Transactions for ${monthKeyLabel(report.monthKey)}`}>
+        <thead>
+          {/* Type band headers */}
+          <tr>
+            <td className={cx(styles.cell, styles.dayCell, styles.cornerCell, styles.bandHead)} />
+            {TX_TYPES.map((type) => (
+              <th
+                key={type}
+                scope="colgroup"
+                colSpan={TX_TYPE_CATEGORIES[type].length}
+                className={cx(styles.bandHead, BAND_CLASS[type], styles.bandStrong)}
+              >
+                {BAND_LABEL[type]}
+              </th>
+            ))}
+          </tr>
 
-        {/* Category sub-headers */}
-        <div className={cx(styles.cell, styles.dayCell)} aria-hidden />
-        {GRID_CATEGORIES.map(({ category, type }) => (
-          <div key={category} className={cx(styles.cell, styles.categoryHead, BAND_CLASS[type], styles.bandSoft)}>
-            {category}
-          </div>
-        ))}
+          {/* Category sub-headers */}
+          <tr>
+            <td className={cx(styles.cell, styles.dayCell, styles.cornerCell)} />
+            {GRID_CATEGORIES.map(({ category, type }) => (
+              <th
+                key={category}
+                scope="col"
+                className={cx(styles.cell, styles.categoryHead, BAND_CLASS[type], styles.bandSoft)}
+              >
+                {category}
+              </th>
+            ))}
+          </tr>
+        </thead>
 
-        {/* One row per day of the month */}
-        {rows.map((row) => {
-          const hasEntries = GRID_CATEGORIES.some(({ category }) => row.cells[category].length > 0);
-          return (
-            <div key={row.day} style={{ display: "contents" }}>
-              <div className={cx(styles.cell, styles.dayCell, !hasEntries && styles.dayCellEmpty)}>{row.label}</div>
+        {/* One row per day that has at least one transaction */}
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.day}>
+              <th scope="row" className={cx(styles.cell, styles.dayCell)}>
+                {row.label}
+              </th>
               {GRID_CATEGORIES.map(({ category, type }) => {
                 const entries = row.cells[category];
                 return (
-                  <div key={category} className={cx(styles.cell, BAND_CLASS[type], styles.bandFaint)}>
+                  <td key={category} className={cx(styles.cell, BAND_CLASS[type], styles.bandFaint)}>
                     {entries.length > 0 ? (
                       <div className={styles.cellStack}>
                         {entries.map((entry) => (
@@ -682,101 +702,129 @@ function MonthlyGrid({ report, onEditTransaction }: { report: MonthlyReport; onE
                         ))}
                       </div>
                     ) : null}
-                  </div>
+                  </td>
                 );
               })}
-            </div>
-          );
-        })}
+            </tr>
+          ))}
+        </tbody>
 
-        {/* Per-category totals */}
-        <div className={cx(styles.cell, styles.dayCell, styles.totalCell, styles.totalLabel)}>Totals</div>
-        {GRID_CATEGORIES.map(({ category, type }) => {
-          const budgetDelta = budget?.comparison.categoryDeltas[category];
-          const isIncome = type === "Income";
-          return (
-            <div key={category} className={cx(styles.cell, styles.totalCell, BAND_CLASS[type], styles.bandFaint)}>
-              <span className={styles.totalAmount}>{formatCents(report.current.categoryTotalsCents[category] ?? 0)}</span>
-              {(budgetDelta || hasPrev) && (
-                <span className={styles.comparisons}>
-                  {budgetDelta ? (
-                    <DeltaLine label="vs budget" deltaCents={budgetDelta.deltaCents} goodWhenPositive={isIncome} />
-                  ) : null}
-                  {hasPrev ? (
-                    <DeltaLine
-                      label={`vs ${prevLabel}`}
-                      deltaCents={report.monthOverMonth.categoryTotalsCents[category] ?? 0}
-                      goodWhenPositive={isIncome}
-                    />
-                  ) : null}
-                </span>
-              )}
-            </div>
-          );
-        })}
+        <tfoot>
+          {/* Per-category totals */}
+          <tr>
+            <th scope="row" className={cx(styles.cell, styles.dayCell, styles.totalCell, styles.totalLabel)}>
+              Totals
+            </th>
+            {GRID_CATEGORIES.map(({ category, type }) => {
+              const budgetDelta = budget?.comparison.categoryDeltas[category];
+              const isIncome = type === "Income";
+              return (
+                <td key={category} className={cx(styles.cell, styles.totalCell, BAND_CLASS[type], styles.bandFaint)}>
+                  <span className={styles.totalAmount}>{formatCents(report.current.categoryTotalsCents[category] ?? 0)}</span>
+                  {(budgetDelta || hasPrev) && (
+                    <span className={styles.comparisons}>
+                      {budgetDelta ? (
+                        <DeltaLine label="vs budget" deltaCents={budgetDelta.deltaCents} goodWhenPositive={isIncome} />
+                      ) : null}
+                      {hasPrev ? (
+                        <DeltaLine
+                          label={`vs ${prevLabel}`}
+                          deltaCents={report.monthOverMonth.categoryTotalsCents[category] ?? 0}
+                          goodWhenPositive={isIncome}
+                        />
+                      ) : null}
+                    </span>
+                  )}
+                </td>
+              );
+            })}
+          </tr>
 
-        {/* Per-type totals (banded) */}
-        <div className={cx(styles.cell, styles.dayCell, styles.totalCell, styles.totalLabel)} aria-hidden />
-        {TX_TYPES.map((type) => {
-          const budgetDelta = budget?.comparison.typeDeltas[type];
-          const isIncome = type === "Income";
-          const percent = report.current.typePercentOfOutgoing[type] ?? 0;
-          return (
-            <div
-              key={type}
-              className={cx(styles.cell, styles.totalCell, BAND_CLASS[type], styles.bandSoft)}
-              style={{ gridColumn: `span ${TX_TYPE_CATEGORIES[type].length}` }}
+          {/* Per-type totals (banded) */}
+          <tr>
+            <td className={cx(styles.cell, styles.dayCell, styles.totalCell)} />
+            {TX_TYPES.map((type) => {
+              const budgetDelta = budget?.comparison.typeDeltas[type];
+              const isIncome = type === "Income";
+              const percent = report.current.typePercentOfOutgoing[type] ?? 0;
+              return (
+                <td
+                  key={type}
+                  colSpan={TX_TYPE_CATEGORIES[type].length}
+                  className={cx(styles.cell, styles.totalCell, BAND_CLASS[type], styles.bandSoft)}
+                >
+                  <span className={styles.totalAmount}>
+                    {BAND_LABEL[type]} {formatCents(report.current.typeTotalsCents[type] ?? 0)}
+                    {!isIncome && report.current.totalOutgoingCents > 0 ? (
+                      <span className={styles.totalPercent}>{percent}% of outgoing</span>
+                    ) : null}
+                  </span>
+                  {(budgetDelta || hasPrev) && (
+                    <span className={styles.comparisons}>
+                      {budgetDelta ? (
+                        <DeltaLine label="vs budget" deltaCents={budgetDelta.deltaCents} goodWhenPositive={isIncome} />
+                      ) : null}
+                      {hasPrev ? (
+                        <DeltaLine
+                          label={`vs ${prevLabel}`}
+                          deltaCents={report.monthOverMonth.typeTotalsCents[type] ?? 0}
+                          goodWhenPositive={isIncome}
+                        />
+                      ) : null}
+                    </span>
+                  )}
+                </td>
+              );
+            })}
+          </tr>
+
+          {/* Account total outgoing */}
+          <tr>
+            <th
+              scope="row"
+              colSpan={SUMMARY_LABEL_SPAN}
+              className={cx(styles.cell, styles.totalCell, styles.totalLabel, styles.summaryRowLabel)}
             >
-              <span className={styles.totalAmount}>
-                {BAND_LABEL[type]} {formatCents(report.current.typeTotalsCents[type] ?? 0)}
-                {!isIncome && report.current.totalOutgoingCents > 0 ? (
-                  <span className={styles.totalPercent}>{percent}% of outgoing</span>
+              Account total (outgoing)
+            </th>
+            <td colSpan={SUMMARY_VALUE_SPAN} className={cx(styles.cell, styles.totalCell, styles.summaryRowValue)}>
+              <div className={styles.summaryFlex}>
+                {budget?.comparison.outgoing ? (
+                  <DeltaLine label="vs budget" deltaCents={budget.comparison.outgoing.deltaCents} />
                 ) : null}
-              </span>
-              {(budgetDelta || hasPrev) && (
-                <span className={styles.comparisons}>
-                  {budgetDelta ? (
-                    <DeltaLine label="vs budget" deltaCents={budgetDelta.deltaCents} goodWhenPositive={isIncome} />
-                  ) : null}
-                  {hasPrev ? (
-                    <DeltaLine
-                      label={`vs ${prevLabel}`}
-                      deltaCents={report.monthOverMonth.typeTotalsCents[type] ?? 0}
-                      goodWhenPositive={isIncome}
-                    />
-                  ) : null}
+                {hasPrev ? (
+                  <DeltaLine label={`vs ${prevLabel}`} deltaCents={report.monthOverMonth.totalOutgoingCents} />
+                ) : null}
+                <span>{formatCents(report.current.totalOutgoingCents)}</span>
+              </div>
+            </td>
+          </tr>
+
+          {/* Net after income */}
+          <tr>
+            <th
+              scope="row"
+              colSpan={SUMMARY_LABEL_SPAN}
+              className={cx(styles.cell, styles.totalCell, styles.totalLabel, styles.summaryRowLabel)}
+            >
+              After income
+            </th>
+            <td colSpan={SUMMARY_VALUE_SPAN} className={cx(styles.cell, styles.totalCell, styles.summaryRowValue)}>
+              <div className={styles.summaryFlex}>
+                {budget?.comparison.net ? (
+                  <DeltaLine label="vs budget" deltaCents={budget.comparison.net.deltaCents} goodWhenPositive />
+                ) : null}
+                {hasPrev ? (
+                  <DeltaLine label={`vs ${prevLabel}`} deltaCents={report.monthOverMonth.netCents} goodWhenPositive />
+                ) : null}
+                <span className={report.current.netCents >= 0 ? styles.netPositive : styles.netNegative}>
+                  {formatCents(report.current.netCents)}
                 </span>
-              )}
-            </div>
-          );
-        })}
-
-        {/* Account total outgoing */}
-        <div className={cx(styles.cell, styles.totalCell, styles.totalLabel, styles.summaryRowLabel)}>
-          Account total (outgoing)
-        </div>
-        <div className={cx(styles.cell, styles.totalCell, styles.summaryRowValue)}>
-          {budget?.comparison.outgoing ? (
-            <DeltaLine label="vs budget" deltaCents={budget.comparison.outgoing.deltaCents} />
-          ) : null}
-          {hasPrev ? <DeltaLine label={`vs ${prevLabel}`} deltaCents={report.monthOverMonth.totalOutgoingCents} /> : null}
-          <span>{formatCents(report.current.totalOutgoingCents)}</span>
-        </div>
-
-        {/* Net after income */}
-        <div className={cx(styles.cell, styles.totalCell, styles.totalLabel, styles.summaryRowLabel)}>After income</div>
-        <div className={cx(styles.cell, styles.totalCell, styles.summaryRowValue)}>
-          {budget?.comparison.net ? (
-            <DeltaLine label="vs budget" deltaCents={budget.comparison.net.deltaCents} goodWhenPositive />
-          ) : null}
-          {hasPrev ? (
-            <DeltaLine label={`vs ${prevLabel}`} deltaCents={report.monthOverMonth.netCents} goodWhenPositive />
-          ) : null}
-          <span className={report.current.netCents >= 0 ? styles.netPositive : styles.netNegative}>
-            {formatCents(report.current.netCents)}
-          </span>
-        </div>
-      </div>
+              </div>
+            </td>
+          </tr>
+        </tfoot>
+      </table>
     </div>
   );
 }
