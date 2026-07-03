@@ -10,6 +10,7 @@ import {
   Inbox,
   ScrollText,
   Settings,
+  Wallet,
   type LucideIcon,
 } from "lucide-react";
 import { api } from "../../lib/skippy-api";
@@ -47,6 +48,12 @@ export const hubs: Array<{
     label: "Review",
     icon: Inbox,
     match: (p) => p.startsWith("/review"),
+  },
+  {
+    href: "/finances",
+    label: "Finances",
+    icon: Wallet,
+    match: (p) => p.startsWith("/finances"),
   },
   {
     href: "/skills",
