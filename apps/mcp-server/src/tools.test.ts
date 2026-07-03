@@ -74,6 +74,10 @@ function createFakeClient(): { client: SkippyClient; calls: Array<{ name: string
       recordNotificationDelivery: (brainInstanceId, delivery) =>
         record("recordNotificationDelivery", brainInstanceId, delivery),
       getSkill: (brainInstanceId, input) => record("getSkill", brainInstanceId, input),
+      upsertFinancialAccount: (brainInstanceId, input) => record("upsertFinancialAccount", brainInstanceId, input),
+      recordFinancialTransactions: (brainInstanceId, input) =>
+        record("recordFinancialTransactions", brainInstanceId, input),
+      getFinancialReport: (brainInstanceId, input) => record("getFinancialReport", brainInstanceId, input),
     },
   };
 }
@@ -584,6 +588,138 @@ describe("Skippy MCP tool handlers", () => {
         },
       ],
     });
+  });
+
+  it("upserts financial accounts with harness attribution and last-4 masks only", async () => {
+    const { client, calls } = createFakeClient();
+    const tools = createSkippyToolHandlers(client, "brain_123");
+
+    await tools.upsertFinancialAccount({
+      name: "  Chase Checking  ",
+      accountType: "Family Shared",
+      mask: " 4321 ",
+      institution: "Chase",
+      plaidAccountId: "plaid_acct_1",
+    });
+
+    expect(calls[0]).toMatchObject({
+      name: "upsertFinancialAccount",
+      args: [
+        "brain_123",
+        {
+          name: "Chase Checking",
+          accountType: "Family Shared",
+          mask: "4321",
+          institution: "Chase",
+          plaidAccountId: "plaid_acct_1",
+          actorId: "skippy_mcp",
+        },
+      ],
+    });
+
+    await expect(
+      tools.upsertFinancialAccount({
+        name: "Chase Checking",
+        accountType: "Family Shared",
+        mask: "123456789",
+      }),
+    ).rejects.toThrow(/never send full account numbers/);
+  });
+
+  it("records bulk financial transactions with plaid defaults and idempotent externalIds", async () => {
+    const { client, calls } = createFakeClient();
+    const tools = createSkippyToolHandlers(client, "brain_123");
+
+    await tools.recordFinancialTransactions({
+      accountId: "account_123",
+      transactions: [
+        {
+          date: 1780850000000,
+          amountCents: 4599,
+          description: "Kroger",
+          txType: "Food",
+          category: "Groceries",
+          externalId: "plaid_tx_1",
+        },
+        {
+          date: 1780850000000,
+          amountCents: 500000,
+          description: "Payroll",
+          txType: "Income",
+          category: "Jeff",
+          externalId: "plaid_tx_2",
+        },
+      ],
+    });
+
+    expect(calls[0]).toMatchObject({
+      name: "recordFinancialTransactions",
+      args: [
+        "brain_123",
+        {
+          accountId: "account_123",
+          source: "plaid",
+          actorId: "skippy_mcp",
+          transactions: [
+            { externalId: "plaid_tx_1", txType: "Food", category: "Groceries" },
+            { externalId: "plaid_tx_2", txType: "Income", category: "Jeff" },
+          ],
+        },
+      ],
+    });
+  });
+
+  it("rejects invalid type-category pairs and non-integer cents before calling the backend", async () => {
+    const { client, calls } = createFakeClient();
+    const tools = createSkippyToolHandlers(client, "brain_123");
+
+    await expect(
+      tools.recordFinancialTransactions({
+        accountId: "account_123",
+        transactions: [
+          {
+            date: 1780850000000,
+            amountCents: 4599,
+            description: "Kroger",
+            txType: "Fixed",
+            category: "Groceries",
+          },
+        ],
+      }),
+    ).rejects.toThrow(/transactions\[0\].*invalid category "Groceries" for transaction type "Fixed"/);
+
+    await expect(
+      tools.recordFinancialTransactions({
+        accountId: "account_123",
+        transactions: [
+          {
+            date: 1780850000000,
+            amountCents: 45.99,
+            description: "Kroger",
+            txType: "Food",
+            category: "Groceries",
+          },
+        ],
+      }),
+    ).rejects.toThrow(/integer number of cents/);
+
+    expect(calls).toHaveLength(0);
+  });
+
+  it("fetches monthly financial reports with validated month keys", async () => {
+    const { client, calls } = createFakeClient();
+    const tools = createSkippyToolHandlers(client, "brain_123");
+
+    await tools.getFinancialReport({ accountId: "account_123", monthKey: "2026-06" });
+
+    expect(calls[0]).toMatchObject({
+      name: "getFinancialReport",
+      args: ["brain_123", { accountId: "account_123", monthKey: "2026-06" }],
+    });
+
+    await expect(tools.getFinancialReport({ accountId: "account_123", monthKey: "June 2026" })).rejects.toThrow(
+      /invalid monthKey/,
+    );
   });
 
   it("previews notification dispatch candidates in dry run mode", async () => {

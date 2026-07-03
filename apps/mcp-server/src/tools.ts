@@ -9,12 +9,19 @@ import {
   type CandidateObjectInput,
   type EntityRef,
   type EntityType,
+  type FinancialAccountType,
   type FocusSummary,
   type LinkStatus,
   type PendingActionStatus,
   type RelationshipInput,
   type SourceRefInput,
+  type TxCategory,
+  type TxSource,
+  type TxType,
+  assertIntegerCents,
+  assertValidTxTypeCategory,
   isLinkFocusCandidate,
+  isValidMonthKey,
   linkAgeDays,
   normalizeCandidateObject,
 } from "@skippy/shared";
@@ -231,6 +238,43 @@ export type SkippyClient = {
       error?: string;
     },
   ): Promise<unknown>;
+  upsertFinancialAccount(brainInstanceId: string, input: UpsertFinancialAccountInput): Promise<unknown>;
+  recordFinancialTransactions(
+    brainInstanceId: string,
+    input: RecordFinancialTransactionsInput,
+  ): Promise<unknown>;
+  getFinancialReport(brainInstanceId: string, input: { accountId: string; monthKey: string }): Promise<unknown>;
+};
+
+export type UpsertFinancialAccountInput = {
+  name: string;
+  accountType: FinancialAccountType;
+  /** Last-4 identifier ONLY. Never full account numbers. */
+  mask: string;
+  institution?: string;
+  plaidAccountId?: string;
+  actorId?: string;
+};
+
+export type FinancialTransactionRow = {
+  /** Transaction date in epoch milliseconds. */
+  date: number;
+  /** Integer cents; direction is determined by txType. */
+  amountCents: number;
+  description: string;
+  txType: TxType;
+  category: TxCategory;
+  /** Plaid transaction_id for idempotent dedupe. */
+  externalId?: string;
+  /** 'YYYY-MM'; derived from date when omitted. */
+  monthKey?: string;
+};
+
+export type RecordFinancialTransactionsInput = {
+  accountId: string;
+  source?: TxSource;
+  transactions: FinancialTransactionRow[];
+  actorId?: string;
 };
 
 export type SkippyToolHandlers = ReturnType<typeof createSkippyToolHandlers>;
@@ -1186,6 +1230,54 @@ export function createSkippyToolHandlers(client: SkippyClient, brainInstanceId: 
 
     async updateSourceSyncStatus(input: Parameters<SkippyClient["updateSourceSyncStatus"]>[1]) {
       return await client.updateSourceSyncStatus(brainInstanceId, input);
+    },
+
+    async upsertFinancialAccount(input: UpsertFinancialAccountInput) {
+      const name = normalizeRequiredText(input.name, "name");
+      const mask = normalizeRequiredText(input.mask, "mask");
+      if (mask.length > 4) {
+        throw new Error("mask must be at most 4 characters (last-4 only) — never send full account numbers");
+      }
+      return await client.upsertFinancialAccount(brainInstanceId, {
+        ...input,
+        name,
+        mask,
+        actorId: input.actorId ?? "skippy_mcp",
+      });
+    },
+
+    async recordFinancialTransactions(input: RecordFinancialTransactionsInput) {
+      if (!input.transactions.length) {
+        throw new Error("transactions must contain at least one item");
+      }
+      input.transactions.forEach((transaction, index) => {
+        try {
+          assertValidTxTypeCategory(transaction.txType, transaction.category);
+          assertIntegerCents(transaction.amountCents, "amountCents");
+          if (transaction.monthKey !== undefined && !isValidMonthKey(transaction.monthKey)) {
+            throw new Error(`invalid monthKey "${transaction.monthKey}". Expected 'YYYY-MM'.`);
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          throw new Error(`transactions[${index}]: ${message}`);
+        }
+      });
+      return await client.recordFinancialTransactions(brainInstanceId, {
+        ...input,
+        source: input.source ?? "plaid",
+        actorId: input.actorId ?? "skippy_mcp",
+      });
+    },
+
+    async getFinancialReport(input: { accountId: string; monthKey: string }) {
+      const monthKey = normalizeRequiredText(input.monthKey, "monthKey");
+      if (!isValidMonthKey(monthKey)) {
+        throw new Error(`invalid monthKey "${monthKey}". Expected 'YYYY-MM'.`);
+      }
+      return await client.getFinancialReport(brainInstanceId, {
+        accountId: normalizeRequiredText(input.accountId, "accountId"),
+        monthKey,
+      });
     },
 
     async dispatchNotifications(input: { dryRun?: boolean; limit?: number } = {}) {

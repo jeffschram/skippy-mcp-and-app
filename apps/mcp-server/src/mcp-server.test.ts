@@ -203,6 +203,27 @@ function createFakeClient(overrides: Partial<SkippyClient> = {}): SkippyClient {
             version: 1,
             isDefault: true,
           },
+    upsertFinancialAccount: async (_brainInstanceId, input) => ({
+      accountId: "financial_account_123",
+      status: "created",
+      name: input.name,
+      accountType: input.accountType,
+      mask: input.mask,
+    }),
+    recordFinancialTransactions: async (_brainInstanceId, input) => ({
+      accountId: input.accountId,
+      accountName: "Chase Checking",
+      source: input.source ?? "plaid",
+      inserted: input.transactions.length,
+      updated: 0,
+      skipped: 0,
+    }),
+    getFinancialReport: async (_brainInstanceId, input) => ({
+      monthKey: input.monthKey,
+      previousMonthKey: "2026-05",
+      account: { _id: input.accountId, name: "Chase Checking" },
+      current: { totalOutgoingCents: 500000, totalIncomingCents: 800000, netCents: 300000 },
+    }),
   };
 
   return { ...client, ...overrides };
@@ -263,6 +284,9 @@ describe("Skippy MCP manifest", () => {
       const upsertLink = tools.find((tool) => tool.name === "upsert_link");
       const upsertNote = tools.find((tool) => tool.name === "upsert_note");
       const updateLinkStatus = tools.find((tool) => tool.name === "update_link_status");
+      const upsertFinancialAccount = tools.find((tool) => tool.name === "upsert_financial_account");
+      const recordFinancialTransactions = tools.find((tool) => tool.name === "record_financial_transactions");
+      const getFinancialReport = tools.find((tool) => tool.name === "get_financial_report");
 
       expect(ingestObject?.description).toContain("importance rubric");
       expect(ingestObject?.description).toContain("default to 'saved'");
@@ -285,6 +309,18 @@ describe("Skippy MCP manifest", () => {
       expect(updateLinkStatus?.inputSchema.properties?.linkId).toBeDefined();
       expect(updateLinkStatus?.inputSchema.properties?.status).toBeDefined();
       expect(updateLinkStatus?.inputSchema.properties?.reason).toBeDefined();
+      expect(upsertFinancialAccount?.description).toContain("never send full account numbers");
+      expect(upsertFinancialAccount?.description).toContain("plaidAccountId");
+      expect(upsertFinancialAccount?.inputSchema.properties?.mask).toBeDefined();
+      expect(recordFinancialTransactions?.description).toContain("ground truth");
+      expect(recordFinancialTransactions?.description).toContain("never queue it for review");
+      expect(recordFinancialTransactions?.description).toContain("INTEGER CENTS");
+      expect(recordFinancialTransactions?.description).toContain("externalIds for idempotency");
+      expect(recordFinancialTransactions?.description).toContain("Fixed: Mortgage, HOA, Mortgage Loan | Recurring Bills");
+      expect(recordFinancialTransactions?.inputSchema.properties?.transactions).toBeDefined();
+      expect(getFinancialReport?.annotations?.readOnlyHint).toBe(true);
+      expect(getFinancialReport?.description).toContain("previous-month deltas");
+      expect(getFinancialReport?.inputSchema.properties?.monthKey).toBeDefined();
       expect(capture?.description).toContain("accepted note directly");
       expect(ask?.annotations?.readOnlyHint).toBe(true);
       expect(refreshFocusSummary?.description).toContain("Generate and store");
@@ -877,6 +913,215 @@ describe("Skippy MCP manifest", () => {
         externalMessageId: "gmail_message_123",
         reviewUrl: "http://127.0.0.1:3000/actions",
         nextAction: "Execution result recorded in Skippy.",
+      });
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
+  it("wires financial account upsert and bulk transaction ingestion with counts", async () => {
+    const accountCalls: Array<{ brainInstanceId: string; input: unknown }> = [];
+    const transactionCalls: Array<{ brainInstanceId: string; input: unknown }> = [];
+    const server = createMcpServer(
+      createFakeClient({
+        upsertFinancialAccount: async (brainInstanceId, input) => {
+          accountCalls.push({ brainInstanceId, input });
+          return {
+            accountId: "financial_account_123",
+            status: "created",
+            name: input.name,
+            accountType: input.accountType,
+            mask: input.mask,
+          };
+        },
+        recordFinancialTransactions: async (brainInstanceId, input) => {
+          transactionCalls.push({ brainInstanceId, input });
+          return {
+            accountId: input.accountId,
+            accountName: "Chase Checking",
+            source: input.source ?? "plaid",
+            inserted: 1,
+            updated: 1,
+            skipped: 0,
+          };
+        },
+      }),
+      "brain_123",
+    );
+    const client = new Client({ name: "financial-tools-test", version: "0.1.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    try {
+      await server.connect(serverTransport);
+      await client.connect(clientTransport);
+
+      const accountResult = await client.callTool({
+        name: "upsert_financial_account",
+        arguments: {
+          name: "Chase Checking",
+          accountType: "Family Shared",
+          mask: "4321",
+          institution: "Chase",
+          plaidAccountId: "plaid_acct_1",
+        },
+      });
+
+      expect(accountCalls).toEqual([
+        {
+          brainInstanceId: "brain_123",
+          input: {
+            name: "Chase Checking",
+            accountType: "Family Shared",
+            mask: "4321",
+            institution: "Chase",
+            plaidAccountId: "plaid_acct_1",
+            actorId: "skippy_mcp",
+          },
+        },
+      ]);
+      expect(textResult(accountResult)).toMatchObject({
+        status: "created",
+        entityType: "financial_account",
+        accountId: "financial_account_123",
+        title: "Chase Checking",
+        accountType: "Family Shared",
+        mask: "4321",
+        reviewUrl: "http://127.0.0.1:3000/finances",
+      });
+
+      const transactionsResult = await client.callTool({
+        name: "record_financial_transactions",
+        arguments: {
+          accountId: "financial_account_123",
+          transactions: [
+            {
+              date: 1780850000000,
+              amountCents: 4599,
+              description: "Kroger",
+              txType: "Food",
+              category: "Groceries",
+              externalId: "plaid_tx_1",
+            },
+            {
+              date: 1780851000000,
+              amountCents: 500000,
+              description: "Payroll",
+              txType: "Income",
+              category: "Jeff",
+              externalId: "plaid_tx_2",
+            },
+          ],
+        },
+      });
+
+      expect(transactionCalls).toEqual([
+        {
+          brainInstanceId: "brain_123",
+          input: {
+            accountId: "financial_account_123",
+            source: "plaid",
+            actorId: "skippy_mcp",
+            transactions: [
+              {
+                date: 1780850000000,
+                amountCents: 4599,
+                description: "Kroger",
+                txType: "Food",
+                category: "Groceries",
+                externalId: "plaid_tx_1",
+              },
+              {
+                date: 1780851000000,
+                amountCents: 500000,
+                description: "Payroll",
+                txType: "Income",
+                category: "Jeff",
+                externalId: "plaid_tx_2",
+              },
+            ],
+          },
+        },
+      ]);
+      expect(textResult(transactionsResult)).toMatchObject({
+        status: "recorded",
+        entityType: "financial_transactions",
+        accountId: "financial_account_123",
+        title: "Chase Checking",
+        source: "plaid",
+        submitted: 2,
+        inserted: 1,
+        updated: 1,
+        skipped: 0,
+        reviewUrl: "http://127.0.0.1:3000/finances",
+      });
+
+      const invalidPair = await client.callTool({
+        name: "record_financial_transactions",
+        arguments: {
+          accountId: "financial_account_123",
+          transactions: [
+            {
+              date: 1780850000000,
+              amountCents: 4599,
+              description: "Kroger",
+              txType: "Fixed",
+              category: "Groceries",
+            },
+          ],
+        },
+      });
+      expect(invalidPair.isError).toBe(true);
+      expect(JSON.stringify(invalidPair.content)).toContain("invalid category");
+      expect(transactionCalls).toHaveLength(1);
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
+  it("returns monthly financial reports with review URLs", async () => {
+    const reportCalls: Array<{ brainInstanceId: string; input: unknown }> = [];
+    const server = createMcpServer(
+      createFakeClient({
+        getFinancialReport: async (brainInstanceId, input) => {
+          reportCalls.push({ brainInstanceId, input });
+          return {
+            monthKey: input.monthKey,
+            previousMonthKey: "2026-05",
+            account: { _id: input.accountId, name: "Chase Checking" },
+            current: { totalOutgoingCents: 500000, totalIncomingCents: 800000, netCents: 300000 },
+          };
+        },
+      }),
+      "brain_123",
+    );
+    const client = new Client({ name: "financial-report-test", version: "0.1.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    try {
+      await server.connect(serverTransport);
+      await client.connect(clientTransport);
+
+      const result = await client.callTool({
+        name: "get_financial_report",
+        arguments: { accountId: "financial_account_123", monthKey: "2026-06" },
+      });
+
+      expect(reportCalls).toEqual([
+        {
+          brainInstanceId: "brain_123",
+          input: { accountId: "financial_account_123", monthKey: "2026-06" },
+        },
+      ]);
+      expect(textResult(result)).toMatchObject({
+        status: "report",
+        entityType: "financial_report",
+        accountId: "financial_account_123",
+        monthKey: "2026-06",
+        previousMonthKey: "2026-05",
+        current: { netCents: 300000 },
+        reviewUrl: "http://127.0.0.1:3000/finances",
       });
     } finally {
       await client.close();

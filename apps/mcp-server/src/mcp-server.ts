@@ -15,11 +15,25 @@ import {
   type MemoryListInput,
   type MemoryReviewBehavior,
   type MemoryReviewCandidateInput,
+  type RecordFinancialTransactionsInput,
   type RecordMemoryInput,
   type SkippyClient,
   type StartInterviewInput,
+  type UpsertFinancialAccountInput,
 } from "./tools.js";
-import type { CandidateObjectInput, EntityType, FocusSummary, RelationshipInput, SourceRefInput } from "@skippy/shared";
+import {
+  FINANCIAL_ACCOUNT_TYPES,
+  MONTH_KEY_PATTERN,
+  TX_CATEGORIES,
+  TX_SOURCES,
+  TX_TYPES,
+  TX_TYPE_CATEGORIES,
+  type CandidateObjectInput,
+  type EntityType,
+  type FocusSummary,
+  type RelationshipInput,
+  type SourceRefInput,
+} from "@skippy/shared";
 
 const entityTypeValues = ["goal", "project", "task", "note", "person", "company", "link", "knowledgeObject"] as const;
 
@@ -73,6 +87,7 @@ const skippyInstructions = [
   "Use submit_memory_review_candidate when a possible memory is useful but uncertain. Do not queue transient alerts (balance notifications, promo deadlines, ToS notices); skip them or record directly with expiry context. Use list_memory/get_context_bundle/get_memory_detail before adding likely duplicates or answering from memory, and link_memory to attach memories to accepted entities.",
   "Use list_interview_templates/start_interview/get_interview/answer_interview_question/complete_interview/archive_interview to run guided second-brain interviews inside the harness chat. Ask one question at a time in chat, using the assistantDisplayName returned by Skippy.",
   "Use ask/summarize_focus/list_pending_actions for retrieval. Internal AI synthesis may be disabled, so expect structured context rather than polished answers.",
+  "Financial data from Plaid is ground truth: map it to the fixed transaction taxonomy at ingest time and record it directly with upsert_financial_account/record_financial_transactions (never queue it for review). Amounts are integer cents; pass Plaid transaction_ids as externalIds for idempotency, and store only account last-4 masks, never full account numbers.",
 ].join("\n");
 
 function getSkippyAppUrl() {
@@ -512,6 +527,47 @@ function linkStatusUpdatedConfirmation(input: { status: string }, result: unknow
     linkId: resultRecord.linkId,
     title: resultRecord.title,
     reviewUrl: reviewUrl("/brain"),
+  };
+}
+
+function financialAccountConfirmation(result: unknown) {
+  const resultRecord = objectResult(result);
+  return {
+    status: resultRecord.status ?? "upserted",
+    entityType: "financial_account",
+    accountId: resultRecord.accountId,
+    title: resultRecord.name,
+    accountType: resultRecord.accountType,
+    mask: resultRecord.mask,
+    reviewUrl: reviewUrl("/finances"),
+  };
+}
+
+function financialTransactionsConfirmation(input: RecordFinancialTransactionsInput, result: unknown) {
+  const resultRecord = objectResult(result);
+  return {
+    status: "recorded",
+    entityType: "financial_transactions",
+    accountId: resultRecord.accountId ?? input.accountId,
+    title: resultRecord.accountName,
+    source: resultRecord.source ?? input.source ?? "plaid",
+    submitted: input.transactions.length,
+    inserted: resultRecord.inserted,
+    updated: resultRecord.updated,
+    skipped: resultRecord.skipped,
+    reviewUrl: reviewUrl("/finances"),
+  };
+}
+
+function financialReportConfirmation(input: { accountId: string; monthKey: string }, result: unknown) {
+  const resultRecord = objectResult(result);
+  return {
+    status: "report",
+    entityType: "financial_report",
+    accountId: input.accountId,
+    monthKey: resultRecord.monthKey ?? input.monthKey,
+    ...resultRecord,
+    reviewUrl: reviewUrl("/finances"),
   };
 }
 
@@ -1688,6 +1744,98 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
         reason?: string;
       };
       return toolResult(linkStatusUpdatedConfirmation(input, await tools.updateLinkStatus(input)));
+    },
+  );
+
+  const taxonomySummary = TX_TYPES.map((type) => `${type}: ${TX_TYPE_CATEGORIES[type].join(" | ")}`).join("; ");
+
+  server.registerTool(
+    "upsert_financial_account",
+    {
+      title: "Upsert financial account",
+      description:
+        "Create or update a tracked financial account (accountType 'Jeff Personal' or 'Family Shared'). Idempotent: pass the Plaid account_id as plaidAccountId so re-syncs update the same account instead of duplicating it. mask is the LAST 4 characters of the account number ONLY — never send full account numbers.",
+      annotations: { destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: z.object({
+        name: z.string().describe("Human-friendly account name, e.g. 'Chase Checking'."),
+        accountType: z.enum(FINANCIAL_ACCOUNT_TYPES).describe("Fixed account type."),
+        mask: z.string().max(4).describe("Last 4 characters of the account number ONLY. Never full account numbers."),
+        institution: z.string().optional().describe("Bank/institution name, e.g. 'Chase'."),
+        plaidAccountId: z.string().optional().describe("Plaid account_id for idempotent mapping across syncs."),
+      }),
+    },
+    async (args) =>
+      toolResult(
+        financialAccountConfirmation(
+          await tools.upsertFinancialAccount(stripUndefined(args) as UpsertFinancialAccountInput),
+        ),
+      ),
+  );
+
+  server.registerTool(
+    "record_financial_transactions",
+    {
+      title: "Record financial transactions (bulk)",
+      description:
+        `Bulk-ingest financial transactions for a tracked account. Financial data from Plaid is ground truth — ingest it directly, never queue it for review. The harness maps Plaid data to the FIXED taxonomy at ingest time using its judgment (${taxonomySummary}); the type-category pairing is enforced and invalid pairs are rejected. Pass Plaid transaction_ids as externalIds for idempotency: an existing externalId updates the stored transaction instead of duplicating it. All amounts are INTEGER CENTS (positive magnitudes; txType determines direction). Returns {inserted, updated, skipped} counts.`,
+      annotations: { destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: z.object({
+        accountId: z.string().describe("Financial account ID from upsert_financial_account."),
+        source: z
+          .enum(TX_SOURCES)
+          .optional()
+          .describe("Where the transactions came from. Defaults to plaid."),
+        transactions: z
+          .array(
+            z.object({
+              date: z.number().describe("Transaction date in epoch milliseconds."),
+              amountCents: z
+                .number()
+                .int()
+                .describe("Integer cents (e.g. $12.34 -> 1234). Direction is determined by txType."),
+              description: z.string().describe("Merchant/transaction description."),
+              txType: z.enum(TX_TYPES).describe("Fixed transaction type."),
+              category: z
+                .enum(TX_CATEGORIES)
+                .describe("Category — must be valid for the txType under the fixed taxonomy."),
+              externalId: z
+                .string()
+                .optional()
+                .describe("Plaid transaction_id, used for idempotent dedupe across syncs."),
+              monthKey: z
+                .string()
+                .regex(MONTH_KEY_PATTERN)
+                .optional()
+                .describe("'YYYY-MM' month bucket. Derived from date (UTC) when omitted."),
+            }),
+          )
+          .min(1)
+          .describe("Transactions to ingest."),
+      }),
+    },
+    async (args) => {
+      const input = stripUndefined(args) as RecordFinancialTransactionsInput;
+      return toolResult(
+        financialTransactionsConfirmation(input, await tools.recordFinancialTransactions(input)),
+      );
+    },
+  );
+
+  server.registerTool(
+    "get_financial_report",
+    {
+      title: "Get monthly financial report",
+      description:
+        "Read-only monthly report for one account, computed at read time from stored transactions: totals per category and type, outgoing (Fixed+Spending+Food), incoming (Income), net, percentages of outgoing, previous-month deltas, and the applicable budget (month-specific if present, else the default) with per-target deltas. All amounts are integer cents.",
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: z.object({
+        accountId: z.string().describe("Financial account ID."),
+        monthKey: z.string().regex(MONTH_KEY_PATTERN).describe("Month to report on, 'YYYY-MM'."),
+      }),
+    },
+    async (args) => {
+      const input = stripUndefined(args) as { accountId: string; monthKey: string };
+      return toolResult(financialReportConfirmation(input, await tools.getFinancialReport(input)));
     },
   );
 

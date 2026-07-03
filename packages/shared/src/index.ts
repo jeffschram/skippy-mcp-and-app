@@ -699,6 +699,367 @@ export function candidateFingerprint(entityType: EntityType, rawPayload: unknown
   return `${entityType}:${fingerprintHash(canonicalText)}`;
 }
 
+/* ------------------------------------------------------------------ */
+/* Finances: fixed taxonomy, month keys, report math, bulk ingestion   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * FIXED transaction taxonomy. Transaction types and their ONLY valid categories.
+ * Every write path (Convex mutations, MCP tools) must enforce this pairing via
+ * isValidTxTypeCategory / assertValidTxTypeCategory.
+ */
+export const TX_TYPES = ["Fixed", "Spending", "Food", "Income"] as const;
+export type TxType = (typeof TX_TYPES)[number];
+
+export const TX_TYPE_CATEGORIES = {
+  Fixed: ["Mortgage, HOA, Mortgage Loan", "Recurring Bills"],
+  Spending: ["Subscriptions", "Gas, Amazon, Home Depot, Etc", "Misc."],
+  Food: ["Groceries", "Restaurants"],
+  Income: ["Jeff", "Holly"],
+} as const;
+
+export type TxCategory = (typeof TX_TYPE_CATEGORIES)[TxType][number];
+
+/** All valid categories across every transaction type, in taxonomy order. */
+export const TX_CATEGORIES = [
+  "Mortgage, HOA, Mortgage Loan",
+  "Recurring Bills",
+  "Subscriptions",
+  "Gas, Amazon, Home Depot, Etc",
+  "Misc.",
+  "Groceries",
+  "Restaurants",
+  "Jeff",
+  "Holly",
+] as const satisfies readonly TxCategory[];
+
+/** Transaction types that count toward money going out. */
+export const OUTGOING_TX_TYPES = ["Fixed", "Spending", "Food"] as const;
+/** Transaction types that count toward money coming in. */
+export const INCOMING_TX_TYPES = ["Income"] as const;
+
+export const FINANCIAL_ACCOUNT_TYPES = ["Jeff Personal", "Family Shared"] as const;
+export type FinancialAccountType = (typeof FINANCIAL_ACCOUNT_TYPES)[number];
+
+export const TX_SOURCES = ["plaid", "manual", "harness"] as const;
+export type TxSource = (typeof TX_SOURCES)[number];
+
+export function isTxType(value: unknown): value is TxType {
+  return isOneOf(TX_TYPES, value);
+}
+
+export function isTxCategory(value: unknown): value is TxCategory {
+  return isOneOf(TX_CATEGORIES, value);
+}
+
+export function isFinancialAccountType(value: unknown): value is FinancialAccountType {
+  return isOneOf(FINANCIAL_ACCOUNT_TYPES, value);
+}
+
+export function isTxSource(value: unknown): value is TxSource {
+  return isOneOf(TX_SOURCES, value);
+}
+
+/** Whether `category` is a valid category for transaction type `type` under the fixed taxonomy. */
+export function isValidTxTypeCategory(type: string, category: string): boolean {
+  const categories = (TX_TYPE_CATEGORIES as Record<string, readonly string[] | undefined>)[type];
+  return categories !== undefined && categories.includes(category);
+}
+
+/** Throws a clear error when the type/category pairing is invalid. */
+export function assertValidTxTypeCategory(type: string, category: string): void {
+  if (!isTxType(type)) {
+    throw new Error(`invalid transaction type "${type}". Valid types: ${TX_TYPES.join(" | ")}`);
+  }
+  if (!isValidTxTypeCategory(type, category)) {
+    throw new Error(
+      `invalid category "${category}" for transaction type "${type}". Valid categories for ${type}: ${TX_TYPE_CATEGORIES[type].join(" | ")}`,
+    );
+  }
+}
+
+/**
+ * All financial amounts are INTEGER CENTS to avoid float drift. Throws when the
+ * value is not a finite integer.
+ */
+export function assertIntegerCents(value: number, fieldName: string): void {
+  if (!Number.isInteger(value)) {
+    throw new Error(`${fieldName} must be an integer number of cents (no fractional or non-finite values)`);
+  }
+}
+
+export const MONTH_KEY_PATTERN = /^\d{4}-(0[1-9]|1[0-2])$/;
+
+export function isValidMonthKey(value: unknown): value is string {
+  return typeof value === "string" && MONTH_KEY_PATTERN.test(value);
+}
+
+/** 'YYYY-MM' month key for an epoch-ms timestamp, computed in UTC. */
+export function monthKeyFromDate(epochMs: number): string {
+  const date = new Date(epochMs);
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+/** The month key immediately before `monthKey` (e.g. '2026-01' -> '2025-12'). */
+export function previousMonthKey(monthKey: string): string {
+  if (!isValidMonthKey(monthKey)) {
+    throw new Error(`invalid monthKey "${monthKey}". Expected 'YYYY-MM'.`);
+  }
+  const year = Number(monthKey.slice(0, 4));
+  const month = Number(monthKey.slice(5, 7));
+  return month === 1 ? `${year - 1}-12` : `${year}-${String(month - 1).padStart(2, "0")}`;
+}
+
+export type MonthTransactionInput = {
+  txType: string;
+  category: string;
+  amountCents: number;
+};
+
+export type FinancialMonthAggregates = {
+  transactionCount: number;
+  categoryTotalsCents: Record<TxCategory, number>;
+  typeTotalsCents: Record<TxType, number>;
+  /** Sum of Fixed + Spending + Food amounts (integer cents). */
+  totalOutgoingCents: number;
+  /** Sum of Income amounts (integer cents). */
+  totalIncomingCents: number;
+  /** totalIncomingCents - totalOutgoingCents. */
+  netCents: number;
+  /** Percent of total outgoing per category (0-100, one decimal). Income categories are 0. */
+  categoryPercentOfOutgoing: Record<TxCategory, number>;
+  /** Percent of total outgoing per type (0-100, one decimal). Income is 0. */
+  typePercentOfOutgoing: Record<TxType, number>;
+};
+
+function zeroCategoryRecord(): Record<TxCategory, number> {
+  return Object.fromEntries(TX_CATEGORIES.map((category) => [category, 0])) as Record<TxCategory, number>;
+}
+
+function zeroTypeRecord(): Record<TxType, number> {
+  return Object.fromEntries(TX_TYPES.map((type) => [type, 0])) as Record<TxType, number>;
+}
+
+function roundPercent(value: number): number {
+  return Math.round(value * 10) / 10;
+}
+
+/**
+ * Pure month aggregation used by monthlyReport: totals per category and type,
+ * outgoing/incoming/net, and share of outgoing per category and type.
+ * Transactions with invalid type/category pairs are rejected loudly.
+ */
+export function aggregateMonthTransactions(transactions: MonthTransactionInput[]): FinancialMonthAggregates {
+  const categoryTotalsCents = zeroCategoryRecord();
+  const typeTotalsCents = zeroTypeRecord();
+
+  for (const transaction of transactions) {
+    assertValidTxTypeCategory(transaction.txType, transaction.category);
+    assertIntegerCents(transaction.amountCents, "amountCents");
+    const txType = transaction.txType as TxType;
+    const category = transaction.category as TxCategory;
+    categoryTotalsCents[category] += transaction.amountCents;
+    typeTotalsCents[txType] += transaction.amountCents;
+  }
+
+  const totalOutgoingCents = OUTGOING_TX_TYPES.reduce((sum, type) => sum + typeTotalsCents[type], 0);
+  const totalIncomingCents = INCOMING_TX_TYPES.reduce((sum, type) => sum + typeTotalsCents[type], 0);
+
+  const categoryPercentOfOutgoing = zeroCategoryRecord();
+  const typePercentOfOutgoing = zeroTypeRecord();
+  if (totalOutgoingCents !== 0) {
+    for (const type of OUTGOING_TX_TYPES) {
+      typePercentOfOutgoing[type] = roundPercent((typeTotalsCents[type] / totalOutgoingCents) * 100);
+      for (const category of TX_TYPE_CATEGORIES[type]) {
+        categoryPercentOfOutgoing[category] = roundPercent(
+          (categoryTotalsCents[category] / totalOutgoingCents) * 100,
+        );
+      }
+    }
+  }
+
+  return {
+    transactionCount: transactions.length,
+    categoryTotalsCents,
+    typeTotalsCents,
+    totalOutgoingCents,
+    totalIncomingCents,
+    netCents: totalIncomingCents - totalOutgoingCents,
+    categoryPercentOfOutgoing,
+    typePercentOfOutgoing,
+  };
+}
+
+export type FinancialBudgetTargets = {
+  monthKey?: string;
+  /** category -> target integer cents. */
+  categoryTargets?: Record<string, number>;
+  /** transaction type -> target integer cents. */
+  typeTargets?: Record<string, number>;
+  targetOutgoingCents?: number;
+  targetIncomingCents?: number;
+  targetNetCents?: number;
+};
+
+export type BudgetTargetDelta = {
+  targetCents: number;
+  actualCents: number;
+  /** actualCents - targetCents. Positive = over target. */
+  deltaCents: number;
+};
+
+export type FinancialBudgetComparison = {
+  categoryDeltas: Record<string, BudgetTargetDelta>;
+  typeDeltas: Record<string, BudgetTargetDelta>;
+  outgoing?: BudgetTargetDelta;
+  incoming?: BudgetTargetDelta;
+  net?: BudgetTargetDelta;
+};
+
+function targetDelta(targetCents: number, actualCents: number): BudgetTargetDelta {
+  return { targetCents, actualCents, deltaCents: actualCents - targetCents };
+}
+
+/** Per-target deltas between a budget and a month's actual aggregates. */
+export function compareBudgetToAggregates(
+  budget: FinancialBudgetTargets,
+  aggregates: FinancialMonthAggregates,
+): FinancialBudgetComparison {
+  const categoryDeltas: Record<string, BudgetTargetDelta> = {};
+  for (const [category, target] of Object.entries(budget.categoryTargets ?? {})) {
+    const actual = (aggregates.categoryTotalsCents as Record<string, number | undefined>)[category] ?? 0;
+    categoryDeltas[category] = targetDelta(target, actual);
+  }
+
+  const typeDeltas: Record<string, BudgetTargetDelta> = {};
+  for (const [type, target] of Object.entries(budget.typeTargets ?? {})) {
+    const actual = (aggregates.typeTotalsCents as Record<string, number | undefined>)[type] ?? 0;
+    typeDeltas[type] = targetDelta(target, actual);
+  }
+
+  const comparison: FinancialBudgetComparison = { categoryDeltas, typeDeltas };
+  if (budget.targetOutgoingCents !== undefined) {
+    comparison.outgoing = targetDelta(budget.targetOutgoingCents, aggregates.totalOutgoingCents);
+  }
+  if (budget.targetIncomingCents !== undefined) {
+    comparison.incoming = targetDelta(budget.targetIncomingCents, aggregates.totalIncomingCents);
+  }
+  if (budget.targetNetCents !== undefined) {
+    comparison.net = targetDelta(budget.targetNetCents, aggregates.netCents);
+  }
+  return comparison;
+}
+
+export type MonthlyFinancialReportInput = {
+  monthKey: string;
+  transactions: MonthTransactionInput[];
+  previousTransactions?: MonthTransactionInput[];
+  /** The applicable budget: month-specific if present, else the default/recurring budget. */
+  budget?: FinancialBudgetTargets;
+  /** True when `budget` is the default/recurring budget rather than a month-specific one. */
+  budgetIsDefault?: boolean;
+};
+
+export type MonthlyFinancialReport = {
+  monthKey: string;
+  previousMonthKey: string;
+  current: FinancialMonthAggregates;
+  previous: FinancialMonthAggregates;
+  /** current - previous, for delta display. */
+  monthOverMonth: {
+    totalOutgoingCents: number;
+    totalIncomingCents: number;
+    netCents: number;
+    categoryTotalsCents: Record<TxCategory, number>;
+    typeTotalsCents: Record<TxType, number>;
+  };
+  budget: (FinancialBudgetTargets & { isDefault: boolean; comparison: FinancialBudgetComparison }) | null;
+};
+
+/**
+ * Pure monthly report computation (computed at read time; nothing is stored).
+ * Given this month's and the previous month's transactions plus the applicable
+ * budget, returns totals, percentages, previous-month deltas, and budget deltas.
+ */
+export function computeMonthlyFinancialReport(input: MonthlyFinancialReportInput): MonthlyFinancialReport {
+  const current = aggregateMonthTransactions(input.transactions);
+  const previous = aggregateMonthTransactions(input.previousTransactions ?? []);
+
+  const categoryTotalsCents = zeroCategoryRecord();
+  for (const category of TX_CATEGORIES) {
+    categoryTotalsCents[category] = current.categoryTotalsCents[category] - previous.categoryTotalsCents[category];
+  }
+  const typeTotalsCents = zeroTypeRecord();
+  for (const type of TX_TYPES) {
+    typeTotalsCents[type] = current.typeTotalsCents[type] - previous.typeTotalsCents[type];
+  }
+
+  return {
+    monthKey: input.monthKey,
+    previousMonthKey: previousMonthKey(input.monthKey),
+    current,
+    previous,
+    monthOverMonth: {
+      totalOutgoingCents: current.totalOutgoingCents - previous.totalOutgoingCents,
+      totalIncomingCents: current.totalIncomingCents - previous.totalIncomingCents,
+      netCents: current.netCents - previous.netCents,
+      categoryTotalsCents,
+      typeTotalsCents,
+    },
+    budget: input.budget
+      ? {
+          ...input.budget,
+          isDefault: input.budgetIsDefault ?? false,
+          comparison: compareBudgetToAggregates(input.budget, current),
+        }
+      : null,
+  };
+}
+
+export type BulkTransactionWritePlan<T> = {
+  /** Rows with no externalId, or an externalId not seen before. */
+  inserts: T[];
+  /** Rows whose externalId already exists in storage: update in place, never duplicate. */
+  updates: Array<{ externalId: string; row: T }>;
+  /** Rows repeating an externalId already handled earlier in the same batch. */
+  skipped: number;
+};
+
+/**
+ * Pure idempotency planning for bulk transaction ingestion. Rows carrying an
+ * externalId (Plaid transaction_id) that already exists become updates instead of
+ * duplicates; repeats of the same externalId within one batch are skipped.
+ */
+export function planBulkTransactionWrites<T extends { externalId?: string | undefined }>(
+  rows: T[],
+  existingExternalIds: ReadonlySet<string>,
+): BulkTransactionWritePlan<T> {
+  const inserts: T[] = [];
+  const updates: Array<{ externalId: string; row: T }> = [];
+  const seenInBatch = new Set<string>();
+  let skipped = 0;
+
+  for (const row of rows) {
+    const externalId = row.externalId?.trim();
+    if (!externalId) {
+      inserts.push(row);
+      continue;
+    }
+    if (seenInBatch.has(externalId)) {
+      skipped += 1;
+      continue;
+    }
+    seenInBatch.add(externalId);
+    if (existingExternalIds.has(externalId)) {
+      updates.push({ externalId, row });
+    } else {
+      inserts.push(row);
+    }
+  }
+
+  return { inserts, updates, skipped };
+}
+
 /**
  * A focus-summary topItem candidate that a dismissed bullet may resolve to. `reason` is the
  * stored topItem reason and `entityTitle` is the referenced entity's title/name/url.

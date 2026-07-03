@@ -71,6 +71,11 @@ const operatingRulesForBrainRef = makeFunctionReference<"query">("settings:opera
 const getEffectiveRubricForBrainRef = makeFunctionReference<"query">("settings:getEffectiveRubricForBrain");
 const notificationDispatchContextForBrainRef = makeFunctionReference<"query">("settings:notificationDispatchContextForBrain");
 const recordNotificationDeliveryRef = makeFunctionReference<"mutation">("settings:recordNotificationDelivery");
+const upsertFinancialAccountForBrainRef = makeFunctionReference<"mutation">("finances:upsertFinancialAccountForBrain");
+const recordFinancialTransactionsForBrainRef = makeFunctionReference<"mutation">(
+  "finances:recordFinancialTransactionsForBrain",
+);
+const monthlyReportForBrainRef = makeFunctionReference<"query">("finances:monthlyReportForBrain");
 
 export function createConvexSkippyClient(convexUrl: string, authToken?: string): SkippyClient {
   const client = new ConvexHttpClient(convexUrl);
@@ -175,6 +180,12 @@ export function createConvexSkippyClient(convexUrl: string, authToken?: string):
       client.query(notificationDispatchContextForBrainRef, { brainInstanceId }),
     recordNotificationDelivery: (brainInstanceId, delivery) =>
       client.mutation(recordNotificationDeliveryRef, { brainInstanceId, ...delivery }),
+    upsertFinancialAccount: (brainInstanceId, input) =>
+      client.mutation(upsertFinancialAccountForBrainRef, { brainInstanceId, ...input }),
+    recordFinancialTransactions: (brainInstanceId, input) =>
+      client.mutation(recordFinancialTransactionsForBrainRef, { brainInstanceId, ...input }),
+    getFinancialReport: (brainInstanceId, input) =>
+      client.query(monthlyReportForBrainRef, { brainInstanceId, ...input }),
   };
 }
 
