@@ -136,23 +136,26 @@ type MonthlyReport = {
 /* ------------------------------------------------------------------ */
 
 const BAND_CLASS: Record<TxType, string> = {
-  Fixed: styles.bandFixed!,
-  Spending: styles.bandSpending!,
-  Food: styles.bandFood!,
+  "Fixed Costs": styles.bandFixedCosts!,
+  Investments: styles.bandInvestments!,
+  Savings: styles.bandSavings!,
+  "Guilt-Free": styles.bandGuiltFree!,
   Income: styles.bandIncome!,
   Transfer: styles.bandTransfer!,
 };
 
 const BAND_LABEL: Record<TxType, string> = {
-  Fixed: "Fixed",
-  Spending: "Spending",
-  Food: "Food",
+  "Fixed Costs": "Fixed Costs",
+  Investments: "Investments",
+  Savings: "Savings",
+  "Guilt-Free": "Guilt-Free",
   Income: "INCOME",
   Transfer: "Transfers",
 };
 
-// Band order follows TX_TYPES (shared taxonomy order): Fixed, Spending, Food,
-// Income, then Transfer LAST — the neutral band sits after the colored ones.
+// Band order follows TX_TYPES (shared CSP taxonomy order): Fixed Costs,
+// Investments, Savings, Guilt-Free, Income, then Transfer LAST — the neutral
+// band sits after the colored ones.
 const GRID_CATEGORIES: Array<{ category: TxCategory; type: TxType }> = TX_TYPES.flatMap((type) =>
   TX_TYPE_CATEGORIES[type].map((category) => ({ category: category as TxCategory, type })),
 );
@@ -226,8 +229,8 @@ function emptyDraft(monthKey: string): TxDraft {
     date: todayKey === monthKey ? epochMsToDateInput(today.getTime()) : `${monthKey}-01`,
     amount: "",
     description: "",
-    txType: "Spending",
-    category: TX_TYPE_CATEGORIES.Spending[0] as TxCategory,
+    txType: "Guilt-Free",
+    category: TX_TYPE_CATEGORIES["Guilt-Free"][0] as TxCategory,
   };
 }
 

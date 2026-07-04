@@ -130,15 +130,21 @@
 }
 
 /* Band tint variables (token-derived, theme-aware). */
-.bandFixed {
+.bandFixedCosts {
   --band: color-mix(in srgb, var(--blue) 55%, var(--red) 45%);
 }
 
-.bandSpending {
-  --band: var(--blue);
+/* Teal-ish: growth money, between green (income) and blue. */
+.bandInvestments {
+  --band: color-mix(in srgb, var(--green) 55%, var(--blue) 45%);
 }
 
-.bandFood {
+/* Cyan/steel: cooler and grayer than the Investments teal. */
+.bandSavings {
+  --band: color-mix(in srgb, var(--blue) 70%, var(--muted) 30%);
+}
+
+.bandGuiltFree {
   --band: var(--gold);
 }
 

@@ -1,10 +1,12 @@
 import { mutationGeneric, queryGeneric } from "convex/server";
 import { v } from "convex/values";
 import {
+  LEGACY_CSP_BUDGET_TYPE_MAPPING,
   TRANSFER_TX_TYPE,
   TX_CATEGORIES,
   TX_TYPES,
   TX_TYPE_CATEGORIES,
+  migrateLegacyTransaction,
   aggregateMonthTransactions,
   assertIntegerCents,
   assertValidTxTypeCategory,
@@ -25,10 +27,14 @@ import { requireOwnedBrain } from "./auth";
 
 const financialAccountTypeValidator = v.union(v.literal("Jeff Personal"), v.literal("Family Shared"));
 
+// ARG validators for NEW writes: CSP vocabulary ONLY. (The TABLE validators in
+// convex/schema.ts temporarily accept the legacy vocabulary too, until
+// migrateTaxonomyForBrain has rewritten stored rows.)
 const txTypeValidator = v.union(
-  v.literal("Fixed"),
-  v.literal("Spending"),
-  v.literal("Food"),
+  v.literal("Fixed Costs"),
+  v.literal("Investments"),
+  v.literal("Savings"),
+  v.literal("Guilt-Free"),
   v.literal("Income"),
   v.literal("Transfer"),
 );
@@ -36,11 +42,16 @@ const txTypeValidator = v.union(
 const txCategoryValidator = v.union(
   v.literal("Mortgage, HOA, Mortgage Loan"),
   v.literal("Recurring Bills"),
+  v.literal("Debt Payments"),
+  v.literal("Groceries"),
   v.literal("Subscriptions"),
+  v.literal("Retirement"),
+  v.literal("Brokerage"),
+  v.literal("Emergency Fund"),
+  v.literal("Goals"),
+  v.literal("Restaurants"),
   v.literal("Gas, Amazon, Home Depot, Etc"),
   v.literal("Misc."),
-  v.literal("Groceries"),
-  v.literal("Restaurants"),
   v.literal("Jeff"),
   v.literal("Holly"),
   v.literal("Transfers In"),
@@ -1084,5 +1095,166 @@ export const insightsForBrain = queryGeneric({
       ...(args.accountId !== undefined ? { accountId: args.accountId } : {}),
       ...(args.monthCount !== undefined ? { monthCount: args.monthCount } : {}),
     });
+  },
+});
+
+/* ------------------------------------------------------------------ */
+/* One-time data migration: legacy taxonomy -> CSP buckets             */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Rewrites a legacy budget key record ({key -> number}) through a key mapping.
+ * Keys mapped to null are dropped (recorded in droppedKeys); keys mapped to a
+ * name that is already present keep the existing (already-CSP) value so a
+ * re-run can never clobber migrated data.
+ */
+function migrateBudgetKeyRecord(
+  record: Record<string, number> | undefined,
+  mapKey: (key: string) => string | null | undefined,
+  fieldName: string,
+  droppedKeys: string[],
+): { changed: boolean; value: Record<string, number> | undefined } {
+  if (!record) return { changed: false, value: record };
+  const next: Record<string, number> = {};
+  let changed = false;
+  // Pass 1: keys that are already CSP (mapKey -> undefined) copy verbatim, so
+  // they always win over a legacy key renaming onto the same name.
+  for (const [key, value] of Object.entries(record)) {
+    if (mapKey(key) === undefined) next[key] = value;
+  }
+  // Pass 2: legacy keys are renamed or dropped.
+  for (const [key, value] of Object.entries(record)) {
+    const mapped = mapKey(key);
+    if (mapped === undefined) continue;
+    changed = true;
+    if (mapped === null) {
+      // No CSP successor (legacy 'Food': its categories split across buckets).
+      droppedKeys.push(`${fieldName}.${key}`);
+      continue;
+    }
+    if (mapped in next) continue; // an already-CSP value exists; never clobber
+    next[mapped] = value;
+  }
+  return { changed, value: next };
+}
+
+/**
+ * One-time migration of a brain's financial data from the legacy taxonomy
+ * (Fixed/Spending/Food) to the CSP buckets (Fixed Costs/Investments/Savings/
+ * Guilt-Free). Idempotent: rows and budget keys already in the CSP vocabulary
+ * are untouched, so re-running is safe.
+ *
+ * - financialTransactions: each row's (txType, category) is rewritten via the
+ *   shared migrateLegacyTransaction, including the debt-payment description
+ *   override (legacy Fixed/'Recurring Bills' rows matching the credit-card
+ *   pattern become Fixed Costs/'Debt Payments').
+ * - financialBudgets: typeTargets/typePercentTargets keys are renamed
+ *   (Fixed -> Fixed Costs, Spending -> Guilt-Free); legacy 'Food' targets are
+ *   DROPPED and reported in droppedBudgetKeys (Food split across buckets, so
+ *   there is no honest single successor). Category target keys are unchanged
+ *   (every legacy category name survives verbatim under CSP).
+ *
+ * Run AFTER deploying the dual-vocabulary schema; table validators may be
+ * tightened to CSP-only in a follow-up once this has run for every brain.
+ */
+export const migrateTaxonomyForBrain = mutationGeneric({
+  args: {
+    brainInstanceId: v.id("brainInstances"),
+    actorId: v.optional(v.string()),
+  },
+  handler: async ({ db }, args) => {
+    const now = Date.now();
+
+    // Transactions: by_brain_account_month prefix-scans the whole brain.
+    const transactions = await db
+      .query("financialTransactions")
+      .withIndex("by_brain_account_month", (q: any) => q.eq("brainInstanceId", args.brainInstanceId))
+      .collect();
+
+    let transactionsPatched = 0;
+    for (const transaction of transactions) {
+      const migrated = migrateLegacyTransaction({
+        txType: transaction.txType,
+        category: transaction.category,
+        description: transaction.description,
+      });
+      if (!migrated) continue; // already CSP
+      await db.patch(transaction._id, {
+        txType: migrated.txType,
+        category: migrated.category,
+        updatedAt: now,
+      });
+      transactionsPatched += 1;
+    }
+
+    // Budgets: rename type-level keys through the legacy->CSP type mapping.
+    const budgets = await db
+      .query("financialBudgets")
+      .withIndex("by_brain_account", (q: any) => q.eq("brainInstanceId", args.brainInstanceId))
+      .collect();
+
+    const mapTypeKey = (key: string): string | null | undefined =>
+      key in LEGACY_CSP_BUDGET_TYPE_MAPPING && !(TX_TYPES as readonly string[]).includes(key)
+        ? LEGACY_CSP_BUDGET_TYPE_MAPPING[key as keyof typeof LEGACY_CSP_BUDGET_TYPE_MAPPING]
+        : undefined; // already CSP (or unknown): leave untouched
+    // Category keys are identical across vocabularies: identity mapping.
+    const mapCategoryKey = (): undefined => undefined;
+
+    let budgetsPatched = 0;
+    const droppedBudgetKeys: string[] = [];
+    for (const budget of budgets) {
+      const typeTargets = migrateBudgetKeyRecord(
+        budget.typeTargets,
+        mapTypeKey,
+        "typeTargets",
+        droppedBudgetKeys,
+      );
+      const typePercentTargets = migrateBudgetKeyRecord(
+        budget.typePercentTargets,
+        mapTypeKey,
+        "typePercentTargets",
+        droppedBudgetKeys,
+      );
+      const categoryTargets = migrateBudgetKeyRecord(
+        budget.categoryTargets,
+        mapCategoryKey,
+        "categoryTargets",
+        droppedBudgetKeys,
+      );
+      const categoryPercentTargets = migrateBudgetKeyRecord(
+        budget.categoryPercentTargets,
+        mapCategoryKey,
+        "categoryPercentTargets",
+        droppedBudgetKeys,
+      );
+      if (
+        !typeTargets.changed &&
+        !typePercentTargets.changed &&
+        !categoryTargets.changed &&
+        !categoryPercentTargets.changed
+      ) {
+        continue;
+      }
+      await db.patch(budget._id, {
+        typeTargets: typeTargets.value,
+        typePercentTargets: typePercentTargets.value,
+        categoryTargets: categoryTargets.value,
+        categoryPercentTargets: categoryPercentTargets.value,
+        updatedAt: now,
+      });
+      budgetsPatched += 1;
+    }
+
+    await db.insert("activityEvents", {
+      brainInstanceId: args.brainInstanceId,
+      activityType: "financial_taxonomy_migrated",
+      actorType: "harness",
+      ...(args.actorId ? { actorId: args.actorId } : {}),
+      timestamp: now,
+      summary: `Migrated finances taxonomy to CSP buckets: ${transactionsPatched} transaction${transactionsPatched === 1 ? "" : "s"} and ${budgetsPatched} budget${budgetsPatched === 1 ? "" : "s"} patched${droppedBudgetKeys.length > 0 ? `, dropped budget keys: ${droppedBudgetKeys.join(", ")}` : ""}`,
+      metadata: { transactionsPatched, budgetsPatched, droppedBudgetKeys },
+    });
+
+    return { transactionsPatched, budgetsPatched, droppedBudgetKeys };
   },
 });

@@ -639,7 +639,7 @@ describe("Skippy MCP tool handlers", () => {
           date: 1780850000000,
           amountCents: 4599,
           description: "Kroger",
-          txType: "Food",
+          txType: "Fixed Costs",
           category: "Groceries",
           externalId: "plaid_tx_1",
         },
@@ -663,7 +663,7 @@ describe("Skippy MCP tool handlers", () => {
           source: "plaid",
           actorId: "skippy_mcp",
           transactions: [
-            { externalId: "plaid_tx_1", txType: "Food", category: "Groceries" },
+            { externalId: "plaid_tx_1", txType: "Fixed Costs", category: "Groceries" },
             { externalId: "plaid_tx_2", txType: "Income", category: "Jeff" },
           ],
         },
@@ -683,12 +683,12 @@ describe("Skippy MCP tool handlers", () => {
             date: 1780850000000,
             amountCents: 4599,
             description: "Kroger",
-            txType: "Fixed",
+            txType: "Guilt-Free",
             category: "Groceries",
           },
         ],
       }),
-    ).rejects.toThrow(/transactions\[0\].*invalid category "Groceries" for transaction type "Fixed"/);
+    ).rejects.toThrow(/transactions\[0\].*invalid category "Groceries" for transaction type "Guilt-Free"/);
 
     await expect(
       tools.recordFinancialTransactions({
@@ -698,7 +698,7 @@ describe("Skippy MCP tool handlers", () => {
             date: 1780850000000,
             amountCents: 45.99,
             description: "Kroger",
-            txType: "Food",
+            txType: "Fixed Costs",
             category: "Groceries",
           },
         ],
