@@ -641,3 +641,161 @@
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
+
+/* ---------------- Debts view ---------------- */
+
+.debtHeadlineGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+}
+
+.debtHeadlineValue {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.debtHeadlineSub {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.debtList {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 14px;
+}
+
+.debtCard {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+}
+
+.debtCardHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.debtName {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 760;
+}
+
+.debtLender {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.debtFacts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+}
+
+.debtFact {
+  display: grid;
+  gap: 2px;
+}
+
+.debtFactLabel {
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.debtFactValue {
+  font-size: 14px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.debtFactNote {
+  color: var(--muted);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.debtPattern {
+  padding: 1px 5px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--panel-strong);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.debtMatchLine {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.debtExtraField {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.debtExtraField input {
+  width: 110px;
+}
+
+.debtExtraLabel {
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.debtWarning {
+  color: color-mix(in srgb, var(--red) 78%, var(--muted));
+  font-weight: 600;
+}
+
+.debtProjectionList {
+  display: grid;
+  gap: 9px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.debtProjectionRow {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 13px;
+}
+
+.debtProjectionMonth {
+  min-width: 120px;
+  font-weight: 760;
+  white-space: nowrap;
+}
+
+.debtProjectionDetail {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.debtBandBadge {
+  margin-left: 8px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--green) 22%, var(--panel-strong));
+  color: light-dark(color-mix(in srgb, var(--green) 42%, var(--near-black)), var(--green));
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}

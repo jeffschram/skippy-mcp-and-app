@@ -1793,6 +1793,373 @@ export function computeFinancialInsights(
   };
 }
 
+/* ------------------------------------------------------------------ */
+/* Finances: debt payoff planning (avalanche / snowball)               */
+/* ------------------------------------------------------------------ */
+
+export const PAYOFF_STRATEGIES = ["avalanche", "snowball"] as const;
+export type PayoffStrategy = (typeof PAYOFF_STRATEGIES)[number];
+
+export function isPayoffStrategy(value: unknown): value is PayoffStrategy {
+  return isOneOf(PAYOFF_STRATEGIES, value);
+}
+
+/** Hard cap on the payoff simulation length: 600 months (50 years). */
+export const PAYOFF_MAX_MONTHS = 600;
+
+export type PayoffDebtInput = {
+  id: string;
+  name: string;
+  /** Current balance in integer cents (>= 0). */
+  balanceCents: number;
+  /** Annual percentage rate as a plain number (22.5 = 22.5%). */
+  apr: number;
+  /** Contractual minimum monthly payment in integer cents (>= 0). */
+  minPaymentCents: number;
+};
+
+export type PayoffScheduleEntry = {
+  monthKey: string;
+  startingBalanceCents: number;
+  /** Interest accrued this month: round(balance * apr / 100 / 12). */
+  interestCents: number;
+  /** Total paid against this debt this month (minimum + any extra/rollover). */
+  paymentCents: number;
+  endingBalanceCents: number;
+};
+
+export type PayoffDebtSchedule = {
+  id: string;
+  name: string;
+  /** Month-by-month rows from startMonthKey until this debt hits zero (or the cap). */
+  schedule: PayoffScheduleEntry[];
+  /** The month this debt reaches zero, or null when it never does within the cap. */
+  payoffMonthKey: string | null;
+  /**
+   * True when the debt's first-month interest meets or exceeds its minimum
+   * payment: minimums alone can never retire it. Surfaced instead of looping
+   * forever; extra payments may still pay it down when it becomes the target.
+   */
+  nonAmortizing: boolean;
+  totalInterestCents: number;
+  totalPaidCents: number;
+};
+
+export type PayoffPlan = {
+  strategy: PayoffStrategy;
+  startMonthKey: string;
+  extraMonthlyCents: number;
+  debts: PayoffDebtSchedule[];
+  /** Every simulated month key, ascending (schedule rows align to this axis). */
+  monthKeys: string[];
+  /** The month every debt reaches zero, or null when the cap was hit first. */
+  debtFreeMonthKey: string | null;
+  /** Months simulated until debt-free (or PAYOFF_MAX_MONTHS when truncated). */
+  totalMonths: number;
+  totalInterestCents: number;
+  /** Debts whose minimums cannot cover their own interest (see nonAmortizing). */
+  nonAmortizingDebtIds: string[];
+  /** True when the simulation hit PAYOFF_MAX_MONTHS with balances remaining. */
+  truncated: boolean;
+  /**
+   * Interest saved vs the SAME simulation with extraMonthlyCents = 0, or null
+   * when either simulation hit the cap (the baseline never finishes, so a
+   * finite comparison would be dishonest).
+   */
+  interestSavedVsMinimumCents: number | null;
+  /** Months saved vs the minimums-only simulation, or null when incomparable. */
+  monthsSaved: number | null;
+};
+
+/** The month key immediately after `monthKey` (e.g. '2025-12' -> '2026-01'). */
+export function nextMonthKey(monthKey: string): string {
+  if (!isValidMonthKey(monthKey)) {
+    throw new Error(`invalid monthKey "${monthKey}". Expected 'YYYY-MM'.`);
+  }
+  const year = Number(monthKey.slice(0, 4));
+  const month = Number(monthKey.slice(5, 7));
+  return month === 12 ? `${year + 1}-01` : `${year}-${String(month + 1).padStart(2, "0")}`;
+}
+
+/** One month of interest at an annual rate: round(balance * apr / 100 / 12). */
+export function monthlyInterestCents(balanceCents: number, apr: number): number {
+  return Math.round((balanceCents * apr) / 100 / 12);
+}
+
+function assertPayoffInputs(debts: readonly PayoffDebtInput[], extraMonthlyCents: number): void {
+  assertIntegerCents(extraMonthlyCents, "extraMonthlyCents");
+  if (extraMonthlyCents < 0) {
+    throw new Error("extraMonthlyCents must be >= 0");
+  }
+  const seenIds = new Set<string>();
+  debts.forEach((debt, index) => {
+    const field = `debts[${index}]`;
+    if (!debt.id) throw new Error(`${field}.id is required`);
+    if (seenIds.has(debt.id)) throw new Error(`${field}.id "${debt.id}" is duplicated`);
+    seenIds.add(debt.id);
+    assertIntegerCents(debt.balanceCents, `${field}.balanceCents`);
+    if (debt.balanceCents < 0) throw new Error(`${field}.balanceCents must be >= 0`);
+    assertIntegerCents(debt.minPaymentCents, `${field}.minPaymentCents`);
+    if (debt.minPaymentCents < 0) throw new Error(`${field}.minPaymentCents must be >= 0`);
+    if (!Number.isFinite(debt.apr) || debt.apr < 0 || debt.apr > 100) {
+      throw new Error(`${field}.apr must be a number between 0 and 100 (annual percent)`);
+    }
+  });
+}
+
+/**
+ * Debts in target order for a strategy: avalanche pays the highest APR first,
+ * snowball the smallest balance first (ties broken by the other dimension,
+ * then by name for determinism).
+ */
+export function orderDebtsForStrategy<T extends PayoffDebtInput>(
+  debts: readonly T[],
+  strategy: PayoffStrategy,
+): T[] {
+  const sorted = [...debts];
+  if (strategy === "avalanche") {
+    sorted.sort((a, b) => b.apr - a.apr || a.balanceCents - b.balanceCents || a.name.localeCompare(b.name));
+  } else {
+    sorted.sort((a, b) => a.balanceCents - b.balanceCents || b.apr - a.apr || a.name.localeCompare(b.name));
+  }
+  return sorted;
+}
+
+type SimulatedDebt = {
+  input: PayoffDebtInput;
+  balanceCents: number;
+  schedule: PayoffScheduleEntry[];
+  payoffMonthKey: string | null;
+  totalInterestCents: number;
+  totalPaidCents: number;
+};
+
+/**
+ * Core month-by-month payoff simulation.
+ *
+ * Each month, per open debt: interest = round(balance * apr/100/12) accrues,
+ * then the minimum payment is applied (capped at the accrued balance). The
+ * extra budget — extraMonthlyCents plus every ALREADY-RETIRED debt's freed-up
+ * minimum — goes to the strategy's target debt (highest APR for avalanche,
+ * smallest CURRENT balance for snowball); when the target retires mid-month,
+ * the remainder cascades to the next target the same month. Capped at
+ * PAYOFF_MAX_MONTHS so non-amortizing debts can never loop forever.
+ */
+function simulatePayoff(
+  debts: readonly PayoffDebtInput[],
+  extraMonthlyCents: number,
+  strategy: PayoffStrategy,
+  startMonthKey: string,
+): { debts: SimulatedDebt[]; monthKeys: string[]; debtFreeMonthKey: string | null; truncated: boolean } {
+  const simulated: SimulatedDebt[] = debts.map((input) => ({
+    input,
+    balanceCents: input.balanceCents,
+    schedule: [],
+    payoffMonthKey: null,
+    totalInterestCents: 0,
+    totalPaidCents: 0,
+  }));
+
+  const monthKeys: string[] = [];
+  let monthKey = startMonthKey;
+  let debtFreeMonthKey: string | null = null;
+  let truncated = false;
+
+  const open = () => simulated.filter((debt) => debt.balanceCents > 0);
+
+  if (open().length === 0) {
+    return { debts: simulated, monthKeys, debtFreeMonthKey: null, truncated: false };
+  }
+
+  for (let month = 0; month < PAYOFF_MAX_MONTHS; month += 1) {
+    const openDebts = open();
+    if (openDebts.length === 0) break;
+    monthKeys.push(monthKey);
+
+    // Freed-up minimums: every debt retired in a PREVIOUS month rolls its
+    // minimum into this month's extra budget.
+    const freedMinimumsCents = simulated
+      .filter((debt) => debt.input.balanceCents > 0 && debt.balanceCents === 0)
+      .reduce((sum, debt) => sum + debt.input.minPaymentCents, 0);
+    let extraBudgetCents = extraMonthlyCents + freedMinimumsCents;
+
+    // 1) Interest accrues and minimums are paid on every open debt.
+    const rows = new Map<SimulatedDebt, PayoffScheduleEntry>();
+    for (const debt of openDebts) {
+      const startingBalanceCents = debt.balanceCents;
+      const interestCents = monthlyInterestCents(startingBalanceCents, debt.input.apr);
+      const accrued = startingBalanceCents + interestCents;
+      const paymentCents = Math.min(debt.input.minPaymentCents, accrued);
+      debt.balanceCents = accrued - paymentCents;
+      debt.totalInterestCents += interestCents;
+      debt.totalPaidCents += paymentCents;
+      rows.set(debt, {
+        monthKey,
+        startingBalanceCents,
+        interestCents,
+        paymentCents,
+        endingBalanceCents: debt.balanceCents,
+      });
+    }
+
+    // 2) The extra budget hits the target debt; leftover cascades on retire.
+    while (extraBudgetCents > 0) {
+      const targets = orderDebtsForStrategy(
+        open().map((debt) => ({ ...debt.input, balanceCents: debt.balanceCents, sim: debt })),
+        strategy,
+      );
+      const target = targets[0]?.sim;
+      if (!target) break;
+      const extraPaymentCents = Math.min(extraBudgetCents, target.balanceCents);
+      target.balanceCents -= extraPaymentCents;
+      target.totalPaidCents += extraPaymentCents;
+      extraBudgetCents -= extraPaymentCents;
+      const row = rows.get(target)!;
+      row.paymentCents += extraPaymentCents;
+      row.endingBalanceCents = target.balanceCents;
+    }
+
+    // 3) Record rows and payoff months.
+    for (const [debt, row] of rows) {
+      debt.schedule.push(row);
+      if (row.endingBalanceCents === 0 && debt.payoffMonthKey === null) {
+        debt.payoffMonthKey = monthKey;
+      }
+    }
+
+    if (open().length === 0) {
+      debtFreeMonthKey = monthKey;
+      break;
+    }
+    monthKey = nextMonthKey(monthKey);
+  }
+
+  if (debtFreeMonthKey === null && open().length > 0) {
+    truncated = true;
+  }
+  return { debts: simulated, monthKeys, debtFreeMonthKey, truncated };
+}
+
+/**
+ * Debt payoff plan: monthly simulation under a strategy plus totals, including
+ * the savings vs a minimums-only baseline (the same simulation with extra = 0).
+ *
+ * - avalanche: extra money targets the highest-APR debt (mathematically optimal).
+ * - snowball: extra money targets the smallest-balance debt (fastest wins).
+ * - Retired debts' minimums roll into the extra budget for later months, and
+ *   leftover extra cascades to the next target within the same month.
+ * - A debt whose monthly interest >= its minimum payment is flagged
+ *   nonAmortizing (minimums alone can never retire it); the simulation still
+ *   runs but is hard-capped at PAYOFF_MAX_MONTHS and reports truncated.
+ */
+export function computePayoffPlan(
+  debts: readonly PayoffDebtInput[],
+  extraMonthlyCents: number,
+  strategy: PayoffStrategy,
+  startMonthKey: string,
+): PayoffPlan {
+  if (!isPayoffStrategy(strategy)) {
+    throw new Error(`invalid strategy "${strategy}". Valid strategies: ${PAYOFF_STRATEGIES.join(" | ")}`);
+  }
+  if (!isValidMonthKey(startMonthKey)) {
+    throw new Error(`invalid startMonthKey "${startMonthKey}". Expected 'YYYY-MM'.`);
+  }
+  assertPayoffInputs(debts, extraMonthlyCents);
+
+  // Flagged from the ENTERED balance: at that balance, minimums never amortize.
+  const nonAmortizingDebtIds = debts
+    .filter(
+      (debt) =>
+        debt.balanceCents > 0 && monthlyInterestCents(debt.balanceCents, debt.apr) >= debt.minPaymentCents,
+    )
+    .map((debt) => debt.id);
+
+  const run = simulatePayoff(debts, extraMonthlyCents, strategy, startMonthKey);
+  const totalInterestCents = run.debts.reduce((sum, debt) => sum + debt.totalInterestCents, 0);
+
+  // Baseline: the identical simulation with no extra payment. Comparisons are
+  // only honest when BOTH simulations finish within the cap.
+  let interestSavedVsMinimumCents: number | null = null;
+  let monthsSaved: number | null = null;
+  if (!run.truncated) {
+    const baseline = simulatePayoff(debts, 0, strategy, startMonthKey);
+    if (!baseline.truncated) {
+      const baselineInterestCents = baseline.debts.reduce((sum, debt) => sum + debt.totalInterestCents, 0);
+      interestSavedVsMinimumCents = baselineInterestCents - totalInterestCents;
+      monthsSaved = baseline.monthKeys.length - run.monthKeys.length;
+    }
+  }
+
+  return {
+    strategy,
+    startMonthKey,
+    extraMonthlyCents,
+    debts: run.debts.map((debt) => ({
+      id: debt.input.id,
+      name: debt.input.name,
+      schedule: debt.schedule,
+      payoffMonthKey: debt.payoffMonthKey,
+      nonAmortizing: nonAmortizingDebtIds.includes(debt.input.id),
+      totalInterestCents: debt.totalInterestCents,
+      totalPaidCents: debt.totalPaidCents,
+    })),
+    monthKeys: run.monthKeys,
+    debtFreeMonthKey: run.debtFreeMonthKey,
+    totalMonths: run.monthKeys.length,
+    totalInterestCents,
+    nonAmortizingDebtIds,
+    truncated: run.truncated,
+    interestSavedVsMinimumCents,
+    monthsSaved,
+  };
+}
+
+export type DebtPaymentMatchTransaction = {
+  description: string;
+  txType: string;
+  category: string;
+  date: number;
+  amountCents: number;
+};
+
+/**
+ * Transactions that look like payments toward a debt: the debt's matchPattern
+ * (case-insensitive regex when valid, else a plain case-insensitive substring)
+ * is matched against transaction descriptions. Only Fixed Costs /
+ * 'Debt Payments' rows are considered first; when NONE match there, the
+ * pattern falls back to rows of any type/category (payments are sometimes
+ * miscategorized). Returns matches sorted by date descending. A debt without
+ * a matchPattern matches nothing.
+ */
+export function matchDebtPayments<T extends DebtPaymentMatchTransaction>(
+  debt: { matchPattern?: string | null | undefined },
+  transactions: readonly T[],
+): T[] {
+  const pattern = debt.matchPattern?.trim();
+  if (!pattern) return [];
+
+  let matches: (description: string) => boolean;
+  try {
+    const regex = new RegExp(pattern, "i");
+    matches = (description) => regex.test(description);
+  } catch {
+    const lowered = pattern.toLowerCase();
+    matches = (description) => description.toLowerCase().includes(lowered);
+  }
+
+  const debtPaymentRows = transactions.filter(
+    (transaction) =>
+      transaction.txType === "Fixed Costs" &&
+      transaction.category === "Debt Payments" &&
+      matches(transaction.description),
+  );
+  const matched =
+    debtPaymentRows.length > 0
+      ? debtPaymentRows
+      : transactions.filter((transaction) => matches(transaction.description));
+  return [...matched].sort((a, b) => b.date - a.date);
+}
+
 /**
  * A focus-summary topItem candidate that a dismissed bullet may resolve to. `reason` is the
  * stored topItem reason and `entityTitle` is the referenced entity's title/name/url.

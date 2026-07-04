@@ -9,6 +9,8 @@ import {
   migrateLegacyTransaction,
   aggregateMonthTransactions,
   assertIntegerCents,
+  computePayoffPlan,
+  matchDebtPayments,
   assertValidOffLedgerFields,
   assertValidRecurringContributions,
   assertValidTxTypeCategory,
@@ -825,6 +827,234 @@ async function setBudget(
 }
 
 /* ------------------------------------------------------------------ */
+/* Debt payoff planner                                                 */
+/* ------------------------------------------------------------------ */
+
+const payoffStrategyValidator = v.union(v.literal("avalanche"), v.literal("snowball"));
+
+/**
+ * Validates the owner-entered debt fields shared by every debt write path:
+ * integer-cents balance/minimum, APR 0-100, and a finite balanceAsOf.
+ */
+function normalizeDebtFields(input: {
+  name: string;
+  lender?: string;
+  balanceCents: number;
+  balanceAsOf: number;
+  apr: number;
+  minPaymentCents: number;
+  matchPattern?: string;
+}) {
+  const name = normalizeRequired(input.name, "name");
+  assertIntegerCents(input.balanceCents, "balanceCents");
+  if (input.balanceCents < 0) throw new Error("balanceCents must be >= 0");
+  assertIntegerCents(input.minPaymentCents, "minPaymentCents");
+  if (input.minPaymentCents < 0) throw new Error("minPaymentCents must be >= 0");
+  if (!Number.isFinite(input.apr) || input.apr < 0 || input.apr > 100) {
+    throw new Error("apr must be a number between 0 and 100 (annual percent, 22.5 = 22.5%)");
+  }
+  if (!Number.isFinite(input.balanceAsOf)) {
+    throw new Error("balanceAsOf must be epoch milliseconds (when the balance was entered)");
+  }
+  return {
+    name,
+    lender: input.lender?.trim() || undefined,
+    balanceCents: input.balanceCents,
+    balanceAsOf: input.balanceAsOf,
+    apr: input.apr,
+    minPaymentCents: input.minPaymentCents,
+    matchPattern: input.matchPattern?.trim() || undefined,
+  };
+}
+
+/**
+ * Create or update a debt. Idempotent: matches an existing debt by explicit
+ * debtId, then by case-insensitive name, so re-entering a balance updates the
+ * debt instead of duplicating it.
+ */
+async function upsertDebt(
+  db: any,
+  brainInstanceId: any,
+  input: {
+    debtId?: string;
+    name: string;
+    lender?: string;
+    balanceCents: number;
+    balanceAsOf: number;
+    apr: number;
+    minPaymentCents: number;
+    matchPattern?: string;
+  },
+  actor: Actor,
+) {
+  const fields = normalizeDebtFields(input);
+  const now = Date.now();
+
+  let existing: any = null;
+  if (input.debtId) {
+    existing = await db.get(input.debtId);
+    if (!existing || existing.brainInstanceId !== brainInstanceId) {
+      throw new Error("debt not found for brain instance");
+    }
+  }
+  if (!existing) {
+    const debts = await db
+      .query("financialDebts")
+      .withIndex("by_brain", (q: any) => q.eq("brainInstanceId", brainInstanceId))
+      .collect();
+    existing = debts.find((debt: any) => debt.name.toLowerCase() === fields.name.toLowerCase()) ?? null;
+  }
+
+  let debtId: string;
+  let status: "created" | "updated";
+  if (existing) {
+    await db.patch(existing._id, { ...fields, updatedAt: now });
+    debtId = existing._id;
+    status = "updated";
+  } else {
+    debtId = await db.insert("financialDebts", {
+      brainInstanceId,
+      ...fields,
+      createdAt: now,
+      updatedAt: now,
+    });
+    status = "created";
+  }
+
+  await db.insert("activityEvents", {
+    brainInstanceId,
+    activityType: status === "created" ? "financial_debt_created" : "financial_debt_updated",
+    actorType: actor.actorType,
+    actorId: actor.actorId,
+    timestamp: now,
+    summary: `Debt ${status}: ${fields.name} (${fields.apr}% APR)`,
+    metadata: { debtId, balanceCents: fields.balanceCents, minPaymentCents: fields.minPaymentCents },
+  });
+
+  return { debtId, status, name: fields.name };
+}
+
+function debtRow(debt: any) {
+  return {
+    _id: debt._id,
+    name: debt.name,
+    lender: debt.lender,
+    balanceCents: debt.balanceCents,
+    balanceAsOf: debt.balanceAsOf,
+    apr: debt.apr,
+    minPaymentCents: debt.minPaymentCents,
+    matchPattern: debt.matchPattern,
+    updatedAt: debt.updatedAt,
+  };
+}
+
+async function listDebts(db: any, brainInstanceId: any) {
+  const debts = await db
+    .query("financialDebts")
+    .withIndex("by_brain", (q: any) => q.eq("brainInstanceId", brainInstanceId))
+    .collect();
+  return debts.sort((a: any, b: any) => a.name.localeCompare(b.name));
+}
+
+/** Bound on how far back payment matching scans transactions (months). */
+const DEBT_MATCH_LOOKBACK_MONTHS = 24;
+
+/**
+ * Payoff plan, COMPUTED AT READ TIME. Loads the brain's debts, matches each
+ * debt's payments recorded in financialTransactions (across ALL accounts)
+ * since its balanceAsOf via the shared matchDebtPayments, projects the current
+ * balance, and runs the shared computePayoffPlan from the current month.
+ *
+ * BALANCE PROJECTION IS AN APPROXIMATION: the full matched payment amounts are
+ * subtracted from the entered balance WITHOUT re-adding interest accrued since
+ * balanceAsOf, so the projection slightly flatters the balance between owner
+ * re-entries. Deliberate: honest to the cent would require daily accrual math
+ * against unknown statement cycles; the owner re-enters real balances
+ * periodically, which resets any drift.
+ */
+async function buildPayoffPlan(
+  db: any,
+  brainInstanceId: any,
+  args: { strategy: "avalanche" | "snowball"; extraMonthlyCents?: number },
+) {
+  const extraMonthlyCents = args.extraMonthlyCents ?? 0;
+  const currentKey = monthKeyFromDate(Date.now());
+  const debts = await listDebts(db, brainInstanceId);
+
+  if (debts.length === 0) {
+    return {
+      strategy: args.strategy,
+      extraMonthlyCents,
+      startMonthKey: currentKey,
+      debts: [],
+      plan: null,
+    };
+  }
+
+  // One transaction sweep covering every debt's matching window (bounded).
+  const earliestAsOf = Math.min(...debts.map((debt: any) => debt.balanceAsOf));
+  const monthKeys: string[] = [currentKey];
+  while (
+    monthKeys.length < DEBT_MATCH_LOOKBACK_MONTHS + 1 &&
+    monthKeys[0]! > monthKeyFromDate(earliestAsOf)
+  ) {
+    monthKeys.unshift(previousMonthKey(monthKeys[0]!));
+  }
+  const accounts = await db
+    .query("financialAccounts")
+    .withIndex("by_brain", (q: any) => q.eq("brainInstanceId", brainInstanceId))
+    .collect();
+  const transactions: any[] = [];
+  for (const account of accounts) {
+    for (const monthKey of monthKeys) {
+      transactions.push(...(await monthTransactions(db, brainInstanceId, account._id, monthKey)));
+    }
+  }
+  // Off-ledger rows never left an account, so they can never be debt payments.
+  const onLedger = transactions.filter((transaction: any) => !transaction.offLedger);
+
+  const debtRows = debts.map((debt: any) => {
+    const matched = matchDebtPayments(
+      debt,
+      onLedger.filter((transaction: any) => transaction.date >= debt.balanceAsOf),
+    );
+    const paidCents = matched.reduce((sum: number, row: any) => sum + row.amountCents, 0);
+    // See the function comment: full payments subtracted, accrued interest not re-added.
+    const projectedBalanceCents = Math.max(0, debt.balanceCents - paidCents);
+    return {
+      ...debtRow(debt),
+      matchedPayments: {
+        count: matched.length,
+        totalCents: paidCents,
+        lastDate: matched.length > 0 ? matched[0].date : null,
+      },
+      projectedBalanceCents,
+    };
+  });
+
+  const plan = computePayoffPlan(
+    debtRows.map((debt: any) => ({
+      id: debt._id,
+      name: debt.name,
+      balanceCents: debt.projectedBalanceCents,
+      apr: debt.apr,
+      minPaymentCents: debt.minPaymentCents,
+    })),
+    extraMonthlyCents,
+    args.strategy,
+    currentKey,
+  );
+
+  return {
+    strategy: args.strategy,
+    extraMonthlyCents,
+    startMonthKey: currentKey,
+    debts: debtRows,
+    plan,
+  };
+}
+
+/* ------------------------------------------------------------------ */
 /* Viewer-facing (Clerk auth)                                         */
 /* ------------------------------------------------------------------ */
 
@@ -1043,6 +1273,71 @@ export const insightsForViewer = queryGeneric({
   },
 });
 
+export const upsertDebtForViewer = mutationGeneric({
+  args: {
+    debtId: v.optional(v.id("financialDebts")),
+    name: v.string(),
+    lender: v.optional(v.string()),
+    balanceCents: v.number(),
+    // Epoch ms the balance was entered; payment matching starts here.
+    balanceAsOf: v.number(),
+    apr: v.number(),
+    minPaymentCents: v.number(),
+    matchPattern: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const { user, brain } = await requireOwnedBrain(ctx);
+    return upsertDebt(ctx.db, brain._id, args, { actorType: "user", actorId: user._id });
+  },
+});
+
+export const deleteDebtForViewer = mutationGeneric({
+  args: { debtId: v.id("financialDebts") },
+  handler: async (ctx, args) => {
+    const { user, brain } = await requireOwnedBrain(ctx);
+    const debt = await ctx.db.get(args.debtId);
+    if (!debt || debt.brainInstanceId !== brain._id) {
+      throw new Error("debt not found for brain instance");
+    }
+    await ctx.db.delete(args.debtId);
+
+    await ctx.db.insert("activityEvents", {
+      brainInstanceId: brain._id,
+      activityType: "financial_debt_deleted",
+      actorType: "user",
+      actorId: user._id,
+      timestamp: Date.now(),
+      summary: `Debt deleted: ${debt.name}`,
+      metadata: { debtId: args.debtId },
+    });
+
+    return { debtId: args.debtId, status: "deleted" };
+  },
+});
+
+export const listDebtsForViewer = queryGeneric({
+  args: {},
+  handler: async (ctx) => {
+    const { brain } = await requireOwnedBrain(ctx);
+    const debts = await listDebts(ctx.db, brain._id);
+    return debts.map(debtRow);
+  },
+});
+
+export const payoffPlanForViewer = queryGeneric({
+  args: {
+    strategy: payoffStrategyValidator,
+    extraMonthlyCents: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const { brain } = await requireOwnedBrain(ctx);
+    return buildPayoffPlan(ctx.db, brain._id, {
+      strategy: args.strategy,
+      ...(args.extraMonthlyCents !== undefined ? { extraMonthlyCents: args.extraMonthlyCents } : {}),
+    });
+  },
+});
+
 /* ------------------------------------------------------------------ */
 /* Brain-facing (MCP token routing)                                   */
 /* ------------------------------------------------------------------ */
@@ -1075,6 +1370,29 @@ export const upsertFinancialAccountForBrain = mutationGeneric({
       },
       { actorType: "harness", ...(args.actorId ? { actorId: args.actorId } : {}) },
     );
+  },
+});
+
+export const upsertDebtForBrain = mutationGeneric({
+  args: {
+    brainInstanceId: v.id("brainInstances"),
+    debtId: v.optional(v.id("financialDebts")),
+    name: v.string(),
+    lender: v.optional(v.string()),
+    balanceCents: v.number(),
+    // Epoch ms the balance was entered; payment matching starts here.
+    balanceAsOf: v.number(),
+    apr: v.number(),
+    minPaymentCents: v.number(),
+    matchPattern: v.optional(v.string()),
+    actorId: v.optional(v.string()),
+  },
+  handler: async ({ db }, args) => {
+    const { brainInstanceId, actorId, ...debtArgs } = args;
+    return upsertDebt(db, brainInstanceId, debtArgs, {
+      actorType: "harness",
+      ...(actorId ? { actorId } : {}),
+    });
   },
 });
 
