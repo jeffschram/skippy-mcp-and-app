@@ -1,9 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
+  DEBT_PAYMENT_DESCRIPTION_PATTERN,
+  INCOMING_TX_TYPES,
+  LEGACY_CSP_BUDGET_TYPE_MAPPING,
+  LEGACY_CSP_MAPPING,
+  LEGACY_TX_TYPES,
+  LEGACY_TX_TYPE_CATEGORIES,
+  OUTGOING_TX_TYPES,
   TX_CATEGORIES,
   TX_TYPES,
   TX_TYPE_CATEGORIES,
   aggregateMonthTransactions,
+  migrateLegacyTransaction,
   assertValidTxTypeCategory,
   compareBudgetToAggregates,
   computeMonthlyFinancialReport,
@@ -19,7 +27,11 @@ import {
   summarizeMonthBalances,
 } from "./index";
 
-describe("fixed transaction taxonomy", () => {
+describe("fixed transaction taxonomy (CSP buckets)", () => {
+  it("uses the CSP bucket order with Income and Transfer last", () => {
+    expect([...TX_TYPES]).toEqual(["Fixed Costs", "Investments", "Savings", "Guilt-Free", "Income", "Transfer"]);
+  });
+
   it("accepts every type paired with each of its own categories", () => {
     for (const type of TX_TYPES) {
       for (const category of TX_TYPE_CATEGORIES[type]) {
@@ -29,9 +41,11 @@ describe("fixed transaction taxonomy", () => {
   });
 
   it("rejects categories paired with the wrong type", () => {
-    expect(isValidTxTypeCategory("Fixed", "Groceries")).toBe(false);
-    expect(isValidTxTypeCategory("Spending", "Recurring Bills")).toBe(false);
-    expect(isValidTxTypeCategory("Food", "Misc.")).toBe(false);
+    expect(isValidTxTypeCategory("Fixed Costs", "Restaurants")).toBe(false);
+    expect(isValidTxTypeCategory("Guilt-Free", "Groceries")).toBe(false);
+    expect(isValidTxTypeCategory("Guilt-Free", "Recurring Bills")).toBe(false);
+    expect(isValidTxTypeCategory("Investments", "Emergency Fund")).toBe(false);
+    expect(isValidTxTypeCategory("Savings", "Retirement")).toBe(false);
     expect(isValidTxTypeCategory("Income", "Subscriptions")).toBe(false);
     expect(isValidTxTypeCategory("Income", "Restaurants")).toBe(false);
   });
@@ -50,23 +64,34 @@ describe("fixed transaction taxonomy", () => {
     expect(() => assertValidTxTypeCategory("Transfer", "Transfers Out")).not.toThrow();
   });
 
-  it("rejects unknown types and categories", () => {
-    expect(isValidTxTypeCategory("Savings", "Groceries")).toBe(false);
-    expect(isValidTxTypeCategory("Food", "Takeout")).toBe(false);
+  it("rejects unknown and legacy types and categories", () => {
+    expect(isValidTxTypeCategory("Fixed", "Groceries")).toBe(false);
+    expect(isValidTxTypeCategory("Spending", "Misc.")).toBe(false);
+    expect(isValidTxTypeCategory("Food", "Groceries")).toBe(false);
+    expect(isValidTxTypeCategory("Fixed Costs", "Takeout")).toBe(false);
     expect(isValidTxTypeCategory("", "")).toBe(false);
   });
 
   it("throws clear errors from assertValidTxTypeCategory", () => {
-    expect(() => assertValidTxTypeCategory("Savings", "Groceries")).toThrow(/invalid transaction type "Savings"/);
-    expect(() => assertValidTxTypeCategory("Fixed", "Groceries")).toThrow(
-      /invalid category "Groceries" for transaction type "Fixed"/,
+    expect(() => assertValidTxTypeCategory("Spending", "Misc.")).toThrow(/invalid transaction type "Spending"/);
+    expect(() => assertValidTxTypeCategory("Fixed Costs", "Restaurants")).toThrow(
+      /invalid category "Restaurants" for transaction type "Fixed Costs"/,
     );
-    expect(() => assertValidTxTypeCategory("Food", "Groceries")).not.toThrow();
+    expect(() => assertValidTxTypeCategory("Fixed Costs", "Groceries")).not.toThrow();
+    expect(() => assertValidTxTypeCategory("Investments", "Retirement")).not.toThrow();
+    expect(() => assertValidTxTypeCategory("Savings", "Emergency Fund")).not.toThrow();
   });
 
   it("keeps the flat category list in sync with the type map", () => {
     const flattened = TX_TYPES.flatMap((type) => [...TX_TYPE_CATEGORIES[type]]);
     expect([...TX_CATEGORIES]).toEqual(flattened);
+  });
+
+  it("counts Fixed Costs, Investments, Savings, and Guilt-Free as outgoing; Income as incoming; Transfer as neither", () => {
+    expect([...OUTGOING_TX_TYPES]).toEqual(["Fixed Costs", "Investments", "Savings", "Guilt-Free"]);
+    expect([...INCOMING_TX_TYPES]).toEqual(["Income"]);
+    expect(OUTGOING_TX_TYPES).not.toContain("Transfer");
+    expect(OUTGOING_TX_TYPES).not.toContain("Income");
   });
 
   it("validates account types", () => {
@@ -97,20 +122,24 @@ describe("month keys", () => {
 });
 
 const juneTransactions = [
-  { txType: "Fixed", category: "Mortgage, HOA, Mortgage Loan", amountCents: 250_000 },
-  { txType: "Fixed", category: "Recurring Bills", amountCents: 40_000 },
-  { txType: "Spending", category: "Subscriptions", amountCents: 5_000 },
-  { txType: "Spending", category: "Gas, Amazon, Home Depot, Etc", amountCents: 60_000 },
-  { txType: "Spending", category: "Misc.", amountCents: 15_000 },
-  { txType: "Food", category: "Groceries", amountCents: 90_000 },
-  { txType: "Food", category: "Restaurants", amountCents: 40_000 },
+  { txType: "Fixed Costs", category: "Mortgage, HOA, Mortgage Loan", amountCents: 250_000 },
+  { txType: "Fixed Costs", category: "Recurring Bills", amountCents: 40_000 },
+  { txType: "Fixed Costs", category: "Groceries", amountCents: 90_000 },
+  { txType: "Fixed Costs", category: "Subscriptions", amountCents: 5_000 },
+  { txType: "Investments", category: "Retirement", amountCents: 30_000 },
+  { txType: "Investments", category: "Brokerage", amountCents: 20_000 },
+  { txType: "Savings", category: "Emergency Fund", amountCents: 10_000 },
+  { txType: "Savings", category: "Goals", amountCents: 15_000 },
+  { txType: "Guilt-Free", category: "Restaurants", amountCents: 40_000 },
+  { txType: "Guilt-Free", category: "Gas, Amazon, Home Depot, Etc", amountCents: 60_000 },
+  { txType: "Guilt-Free", category: "Misc.", amountCents: 15_000 },
   { txType: "Income", category: "Jeff", amountCents: 500_000 },
   { txType: "Income", category: "Holly", amountCents: 300_000 },
 ];
 
 const mayTransactions = [
-  { txType: "Fixed", category: "Mortgage, HOA, Mortgage Loan", amountCents: 250_000 },
-  { txType: "Food", category: "Groceries", amountCents: 100_000 },
+  { txType: "Fixed Costs", category: "Mortgage, HOA, Mortgage Loan", amountCents: 250_000 },
+  { txType: "Fixed Costs", category: "Groceries", amountCents: 100_000 },
   { txType: "Income", category: "Jeff", amountCents: 500_000 },
 ];
 
@@ -126,32 +155,36 @@ const mayTransfers = [{ txType: "Transfer", category: "Transfers Out", amountCen
 describe("aggregateMonthTransactions", () => {
   it("totals per category and per type", () => {
     const aggregates = aggregateMonthTransactions(juneTransactions);
-    expect(aggregates.transactionCount).toBe(9);
+    expect(aggregates.transactionCount).toBe(13);
     expect(aggregates.categoryTotalsCents["Mortgage, HOA, Mortgage Loan"]).toBe(250_000);
     expect(aggregates.categoryTotalsCents["Groceries"]).toBe(90_000);
+    expect(aggregates.categoryTotalsCents["Retirement"]).toBe(30_000);
+    expect(aggregates.categoryTotalsCents["Emergency Fund"]).toBe(10_000);
     expect(aggregates.categoryTotalsCents["Holly"]).toBe(300_000);
-    expect(aggregates.typeTotalsCents.Fixed).toBe(290_000);
-    expect(aggregates.typeTotalsCents.Spending).toBe(80_000);
-    expect(aggregates.typeTotalsCents.Food).toBe(130_000);
+    expect(aggregates.typeTotalsCents["Fixed Costs"]).toBe(385_000);
+    expect(aggregates.typeTotalsCents.Investments).toBe(50_000);
+    expect(aggregates.typeTotalsCents.Savings).toBe(25_000);
+    expect(aggregates.typeTotalsCents["Guilt-Free"]).toBe(115_000);
     expect(aggregates.typeTotalsCents.Income).toBe(800_000);
   });
 
   it("computes outgoing, incoming, and net in integer cents", () => {
     const aggregates = aggregateMonthTransactions(juneTransactions);
-    expect(aggregates.totalOutgoingCents).toBe(500_000); // 290k + 80k + 130k
+    expect(aggregates.totalOutgoingCents).toBe(575_000); // 385k + 50k + 25k + 115k
     expect(aggregates.totalIncomingCents).toBe(800_000);
-    expect(aggregates.netCents).toBe(300_000);
+    expect(aggregates.netCents).toBe(225_000);
   });
 
   it("computes percentages of outgoing per category and type", () => {
     const aggregates = aggregateMonthTransactions(juneTransactions);
-    expect(aggregates.typePercentOfOutgoing.Fixed).toBe(58);
-    expect(aggregates.typePercentOfOutgoing.Spending).toBe(16);
-    expect(aggregates.typePercentOfOutgoing.Food).toBe(26);
+    expect(aggregates.typePercentOfOutgoing["Fixed Costs"]).toBe(67);
+    expect(aggregates.typePercentOfOutgoing.Investments).toBe(8.7);
+    expect(aggregates.typePercentOfOutgoing.Savings).toBe(4.3);
+    expect(aggregates.typePercentOfOutgoing["Guilt-Free"]).toBe(20);
     expect(aggregates.typePercentOfOutgoing.Income).toBe(0);
-    expect(aggregates.categoryPercentOfOutgoing["Mortgage, HOA, Mortgage Loan"]).toBe(50);
-    expect(aggregates.categoryPercentOfOutgoing["Groceries"]).toBe(18);
-    expect(aggregates.categoryPercentOfOutgoing["Subscriptions"]).toBe(1);
+    expect(aggregates.categoryPercentOfOutgoing["Mortgage, HOA, Mortgage Loan"]).toBe(43.5);
+    expect(aggregates.categoryPercentOfOutgoing["Groceries"]).toBe(15.7);
+    expect(aggregates.categoryPercentOfOutgoing["Subscriptions"]).toBe(0.9);
     expect(aggregates.categoryPercentOfOutgoing["Jeff"]).toBe(0);
   });
 
@@ -161,8 +194,9 @@ describe("aggregateMonthTransactions", () => {
     expect(aggregates.totalIncomingCents).toBe(0);
     expect(aggregates.netCents).toBe(0);
     expect(aggregates.transferNetCents).toBe(0);
-    expect(aggregates.typePercentOfOutgoing.Fixed).toBe(0);
+    expect(aggregates.typePercentOfOutgoing["Fixed Costs"]).toBe(0);
     expect(aggregates.categoryTotalsCents["Misc."]).toBe(0);
+    expect(aggregates.categoryTotalsCents["Brokerage"]).toBe(0);
     expect(aggregates.categoryTotalsCents["Transfers In"]).toBe(0);
   });
 
@@ -174,7 +208,7 @@ describe("aggregateMonthTransactions", () => {
     expect(withTransfers.categoryTotalsCents["Transfers In"]).toBe(200_000);
     expect(withTransfers.categoryTotalsCents["Transfers Out"]).toBe(100_000);
     expect(withTransfers.typeTotalsCents.Transfer).toBe(300_000);
-    expect(withTransfers.transactionCount).toBe(12);
+    expect(withTransfers.transactionCount).toBe(16);
 
     // Budget totals are untouched by transfer rows.
     expect(withTransfers.totalOutgoingCents).toBe(withoutTransfers.totalOutgoingCents);
@@ -212,16 +246,19 @@ describe("aggregateMonthTransactions", () => {
       aggregateMonthTransactions([{ txType: "Income", category: "Transfers In", amountCents: 100 }]),
     ).toThrow(/invalid category/);
     expect(() =>
-      aggregateMonthTransactions([{ txType: "Spending", category: "Transfers Out", amountCents: 100 }]),
+      aggregateMonthTransactions([{ txType: "Guilt-Free", category: "Transfers Out", amountCents: 100 }]),
     ).toThrow(/invalid category/);
   });
 
-  it("rejects invalid pairs and non-integer amounts", () => {
+  it("rejects invalid pairs, legacy pairs, and non-integer amounts", () => {
     expect(() =>
-      aggregateMonthTransactions([{ txType: "Fixed", category: "Groceries", amountCents: 100 }]),
+      aggregateMonthTransactions([{ txType: "Guilt-Free", category: "Groceries", amountCents: 100 }]),
     ).toThrow(/invalid category/);
     expect(() =>
-      aggregateMonthTransactions([{ txType: "Food", category: "Groceries", amountCents: 10.5 }]),
+      aggregateMonthTransactions([{ txType: "Food", category: "Groceries", amountCents: 100 }]),
+    ).toThrow(/invalid transaction type/);
+    expect(() =>
+      aggregateMonthTransactions([{ txType: "Fixed Costs", category: "Groceries", amountCents: 10.5 }]),
     ).toThrow(/integer number of cents/);
   });
 });
@@ -238,10 +275,11 @@ describe("computeMonthlyFinancialReport", () => {
     expect(report.previousMonthKey).toBe("2026-05");
     expect(report.previous.totalOutgoingCents).toBe(350_000);
     expect(report.previous.totalIncomingCents).toBe(500_000);
-    expect(report.monthOverMonth.totalOutgoingCents).toBe(150_000);
+    expect(report.monthOverMonth.totalOutgoingCents).toBe(225_000);
     expect(report.monthOverMonth.totalIncomingCents).toBe(300_000);
-    expect(report.monthOverMonth.netCents).toBe(150_000);
+    expect(report.monthOverMonth.netCents).toBe(75_000);
     expect(report.monthOverMonth.categoryTotalsCents["Groceries"]).toBe(-10_000);
+    expect(report.monthOverMonth.typeTotalsCents["Investments"]).toBe(50_000);
     expect(report.monthOverMonth.typeTotalsCents.Income).toBe(300_000);
     expect(report.budget).toBeNull();
   });
@@ -253,7 +291,7 @@ describe("computeMonthlyFinancialReport", () => {
       previousTransactions: mayTransactions,
       budget: {
         categoryTargets: { Groceries: 80_000, Restaurants: 50_000 },
-        typeTargets: { Food: 120_000 },
+        typeTargets: { "Guilt-Free": 120_000, Investments: 40_000 },
         targetOutgoingCents: 450_000,
         targetIncomingCents: 800_000,
         targetNetCents: 350_000,
@@ -272,15 +310,20 @@ describe("computeMonthlyFinancialReport", () => {
       actualCents: 40_000,
       deltaCents: -10_000,
     });
-    expect(report.budget?.comparison.typeDeltas["Food"]).toEqual({
+    expect(report.budget?.comparison.typeDeltas["Guilt-Free"]).toEqual({
       targetCents: 120_000,
-      actualCents: 130_000,
+      actualCents: 115_000,
+      deltaCents: -5_000,
+    });
+    expect(report.budget?.comparison.typeDeltas["Investments"]).toEqual({
+      targetCents: 40_000,
+      actualCents: 50_000,
       deltaCents: 10_000,
     });
     expect(report.budget?.comparison.outgoing).toEqual({
       targetCents: 450_000,
-      actualCents: 500_000,
-      deltaCents: 50_000,
+      actualCents: 575_000,
+      deltaCents: 125_000,
     });
     expect(report.budget?.comparison.incoming).toEqual({
       targetCents: 800_000,
@@ -289,8 +332,8 @@ describe("computeMonthlyFinancialReport", () => {
     });
     expect(report.budget?.comparison.net).toEqual({
       targetCents: 350_000,
-      actualCents: 300_000,
-      deltaCents: -50_000,
+      actualCents: 225_000,
+      deltaCents: -125_000,
     });
   });
 
@@ -306,11 +349,11 @@ describe("computeMonthlyFinancialReport", () => {
     expect(report.monthOverMonth.transferNetCents).toBe(140_000);
 
     // Transfers stay out of the headline budget totals and their deltas.
-    expect(report.current.totalOutgoingCents).toBe(500_000);
+    expect(report.current.totalOutgoingCents).toBe(575_000);
     expect(report.current.totalIncomingCents).toBe(800_000);
-    expect(report.current.netCents).toBe(300_000);
-    expect(report.monthOverMonth.totalOutgoingCents).toBe(150_000);
-    expect(report.monthOverMonth.netCents).toBe(150_000);
+    expect(report.current.netCents).toBe(225_000);
+    expect(report.monthOverMonth.totalOutgoingCents).toBe(225_000);
+    expect(report.monthOverMonth.netCents).toBe(75_000);
 
     // But the grid deltas still cover the Transfer band.
     expect(report.monthOverMonth.typeTotalsCents.Transfer).toBe(260_000);
@@ -323,7 +366,7 @@ describe("computeMonthlyFinancialReport", () => {
       transactions: [...juneTransactions, ...juneTransfers],
       budget: {
         categoryTargets: { Groceries: 80_000, "Transfers In": 10_000, "Transfers Out": 20_000 },
-        typeTargets: { Transfer: 50_000, Food: 120_000 },
+        typeTargets: { Transfer: 50_000, "Guilt-Free": 120_000 },
         targetOutgoingCents: 450_000,
       },
     });
@@ -331,19 +374,19 @@ describe("computeMonthlyFinancialReport", () => {
     expect(report.budget?.comparison.categoryDeltas["Groceries"]).toBeDefined();
     expect(report.budget?.comparison.categoryDeltas["Transfers In"]).toBeUndefined();
     expect(report.budget?.comparison.categoryDeltas["Transfers Out"]).toBeUndefined();
-    expect(report.budget?.comparison.typeDeltas["Food"]).toBeDefined();
+    expect(report.budget?.comparison.typeDeltas["Guilt-Free"]).toBeDefined();
     expect(report.budget?.comparison.typeDeltas["Transfer"]).toBeUndefined();
     // Transfer rows do not move the outgoing actual.
     expect(report.budget?.comparison.outgoing).toEqual({
       targetCents: 450_000,
-      actualCents: 500_000,
-      deltaCents: 50_000,
+      actualCents: 575_000,
+      deltaCents: 125_000,
     });
   });
 });
 
 describe("percent-of-income budget targets", () => {
-  // June actuals: income 800_000, Food 130_000, Groceries 90_000, net 300_000.
+  // June actuals: income 800_000, Guilt-Free 115_000, Groceries 90_000, net 225_000.
   const juneAggregates = aggregateMonthTransactions(juneTransactions);
 
   it("rounds percent-of-income to integer cents", () => {
@@ -357,7 +400,7 @@ describe("percent-of-income budget targets", () => {
     const comparison = compareBudgetToAggregates(
       {
         categoryPercentTargets: { Groceries: 10 },
-        typePercentTargets: { Food: 20 },
+        typePercentTargets: { "Guilt-Free": 20 },
         targetNetPercent: 25,
       },
       juneAggregates,
@@ -370,18 +413,18 @@ describe("percent-of-income budget targets", () => {
       deltaCents: 10_000,
       targetPercent: 10,
     });
-    // 20% of $8,000 = $1,600 target vs $1,300 actual.
-    expect(comparison.typeDeltas["Food"]).toEqual({
+    // 20% of $8,000 = $1,600 target vs $1,150 actual.
+    expect(comparison.typeDeltas["Guilt-Free"]).toEqual({
       targetCents: 160_000,
-      actualCents: 130_000,
-      deltaCents: -30_000,
+      actualCents: 115_000,
+      deltaCents: -45_000,
       targetPercent: 20,
     });
-    // 25% of $8,000 = $2,000 net target vs $3,000 actual.
+    // 25% of $8,000 = $2,000 net target vs $2,250 actual.
     expect(comparison.net).toEqual({
       targetCents: 200_000,
-      actualCents: 300_000,
-      deltaCents: 100_000,
+      actualCents: 225_000,
+      deltaCents: 25_000,
       targetPercent: 25,
     });
   });
@@ -391,8 +434,8 @@ describe("percent-of-income budget targets", () => {
       {
         categoryTargets: { Groceries: 999_999 },
         categoryPercentTargets: { Groceries: 10 },
-        typeTargets: { Food: 999_999 },
-        typePercentTargets: { Food: 20 },
+        typeTargets: { "Guilt-Free": 999_999 },
+        typePercentTargets: { "Guilt-Free": 20 },
         targetNetCents: 999_999,
         targetNetPercent: 25,
       },
@@ -401,21 +444,21 @@ describe("percent-of-income budget targets", () => {
 
     expect(comparison.categoryDeltas["Groceries"]?.targetCents).toBe(80_000);
     expect(comparison.categoryDeltas["Groceries"]?.targetPercent).toBe(10);
-    expect(comparison.typeDeltas["Food"]?.targetCents).toBe(160_000);
-    expect(comparison.typeDeltas["Food"]?.targetPercent).toBe(20);
+    expect(comparison.typeDeltas["Guilt-Free"]?.targetCents).toBe(160_000);
+    expect(comparison.typeDeltas["Guilt-Free"]?.targetPercent).toBe(20);
     expect(comparison.net?.targetCents).toBe(200_000);
     expect(comparison.net?.targetPercent).toBe(25);
   });
 
   it("produces NO comparison rows for percent targets when the month has no income", () => {
     const noIncomeAggregates = aggregateMonthTransactions([
-      { txType: "Food", category: "Groceries", amountCents: 90_000 },
+      { txType: "Fixed Costs", category: "Groceries", amountCents: 90_000 },
     ]);
     const comparison = compareBudgetToAggregates(
       {
         categoryTargets: { Restaurants: 50_000 },
         categoryPercentTargets: { Groceries: 10 },
-        typePercentTargets: { Food: 20 },
+        typePercentTargets: { "Guilt-Free": 20 },
         targetNetCents: 100_000,
         targetNetPercent: 25,
       },
@@ -424,7 +467,7 @@ describe("percent-of-income budget targets", () => {
 
     // Percent-derived rows are absent entirely (not zero targets)...
     expect(comparison.categoryDeltas["Groceries"]).toBeUndefined();
-    expect(comparison.typeDeltas["Food"]).toBeUndefined();
+    expect(comparison.typeDeltas["Guilt-Free"]).toBeUndefined();
     // ...including net: the percent wins over targetNetCents even when it
     // cannot resolve, so there is no net row at all.
     expect(comparison.net).toBeUndefined();
@@ -441,8 +484,8 @@ describe("percent-of-income budget targets", () => {
       {
         categoryTargets: { Restaurants: 50_000 },
         categoryPercentTargets: { Groceries: 10 },
-        typeTargets: { Fixed: 300_000 },
-        typePercentTargets: { Food: 20 },
+        typeTargets: { "Fixed Costs": 400_000 },
+        typePercentTargets: { "Guilt-Free": 20 },
       },
       juneAggregates,
     );
@@ -453,19 +496,19 @@ describe("percent-of-income budget targets", () => {
       deltaCents: -10_000,
     });
     expect(comparison.categoryDeltas["Groceries"]?.targetPercent).toBe(10);
-    expect(comparison.typeDeltas["Fixed"]).toEqual({
-      targetCents: 300_000,
-      actualCents: 290_000,
-      deltaCents: -10_000,
+    expect(comparison.typeDeltas["Fixed Costs"]).toEqual({
+      targetCents: 400_000,
+      actualCents: 385_000,
+      deltaCents: -15_000,
     });
-    expect(comparison.typeDeltas["Food"]?.targetPercent).toBe(20);
+    expect(comparison.typeDeltas["Guilt-Free"]?.targetPercent).toBe(20);
   });
 
   it("still ignores Transfer percent targets end to end", () => {
     const comparison = compareBudgetToAggregates(
       {
         categoryPercentTargets: { "Transfers In": 10, "Transfers Out": 10, Groceries: 10 },
-        typePercentTargets: { Transfer: 10, Food: 20 },
+        typePercentTargets: { Transfer: 10, "Guilt-Free": 20 },
       },
       aggregateMonthTransactions([...juneTransactions, ...juneTransfers]),
     );
@@ -474,24 +517,154 @@ describe("percent-of-income budget targets", () => {
     expect(comparison.categoryDeltas["Transfers Out"]).toBeUndefined();
     expect(comparison.typeDeltas["Transfer"]).toBeUndefined();
     expect(comparison.categoryDeltas["Groceries"]).toBeDefined();
-    expect(comparison.typeDeltas["Food"]).toBeDefined();
+    expect(comparison.typeDeltas["Guilt-Free"]).toBeDefined();
   });
 
   it("flows percent-derived deltas through computeMonthlyFinancialReport", () => {
     const report = computeMonthlyFinancialReport({
       monthKey: "2026-06",
       transactions: juneTransactions,
-      budget: { typePercentTargets: { Food: 20 }, targetNetPercent: 25 },
+      budget: { typePercentTargets: { "Guilt-Free": 20 }, targetNetPercent: 25 },
       budgetIsDefault: true,
     });
 
-    expect(report.budget?.comparison.typeDeltas["Food"]).toEqual({
+    expect(report.budget?.comparison.typeDeltas["Guilt-Free"]).toEqual({
       targetCents: 160_000,
-      actualCents: 130_000,
-      deltaCents: -30_000,
+      actualCents: 115_000,
+      deltaCents: -45_000,
       targetPercent: 20,
     });
     expect(report.budget?.comparison.net?.targetPercent).toBe(25);
+  });
+});
+
+describe("legacy -> CSP migration mapping", () => {
+  it("maps every legacy (type, category) pair to a valid CSP pair (completeness)", () => {
+    for (const legacyType of LEGACY_TX_TYPES) {
+      for (const legacyCategory of LEGACY_TX_TYPE_CATEGORIES[legacyType]) {
+        const mapped = LEGACY_CSP_MAPPING[legacyType]?.[legacyCategory];
+        expect(mapped, `missing mapping for ${legacyType} / ${legacyCategory}`).toBeDefined();
+        expect(isValidTxTypeCategory(mapped!.txType, mapped!.category)).toBe(true);
+      }
+    }
+    // No stray entries beyond the legacy taxonomy.
+    for (const legacyType of LEGACY_TX_TYPES) {
+      expect(Object.keys(LEGACY_CSP_MAPPING[legacyType]).sort()).toEqual(
+        [...LEGACY_TX_TYPE_CATEGORIES[legacyType]].sort(),
+      );
+    }
+  });
+
+  it("keeps Income and Transfer pairs unchanged (identity mappings)", () => {
+    for (const legacyType of ["Income", "Transfer"] as const) {
+      for (const category of LEGACY_TX_TYPE_CATEGORIES[legacyType]) {
+        expect(LEGACY_CSP_MAPPING[legacyType][category]).toEqual({ txType: legacyType, category });
+      }
+    }
+  });
+
+  it("migrates every legacy pair to the specified CSP pair", () => {
+    const expectMigrated = (txType: string, category: string, expected: { txType: string; category: string }) =>
+      expect(migrateLegacyTransaction({ txType, category, description: "Some merchant" })).toEqual(expected);
+
+    expectMigrated("Fixed", "Mortgage, HOA, Mortgage Loan", {
+      txType: "Fixed Costs",
+      category: "Mortgage, HOA, Mortgage Loan",
+    });
+    expectMigrated("Fixed", "Recurring Bills", { txType: "Fixed Costs", category: "Recurring Bills" });
+    expectMigrated("Food", "Groceries", { txType: "Fixed Costs", category: "Groceries" });
+    expectMigrated("Spending", "Subscriptions", { txType: "Fixed Costs", category: "Subscriptions" });
+    expectMigrated("Food", "Restaurants", { txType: "Guilt-Free", category: "Restaurants" });
+    expectMigrated("Spending", "Gas, Amazon, Home Depot, Etc", {
+      txType: "Guilt-Free",
+      category: "Gas, Amazon, Home Depot, Etc",
+    });
+    expectMigrated("Spending", "Misc.", { txType: "Guilt-Free", category: "Misc." });
+  });
+
+  it("returns null for Income and Transfer pairs (already CSP, unchanged)", () => {
+    expect(migrateLegacyTransaction({ txType: "Income", category: "Jeff", description: "Payroll" })).toBeNull();
+    expect(migrateLegacyTransaction({ txType: "Income", category: "Holly", description: "Payroll" })).toBeNull();
+    expect(
+      migrateLegacyTransaction({ txType: "Transfer", category: "Transfers In", description: "From savings" }),
+    ).toBeNull();
+    expect(
+      migrateLegacyTransaction({ txType: "Transfer", category: "Transfers Out", description: "To savings" }),
+    ).toBeNull();
+  });
+
+  it("routes debt-pattern Recurring Bills rows to Debt Payments", () => {
+    const debtDescriptions = [
+      "CHASE CREDIT CRD AUTOPAY",
+      "chase credit crd epay", // case-insensitive
+      "DISCOVER E-PAYMENT",
+      "CAPITAL ONE CRCARDPMT",
+      "APPLECARD GSBANK PAYMENT",
+      "APPLE CARD GSBANK PAYMENT", // optional space
+      "LIBERTY BANK LOAN PMT",
+      "FIDELITY TRANSFER",
+      "Payment to Discover card", // pattern match anywhere in the description
+    ];
+    for (const description of debtDescriptions) {
+      expect(DEBT_PAYMENT_DESCRIPTION_PATTERN.test(description)).toBe(true);
+      expect(migrateLegacyTransaction({ txType: "Fixed", category: "Recurring Bills", description })).toEqual({
+        txType: "Fixed Costs",
+        category: "Debt Payments",
+      });
+    }
+  });
+
+  it("keeps non-debt Recurring Bills rows as Recurring Bills", () => {
+    for (const description of ["Netflix.com", "Eversource Electric", "COMCAST CABLE"]) {
+      expect(migrateLegacyTransaction({ txType: "Fixed", category: "Recurring Bills", description })).toEqual({
+        txType: "Fixed Costs",
+        category: "Recurring Bills",
+      });
+    }
+  });
+
+  it("applies the debt override ONLY to legacy Fixed / Recurring Bills", () => {
+    // A Spending row that happens to mention DISCOVER still follows the plain mapping.
+    expect(
+      migrateLegacyTransaction({ txType: "Spending", category: "Misc.", description: "DISCOVER STORE" }),
+    ).toEqual({ txType: "Guilt-Free", category: "Misc." });
+    // An already-CSP Recurring Bills row is untouched even with a debt description.
+    expect(
+      migrateLegacyTransaction({
+        txType: "Fixed Costs",
+        category: "Recurring Bills",
+        description: "CHASE CREDIT CRD AUTOPAY",
+      }),
+    ).toBeNull();
+  });
+
+  it("is idempotent: every valid CSP pair returns null", () => {
+    for (const type of TX_TYPES) {
+      for (const category of TX_TYPE_CATEGORIES[type]) {
+        expect(
+          migrateLegacyTransaction({ txType: type, category, description: "CHASE CREDIT CRD AUTOPAY" }),
+        ).toBeNull();
+      }
+    }
+  });
+
+  it("throws loudly on pairs from neither vocabulary", () => {
+    expect(() =>
+      migrateLegacyTransaction({ txType: "Fixed", category: "Groceries", description: "Kroger" }),
+    ).toThrow(/no CSP migration mapping/);
+    expect(() =>
+      migrateLegacyTransaction({ txType: "Whatever", category: "Misc.", description: "x" }),
+    ).toThrow(/no CSP migration mapping/);
+  });
+
+  it("maps legacy budget TYPE keys: Fixed -> Fixed Costs, Spending -> Guilt-Free, Food -> dropped", () => {
+    expect(LEGACY_CSP_BUDGET_TYPE_MAPPING).toEqual({
+      Fixed: "Fixed Costs",
+      Spending: "Guilt-Free",
+      Food: null,
+      Income: "Income",
+      Transfer: "Transfer",
+    });
   });
 });
 

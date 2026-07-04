@@ -57,15 +57,22 @@ type InsightsData = {
 /* ------------------------------------------------------------------ */
 
 const BAND_CLASS: Record<TxType, string> = {
-  Fixed: styles.bandFixed!,
-  Spending: styles.bandSpending!,
-  Food: styles.bandFood!,
+  "Fixed Costs": styles.bandFixedCosts!,
+  Investments: styles.bandInvestments!,
+  Savings: styles.bandSavings!,
+  "Guilt-Free": styles.bandGuiltFree!,
   Income: styles.bandIncome!,
   Transfer: styles.bandTransfer!,
 };
 
-/** The four trend types. Transfers are budget-neutral and stay out of insights. */
-const INSIGHT_TYPES = ["Income", "Fixed", "Spending", "Food"] as const satisfies readonly TxType[];
+/** The five trend types. Transfers are budget-neutral and stay out of insights. */
+const INSIGHT_TYPES = [
+  "Income",
+  "Fixed Costs",
+  "Investments",
+  "Savings",
+  "Guilt-Free",
+] as const satisfies readonly TxType[];
 
 /** 'Jul 25' style label: short month + 2-digit year so 12+ month spans stay unambiguous. */
 function monthTickLabel(monthKey: string): string {
@@ -73,20 +80,23 @@ function monthTickLabel(monthKey: string): string {
 }
 
 /* ------------------------------------------------------------------ */
-/* Month matrix: Income / Fixed / Spending / Food / Net x months       */
+/* Month matrix: Income / Fixed Costs / Investments / Savings /        */
+/* Guilt-Free / Net x months                                           */
 /* ------------------------------------------------------------------ */
 
 /**
  * Type x month matrix: each cell is that month's total, colored green when it
- * moved in the good direction vs the previous month (higher for Income/Net,
- * lower for Fixed/Spending/Food) and red when it moved the wrong way.
+ * moved in the good direction vs the previous month (higher for Income,
+ * Investments, Savings, and Net — investing/saving more is good — lower for
+ * Fixed Costs/Guilt-Free) and red when it moved the wrong way.
  */
 function MonthMatrix({ months, currentMonthKey }: { months: InsightsMonth[]; currentMonthKey: string }) {
   const rows: Array<{ label: string; goodWhenHigher: boolean; value: (m: InsightsMonth) => number }> = [
     { label: "Income", goodWhenHigher: true, value: (m) => m.typeTotalsCents.Income ?? 0 },
-    { label: "Fixed", goodWhenHigher: false, value: (m) => m.typeTotalsCents.Fixed ?? 0 },
-    { label: "Spending", goodWhenHigher: false, value: (m) => m.typeTotalsCents.Spending ?? 0 },
-    { label: "Food", goodWhenHigher: false, value: (m) => m.typeTotalsCents.Food ?? 0 },
+    { label: "Fixed Costs", goodWhenHigher: false, value: (m) => m.typeTotalsCents["Fixed Costs"] ?? 0 },
+    { label: "Investments", goodWhenHigher: true, value: (m) => m.typeTotalsCents.Investments ?? 0 },
+    { label: "Savings", goodWhenHigher: true, value: (m) => m.typeTotalsCents.Savings ?? 0 },
+    { label: "Guilt-Free", goodWhenHigher: false, value: (m) => m.typeTotalsCents["Guilt-Free"] ?? 0 },
     { label: "Net", goodWhenHigher: true, value: (m) => m.netCents },
   ];
   return (

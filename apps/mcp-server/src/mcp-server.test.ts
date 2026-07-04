@@ -324,10 +324,17 @@ describe("Skippy MCP manifest", () => {
       expect(recordFinancialTransactions?.description).toContain("never queue it for review");
       expect(recordFinancialTransactions?.description).toContain("INTEGER CENTS");
       expect(recordFinancialTransactions?.description).toContain("externalIds for idempotency");
-      expect(recordFinancialTransactions?.description).toContain("Fixed: Mortgage, HOA, Mortgage Loan | Recurring Bills");
+      expect(recordFinancialTransactions?.description).toContain(
+        "Fixed Costs: Mortgage, HOA, Mortgage Loan | Recurring Bills | Debt Payments | Groceries | Subscriptions",
+      );
+      expect(recordFinancialTransactions?.description).toContain("Investments: Retirement | Brokerage");
+      expect(recordFinancialTransactions?.description).toContain("Savings: Emergency Fund | Goals");
+      expect(recordFinancialTransactions?.description).toContain(
+        "Guilt-Free: Restaurants | Gas, Amazon, Home Depot, Etc | Misc.",
+      );
       expect(recordFinancialTransactions?.description).toContain("Transfer: Transfers In | Transfers Out");
       expect(recordFinancialTransactions?.description).toContain(
-        "Transfers between the owner's own accounts (tracked or untracked, e.g. business checking or a partner's external account) are txType 'Transfer' with category 'Transfers In' or 'Transfers Out' — never Income or Spending",
+        "Transfers between the owner's own accounts (tracked or untracked, e.g. business checking or a partner's external account) are txType 'Transfer' with category 'Transfers In' or 'Transfers Out' — never Income or an outgoing bucket",
       );
       expect(recordFinancialTransactions?.description).toContain("automatically excluded from budget totals");
       expect(recordFinancialTransactions?.inputSchema.properties?.transactions).toBeDefined();
@@ -1017,7 +1024,7 @@ describe("Skippy MCP manifest", () => {
               date: 1780850000000,
               amountCents: 4599,
               description: "Kroger",
-              txType: "Food",
+              txType: "Fixed Costs",
               category: "Groceries",
               externalId: "plaid_tx_1",
             },
@@ -1045,7 +1052,7 @@ describe("Skippy MCP manifest", () => {
                 date: 1780850000000,
                 amountCents: 4599,
                 description: "Kroger",
-                txType: "Food",
+                txType: "Fixed Costs",
                 category: "Groceries",
                 externalId: "plaid_tx_1",
               },
@@ -1083,7 +1090,7 @@ describe("Skippy MCP manifest", () => {
               date: 1780850000000,
               amountCents: 4599,
               description: "Kroger",
-              txType: "Fixed",
+              txType: "Guilt-Free",
               category: "Groceries",
             },
           ],

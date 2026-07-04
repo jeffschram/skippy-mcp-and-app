@@ -704,17 +704,25 @@ export function candidateFingerprint(entityType: EntityType, rawPayload: unknown
 /* ------------------------------------------------------------------ */
 
 /**
- * FIXED transaction taxonomy. Transaction types and their ONLY valid categories.
- * Every write path (Convex mutations, MCP tools) must enforce this pairing via
+ * FIXED transaction taxonomy — Conscious Spending Plan (CSP) buckets.
+ * Transaction types and their ONLY valid categories. Every write path
+ * (Convex mutations, MCP tools) must enforce this pairing via
  * isValidTxTypeCategory / assertValidTxTypeCategory.
  */
-export const TX_TYPES = ["Fixed", "Spending", "Food", "Income", "Transfer"] as const;
+export const TX_TYPES = ["Fixed Costs", "Investments", "Savings", "Guilt-Free", "Income", "Transfer"] as const;
 export type TxType = (typeof TX_TYPES)[number];
 
 export const TX_TYPE_CATEGORIES = {
-  Fixed: ["Mortgage, HOA, Mortgage Loan", "Recurring Bills"],
-  Spending: ["Subscriptions", "Gas, Amazon, Home Depot, Etc", "Misc."],
-  Food: ["Groceries", "Restaurants"],
+  "Fixed Costs": [
+    "Mortgage, HOA, Mortgage Loan",
+    "Recurring Bills",
+    "Debt Payments",
+    "Groceries",
+    "Subscriptions",
+  ],
+  Investments: ["Retirement", "Brokerage"],
+  Savings: ["Emergency Fund", "Goals"],
+  "Guilt-Free": ["Restaurants", "Gas, Amazon, Home Depot, Etc", "Misc."],
   Income: ["Jeff", "Holly"],
   // Transfers between the owner's own accounts (tracked or untracked). Amounts
   // are positive magnitudes — direction IS the category. Visible in the grid
@@ -728,11 +736,16 @@ export type TxCategory = (typeof TX_TYPE_CATEGORIES)[TxType][number];
 export const TX_CATEGORIES = [
   "Mortgage, HOA, Mortgage Loan",
   "Recurring Bills",
+  "Debt Payments",
+  "Groceries",
   "Subscriptions",
+  "Retirement",
+  "Brokerage",
+  "Emergency Fund",
+  "Goals",
+  "Restaurants",
   "Gas, Amazon, Home Depot, Etc",
   "Misc.",
-  "Groceries",
-  "Restaurants",
   "Jeff",
   "Holly",
   "Transfers In",
@@ -740,7 +753,7 @@ export const TX_CATEGORIES = [
 ] as const satisfies readonly TxCategory[];
 
 /** Transaction types that count toward money going out. Transfer is excluded. */
-export const OUTGOING_TX_TYPES = ["Fixed", "Spending", "Food"] as const;
+export const OUTGOING_TX_TYPES = ["Fixed Costs", "Investments", "Savings", "Guilt-Free"] as const;
 /** Transaction types that count toward money coming in. Transfer is excluded. */
 export const INCOMING_TX_TYPES = ["Income"] as const;
 
@@ -793,6 +806,114 @@ export function assertValidTxTypeCategory(type: string, category: string): void 
   }
 }
 
+/* ------------------------------------------------------------------ */
+/* Finances: legacy (pre-CSP) taxonomy migration                       */
+/* ------------------------------------------------------------------ */
+
+/** The pre-CSP transaction types (Fixed/Spending/Food era). */
+export const LEGACY_TX_TYPES = ["Fixed", "Spending", "Food", "Income", "Transfer"] as const;
+export type LegacyTxType = (typeof LEGACY_TX_TYPES)[number];
+
+export const LEGACY_TX_TYPE_CATEGORIES: Record<LegacyTxType, readonly string[]> = {
+  Fixed: ["Mortgage, HOA, Mortgage Loan", "Recurring Bills"],
+  Spending: ["Subscriptions", "Gas, Amazon, Home Depot, Etc", "Misc."],
+  Food: ["Groceries", "Restaurants"],
+  Income: ["Jeff", "Holly"],
+  Transfer: ["Transfers In", "Transfers Out"],
+};
+
+/**
+ * Legacy 'Recurring Bills' rows whose description matches this pattern are
+ * credit-card / loan payments: they migrate to Fixed Costs / 'Debt Payments'
+ * instead of Fixed Costs / 'Recurring Bills'.
+ */
+export const DEBT_PAYMENT_DESCRIPTION_PATTERN =
+  /CHASE CREDIT CRD|DISCOVER|CAPITAL ONE|APPLE ?CARD|APPLECARD|LIBERTY BANK|FIDELITY/i;
+
+/**
+ * Complete legacy -> CSP mapping: every pre-CSP (type, category) pair and the
+ * CSP pair it becomes. Income and Transfer pairs are identity mappings (they
+ * are unchanged under CSP). The one description-driven exception — legacy
+ * Fixed / 'Recurring Bills' rows matching DEBT_PAYMENT_DESCRIPTION_PATTERN
+ * become Fixed Costs / 'Debt Payments' — is applied by
+ * migrateLegacyTransaction, not encoded here.
+ */
+export const LEGACY_CSP_MAPPING: Record<
+  LegacyTxType,
+  Record<string, { txType: TxType; category: TxCategory }>
+> = {
+  Fixed: {
+    "Mortgage, HOA, Mortgage Loan": { txType: "Fixed Costs", category: "Mortgage, HOA, Mortgage Loan" },
+    "Recurring Bills": { txType: "Fixed Costs", category: "Recurring Bills" },
+  },
+  Spending: {
+    Subscriptions: { txType: "Fixed Costs", category: "Subscriptions" },
+    "Gas, Amazon, Home Depot, Etc": { txType: "Guilt-Free", category: "Gas, Amazon, Home Depot, Etc" },
+    "Misc.": { txType: "Guilt-Free", category: "Misc." },
+  },
+  Food: {
+    Groceries: { txType: "Fixed Costs", category: "Groceries" },
+    Restaurants: { txType: "Guilt-Free", category: "Restaurants" },
+  },
+  Income: {
+    Jeff: { txType: "Income", category: "Jeff" },
+    Holly: { txType: "Income", category: "Holly" },
+  },
+  Transfer: {
+    "Transfers In": { txType: "Transfer", category: "Transfers In" },
+    "Transfers Out": { txType: "Transfer", category: "Transfers Out" },
+  },
+};
+
+/**
+ * Legacy budget TYPE keys -> CSP type keys (typeTargets / typePercentTargets).
+ * 'Food' has NO direct successor — its transactions split across Fixed Costs
+ * (Groceries) and Guilt-Free (Restaurants) — so Food targets are DROPPED
+ * (null), never silently folded into another bucket. Category budget keys are
+ * unchanged: every legacy category name survives verbatim under CSP.
+ */
+export const LEGACY_CSP_BUDGET_TYPE_MAPPING: Record<LegacyTxType, TxType | null> = {
+  Fixed: "Fixed Costs",
+  Spending: "Guilt-Free",
+  Food: null,
+  Income: "Income",
+  Transfer: "Transfer",
+};
+
+/**
+ * Pure migration of one transaction's (txType, category) pair from the legacy
+ * taxonomy to CSP. Returns the new pair, or null when the input is already a
+ * valid CSP pair (idempotent: re-running the migration is a no-op). Applies
+ * the debt-payment description override for legacy Fixed / 'Recurring Bills'.
+ * Throws loudly on pairs that belong to neither vocabulary.
+ */
+export function migrateLegacyTransaction(input: {
+  txType: string;
+  category: string;
+  description: string;
+}): { txType: TxType; category: TxCategory } | null {
+  // Already CSP (includes unchanged Income/* and Transfer/* pairs): no-op.
+  if (isValidTxTypeCategory(input.txType, input.category)) return null;
+
+  const byCategory = (LEGACY_CSP_MAPPING as Record<string, Record<string, { txType: TxType; category: TxCategory }> | undefined>)[
+    input.txType
+  ];
+  const mapped = byCategory?.[input.category];
+  if (!mapped) {
+    throw new Error(
+      `no CSP migration mapping for legacy pair "${input.txType}" / "${input.category}"`,
+    );
+  }
+  if (
+    input.txType === "Fixed" &&
+    input.category === "Recurring Bills" &&
+    DEBT_PAYMENT_DESCRIPTION_PATTERN.test(input.description)
+  ) {
+    return { txType: "Fixed Costs", category: "Debt Payments" };
+  }
+  return mapped;
+}
+
 /**
  * All financial amounts are INTEGER CENTS to avoid float drift. Throws when the
  * value is not a finite integer.
@@ -835,7 +956,7 @@ export type FinancialMonthAggregates = {
   transactionCount: number;
   categoryTotalsCents: Record<TxCategory, number>;
   typeTotalsCents: Record<TxType, number>;
-  /** Sum of Fixed + Spending + Food amounts (integer cents). Transfers are excluded. */
+  /** Sum of Fixed Costs + Investments + Savings + Guilt-Free amounts (integer cents). Transfers are excluded. */
   totalOutgoingCents: number;
   /** Sum of Income amounts (integer cents). Transfers are excluded. */
   totalIncomingCents: number;

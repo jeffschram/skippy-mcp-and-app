@@ -12,33 +12,43 @@ function row(
   monthKey: string,
   overrides: {
     income?: number;
-    fixed?: number;
-    spending?: number;
-    food?: number;
+    mortgage?: number;
     groceries?: number;
     restaurants?: number;
     misc?: number;
   } = {},
 ): InsightsMonthRow {
   const income = overrides.income ?? 800000;
-  const fixed = overrides.fixed ?? 300000;
+  const mortgage = overrides.mortgage ?? 300000;
   const groceries = overrides.groceries ?? 60000;
   const restaurants = overrides.restaurants ?? 20000;
   const misc = overrides.misc ?? 40000;
-  const food = overrides.food ?? groceries + restaurants;
-  const spending = overrides.spending ?? misc;
-  const outgoing = fixed + spending + food;
+  const fixedCosts = mortgage + groceries;
+  const guiltFree = restaurants + misc;
+  const outgoing = fixedCosts + guiltFree;
   return {
     monthKey,
-    typeTotalsCents: { Income: income, Fixed: fixed, Spending: spending, Food: food, Transfer: 0 },
+    typeTotalsCents: {
+      Income: income,
+      "Fixed Costs": fixedCosts,
+      Investments: 0,
+      Savings: 0,
+      "Guilt-Free": guiltFree,
+      Transfer: 0,
+    },
     categoryTotalsCents: {
-      "Mortgage, HOA, Mortgage Loan": fixed,
+      "Mortgage, HOA, Mortgage Loan": mortgage,
       "Recurring Bills": 0,
+      "Debt Payments": 0,
+      Groceries: groceries,
       Subscriptions: 0,
+      Retirement: 0,
+      Brokerage: 0,
+      "Emergency Fund": 0,
+      Goals: 0,
+      Restaurants: restaurants,
       "Gas, Amazon, Home Depot, Etc": 0,
       "Misc.": misc,
-      Groceries: groceries,
-      Restaurants: restaurants,
       Jeff: income,
       Holly: 0,
       "Transfers In": 0,
@@ -144,7 +154,7 @@ describe("computeFinancialInsights", () => {
     expect(insights.biggestMovers[1]!.category).toBe("Restaurants");
 
     const restaurants = insights.biggestMovers.find((mover) => mover.category === "Restaurants")!;
-    expect(restaurants.txType).toBe("Food");
+    expect(restaurants.txType).toBe("Guilt-Free");
     const expectedLongMean = Math.round((20000 * 10 + 90000 * 2) / 12);
     expect(restaurants.longMeanCents).toBe(expectedLongMean);
     expect(restaurants.shortMeanCents).toBe(90000);

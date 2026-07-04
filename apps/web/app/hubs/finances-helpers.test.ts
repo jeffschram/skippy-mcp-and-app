@@ -26,7 +26,7 @@ function tx(overrides: Partial<GridTransaction>): GridTransaction {
     date: Date.UTC(2026, 3, 5),
     amountCents: 1000,
     description: "Sample",
-    txType: "Food",
+    txType: "Fixed Costs",
     category: "Groceries",
     ...overrides,
   };
@@ -179,8 +179,8 @@ describe("bucketTransactionsByDay", () => {
 
   it("buckets transactions into their UTC day and category", () => {
     const rows = bucketTransactionsByDay("2026-04", [
-      tx({ _id: "a", date: Date.UTC(2026, 3, 2), category: "Groceries", txType: "Food" }),
-      tx({ _id: "b", date: Date.UTC(2026, 3, 2), category: "Restaurants", txType: "Food" }),
+      tx({ _id: "a", date: Date.UTC(2026, 3, 2), category: "Groceries", txType: "Fixed Costs" }),
+      tx({ _id: "b", date: Date.UTC(2026, 3, 2), category: "Restaurants", txType: "Guilt-Free" }),
       tx({ _id: "c", date: Date.UTC(2026, 3, 17), category: "Jeff", txType: "Income" }),
     ]);
     expect(rows[1]!.cells["Groceries"].map((t) => t._id)).toEqual(["a"]);
@@ -216,7 +216,7 @@ describe("dayRowHasEntries", () => {
 
   it("keeps only days that hold at least one transaction when used as a filter", () => {
     const rows = bucketTransactionsByDay("2026-04", [
-      tx({ _id: "a", date: Date.UTC(2026, 3, 2), category: "Groceries", txType: "Food" }),
+      tx({ _id: "a", date: Date.UTC(2026, 3, 2), category: "Groceries", txType: "Fixed Costs" }),
       tx({ _id: "b", date: Date.UTC(2026, 3, 17), category: "Jeff", txType: "Income" }),
     ]);
     const active = rows.filter(dayRowHasEntries);
