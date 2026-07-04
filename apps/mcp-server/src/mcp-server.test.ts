@@ -337,6 +337,17 @@ describe("Skippy MCP manifest", () => {
         "Transfers between the owner's own accounts (tracked or untracked, e.g. business checking or a partner's external account) are txType 'Transfer' with category 'Transfers In' or 'Transfers Out' — never Income or an outgoing bucket",
       );
       expect(recordFinancialTransactions?.description).toContain("automatically excluded from budget totals");
+      expect(recordFinancialTransactions?.description).toContain("Payroll-deducted retirement contributions");
+      expect(recordFinancialTransactions?.description).toContain("offLedger: true (txType 'Investments' only)");
+      expect(recordFinancialTransactions?.description).toContain(
+        "'employee' amounts are the owner's pre-tax pay, so they gross up the percent-of-income denominator",
+      );
+      expect(recordFinancialTransactions?.description).toContain(
+        "'employer' match amounts count in Investments totals but are NOT income and never gross up the denominator",
+      );
+      expect(recordFinancialTransactions?.description).toContain(
+        "Off-ledger rows are excluded from outgoing/net and from account balances",
+      );
       expect(recordFinancialTransactions?.inputSchema.properties?.transactions).toBeDefined();
       expect(recordFinancialBalances?.description).toContain("FULL raw Plaid transaction feed");
       expect(recordFinancialBalances?.description).toContain("NEVER derive balances by summing recorded budget transactions");

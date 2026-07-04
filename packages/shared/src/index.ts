@@ -772,6 +772,21 @@ export type FinancialAccountType = (typeof FINANCIAL_ACCOUNT_TYPES)[number];
 export const TX_SOURCES = ["plaid", "manual", "harness"] as const;
 export type TxSource = (typeof TX_SOURCES)[number];
 
+/**
+ * Who funded an OFF-LEDGER contribution (e.g. a payroll-deducted 401k).
+ * The two sources have ASYMMETRIC percent-of-income semantics:
+ * - 'employee': pre-tax pay the owner earned but never saw in checking. It
+ *   grosses up the percent-of-income denominator (incomeDenominatorCents).
+ * - 'employer': match money that was never the owner's income. It counts in
+ *   Investments totals but NEVER grosses up the denominator.
+ */
+export const CONTRIBUTION_SOURCES = ["employee", "employer"] as const;
+export type ContributionSource = (typeof CONTRIBUTION_SOURCES)[number];
+
+export function isContributionSource(value: unknown): value is ContributionSource {
+  return isOneOf(CONTRIBUTION_SOURCES, value);
+}
+
 export function isTxType(value: unknown): value is TxType {
   return isOneOf(TX_TYPES, value);
 }
@@ -803,6 +818,33 @@ export function assertValidTxTypeCategory(type: string, category: string): void 
     throw new Error(
       `invalid category "${category}" for transaction type "${type}". Valid categories for ${type}: ${TX_TYPE_CATEGORIES[type].join(" | ")}`,
     );
+  }
+}
+
+/**
+ * OFF-LEDGER rows record money that never touched the account (pre-tax payroll
+ * deductions such as 401k contributions). They are restricted to txType
+ * 'Investments' — the only bucket with defined off-ledger semantics — and must
+ * carry a contributionSource ('employee' | 'employer'). contributionSource is
+ * meaningless (and rejected) on on-ledger rows. Enforced on every write path
+ * and again in aggregation.
+ */
+export function assertValidOffLedgerFields(input: {
+  txType: string;
+  offLedger?: boolean | undefined;
+  contributionSource?: string | undefined;
+}): void {
+  if (input.offLedger) {
+    if (input.txType !== "Investments") {
+      throw new Error(`off-ledger rows must be txType "Investments" (got "${input.txType}")`);
+    }
+    if (!isContributionSource(input.contributionSource)) {
+      throw new Error(
+        `off-ledger rows require contributionSource ${CONTRIBUTION_SOURCES.map((s) => `"${s}"`).join(" or ")} (got ${JSON.stringify(input.contributionSource)})`,
+      );
+    }
+  } else if (input.contributionSource !== undefined) {
+    throw new Error("contributionSource is only valid on off-ledger rows (set offLedger: true)");
   }
 }
 
@@ -950,23 +992,57 @@ export type MonthTransactionInput = {
   txType: string;
   category: string;
   amountCents: number;
+  /**
+   * OFF-LEDGER contribution (e.g. payroll-deducted 401k): the money never
+   * entered the account. Must be txType 'Investments' with a contributionSource.
+   */
+  offLedger?: boolean;
+  contributionSource?: ContributionSource;
+};
+
+/** Off-ledger Investments contribution totals for a month, split by who funded them. */
+export type OffLedgerInvestments = {
+  employeeCents: number;
+  employerCents: number;
+  totalCents: number;
 };
 
 export type FinancialMonthAggregates = {
   transactionCount: number;
+  /** Includes off-ledger contribution amounts so grids/matrices show them. */
   categoryTotalsCents: Record<TxCategory, number>;
+  /** Includes off-ledger contribution amounts so grids/matrices show them. */
   typeTotalsCents: Record<TxType, number>;
-  /** Sum of Fixed Costs + Investments + Savings + Guilt-Free amounts (integer cents). Transfers are excluded. */
+  /**
+   * Sum of ON-LEDGER Fixed Costs + Investments + Savings + Guilt-Free amounts
+   * (integer cents). Transfers and off-ledger contributions are excluded: an
+   * off-ledger 401k deduction never left checking, so counting it here (without
+   * also counting it as income) would corrupt netCents.
+   */
   totalOutgoingCents: number;
-  /** Sum of Income amounts (integer cents). Transfers are excluded. */
+  /** Sum of Income amounts (integer cents). Transfers are excluded. NOT grossed up by off-ledger rows. */
   totalIncomingCents: number;
-  /** totalIncomingCents - totalOutgoingCents. Transfers are excluded. */
+  /** totalIncomingCents - totalOutgoingCents. Transfers and off-ledger rows are excluded. */
   netCents: number;
   /** Transfers In minus Transfers Out (integer cents, signed). Not part of netCents. */
   transferNetCents: number;
-  /** Percent of total outgoing per category (0-100, one decimal). Income and Transfer categories are 0. */
+  /**
+   * Off-ledger Investments contributions (e.g. payroll-deducted 401k). Present
+   * in typeTotalsCents/categoryTotalsCents but excluded from outgoing/net and
+   * every percent-of-outgoing number.
+   */
+  offLedgerInvestmentsCents: OffLedgerInvestments;
+  /**
+   * The denominator for percent-of-income (CSP) targets:
+   * totalIncomingCents + EMPLOYEE off-ledger contributions. Employee 401k
+   * deductions are pre-tax pay the owner earned but never saw in checking, so
+   * they gross up the income base; the EMPLOYER match was never the owner's
+   * income and does NOT.
+   */
+  incomeDenominatorCents: number;
+  /** Percent of total ON-LEDGER outgoing per category (0-100, one decimal). Income, Transfer, and off-ledger amounts are 0/excluded. */
   categoryPercentOfOutgoing: Record<TxCategory, number>;
-  /** Percent of total outgoing per type (0-100, one decimal). Income and Transfer are 0. */
+  /** Percent of total ON-LEDGER outgoing per type (0-100, one decimal). Income and Transfer are 0; off-ledger amounts are excluded. */
   typePercentOfOutgoing: Record<TxType, number>;
 };
 
@@ -990,31 +1066,54 @@ function roundPercent(value: number): number {
  * are excluded from outgoing/incoming/net and every percent-of-outgoing
  * numerator and denominator; their net movement is reported separately as
  * transferNetCents.
+ *
+ * OFF-LEDGER Investments rows (payroll-deducted 401k contributions) also
+ * appear in category/type totals but are excluded from outgoing/incoming/net
+ * and every percent-of-outgoing number (the money never entered checking).
+ * They are reported separately in offLedgerInvestmentsCents, and EMPLOYEE
+ * amounts gross up incomeDenominatorCents — the base for percent-of-income
+ * (CSP) targets — while EMPLOYER match amounts do not.
  */
 export function aggregateMonthTransactions(transactions: MonthTransactionInput[]): FinancialMonthAggregates {
   const categoryTotalsCents = zeroCategoryRecord();
   const typeTotalsCents = zeroTypeRecord();
+  // On-ledger-only totals back the outgoing sum and percent-of-outgoing math.
+  const onLedgerCategoryTotalsCents = zeroCategoryRecord();
+  const onLedgerTypeTotalsCents = zeroTypeRecord();
+  let offLedgerEmployeeCents = 0;
+  let offLedgerEmployerCents = 0;
 
   for (const transaction of transactions) {
     assertValidTxTypeCategory(transaction.txType, transaction.category);
     assertIntegerCents(transaction.amountCents, "amountCents");
+    assertValidOffLedgerFields(transaction);
     const txType = transaction.txType as TxType;
     const category = transaction.category as TxCategory;
     categoryTotalsCents[category] += transaction.amountCents;
     typeTotalsCents[txType] += transaction.amountCents;
+    if (transaction.offLedger) {
+      if (transaction.contributionSource === "employee") {
+        offLedgerEmployeeCents += transaction.amountCents;
+      } else {
+        offLedgerEmployerCents += transaction.amountCents;
+      }
+    } else {
+      onLedgerCategoryTotalsCents[category] += transaction.amountCents;
+      onLedgerTypeTotalsCents[txType] += transaction.amountCents;
+    }
   }
 
-  const totalOutgoingCents = OUTGOING_TX_TYPES.reduce((sum, type) => sum + typeTotalsCents[type], 0);
+  const totalOutgoingCents = OUTGOING_TX_TYPES.reduce((sum, type) => sum + onLedgerTypeTotalsCents[type], 0);
   const totalIncomingCents = INCOMING_TX_TYPES.reduce((sum, type) => sum + typeTotalsCents[type], 0);
 
   const categoryPercentOfOutgoing = zeroCategoryRecord();
   const typePercentOfOutgoing = zeroTypeRecord();
   if (totalOutgoingCents !== 0) {
     for (const type of OUTGOING_TX_TYPES) {
-      typePercentOfOutgoing[type] = roundPercent((typeTotalsCents[type] / totalOutgoingCents) * 100);
+      typePercentOfOutgoing[type] = roundPercent((onLedgerTypeTotalsCents[type] / totalOutgoingCents) * 100);
       for (const category of TX_TYPE_CATEGORIES[type]) {
         categoryPercentOfOutgoing[category] = roundPercent(
-          (categoryTotalsCents[category] / totalOutgoingCents) * 100,
+          (onLedgerCategoryTotalsCents[category] / totalOutgoingCents) * 100,
         );
       }
     }
@@ -1028,6 +1127,12 @@ export function aggregateMonthTransactions(transactions: MonthTransactionInput[]
     totalIncomingCents,
     netCents: totalIncomingCents - totalOutgoingCents,
     transferNetCents: categoryTotalsCents[TRANSFER_IN_CATEGORY] - categoryTotalsCents[TRANSFER_OUT_CATEGORY],
+    offLedgerInvestmentsCents: {
+      employeeCents: offLedgerEmployeeCents,
+      employerCents: offLedgerEmployerCents,
+      totalCents: offLedgerEmployeeCents + offLedgerEmployerCents,
+    },
+    incomeDenominatorCents: totalIncomingCents + offLedgerEmployeeCents,
     categoryPercentOfOutgoing,
     typePercentOfOutgoing,
   };
@@ -1040,11 +1145,12 @@ export type FinancialBudgetTargets = {
   /** transaction type -> target integer cents. */
   typeTargets?: Record<string, number>;
   /**
-   * category -> target as a percent of the month's ACTUAL totalIncomingCents
-   * (plain number, 50 = 50%). Resolved to cents at read time, so the same
-   * percent plan adapts to variable month-to-month income (Conscious Spending
-   * Plan style). When both a cents and a percent target exist for the same
-   * key, THE PERCENT TARGET WINS.
+   * category -> target as a percent of the month's ACTUAL income denominator
+   * (incomeDenominatorCents: totalIncomingCents plus employee off-ledger 401k
+   * contributions; plain number, 50 = 50%). Resolved to cents at read time, so
+   * the same percent plan adapts to variable month-to-month income (Conscious
+   * Spending Plan style). When both a cents and a percent target exist for the
+   * same key, THE PERCENT TARGET WINS.
    */
   categoryPercentTargets?: Record<string, number>;
   /** transaction type -> percent of actual income. Same rules as categoryPercentTargets. */
@@ -1091,8 +1197,10 @@ export function percentOfIncomeCents(percent: number, totalIncomingCents: number
  * silently ignored so transfers stay out of budget math end to end.
  *
  * Percent-of-income targets (categoryPercentTargets / typePercentTargets /
- * targetNetPercent) resolve against the aggregates' ACTUAL totalIncomingCents
- * at read time:
+ * targetNetPercent) resolve against the aggregates' ACTUAL
+ * incomeDenominatorCents (totalIncomingCents grossed up by EMPLOYEE off-ledger
+ * 401k contributions — pre-tax pay is part of the CSP income base) at read
+ * time:
  * - PRECEDENCE: when a key has both a cents target and a percent target, the
  *   PERCENT TARGET WINS (the cents target is ignored, it does not resurface).
  * - Percent-derived deltas carry `targetPercent` so UIs can label the source.
@@ -1104,7 +1212,7 @@ export function compareBudgetToAggregates(
   aggregates: FinancialMonthAggregates,
 ): FinancialBudgetComparison {
   const transferCategories: readonly string[] = TX_TYPE_CATEGORIES[TRANSFER_TX_TYPE];
-  const incomeCents = aggregates.totalIncomingCents;
+  const incomeCents = aggregates.incomeDenominatorCents;
   const percentResolvable = incomeCents > 0;
   const percentDelta = (percent: number, actualCents: number): BudgetTargetDelta => ({
     ...targetDelta(percentOfIncomeCents(percent, incomeCents), actualCents),
@@ -1342,6 +1450,121 @@ export function planBulkTransactionWrites<T extends { externalId?: string | unde
   }
 
   return { inserts, updates, skipped };
+}
+
+/* ------------------------------------------------------------------ */
+/* Finances: recurring off-ledger contributions (401k materialization) */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A recurring off-ledger contribution configured on a financial account
+ * (e.g. the monthly payroll-deducted 401k employee contribution and employer
+ * match). Materialized into off-ledger Investments transactions once per
+ * month by materializeContributionsForBrain.
+ */
+export type RecurringContribution = {
+  label: string;
+  /** Positive integer cents. */
+  amountCents: number;
+  contributionSource: ContributionSource;
+  /** Must be an Investments category ('Retirement' | 'Brokerage'). */
+  category: string;
+};
+
+/**
+ * Validates a recurringContributions config. At most ONE contribution per
+ * source is supported: materialized externalIds are keyed on (source, month),
+ * so a second contribution with the same source could never be idempotent.
+ */
+export function assertValidRecurringContributions(contributions: readonly RecurringContribution[]): void {
+  const seenSources = new Set<string>();
+  contributions.forEach((contribution, index) => {
+    const field = `recurringContributions[${index}]`;
+    if (!contribution.label.trim()) {
+      throw new Error(`${field}.label is required`);
+    }
+    assertIntegerCents(contribution.amountCents, `${field}.amountCents`);
+    if (contribution.amountCents <= 0) {
+      throw new Error(`${field}.amountCents must be positive`);
+    }
+    if (!isContributionSource(contribution.contributionSource)) {
+      throw new Error(
+        `${field}.contributionSource must be ${CONTRIBUTION_SOURCES.map((s) => `"${s}"`).join(" or ")}`,
+      );
+    }
+    if (!isValidTxTypeCategory("Investments", contribution.category)) {
+      throw new Error(
+        `${field}.category must be an Investments category (${TX_TYPE_CATEGORIES.Investments.join(" | ")})`,
+      );
+    }
+    if (seenSources.has(contribution.contributionSource)) {
+      throw new Error(
+        `recurringContributions: at most one "${contribution.contributionSource}" contribution is supported (materialized externalIds are keyed per source+month)`,
+      );
+    }
+    seenSources.add(contribution.contributionSource);
+  });
+}
+
+/** Idempotency key for a materialized off-ledger contribution: one per source per month. */
+export function contributionExternalId(source: ContributionSource, monthKey: string): string {
+  return `401k-${source}-${monthKey}`;
+}
+
+export type ContributionInsert = {
+  /** The 15th of the month at UTC midnight (mid-month anchor for payroll deductions). */
+  date: number;
+  monthKey: string;
+  amountCents: number;
+  description: string;
+  txType: "Investments";
+  category: TxCategory;
+  externalId: string;
+  offLedger: true;
+  contributionSource: ContributionSource;
+};
+
+/**
+ * Pure planning for materializeContributionsForBrain: one off-ledger
+ * Investments transaction per configured recurring contribution, dated the
+ * 15th of the month (UTC). Idempotent via contributionExternalId — a
+ * contribution whose externalId already exists is skipped, never duplicated.
+ */
+export function planContributionMaterialization(
+  contributions: readonly RecurringContribution[],
+  monthKey: string,
+  existingExternalIds: ReadonlySet<string>,
+): { inserts: ContributionInsert[]; skipped: number } {
+  if (!isValidMonthKey(monthKey)) {
+    throw new Error(`invalid monthKey "${monthKey}". Expected 'YYYY-MM'.`);
+  }
+  assertValidRecurringContributions(contributions);
+
+  const year = Number(monthKey.slice(0, 4));
+  const month = Number(monthKey.slice(5, 7));
+  const date = Date.UTC(year, month - 1, 15);
+
+  const inserts: ContributionInsert[] = [];
+  let skipped = 0;
+  for (const contribution of contributions) {
+    const externalId = contributionExternalId(contribution.contributionSource, monthKey);
+    if (existingExternalIds.has(externalId)) {
+      skipped += 1;
+      continue;
+    }
+    inserts.push({
+      date,
+      monthKey,
+      amountCents: contribution.amountCents,
+      description: contribution.label.trim(),
+      txType: "Investments",
+      category: contribution.category as TxCategory,
+      externalId,
+      offLedger: true,
+      contributionSource: contribution.contributionSource,
+    });
+  }
+  return { inserts, skipped };
 }
 
 /* ------------------------------------------------------------------ */

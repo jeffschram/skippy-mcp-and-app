@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  CONTRIBUTION_SOURCES,
   DEBT_PAYMENT_DESCRIPTION_PATTERN,
   INCOMING_TX_TYPES,
   LEGACY_CSP_BUDGET_TYPE_MAPPING,
@@ -12,7 +13,12 @@ import {
   TX_TYPE_CATEGORIES,
   aggregateMonthTransactions,
   migrateLegacyTransaction,
+  assertValidOffLedgerFields,
+  assertValidRecurringContributions,
   assertValidTxTypeCategory,
+  contributionExternalId,
+  isContributionSource,
+  planContributionMaterialization,
   compareBudgetToAggregates,
   computeMonthlyFinancialReport,
   percentOfIncomeCents,
@@ -260,6 +266,129 @@ describe("aggregateMonthTransactions", () => {
     expect(() =>
       aggregateMonthTransactions([{ txType: "Fixed Costs", category: "Groceries", amountCents: 10.5 }]),
     ).toThrow(/integer number of cents/);
+  });
+});
+
+// Off-ledger 401k contributions: employee $700.02 pre-tax + employer $175.00 match.
+const employeeContribution = {
+  txType: "Investments",
+  category: "Retirement",
+  amountCents: 70_002,
+  offLedger: true,
+  contributionSource: "employee" as const,
+};
+const employerContribution = {
+  txType: "Investments",
+  category: "Retirement",
+  amountCents: 17_500,
+  offLedger: true,
+  contributionSource: "employer" as const,
+};
+
+describe("off-ledger contributions in aggregation", () => {
+  it("exposes contribution source vocabulary", () => {
+    expect([...CONTRIBUTION_SOURCES]).toEqual(["employee", "employer"]);
+    expect(isContributionSource("employee")).toBe(true);
+    expect(isContributionSource("employer")).toBe(true);
+    expect(isContributionSource("company")).toBe(false);
+  });
+
+  it("reports zero off-ledger totals and an ungrossed denominator for months without off-ledger rows", () => {
+    const aggregates = aggregateMonthTransactions(juneTransactions);
+    expect(aggregates.offLedgerInvestmentsCents).toEqual({ employeeCents: 0, employerCents: 0, totalCents: 0 });
+    expect(aggregates.incomeDenominatorCents).toBe(aggregates.totalIncomingCents);
+  });
+
+  it("counts EMPLOYEE off-ledger amounts in totals and grosses up the income denominator only", () => {
+    const base = aggregateMonthTransactions(juneTransactions);
+    const aggregates = aggregateMonthTransactions([...juneTransactions, employeeContribution]);
+
+    // Visible in the grid: category and type totals include the contribution.
+    expect(aggregates.categoryTotalsCents["Retirement"]).toBe(base.categoryTotalsCents["Retirement"] + 70_002);
+    expect(aggregates.typeTotalsCents.Investments).toBe(base.typeTotalsCents.Investments + 70_002);
+
+    // The money never entered checking: outgoing, incoming, and net are untouched.
+    expect(aggregates.totalOutgoingCents).toBe(base.totalOutgoingCents);
+    expect(aggregates.totalIncomingCents).toBe(base.totalIncomingCents);
+    expect(aggregates.netCents).toBe(base.netCents);
+
+    // Pre-tax pay the owner earned: it grosses up the percent-of-income base.
+    expect(aggregates.offLedgerInvestmentsCents).toEqual({
+      employeeCents: 70_002,
+      employerCents: 0,
+      totalCents: 70_002,
+    });
+    expect(aggregates.incomeDenominatorCents).toBe(base.totalIncomingCents + 70_002);
+  });
+
+  it("counts EMPLOYER off-ledger amounts in totals but never grosses up the denominator", () => {
+    const base = aggregateMonthTransactions(juneTransactions);
+    const aggregates = aggregateMonthTransactions([...juneTransactions, employerContribution]);
+
+    expect(aggregates.categoryTotalsCents["Retirement"]).toBe(base.categoryTotalsCents["Retirement"] + 17_500);
+    expect(aggregates.typeTotalsCents.Investments).toBe(base.typeTotalsCents.Investments + 17_500);
+    expect(aggregates.totalOutgoingCents).toBe(base.totalOutgoingCents);
+    expect(aggregates.totalIncomingCents).toBe(base.totalIncomingCents);
+    expect(aggregates.netCents).toBe(base.netCents);
+    expect(aggregates.offLedgerInvestmentsCents).toEqual({
+      employeeCents: 0,
+      employerCents: 17_500,
+      totalCents: 17_500,
+    });
+    // Match money was never the owner's income: denominator is NOT grossed up.
+    expect(aggregates.incomeDenominatorCents).toBe(base.totalIncomingCents);
+  });
+
+  it("splits employee and employer amounts when both are present", () => {
+    const aggregates = aggregateMonthTransactions([
+      ...juneTransactions,
+      employeeContribution,
+      employerContribution,
+    ]);
+    expect(aggregates.offLedgerInvestmentsCents).toEqual({
+      employeeCents: 70_002,
+      employerCents: 17_500,
+      totalCents: 87_502,
+    });
+    expect(aggregates.incomeDenominatorCents).toBe(800_000 + 70_002);
+    expect(aggregates.typeTotalsCents.Investments).toBe(50_000 + 87_502);
+    expect(aggregates.totalOutgoingCents).toBe(575_000);
+    expect(aggregates.netCents).toBe(225_000);
+  });
+
+  it("keeps off-ledger amounts out of every percent-of-outgoing number", () => {
+    const withOffLedger = aggregateMonthTransactions([
+      ...juneTransactions,
+      employeeContribution,
+      employerContribution,
+    ]);
+    const withoutOffLedger = aggregateMonthTransactions(juneTransactions);
+    expect(withOffLedger.typePercentOfOutgoing).toEqual(withoutOffLedger.typePercentOfOutgoing);
+    expect(withOffLedger.categoryPercentOfOutgoing).toEqual(withoutOffLedger.categoryPercentOfOutgoing);
+  });
+
+  it("rejects off-ledger rows outside Investments and malformed contribution sources", () => {
+    expect(() =>
+      aggregateMonthTransactions([
+        { txType: "Savings", category: "Goals", amountCents: 100, offLedger: true, contributionSource: "employee" },
+      ]),
+    ).toThrow(/off-ledger rows must be txType "Investments"/);
+    expect(() =>
+      aggregateMonthTransactions([
+        { txType: "Investments", category: "Retirement", amountCents: 100, offLedger: true },
+      ]),
+    ).toThrow(/require contributionSource/);
+    expect(() =>
+      aggregateMonthTransactions([
+        { txType: "Investments", category: "Retirement", amountCents: 100, contributionSource: "employee" },
+      ]),
+    ).toThrow(/only valid on off-ledger rows/);
+    expect(() =>
+      assertValidOffLedgerFields({ txType: "Investments", offLedger: true, contributionSource: "company" }),
+    ).toThrow(/require contributionSource/);
+    expect(() =>
+      assertValidOffLedgerFields({ txType: "Investments", offLedger: true, contributionSource: "employer" }),
+    ).not.toThrow();
   });
 });
 
@@ -772,5 +901,167 @@ describe("isBalanceSource", () => {
     expect(isBalanceSource("manual")).toBe(true);
     expect(isBalanceSource("plaid")).toBe(false);
     expect(isBalanceSource(undefined)).toBe(false);
+  });
+});
+
+describe("percent targets against the off-ledger-grossed income denominator", () => {
+  // Income $8,000.00; employee 401k $700.02 pre-tax; employer match $175.00.
+  const monthWithOffLedger = [...juneTransactions, employeeContribution, employerContribution];
+  const aggregates = aggregateMonthTransactions(monthWithOffLedger);
+
+  it("resolves type percent targets against incomeDenominatorCents, not totalIncomingCents", () => {
+    const comparison = compareBudgetToAggregates({ typePercentTargets: { Investments: 10 } }, aggregates);
+    // Denominator: 800_000 income + 70_002 employee (employer match excluded).
+    expect(aggregates.incomeDenominatorCents).toBe(870_002);
+    expect(comparison.typeDeltas["Investments"]).toEqual({
+      targetCents: 87_000, // round(870_002 * 10%)
+      actualCents: 137_502, // 50_000 on-ledger + 87_502 off-ledger
+      deltaCents: 50_502,
+      targetPercent: 10,
+    });
+  });
+
+  it("resolves category percent targets and targetNetPercent against the same denominator", () => {
+    const comparison = compareBudgetToAggregates(
+      { categoryPercentTargets: { Retirement: 10 }, targetNetPercent: 20 },
+      aggregates,
+    );
+    expect(comparison.categoryDeltas["Retirement"]).toEqual({
+      targetCents: 87_000,
+      actualCents: 117_502, // 30_000 on-ledger + 87_502 off-ledger
+      deltaCents: 30_502,
+      targetPercent: 10,
+    });
+    expect(comparison.net).toEqual({
+      targetCents: 174_000, // round(870_002 * 20%)
+      actualCents: 225_000, // net is NOT affected by off-ledger rows
+      deltaCents: 51_000,
+      targetPercent: 20,
+    });
+  });
+
+  it("still compares cents targets for incoming against the ungrossed totalIncomingCents", () => {
+    const comparison = compareBudgetToAggregates({ targetIncomingCents: 800_000 }, aggregates);
+    expect(comparison.incoming).toEqual({ targetCents: 800_000, actualCents: 800_000, deltaCents: 0 });
+  });
+
+  it("lets employee off-ledger contributions alone make percent targets resolvable", () => {
+    // A month with no checking income but a payroll-deducted contribution.
+    const offLedgerOnly = aggregateMonthTransactions([employeeContribution]);
+    expect(offLedgerOnly.totalIncomingCents).toBe(0);
+    expect(offLedgerOnly.incomeDenominatorCents).toBe(70_002);
+    const comparison = compareBudgetToAggregates({ typePercentTargets: { Investments: 10 } }, offLedgerOnly);
+    expect(comparison.typeDeltas["Investments"]).toEqual({
+      targetCents: 7_000,
+      actualCents: 70_002,
+      deltaCents: 63_002,
+      targetPercent: 10,
+    });
+
+    // Employer-only months cannot resolve percent targets (no income at all).
+    const employerOnly = aggregateMonthTransactions([employerContribution]);
+    expect(employerOnly.incomeDenominatorCents).toBe(0);
+    const unresolved = compareBudgetToAggregates({ typePercentTargets: { Investments: 10 } }, employerOnly);
+    expect(unresolved.typeDeltas["Investments"]).toBeUndefined();
+  });
+
+  it("keeps outgoing and net unaffected by off-ledger rows end to end in the monthly report", () => {
+    const withOffLedger = computeMonthlyFinancialReport({
+      monthKey: "2026-06",
+      transactions: monthWithOffLedger,
+      previousTransactions: mayTransactions,
+    });
+    const withoutOffLedger = computeMonthlyFinancialReport({
+      monthKey: "2026-06",
+      transactions: juneTransactions,
+      previousTransactions: mayTransactions,
+    });
+    expect(withOffLedger.current.totalOutgoingCents).toBe(withoutOffLedger.current.totalOutgoingCents);
+    expect(withOffLedger.current.netCents).toBe(withoutOffLedger.current.netCents);
+    expect(withOffLedger.monthOverMonth.totalOutgoingCents).toBe(
+      withoutOffLedger.monthOverMonth.totalOutgoingCents,
+    );
+    expect(withOffLedger.monthOverMonth.netCents).toBe(withoutOffLedger.monthOverMonth.netCents);
+    expect(withOffLedger.current.offLedgerInvestmentsCents.totalCents).toBe(87_502);
+  });
+});
+
+describe("recurring contribution materialization planning", () => {
+  const contributions = [
+    { label: "401k employee contribution", amountCents: 70_002, contributionSource: "employee" as const, category: "Retirement" },
+    { label: "401k employer match", amountCents: 17_500, contributionSource: "employer" as const, category: "Retirement" },
+  ];
+
+  it("builds per-source-per-month external ids", () => {
+    expect(contributionExternalId("employee", "2026-04")).toBe("401k-employee-2026-04");
+    expect(contributionExternalId("employer", "2026-07")).toBe("401k-employer-2026-07");
+  });
+
+  it("plans one off-ledger Investments insert per contribution, dated the 15th UTC", () => {
+    const plan = planContributionMaterialization(contributions, "2026-04", new Set());
+    expect(plan.skipped).toBe(0);
+    expect(plan.inserts).toEqual([
+      {
+        date: Date.UTC(2026, 3, 15),
+        monthKey: "2026-04",
+        amountCents: 70_002,
+        description: "401k employee contribution",
+        txType: "Investments",
+        category: "Retirement",
+        externalId: "401k-employee-2026-04",
+        offLedger: true,
+        contributionSource: "employee",
+      },
+      {
+        date: Date.UTC(2026, 3, 15),
+        monthKey: "2026-04",
+        amountCents: 17_500,
+        description: "401k employer match",
+        txType: "Investments",
+        category: "Retirement",
+        externalId: "401k-employer-2026-04",
+        offLedger: true,
+        contributionSource: "employer",
+      },
+    ]);
+  });
+
+  it("is idempotent: already-materialized external ids are skipped, never duplicated", () => {
+    const partial = planContributionMaterialization(
+      contributions,
+      "2026-04",
+      new Set(["401k-employee-2026-04"]),
+    );
+    expect(partial.skipped).toBe(1);
+    expect(partial.inserts.map((row) => row.externalId)).toEqual(["401k-employer-2026-04"]);
+
+    const rerun = planContributionMaterialization(
+      contributions,
+      "2026-04",
+      new Set(["401k-employee-2026-04", "401k-employer-2026-04"]),
+    );
+    expect(rerun.inserts).toEqual([]);
+    expect(rerun.skipped).toBe(2);
+  });
+
+  it("validates the configuration loudly", () => {
+    expect(() => assertValidRecurringContributions(contributions)).not.toThrow();
+    expect(() => planContributionMaterialization(contributions, "2026-13", new Set())).toThrow(/invalid monthKey/);
+    expect(() =>
+      assertValidRecurringContributions([{ ...contributions[0]!, label: "  " }]),
+    ).toThrow(/label is required/);
+    expect(() =>
+      assertValidRecurringContributions([{ ...contributions[0]!, amountCents: -1 }]),
+    ).toThrow(/must be positive/);
+    expect(() =>
+      assertValidRecurringContributions([{ ...contributions[0]!, amountCents: 700.02 }]),
+    ).toThrow(/integer number of cents/);
+    expect(() =>
+      assertValidRecurringContributions([{ ...contributions[0]!, category: "Emergency Fund" }]),
+    ).toThrow(/must be an Investments category/);
+    // externalIds are keyed per source+month: a second same-source config can never be idempotent.
+    expect(() =>
+      assertValidRecurringContributions([contributions[0]!, { ...contributions[0]!, label: "duplicate" }]),
+    ).toThrow(/at most one "employee" contribution/);
   });
 });
