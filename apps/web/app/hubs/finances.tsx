@@ -29,6 +29,7 @@ import {
 } from "../components";
 import { useViewerReady } from "./use-viewer";
 import { FinancesInsightsView } from "./finances-insights";
+import { FinancesDebtsView } from "./finances-debts";
 import {
   balancesByDay,
   bucketTransactionsByDay,
@@ -1144,7 +1145,7 @@ function MonthlyGrid({ report, onEditTransaction }: { report: MonthlyReport; onE
 
 export function FinancesContent() {
   const viewerReady = useViewerReady();
-  const [view, setView] = useState<"grid" | "insights">("grid");
+  const [view, setView] = useState<"grid" | "insights" | "debts">("grid");
   const [monthKey, setMonthKey] = useState(() => currentMonthKey());
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
   const [txDialogOpen, setTxDialogOpen] = useState(false);
@@ -1231,14 +1232,17 @@ export function FinancesContent() {
               items={[
                 { key: "grid", label: "Grid" },
                 { key: "insights", label: "Insights" },
+                { key: "debts", label: "Debts" },
               ]}
               active={view}
-              onChange={(key) => setView(key as "grid" | "insights")}
+              onChange={(key) => setView(key as "grid" | "insights" | "debts")}
             />
           </div>
 
           {view === "insights" ? (
             <FinancesInsightsView accounts={accounts} />
+          ) : view === "debts" ? (
+            <FinancesDebtsView />
           ) : (
             <>
               <div className={styles.controls}>

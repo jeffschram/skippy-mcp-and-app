@@ -951,6 +951,29 @@ export default defineSchema({
     updatedAt: v.number(),
   }).index("by_brain_account", ["brainInstanceId", "accountId"]),
 
+  // Debts tracked for the payoff planner (loans + credit cards). Balances/APRs
+  // are OWNER-ENTERED (never derived); payments observed in
+  // financialTransactions since balanceAsOf are matched via matchPattern to
+  // project the current balance at read time.
+  financialDebts: defineTable({
+    brainInstanceId: v.id("brainInstances"),
+    name: v.string(),
+    lender: v.optional(v.string()),
+    // Owner-entered balance in INTEGER CENTS as of balanceAsOf.
+    balanceCents: v.number(),
+    // Epoch ms timestamp the balance was entered; payment matching starts here.
+    balanceAsOf: v.number(),
+    // Annual percentage rate as a plain number (22.5 = 22.5%), 0-100.
+    apr: v.number(),
+    // Contractual minimum monthly payment in INTEGER CENTS.
+    minPaymentCents: v.number(),
+    // Case-insensitive substring/regex matched against financialTransactions
+    // descriptions to find this debt's payments (e.g. 'LIBERTY BANK').
+    matchPattern: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_brain", ["brainInstanceId"]),
+
   aiProcessingRuns: defineTable({
     brainInstanceId: v.id("brainInstances"),
     provider: v.string(),
