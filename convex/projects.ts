@@ -963,6 +963,7 @@ export const setTaskKindForBrain = mutationGeneric({
     brainInstanceId: v.id("brainInstances"),
     taskId: v.id("tasks"),
     kind: taskKindValidator,
+    ownerType: v.optional(v.union(v.literal("owner"), v.literal("agent"))),
     actorId: v.optional(v.string()),
   },
   handler: async ({ db }, args) => {
@@ -971,7 +972,9 @@ export const setTaskKindForBrain = mutationGeneric({
       throw new Error("task not found for brain instance");
     }
     const now = Date.now();
-    await db.patch(args.taskId, { kind: args.kind, updatedAt: now });
+    const patch: Record<string, unknown> = { kind: args.kind, updatedAt: now };
+    if (args.ownerType) patch.ownerType = args.ownerType;
+    await db.patch(args.taskId, patch);
     await db.insert("activityEvents", {
       brainInstanceId: args.brainInstanceId,
       entityRef: { entityType: "task", entityId: args.taskId },
@@ -979,8 +982,8 @@ export const setTaskKindForBrain = mutationGeneric({
       actorType: "harness",
       actorId: args.actorId,
       timestamp: now,
-      summary: `Task kind set to ${args.kind}: ${task.title}`,
+      summary: `Task kind set to ${args.kind}${args.ownerType ? ` (${args.ownerType}-owned)` : ""}: ${task.title}`,
     });
-    return { taskId: args.taskId, kind: args.kind };
+    return { taskId: args.taskId, kind: args.kind, ownerType: args.ownerType ?? task.ownerType };
   },
 });
