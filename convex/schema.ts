@@ -143,31 +143,18 @@ const harnessAutonomyPolicy = v.object({
 // Finances: FIXED taxonomy mirrored from @skippy/shared (TX_TYPE_CATEGORIES).
 // The type-category pairing is enforced in every write path via the shared helper.
 //
-// MIGRATION WINDOW: these TABLE validators accept BOTH the legacy vocabulary
-// (Fixed/Spending/Food) AND the CSP vocabulary (Fixed Costs/Investments/
-// Savings/Guilt-Free) so existing rows stay valid while
-// finances.migrateTaxonomyForBrain rewrites them. The ARG validators in
-// convex/finances.ts accept ONLY the CSP vocabulary for new writes. After the
-// data migration has run for every brain, a follow-up change tightens these
-// unions to the CSP-only literals.
 const financialAccountType = v.union(v.literal("Jeff Personal"), v.literal("Family Shared"));
 
 const financialTxType = v.union(
-  // CSP vocabulary (current)
   v.literal("Fixed Costs"),
   v.literal("Investments"),
   v.literal("Savings"),
   v.literal("Guilt-Free"),
   v.literal("Income"),
   v.literal("Transfer"),
-  // Legacy vocabulary (pre-CSP; removed after migrateTaxonomyForBrain runs)
-  v.literal("Fixed"),
-  v.literal("Spending"),
-  v.literal("Food"),
 );
 
 const financialTxCategory = v.union(
-  // CSP vocabulary (current)
   v.literal("Mortgage, HOA, Mortgage Loan"),
   v.literal("Recurring Bills"),
   v.literal("Debt Payments"),
@@ -184,8 +171,6 @@ const financialTxCategory = v.union(
   v.literal("Holly"),
   v.literal("Transfers In"),
   v.literal("Transfers Out"),
-  // Legacy category names are all reused verbatim under CSP, so no extra
-  // legacy-only literals are needed here.
 );
 
 const financialTxSource = v.union(v.literal("plaid"), v.literal("manual"), v.literal("harness"));
