@@ -671,6 +671,112 @@ describe("Skippy MCP tool handlers", () => {
     });
   });
 
+  it("passes off-ledger 401k contribution fields through to the backend", async () => {
+    const { client, calls } = createFakeClient();
+    const tools = createSkippyToolHandlers(client, "brain_123");
+
+    await tools.recordFinancialTransactions({
+      accountId: "account_123",
+      source: "harness",
+      transactions: [
+        {
+          date: 1780850000000,
+          amountCents: 70002,
+          description: "401k employee contribution",
+          txType: "Investments",
+          category: "Retirement",
+          externalId: "401k-employee-2026-06",
+          offLedger: true,
+          contributionSource: "employee",
+        },
+        {
+          date: 1780850000000,
+          amountCents: 17500,
+          description: "401k employer match",
+          txType: "Investments",
+          category: "Retirement",
+          externalId: "401k-employer-2026-06",
+          offLedger: true,
+          contributionSource: "employer",
+        },
+      ],
+    });
+
+    expect(calls[0]).toMatchObject({
+      name: "recordFinancialTransactions",
+      args: [
+        "brain_123",
+        {
+          accountId: "account_123",
+          source: "harness",
+          transactions: [
+            { offLedger: true, contributionSource: "employee", externalId: "401k-employee-2026-06" },
+            { offLedger: true, contributionSource: "employer", externalId: "401k-employer-2026-06" },
+          ],
+        },
+      ],
+    });
+  });
+
+  it("rejects malformed off-ledger rows before calling the backend", async () => {
+    const { client, calls } = createFakeClient();
+    const tools = createSkippyToolHandlers(client, "brain_123");
+
+    // Off-ledger is Investments-only.
+    await expect(
+      tools.recordFinancialTransactions({
+        accountId: "account_123",
+        transactions: [
+          {
+            date: 1780850000000,
+            amountCents: 70002,
+            description: "401k",
+            txType: "Savings",
+            category: "Goals",
+            offLedger: true,
+            contributionSource: "employee",
+          },
+        ],
+      }),
+    ).rejects.toThrow(/transactions\[0\].*off-ledger rows must be txType "Investments"/);
+
+    // contributionSource is required when offLedger...
+    await expect(
+      tools.recordFinancialTransactions({
+        accountId: "account_123",
+        transactions: [
+          {
+            date: 1780850000000,
+            amountCents: 70002,
+            description: "401k",
+            txType: "Investments",
+            category: "Retirement",
+            offLedger: true,
+          },
+        ],
+      }),
+    ).rejects.toThrow(/transactions\[0\].*require contributionSource/);
+
+    // ...and meaningless without it.
+    await expect(
+      tools.recordFinancialTransactions({
+        accountId: "account_123",
+        transactions: [
+          {
+            date: 1780850000000,
+            amountCents: 70002,
+            description: "401k",
+            txType: "Investments",
+            category: "Retirement",
+            contributionSource: "employee",
+          },
+        ],
+      }),
+    ).rejects.toThrow(/transactions\[0\].*only valid on off-ledger rows/);
+
+    expect(calls).toHaveLength(0);
+  });
+
   it("rejects invalid type-category pairs and non-integer cents before calling the backend", async () => {
     const { client, calls } = createFakeClient();
     const tools = createSkippyToolHandlers(client, "brain_123");

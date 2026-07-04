@@ -8,6 +8,7 @@ import {
 import {
   type BalanceSource,
   type CandidateObjectInput,
+  type ContributionSource,
   type EntityRef,
   type EntityType,
   type FinancialAccountType,
@@ -20,6 +21,7 @@ import {
   type TxSource,
   type TxType,
   assertIntegerCents,
+  assertValidOffLedgerFields,
   assertValidTxTypeCategory,
   isLinkFocusCandidate,
   isValidMonthKey,
@@ -273,6 +275,12 @@ export type FinancialTransactionRow = {
   externalId?: string;
   /** 'YYYY-MM'; derived from date when omitted. */
   monthKey?: string;
+  /**
+   * OFF-LEDGER contribution (payroll-deducted 401k): never touched the account.
+   * Must be txType 'Investments' and carry contributionSource.
+   */
+  offLedger?: boolean;
+  contributionSource?: ContributionSource;
 };
 
 export type RecordFinancialTransactionsInput = {
@@ -1273,6 +1281,7 @@ export function createSkippyToolHandlers(client: SkippyClient, brainInstanceId: 
         try {
           assertValidTxTypeCategory(transaction.txType, transaction.category);
           assertIntegerCents(transaction.amountCents, "amountCents");
+          assertValidOffLedgerFields(transaction);
           if (transaction.monthKey !== undefined && !isValidMonthKey(transaction.monthKey)) {
             throw new Error(`invalid monthKey "${transaction.monthKey}". Expected 'YYYY-MM'.`);
           }

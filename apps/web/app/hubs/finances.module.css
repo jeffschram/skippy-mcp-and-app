@@ -210,6 +210,38 @@
   min-width: 0;
 }
 
+/* Off-ledger contributions (payroll-deducted 401k): visible in the grid but
+   muted — the money never touched the account, so they are outside the
+   balance column and outgoing/net totals. */
+.entryOffLedger {
+  opacity: 0.6;
+}
+
+.entryOffLedger .entryDesc {
+  font-style: italic;
+}
+
+.entryAutoTag {
+  margin-left: 5px;
+  padding: 0 4px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font-size: 9.5px;
+  font-weight: 700;
+  font-style: normal;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.offLedgerNote {
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
 .entryAmount {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;

@@ -15,6 +15,9 @@ export type GridTransaction = {
   txType: string;
   category: string;
   source?: string;
+  /** Off-ledger contribution (e.g. payroll-deducted 401k) — not part of the account balance. */
+  offLedger?: boolean;
+  contributionSource?: "employee" | "employer";
 };
 
 export type DayRow = {

@@ -15,6 +15,7 @@ import { api } from "../../lib/skippy-api";
 import {
   Button,
   Card,
+  Checkbox,
   Dialog,
   Drawer,
   EmptyState,
@@ -74,6 +75,10 @@ type Aggregates = {
   netCents: number;
   /** Transfers In minus Transfers Out (signed). Excluded from outgoing/incoming/net. */
   transferNetCents: number;
+  /** Off-ledger 401k contributions: in type/category totals, excluded from outgoing/net and balances. */
+  offLedgerInvestmentsCents: { employeeCents: number; employerCents: number; totalCents: number };
+  /** Income base for percent targets: income + employee off-ledger contributions. */
+  incomeDenominatorCents: number;
   categoryPercentOfOutgoing: Record<string, number>;
   typePercentOfOutgoing: Record<string, number>;
 };
@@ -220,6 +225,9 @@ type TxDraft = {
   description: string;
   txType: TxType;
   category: TxCategory;
+  /** Off-ledger contribution (Investments only): never touched the account. */
+  offLedger: boolean;
+  contributionSource: "employee" | "employer";
 };
 
 function emptyDraft(monthKey: string): TxDraft {
@@ -231,6 +239,8 @@ function emptyDraft(monthKey: string): TxDraft {
     description: "",
     txType: "Guilt-Free",
     category: TX_TYPE_CATEGORIES["Guilt-Free"][0] as TxCategory,
+    offLedger: false,
+    contributionSource: "employee",
   };
 }
 
@@ -265,6 +275,8 @@ function TransactionDialog({
             description: editing.description,
             txType: editing.txType as TxType,
             category: editing.category as TxCategory,
+            offLedger: editing.offLedger ?? false,
+            contributionSource: editing.contributionSource ?? "employee",
           }
         : emptyDraft(monthKey),
     );
@@ -278,6 +290,8 @@ function TransactionDialog({
       category: isValidTxTypeCategory(txType, current.category)
         ? current.category
         : (TX_TYPE_CATEGORIES[txType][0] as TxCategory),
+      // Off-ledger is only meaningful for Investments contributions.
+      offLedger: txType === "Investments" ? current.offLedger : false,
     }));
   };
 
@@ -292,6 +306,9 @@ function TransactionDialog({
     }
     setBusy(true);
     try {
+      const offLedgerFields = draft.offLedger
+        ? { offLedger: true, contributionSource: draft.contributionSource }
+        : { offLedger: false };
       if (editing) {
         await updateTransaction({
           transactionId: editing._id as any,
@@ -300,6 +317,7 @@ function TransactionDialog({
           description: draft.description.trim(),
           txType: draft.txType,
           category: draft.category,
+          ...offLedgerFields,
         });
         toast("Transaction updated.", "success");
       } else {
@@ -310,6 +328,7 @@ function TransactionDialog({
           description: draft.description.trim(),
           txType: draft.txType,
           category: draft.category,
+          ...(draft.offLedger ? { offLedger: true, contributionSource: draft.contributionSource } : {}),
         });
         toast("Transaction added.", "success");
       }
@@ -385,6 +404,28 @@ function TransactionDialog({
             </Select>
           </Field>
         </div>
+        {draft.txType === "Investments" ? (
+          <div className={styles.formRow}>
+            <Checkbox
+              label="Off-ledger (payroll-deducted; not part of account balance)"
+              checked={draft.offLedger}
+              onChange={(event) => setDraft({ ...draft, offLedger: event.target.checked })}
+            />
+            {draft.offLedger ? (
+              <Field label="Contribution source">
+                <Select
+                  value={draft.contributionSource}
+                  onChange={(event) =>
+                    setDraft({ ...draft, contributionSource: event.target.value as "employee" | "employer" })
+                  }
+                >
+                  <option value="employee">Employee (pre-tax pay)</option>
+                  <option value="employer">Employer match</option>
+                </Select>
+              </Field>
+            ) : null}
+          </div>
+        ) : null}
         <div className={styles.formActions}>
           {editing ? (
             <Button variant="danger" onClick={() => void remove()} disabled={busy}>
@@ -868,11 +909,22 @@ function MonthlyGrid({ report, onEditTransaction }: { report: MonthlyReport; onE
                             <button
                               key={entry._id}
                               type="button"
-                              className={styles.entry}
+                              className={cx(styles.entry, entry.offLedger && styles.entryOffLedger)}
                               onClick={() => onEditTransaction(entry)}
-                              title={`${entry.description} — ${formatCents(entry.amountCents)} (click to edit)`}
+                              title={
+                                entry.offLedger
+                                  ? `${entry.description} — ${formatCents(entry.amountCents)} — off-ledger contribution — not part of account balance (click to edit)`
+                                  : `${entry.description} — ${formatCents(entry.amountCents)} (click to edit)`
+                              }
                             >
-                              <span className={styles.entryDesc}>{entry.description}</span>
+                              <span className={styles.entryDesc}>
+                                {entry.description}
+                                {entry.offLedger ? (
+                                  <span className={styles.entryAutoTag} aria-label="off-ledger contribution">
+                                    auto
+                                  </span>
+                                ) : null}
+                              </span>
                               <span className={styles.entryAmount}>{formatCents(entry.amountCents)}</span>
                             </button>
                           ))}
@@ -999,6 +1051,27 @@ function MonthlyGrid({ report, onEditTransaction }: { report: MonthlyReport; onE
             </th>
           </tr>
 
+          {/* Off-ledger 401k note: these amounts show in the Investments band
+              above but never left checking, so they are outside outgoing/net
+              and the balance column. */}
+          {(report.current.offLedgerInvestmentsCents?.totalCents ?? 0) > 0 ? (
+            <tr>
+              <th scope="row" colSpan={GRID_COLUMN_COUNT} className={cx(styles.cell, styles.totalCell, styles.summaryRow)}>
+                <div className={styles.summaryStick}>
+                  <span
+                    className={styles.offLedgerNote}
+                    title="off-ledger contribution — not part of account balance"
+                  >
+                    incl. {formatCents(report.current.offLedgerInvestmentsCents.totalCents)} off-ledger 401k
+                    {" "}(employee {formatCents(report.current.offLedgerInvestmentsCents.employeeCents)}, employer{" "}
+                    {formatCents(report.current.offLedgerInvestmentsCents.employerCents)}) — not part of account
+                    balance
+                  </span>
+                </div>
+              </th>
+            </tr>
+          ) : null}
+
           <tr>
             <th scope="row" colSpan={GRID_COLUMN_COUNT} className={cx(styles.cell, styles.totalCell, styles.summaryRow)}>
               <div className={styles.summaryStick}>
@@ -1097,13 +1170,18 @@ export function FinancesContent() {
   const recentIncome = useMemo(() => {
     if (!report) return null;
     const nowKey = currentMonthKey();
+    // Percent targets resolve against the income denominator (income grossed
+    // up by employee off-ledger 401k contributions), so preview with it too.
     if (report.monthKey < nowKey) {
-      return { monthLabel: monthKeyShortLabel(report.monthKey), incomeCents: report.current.totalIncomingCents };
+      return {
+        monthLabel: monthKeyShortLabel(report.monthKey),
+        incomeCents: report.current.incomeDenominatorCents ?? report.current.totalIncomingCents,
+      };
     }
     if (report.monthKey === nowKey) {
       return {
         monthLabel: monthKeyShortLabel(report.previousMonthKey),
-        incomeCents: report.previous.totalIncomingCents,
+        incomeCents: report.previous.incomeDenominatorCents ?? report.previous.totalIncomingCents,
       };
     }
     return null;

@@ -9,15 +9,21 @@ import {
   migrateLegacyTransaction,
   aggregateMonthTransactions,
   assertIntegerCents,
+  assertValidOffLedgerFields,
+  assertValidRecurringContributions,
   assertValidTxTypeCategory,
   computeMonthlyFinancialReport,
+  contributionExternalId,
   dayStartUtc,
   isFinancialAccountType,
   isValidMonthKey,
   monthKeyFromDate,
   planBulkTransactionWrites,
+  planContributionMaterialization,
   previousMonthKey,
   summarizeMonthBalances,
+  type ContributionSource,
+  type RecurringContribution,
 } from "@skippy/shared";
 import { requireOwnedBrain } from "./auth";
 
@@ -62,6 +68,17 @@ const txSourceValidator = v.union(v.literal("plaid"), v.literal("manual"), v.lit
 
 const balanceSourceValidator = v.union(v.literal("plaid_derived"), v.literal("manual"));
 
+const contributionSourceValidator = v.union(v.literal("employee"), v.literal("employer"));
+
+// Recurring off-ledger contribution config (materialized monthly). Categories
+// are restricted to the Investments bucket.
+const recurringContributionValidator = v.object({
+  label: v.string(),
+  amountCents: v.number(),
+  contributionSource: contributionSourceValidator,
+  category: v.union(v.literal("Retirement"), v.literal("Brokerage")),
+});
+
 const dailyBalanceValidator = v.object({
   date: v.number(),
   endOfDayBalanceCents: v.number(),
@@ -75,6 +92,11 @@ const bulkTransactionValidator = v.object({
   category: txCategoryValidator,
   externalId: v.optional(v.string()),
   monthKey: v.optional(v.string()),
+  // OFF-LEDGER contribution (payroll-deducted 401k): must be txType
+  // 'Investments' and carry contributionSource. Excluded from outgoing/net
+  // and from all balance reasoning.
+  offLedger: v.optional(v.boolean()),
+  contributionSource: v.optional(contributionSourceValidator),
 });
 
 /* ------------------------------------------------------------------ */
@@ -113,8 +135,11 @@ async function requireAccount(db: any, brainInstanceId: any, accountId: string) 
 
 /**
  * Validates and normalizes a transaction's core fields. Enforces the fixed
- * type-category pairing and integer-cents amounts on every write path, and
- * derives the monthKey (UTC) from the date when not supplied.
+ * type-category pairing, integer-cents amounts, and the off-ledger invariants
+ * (Investments-only, contributionSource required) on every write path, and
+ * derives the monthKey (UTC) from the date when not supplied. The returned
+ * offLedger/contributionSource are explicitly undefined for on-ledger rows so
+ * db.patch clears them when a row is toggled back on-ledger.
  */
 function normalizeTransactionFields(input: {
   date: number;
@@ -123,9 +148,12 @@ function normalizeTransactionFields(input: {
   txType: string;
   category: string;
   monthKey?: string;
+  offLedger?: boolean;
+  contributionSource?: ContributionSource;
 }) {
   assertValidTxTypeCategory(input.txType, input.category);
   assertIntegerCents(input.amountCents, "amountCents");
+  assertValidOffLedgerFields(input);
   if (!Number.isFinite(input.date)) {
     throw new Error("date must be epoch milliseconds");
   }
@@ -140,12 +168,16 @@ function normalizeTransactionFields(input: {
     txType: input.txType,
     category: input.category,
     monthKey,
+    offLedger: input.offLedger ? (true as const) : undefined,
+    contributionSource: input.offLedger ? input.contributionSource : undefined,
   };
 }
 
 /**
  * Create or update a financial account. Idempotent: matches an existing account
  * by explicit accountId, then by plaidAccountId, then by case-insensitive name.
+ * recurringContributions uses REPLACE semantics when provided (an empty array
+ * clears the config) and is left untouched when omitted.
  */
 async function upsertAccount(
   db: any,
@@ -157,6 +189,7 @@ async function upsertAccount(
     mask: string;
     institution?: string;
     plaidAccountId?: string;
+    recurringContributions?: RecurringContribution[];
   },
   actor: Actor,
 ) {
@@ -167,6 +200,14 @@ async function upsertAccount(
   const mask = normalizeMask(input.mask);
   const institution = input.institution?.trim() || undefined;
   const plaidAccountId = input.plaidAccountId?.trim() || undefined;
+  const recurringContributions =
+    input.recurringContributions?.map((contribution) => ({
+      ...contribution,
+      label: contribution.label.trim(),
+    })) ?? undefined;
+  if (recurringContributions) {
+    assertValidRecurringContributions(recurringContributions);
+  }
   const now = Date.now();
 
   let existing: any = null;
@@ -198,6 +239,7 @@ async function upsertAccount(
       mask,
       institution: institution ?? existing.institution,
       plaidAccountId: plaidAccountId ?? existing.plaidAccountId,
+      recurringContributions: recurringContributions ?? existing.recurringContributions,
       updatedAt: now,
     });
     accountId = existing._id;
@@ -210,6 +252,7 @@ async function upsertAccount(
       mask,
       institution,
       plaidAccountId,
+      recurringContributions,
       createdAt: now,
       updatedAt: now,
     });
@@ -248,6 +291,8 @@ async function recordTransactionsBulk(
       category: string;
       externalId?: string;
       monthKey?: string;
+      offLedger?: boolean;
+      contributionSource?: ContributionSource;
     }>;
   },
   actor: Actor,
@@ -298,6 +343,8 @@ async function recordTransactionsBulk(
       txType: row.txType,
       category: row.category,
       externalId: row.externalId,
+      offLedger: row.offLedger,
+      contributionSource: row.contributionSource,
       source,
       createdAt: now,
       updatedAt: now,
@@ -314,6 +361,9 @@ async function recordTransactionsBulk(
       description: row.description,
       txType: row.txType,
       category: row.category,
+      // Explicitly undefined for on-ledger rows so a re-ingest can clear the flag.
+      offLedger: row.offLedger,
+      contributionSource: row.contributionSource,
       source,
       updatedAt: now,
     });
@@ -485,6 +535,8 @@ async function buildMonthlyReport(db: any, brainInstanceId: any, accountId: stri
     txType: transaction.txType,
     category: transaction.category,
     amountCents: transaction.amountCents,
+    offLedger: transaction.offLedger,
+    contributionSource: transaction.contributionSource,
   });
 
   const report = computeMonthlyFinancialReport({
@@ -539,6 +591,8 @@ async function buildMonthlyReport(db: any, brainInstanceId: any, accountId: stri
         category: transaction.category,
         source: transaction.source,
         externalId: transaction.externalId,
+        offLedger: transaction.offLedger,
+        contributionSource: transaction.contributionSource,
       }))
       .sort((a: any, b: any) => a.date - b.date),
   };
@@ -604,6 +658,8 @@ async function buildInsights(
         txType: transaction.txType,
         category: transaction.category,
         amountCents: transaction.amountCents,
+        offLedger: transaction.offLedger,
+        contributionSource: transaction.contributionSource,
       })),
     );
     months.push({
@@ -615,6 +671,8 @@ async function buildInsights(
       totalIncomingCents: aggregates.totalIncomingCents,
       netCents: aggregates.netCents,
       transferNetCents: aggregates.transferNetCents,
+      offLedgerInvestmentsCents: aggregates.offLedgerInvestmentsCents,
+      incomeDenominatorCents: aggregates.incomeDenominatorCents,
       endingBalanceCents: hasBalance ? balanceSumCents : null,
     });
   }
@@ -778,6 +836,8 @@ export const upsertFinancialAccountForViewer = mutationGeneric({
     mask: v.string(),
     institution: v.optional(v.string()),
     plaidAccountId: v.optional(v.string()),
+    // Replace semantics when provided ([] clears); untouched when omitted.
+    recurringContributions: v.optional(v.array(recurringContributionValidator)),
   },
   handler: async (ctx, args) => {
     const { user, brain } = await requireOwnedBrain(ctx);
@@ -816,6 +876,9 @@ export const createTransactionForViewer = mutationGeneric({
     txType: txTypeValidator,
     category: txCategoryValidator,
     monthKey: v.optional(v.string()),
+    // Off-ledger contribution (Investments only; contributionSource required).
+    offLedger: v.optional(v.boolean()),
+    contributionSource: v.optional(contributionSourceValidator),
   },
   handler: async (ctx, args) => {
     const { user, brain } = await requireOwnedBrain(ctx);
@@ -855,6 +918,9 @@ export const updateTransactionForViewer = mutationGeneric({
     txType: v.optional(txTypeValidator),
     category: v.optional(txCategoryValidator),
     monthKey: v.optional(v.string()),
+    // offLedger: false clears the flag (and contributionSource) on the row.
+    offLedger: v.optional(v.boolean()),
+    contributionSource: v.optional(contributionSourceValidator),
   },
   handler: async (ctx, args) => {
     const { user, brain } = await requireOwnedBrain(ctx);
@@ -868,12 +934,18 @@ export const updateTransactionForViewer = mutationGeneric({
 
     // Resolve the full post-edit field set, then re-validate the pairing so a
     // recategorization can never produce an invalid type/category combination.
+    // When the row ends up on-ledger, contributionSource is dropped with it.
+    const offLedger = args.offLedger ?? transaction.offLedger ?? false;
     const fields = normalizeTransactionFields({
       date: args.date ?? transaction.date,
       amountCents: args.amountCents ?? transaction.amountCents,
       description: args.description ?? transaction.description,
       txType: args.txType ?? transaction.txType,
       category: args.category ?? transaction.category,
+      offLedger,
+      contributionSource: offLedger
+        ? (args.contributionSource ?? transaction.contributionSource)
+        : undefined,
       ...(args.monthKey !== undefined
         ? { monthKey: args.monthKey }
         : args.date !== undefined
@@ -983,6 +1055,8 @@ export const upsertFinancialAccountForBrain = mutationGeneric({
     mask: v.string(),
     institution: v.optional(v.string()),
     plaidAccountId: v.optional(v.string()),
+    // Replace semantics when provided ([] clears); untouched when omitted.
+    recurringContributions: v.optional(v.array(recurringContributionValidator)),
     actorId: v.optional(v.string()),
   },
   handler: async ({ db }, args) => {
@@ -995,9 +1069,86 @@ export const upsertFinancialAccountForBrain = mutationGeneric({
         mask: args.mask,
         ...(args.institution !== undefined ? { institution: args.institution } : {}),
         ...(args.plaidAccountId !== undefined ? { plaidAccountId: args.plaidAccountId } : {}),
+        ...(args.recurringContributions !== undefined
+          ? { recurringContributions: args.recurringContributions }
+          : {}),
       },
       { actorType: "harness", ...(args.actorId ? { actorId: args.actorId } : {}) },
     );
+  },
+});
+
+/**
+ * Materializes an account's configured recurringContributions for one month as
+ * OFF-LEDGER Investments transactions (txType 'Investments', category from the
+ * config, dated the 15th of the month UTC, source 'harness'). Idempotent via
+ * externalId '401k-{contributionSource}-{monthKey}': contributions already
+ * materialized for the month are skipped, never duplicated. Returns counts.
+ */
+export const materializeContributionsForBrain = mutationGeneric({
+  args: {
+    brainInstanceId: v.id("brainInstances"),
+    accountId: v.id("financialAccounts"),
+    monthKey: v.string(),
+    actorId: v.optional(v.string()),
+  },
+  handler: async ({ db }, args) => {
+    const account = await requireAccount(db, args.brainInstanceId, args.accountId);
+    const contributions: RecurringContribution[] = account.recurringContributions ?? [];
+    const now = Date.now();
+
+    // Existing externalIds for this month's candidate inserts (brain-scoped).
+    const existingExternalIds = new Set<string>();
+    for (const contribution of contributions) {
+      const externalId = contributionExternalId(contribution.contributionSource as ContributionSource, args.monthKey);
+      const existing = await db
+        .query("financialTransactions")
+        .withIndex("by_brain_external", (q: any) =>
+          q.eq("brainInstanceId", args.brainInstanceId).eq("externalId", externalId),
+        )
+        .first();
+      if (existing) existingExternalIds.add(externalId);
+    }
+
+    const plan = planContributionMaterialization(contributions, args.monthKey, existingExternalIds);
+
+    for (const row of plan.inserts) {
+      await db.insert("financialTransactions", {
+        brainInstanceId: args.brainInstanceId,
+        accountId: args.accountId,
+        date: row.date,
+        monthKey: row.monthKey,
+        amountCents: row.amountCents,
+        description: row.description,
+        txType: row.txType,
+        category: row.category,
+        externalId: row.externalId,
+        offLedger: true,
+        contributionSource: row.contributionSource,
+        source: "harness",
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+
+    await db.insert("activityEvents", {
+      brainInstanceId: args.brainInstanceId,
+      activityType: "financial_contributions_materialized",
+      actorType: "harness",
+      ...(args.actorId ? { actorId: args.actorId } : {}),
+      timestamp: now,
+      summary: `Materialized ${plan.inserts.length} off-ledger contribution${plan.inserts.length === 1 ? "" : "s"} for ${account.name} (${args.monthKey}; ${plan.skipped} already present)`,
+      metadata: { accountId: args.accountId, monthKey: args.monthKey, inserted: plan.inserts.length, skipped: plan.skipped },
+    });
+
+    return {
+      accountId: args.accountId,
+      accountName: account.name,
+      monthKey: args.monthKey,
+      inserted: plan.inserts.length,
+      skipped: plan.skipped,
+      configured: contributions.length,
+    };
   },
 });
 

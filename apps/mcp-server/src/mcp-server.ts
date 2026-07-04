@@ -24,6 +24,7 @@ import {
 } from "./tools.js";
 import {
   BALANCE_SOURCES,
+  CONTRIBUTION_SOURCES,
   FINANCIAL_ACCOUNT_TYPES,
   MONTH_KEY_PATTERN,
   TX_CATEGORIES,
@@ -1794,7 +1795,7 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
     {
       title: "Record financial transactions (bulk)",
       description:
-        `Bulk-ingest financial transactions for a tracked account. Financial data from Plaid is ground truth — ingest it directly, never queue it for review. The harness maps Plaid data to the FIXED Conscious Spending Plan taxonomy at ingest time using its judgment (${taxonomySummary}); the type-category pairing is enforced and invalid pairs are rejected. Transfers between the owner's own accounts (tracked or untracked, e.g. business checking or a partner's external account) are txType 'Transfer' with category 'Transfers In' or 'Transfers Out' — never Income or an outgoing bucket — and are automatically excluded from budget totals. Pass Plaid transaction_ids as externalIds for idempotency: an existing externalId updates the stored transaction instead of duplicating it. All amounts are INTEGER CENTS (positive magnitudes; txType determines direction — for Transfer the direction is the category). Returns {inserted, updated, skipped} counts.`,
+        `Bulk-ingest financial transactions for a tracked account. Financial data from Plaid is ground truth — ingest it directly, never queue it for review. The harness maps Plaid data to the FIXED Conscious Spending Plan taxonomy at ingest time using its judgment (${taxonomySummary}); the type-category pairing is enforced and invalid pairs are rejected. Transfers between the owner's own accounts (tracked or untracked, e.g. business checking or a partner's external account) are txType 'Transfer' with category 'Transfers In' or 'Transfers Out' — never Income or an outgoing bucket — and are automatically excluded from budget totals. Payroll-deducted retirement contributions (e.g. pre-tax 401k) that never touch checking are recorded with offLedger: true (txType 'Investments' only) plus contributionSource: 'employee' amounts are the owner's pre-tax pay, so they gross up the percent-of-income denominator used for CSP budget targets; 'employer' match amounts count in Investments totals but are NOT income and never gross up the denominator. Off-ledger rows are excluded from outgoing/net and from account balances. Pass Plaid transaction_ids as externalIds for idempotency: an existing externalId updates the stored transaction instead of duplicating it. All amounts are INTEGER CENTS (positive magnitudes; txType determines direction — for Transfer the direction is the category). Returns {inserted, updated, skipped} counts.`,
       annotations: { destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: z.object({
         accountId: z.string().describe("Financial account ID from upsert_financial_account."),
@@ -1824,6 +1825,18 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
                 .regex(MONTH_KEY_PATTERN)
                 .optional()
                 .describe("'YYYY-MM' month bucket. Derived from date (UTC) when omitted."),
+              offLedger: z
+                .boolean()
+                .optional()
+                .describe(
+                  "True for OFF-LEDGER contributions that never touched the account (payroll-deducted 401k). Must be txType 'Investments' with contributionSource. Counted in Investments totals but excluded from outgoing/net and account balances.",
+                ),
+              contributionSource: z
+                .enum(CONTRIBUTION_SOURCES)
+                .optional()
+                .describe(
+                  "Required when offLedger. 'employee' = the owner's pre-tax pay (grosses up the percent-of-income denominator for CSP targets); 'employer' = match (counted in totals, never grosses up the denominator).",
+                ),
             }),
           )
           .min(1)

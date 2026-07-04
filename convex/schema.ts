@@ -847,6 +847,22 @@ export default defineSchema({
     institution: v.optional(v.string()),
     // Plaid account_id for idempotent mapping of Plaid-sourced accounts.
     plaidAccountId: v.optional(v.string()),
+    // Recurring OFF-LEDGER contributions (e.g. monthly payroll-deducted 401k
+    // employee contribution + employer match), materialized into off-ledger
+    // Investments transactions once per month by materializeContributionsForBrain.
+    // At most one entry per contributionSource (externalIds are per source+month).
+    recurringContributions: v.optional(
+      v.array(
+        v.object({
+          label: v.string(),
+          // Positive integer cents.
+          amountCents: v.number(),
+          contributionSource: v.union(v.literal("employee"), v.literal("employer")),
+          // Investments categories only.
+          category: v.union(v.literal("Retirement"), v.literal("Brokerage")),
+        }),
+      ),
+    ),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
@@ -871,6 +887,18 @@ export default defineSchema({
     // Plaid transaction_id used for idempotent dedupe: re-ingesting the same
     // externalId updates the existing row instead of duplicating it.
     externalId: v.optional(v.string()),
+    // OFF-LEDGER row (e.g. payroll-deducted 401k contribution): the money never
+    // touched this account. Off-ledger rows use the normal txType/category
+    // fields (restricted to Investments) and count in type/category totals,
+    // but are EXCLUDED from outgoing/incoming/net. INVARIANT: they never enter
+    // balance reasoning — financialDailyBalances rows are independent snapshots
+    // computed from the raw feed and are never derived from transactions, so an
+    // off-ledger row must never be summed toward any balance.
+    offLedger: v.optional(v.boolean()),
+    // Required when offLedger. 'employee' = pre-tax pay the owner earned
+    // (grosses up the percent-of-income denominator for CSP targets);
+    // 'employer' = match, never the owner's income (does NOT gross it up).
+    contributionSource: v.optional(v.union(v.literal("employee"), v.literal("employer"))),
     source: financialTxSource,
     createdAt: v.number(),
     updatedAt: v.number(),
