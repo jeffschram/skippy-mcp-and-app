@@ -34,7 +34,7 @@ Before capture or retrieval work that may create durable memory, read `reference
    - `capture`: only for useful free-form notes when a typed entity is not clear.
    - `list_interview_templates` / `start_interview` / `get_interview` / `answer_interview_question` / `complete_interview`: run guided second-brain interviews inside the harness chat. Use the returned `assistantDisplayName` when offering the interview.
    - `link_entities`: only after accepted entity IDs are known.
-   - `get_current_context`: resolve what the user has open in the web app. Call this when the user says "this project", "here", or "add a task to this project" without naming it; use the returned active project's id.
+   - `get_current_context`: resolve what the user has open in the web app. Call this when the user says "this project", "here", or "add a task to this project" without naming it; use the returned active project's id. The active project payload includes `_id`, `title`, `kind`, `repoUrl`, `localPath`, `effectiveAssetsPath`, and `effectiveOutputPath`.
    - `plan_project`: decompose an accepted project into executable tasks. Requires an LLM provider on the brain.
    - `brief_task`: write a repo-grounded execution brief plus acceptance criteria for a Proposed task and move it to Briefed.
    - `list_ready_tasks` / `get_task_brief`: find the next unblocked task and fetch its hand-off brief to execute.
@@ -85,7 +85,17 @@ A project may be a **code project** with an associated GitHub repo URL and a loc
 4. Call `record_task_result` with the PR URL as `resultUrl` (and a short summary). This moves the task to `in_review`. **Do not** pass `markDone` — the user completes it.
 5. When the user approves/merges the PR, the task is marked done (`mark_task_done` or recording the result with `markDone: true`), which unblocks dependent tasks.
 
-Non-code projects use a local folder only for output files/assets; the same result-recording flow applies without a PR.
+Non-code projects may still have a local folder for inputs and artifacts; the same result-recording flow applies without a PR.
+
+### Assets and output folders
+
+Project payloads (task briefs, `get_current_context`) include `effectiveAssetsPath` and `effectiveOutputPath`. These derive from the project local folder — `<localPath>/_assets` for user-provided inputs and `<localPath>/_docs` for generated artifacts — unless the user set explicit overrides in the web app's project Settings. Convention:
+
+- Read user-provided inputs (source documents, data, reference material) from `effectiveAssetsPath`.
+- Write generated artifacts and deliverables to `effectiveOutputPath`.
+- An explicit user instruction always overrides these defaults.
+- Skippy never checks these folders exist — create them with `mkdir -p` on first write.
+- Never write deliverables into the project's code repo unless they ARE the product.
 
 ## Entity Mapping
 

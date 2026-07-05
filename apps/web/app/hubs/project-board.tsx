@@ -18,6 +18,7 @@ import {
   Settings2,
   Sparkles,
 } from "lucide-react";
+import { isValidFolderPathFormat } from "@skippy/shared";
 import { api } from "../../lib/skippy-api";
 import { LiveGate } from "../live-auth";
 import {
@@ -46,6 +47,52 @@ type AnyRecord = Record<string, any>;
 const PRE_EXECUTION = new Set(["unplanned", "briefed", "ready", "blocked"]);
 // States where recording a result makes sense.
 const RESULT_STATES = new Set(["in_progress", "in_review"]);
+
+/**
+ * Text input for an assets/output folder override. Unset means "derived from
+ * the project local folder" — the muted hint shows the derived default and a
+ * reset affordance clears the override back to it.
+ */
+function FolderOverrideField({
+  label,
+  value,
+  onChange,
+  derivedDefault,
+  disabled,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  derivedDefault: string | undefined;
+  disabled: boolean;
+}) {
+  return (
+    <Field label={label}>
+      <TextInput
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={derivedDefault ?? ""}
+        disabled={disabled}
+      />
+      <span className="muted" style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 12 }}>
+        <span>{disabled ? "set the project local folder first" : `default: ${derivedDefault}`}</span>
+        {!disabled && value ? (
+          <button
+            type="button"
+            className="text-button"
+            style={{ fontSize: 12 }}
+            onClick={(event) => {
+              event.preventDefault();
+              onChange("");
+            }}
+          >
+            Reset to default
+          </button>
+        ) : null}
+      </span>
+    </Field>
+  );
+}
 
 function buildBriefText(task: AnyRecord, project?: AnyRecord): string {
   const lines = [`# ${task.title}`];
@@ -110,7 +157,15 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
   const [pRepo, setPRepo] = useState("");
   const [pBaseBranch, setPBaseBranch] = useState("");
   const [pFolder, setPFolder] = useState("");
+  const [pAssets, setPAssets] = useState("");
+  const [pOutput, setPOutput] = useState("");
   const [pSummary, setPSummary] = useState("");
+  // Live base for the derived assets/output hints: the local-folder input,
+  // trimmed with trailing slashes stripped (matches server normalization).
+  const pFolderBase = useMemo(() => {
+    const trimmed = pFolder.trim();
+    return trimmed.replace(/[\\/]+$/, "") || trimmed;
+  }, [pFolder]);
 
   const selected = board?.tasks?.find((task: AnyRecord) => task._id === selectedId) ?? null;
   const detail = useQuery(
@@ -147,6 +202,8 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
     setPRepo(project.repoUrl ?? "");
     setPBaseBranch(project.defaultBaseBranch ?? "");
     setPFolder(project.localPath ?? "");
+    setPAssets(project.assetsFolderPath ?? "");
+    setPOutput(project.outputFolderPath ?? "");
     setPSummary(project.summary ?? "");
     setSettingsOpen(true);
   };
@@ -333,6 +390,18 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
   };
 
   const saveSettings = async () => {
+    // Mirror the server's format-only validation; existence checks are the
+    // executing harness's job, never the app's.
+    for (const [label, value] of [
+      ["Assets folder", pAssets],
+      ["Output folder", pOutput],
+    ] as const) {
+      const trimmed = value.trim();
+      if (trimmed && !isValidFolderPathFormat(trimmed)) {
+        toast(`${label} must be an absolute path starting with '/', '~', or a drive letter.`, "error");
+        return;
+      }
+    }
     setBusy(true);
     try {
       await updateProject({
@@ -341,6 +410,8 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
         repoUrl: pRepo,
         defaultBaseBranch: pBaseBranch,
         localPath: pFolder,
+        assetsFolderPath: pAssets,
+        outputFolderPath: pOutput,
         summary: pSummary,
       } as any);
       toast("Project updated.", "success");
@@ -824,9 +895,23 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                   <TextInput value={pBaseBranch} onChange={(event) => setPBaseBranch(event.target.value)} placeholder="main" />
                 </Field>
               ) : null}
-              <Field label="Local folder path (output files / assets)">
+              <Field label="Project local folder">
                 <TextInput value={pFolder} onChange={(event) => setPFolder(event.target.value)} placeholder="/Users/you/projects/thing" />
               </Field>
+              <FolderOverrideField
+                label="Assets folder (inputs)"
+                value={pAssets}
+                onChange={setPAssets}
+                derivedDefault={pFolderBase ? `${pFolderBase}/_assets` : undefined}
+                disabled={!pFolderBase}
+              />
+              <FolderOverrideField
+                label="Output folder (artifacts)"
+                value={pOutput}
+                onChange={setPOutput}
+                derivedDefault={pFolderBase ? `${pFolderBase}/_docs` : undefined}
+                disabled={!pFolderBase}
+              />
               <Field label="Summary">
                 <TextArea value={pSummary} onChange={(event) => setPSummary(event.target.value)} />
               </Field>

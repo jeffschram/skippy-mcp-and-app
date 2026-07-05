@@ -273,8 +273,14 @@ export default defineSchema({
     kind: v.optional(v.union(v.literal("code"), v.literal("general"))),
     repoUrl: v.optional(v.string()),
     defaultBaseBranch: v.optional(v.string()),
-    // Local folder path for output files/assets (all projects may have one).
+    // Project local folder (all projects may have one).
     localPath: v.optional(v.string()),
+    // Explicit overrides for the assets (inputs) and output (artifacts) folders.
+    // Stored ONLY when the user overrides; when unset, readers derive
+    // `${localPath}/_assets` and `${localPath}/_docs` lazily at read time
+    // (see effectiveProjectPaths in @skippy/shared) — no backfill/migration.
+    assetsFolderPath: v.optional(v.string()),
+    outputFolderPath: v.optional(v.string()),
     // Dismissing a focus bullet about this entity hides it from focus generation until
     // this epoch-ms timestamp, without changing the entity's real status.
     focusSnoozedUntil: v.optional(v.number()),

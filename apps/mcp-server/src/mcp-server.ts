@@ -338,6 +338,13 @@ function buildHarnessBootstrapMessage({
     "- Agent work should end in `in_review` unless the owner explicitly allows automatic completion.",
     "- Coding tasks should produce a branch, verification, and PR when the project has a GitHub repo.",
     "",
+    "## Project Folders",
+    "",
+    "- Project payloads (task briefs, `get_current_context`) include `effectiveAssetsPath` and `effectiveOutputPath`, derived from the project local folder (`<localPath>/_assets` and `<localPath>/_docs`) unless the user set explicit overrides in project Settings.",
+    "- Read user-provided inputs from `effectiveAssetsPath`; write generated artifacts and deliverables to `effectiveOutputPath`. An explicit user instruction always overrides these defaults.",
+    "- Skippy never checks these folders exist — create them with `mkdir -p` on first write.",
+    "- Never write deliverables into the project's code repo unless they ARE the product.",
+    "",
     "## Key Tools",
     "",
     "- `get_current_context`: resolve active app route/project.",
@@ -1580,7 +1587,7 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
     {
       title: "Get the user's current app context",
       description:
-        "Read-only. Returns what the user currently has open in the Skippy web app — notably the active project (id + title) and route. Use this to resolve references like 'this project' or 'add a task here' when the user does not name the project explicitly. Returns null if nothing is open.",
+        "Read-only. Returns what the user currently has open in the Skippy web app — notably the active project (id, title, kind, repoUrl, localPath, effectiveAssetsPath, effectiveOutputPath) and route. Use this to resolve references like 'this project' or 'add a task here' when the user does not name the project explicitly. effectiveAssetsPath is where user-provided inputs live; effectiveOutputPath is where generated artifacts belong. Returns null if nothing is open.",
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: z.object({}),
     },
@@ -1635,7 +1642,7 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
     {
       title: "Get a task's execution brief",
       description:
-        "Read-only. Fetch the ready-to-hand-off brief for a single task: description, execution brief, acceptance criteria, owning project, and dependency status. Hand this to a coding agent to execute.",
+        "Read-only. Fetch the ready-to-hand-off brief for a single task: description, execution brief, acceptance criteria, owning project, and dependency status. Hand this to a coding agent to execute. The project includes effectiveAssetsPath and effectiveOutputPath: read user-provided inputs from effectiveAssetsPath and write generated artifacts/deliverables to effectiveOutputPath (explicit user instructions override; create folders with mkdir -p on first write; never write deliverables into the project's code repo unless they ARE the product).",
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: z.object({
         taskId: z.string().describe("Task ID to fetch the brief for."),
