@@ -46,9 +46,9 @@ export type EffectiveProjectPaths = {
 export function effectiveProjectPaths(project: ProjectFolderPathFields): EffectiveProjectPaths {
   return {
     effectiveAssetsPath:
-      project.assetsFolderPath ?? (project.localPath ? `${project.localPath}/_assets` : undefined),
+      project.assetsFolderPath ?? (project.localPath ? `${project.localPath}/_library` : undefined),
     effectiveOutputPath:
-      project.outputFolderPath ?? (project.localPath ? `${project.localPath}/_docs` : undefined),
+      project.outputFolderPath ?? (project.localPath ? `${project.localPath}/_output` : undefined),
   };
 }
 

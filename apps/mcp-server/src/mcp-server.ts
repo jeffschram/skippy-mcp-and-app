@@ -340,7 +340,7 @@ function buildHarnessBootstrapMessage({
     "",
     "## Project Folders",
     "",
-    "- Project payloads (task briefs, `get_current_context`) include `effectiveAssetsPath` and `effectiveOutputPath`, derived from the project local folder (`<localPath>/_assets` and `<localPath>/_docs`) unless the user set explicit overrides in project Settings.",
+    "- Project payloads (task briefs, `get_current_context`) include `effectiveAssetsPath` and `effectiveOutputPath`, derived from the project local folder (`<localPath>/_library` and `<localPath>/_output`) unless the user set explicit overrides in project Settings.",
     "- Read user-provided inputs from `effectiveAssetsPath`; write generated artifacts and deliverables to `effectiveOutputPath`. An explicit user instruction always overrides these defaults.",
     "- Skippy never checks these folders exist — create them with `mkdir -p` on first write.",
     "- Never write deliverables into the project's code repo unless they ARE the product.",

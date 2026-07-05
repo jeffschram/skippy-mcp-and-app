@@ -24,7 +24,7 @@ async function projectTaskIds(db: any, brainInstanceId: any, projectId: string):
 
 /**
  * Assets (inputs) and output (artifacts) folders, derived lazily at read time:
- * an unset override falls back to `${localPath}/_assets` / `${localPath}/_docs`,
+ * an unset override falls back to `${localPath}/_library` / `${localPath}/_output`,
  * so defaults automatically track localPath edits. Use this everywhere a
  * project payload leaves Convex.
  */
@@ -655,7 +655,7 @@ export const updateProjectForViewer = mutationGeneric({
     defaultBaseBranch: v.optional(v.string()),
     localPath: v.optional(v.string()),
     // Explicit assets/output folder overrides. Empty string clears the
-    // override (falls back to the derived `${localPath}/_assets` / `_docs`).
+    // override (falls back to the derived `${localPath}/_library` / `_output`).
     assetsFolderPath: v.optional(v.string()),
     outputFolderPath: v.optional(v.string()),
   },

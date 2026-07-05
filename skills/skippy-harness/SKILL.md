@@ -89,7 +89,7 @@ Non-code projects may still have a local folder for inputs and artifacts; the sa
 
 ### Assets and output folders
 
-Project payloads (task briefs, `get_current_context`) include `effectiveAssetsPath` and `effectiveOutputPath`. These derive from the project local folder — `<localPath>/_assets` for user-provided inputs and `<localPath>/_docs` for generated artifacts — unless the user set explicit overrides in the web app's project Settings. Convention:
+Project payloads (task briefs, `get_current_context`) include `effectiveAssetsPath` and `effectiveOutputPath`. These derive from the project local folder — `<localPath>/_library` for user-provided inputs and `<localPath>/_output` for generated artifacts — unless the user set explicit overrides in the web app's project Settings. Convention:
 
 - Read user-provided inputs (source documents, data, reference material) from `effectiveAssetsPath`.
 - Write generated artifacts and deliverables to `effectiveOutputPath`.

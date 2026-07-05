@@ -393,7 +393,7 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
     // Mirror the server's format-only validation; existence checks are the
     // executing harness's job, never the app's.
     for (const [label, value] of [
-      ["Assets folder", pAssets],
+      ["Library folder", pAssets],
       ["Output folder", pOutput],
     ] as const) {
       const trimmed = value.trim();
@@ -899,17 +899,17 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                 <TextInput value={pFolder} onChange={(event) => setPFolder(event.target.value)} placeholder="/Users/you/projects/thing" />
               </Field>
               <FolderOverrideField
-                label="Assets folder (inputs)"
+                label="Library folder (user files)"
                 value={pAssets}
                 onChange={setPAssets}
-                derivedDefault={pFolderBase ? `${pFolderBase}/_assets` : undefined}
+                derivedDefault={pFolderBase ? `${pFolderBase}/_library` : undefined}
                 disabled={!pFolderBase}
               />
               <FolderOverrideField
                 label="Output folder (artifacts)"
                 value={pOutput}
                 onChange={setPOutput}
-                derivedDefault={pFolderBase ? `${pFolderBase}/_docs` : undefined}
+                derivedDefault={pFolderBase ? `${pFolderBase}/_output` : undefined}
                 disabled={!pFolderBase}
               />
               <Field label="Summary">
