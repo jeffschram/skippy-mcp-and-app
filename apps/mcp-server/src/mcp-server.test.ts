@@ -231,6 +231,30 @@ function createFakeClient(overrides: Partial<SkippyClient> = {}): SkippyClient {
       account: { _id: input.accountId, name: "Chase Checking" },
       current: { totalOutgoingCents: 500000, totalIncomingCents: 800000, netCents: 300000 },
     }),
+    generateProjectFileUploadUrl: async () => "https://upload.convex.cloud/api/storage/upload_123",
+    registerProjectFile: async (_brainInstanceId, input) => ({
+      fileId: "project_file_123",
+      projectId: input.projectId,
+      taskId: input.taskId,
+      fileName: input.fileName,
+      mimeType: input.mimeType,
+      sizeBytes: input.sizeBytes,
+      uploadedBy: "harness",
+    }),
+    listProjectFiles: async (_brainInstanceId, input) => [
+      {
+        _id: "project_file_123",
+        projectId: input.projectId,
+        taskId: input.taskId,
+        fileName: "brand-guidelines.pdf",
+        mimeType: "application/pdf",
+        sizeBytes: 2048,
+        uploadedBy: "user",
+        note: "Use for all deliverables.",
+        createdAt: 1780850000000,
+        url: "https://files.convex.cloud/project_file_123?token=ephemeral",
+      },
+    ],
   };
 
   return { ...client, ...overrides };
@@ -297,6 +321,11 @@ describe("Skippy MCP manifest", () => {
       const recordFinancialTransactions = tools.find((tool) => tool.name === "record_financial_transactions");
       const recordFinancialBalances = tools.find((tool) => tool.name === "record_financial_balances");
       const getFinancialReport = tools.find((tool) => tool.name === "get_financial_report");
+      const listProjectFiles = tools.find((tool) => tool.name === "list_project_files");
+      const generateProjectFileUploadUrl = tools.find(
+        (tool) => tool.name === "generate_project_file_upload_url",
+      );
+      const registerProjectFile = tools.find((tool) => tool.name === "register_project_file");
 
       expect(ingestObject?.description).toContain("importance rubric");
       expect(ingestObject?.description).toContain("default to 'saved'");
@@ -370,6 +399,27 @@ describe("Skippy MCP manifest", () => {
       expect(getFinancialReport?.annotations?.readOnlyHint).toBe(true);
       expect(getFinancialReport?.description).toContain("previous-month deltas");
       expect(getFinancialReport?.inputSchema.properties?.monthKey).toBeDefined();
+      expect(listProjectFiles?.annotations?.readOnlyHint).toBe(true);
+      expect(listProjectFiles?.description).toContain("Download URLs are ephemeral");
+      expect(listProjectFiles?.description).toContain("effectiveAssetsPath");
+      expect(listProjectFiles?.description).toContain("_library");
+      expect(listProjectFiles?.description).toContain("matching size");
+      expect(listProjectFiles?.description).toContain("not in the library unless registered");
+      expect(listProjectFiles?.inputSchema.properties?.projectId).toBeDefined();
+      expect(listProjectFiles?.inputSchema.properties?.taskId).toBeDefined();
+      expect(generateProjectFileUploadUrl?.description).toContain("short-lived");
+      expect(generateProjectFileUploadUrl?.description).toContain("{storageId}");
+      expect(generateProjectFileUploadUrl?.description).toContain("register_project_file");
+      expect(generateProjectFileUploadUrl?.inputSchema.properties?.projectId).toBeDefined();
+      expect(registerProjectFile?.description).toContain("generate_project_file_upload_url");
+      expect(registerProjectFile?.description).toContain("HTTP POST the raw file bytes");
+      expect(registerProjectFile?.description).toContain("{storageId}");
+      expect(registerProjectFile?.description).toContain("25 MB");
+      expect(registerProjectFile?.description).toContain("executables and arbitrary binaries are rejected");
+      expect(registerProjectFile?.inputSchema.properties?.storageId).toBeDefined();
+      expect(registerProjectFile?.inputSchema.properties?.fileName).toBeDefined();
+      expect(registerProjectFile?.inputSchema.properties?.mimeType).toBeDefined();
+      expect(registerProjectFile?.inputSchema.properties?.sizeBytes).toBeDefined();
       expect(capture?.description).toContain("accepted note directly");
       expect(ask?.annotations?.readOnlyHint).toBe(true);
       expect(refreshFocusSummary?.description).toContain("Generate and store");
@@ -450,6 +500,11 @@ describe("Skippy MCP manifest", () => {
           "Read user-provided inputs from `effectiveAssetsPath`; write generated artifacts and deliverables to `effectiveOutputPath`.",
         );
         expect(harnessBootstrap.messages[0].content.text).toContain("`mkdir -p` on first write");
+        expect(harnessBootstrap.messages[0].content.text).toContain("cloud-canonical");
+        expect(harnessBootstrap.messages[0].content.text).toContain("`list_project_files`");
+        expect(harnessBootstrap.messages[0].content.text).toContain(
+          "Files found only locally are NOT in the library unless registered",
+        );
         expect(harnessBootstrap.messages[0].content.text).toContain(
           "Never write deliverables into the project's code repo unless they ARE the product.",
         );
@@ -874,6 +929,211 @@ describe("Skippy MCP manifest", () => {
         title: "Interesting article",
         reviewUrl: "http://127.0.0.1:3000/brain",
       });
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
+  it("returns the upload flow for project file upload URL generation", async () => {
+    const urlCalls: string[] = [];
+    const server = createMcpServer(
+      createFakeClient({
+        generateProjectFileUploadUrl: async (brainInstanceId) => {
+          urlCalls.push(brainInstanceId);
+          return "https://upload.convex.cloud/api/storage/upload_123";
+        },
+      }),
+      "brain_123",
+    );
+    const client = new Client({ name: "upload-url-test", version: "0.1.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    try {
+      await server.connect(serverTransport);
+      await client.connect(clientTransport);
+
+      const result = await client.callTool({
+        name: "generate_project_file_upload_url",
+        arguments: { projectId: "project_123" },
+      });
+
+      expect(urlCalls).toEqual(["brain_123"]);
+      const confirmation = textResult(result);
+      expect(confirmation).toMatchObject({
+        status: "upload_url_generated",
+        entityType: "project_file",
+        uploadUrl: "https://upload.convex.cloud/api/storage/upload_123",
+      });
+      expect(String(confirmation.nextAction)).toContain("{storageId}");
+      expect(String(confirmation.nextAction)).toContain("register_project_file");
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
+  it("maps register_project_file fields onto the brain client call", async () => {
+    const registerCalls: Array<{ brainInstanceId: string; input: unknown }> = [];
+    const server = createMcpServer(
+      createFakeClient({
+        registerProjectFile: async (brainInstanceId, input) => {
+          registerCalls.push({ brainInstanceId, input });
+          return {
+            fileId: "project_file_123",
+            projectId: input.projectId,
+            taskId: input.taskId,
+            fileName: input.fileName,
+            mimeType: input.mimeType,
+            sizeBytes: input.sizeBytes,
+            uploadedBy: "harness",
+          };
+        },
+      }),
+      "brain_123",
+    );
+    const client = new Client({ name: "register-file-test", version: "0.1.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    try {
+      await server.connect(serverTransport);
+      await client.connect(clientTransport);
+
+      const result = await client.callTool({
+        name: "register_project_file",
+        arguments: {
+          projectId: "project_123",
+          taskId: "task_123",
+          fileName: "brand-guidelines.pdf",
+          mimeType: "application/pdf",
+          sizeBytes: 2048,
+          storageId: "storage_123",
+          note: "Use for all deliverables.",
+        },
+      });
+
+      expect(registerCalls).toEqual([
+        {
+          brainInstanceId: "brain_123",
+          input: {
+            projectId: "project_123",
+            taskId: "task_123",
+            fileName: "brand-guidelines.pdf",
+            mimeType: "application/pdf",
+            sizeBytes: 2048,
+            storageId: "storage_123",
+            note: "Use for all deliverables.",
+            actorId: "skippy_mcp",
+          },
+        },
+      ]);
+      expect(textResult(result)).toMatchObject({
+        status: "registered",
+        entityType: "project_file",
+        fileId: "project_file_123",
+        projectId: "project_123",
+        taskId: "task_123",
+        fileName: "brand-guidelines.pdf",
+        mimeType: "application/pdf",
+        sizeBytes: 2048,
+        uploadedBy: "harness",
+        reviewUrl: "http://127.0.0.1:3000/projects",
+      });
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
+  it("rejects register_project_file calls for disallowed file types", async () => {
+    const server = createMcpServer(createFakeClient(), "brain_123");
+    const client = new Client({ name: "register-file-reject-test", version: "0.1.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    try {
+      await server.connect(serverTransport);
+      await client.connect(clientTransport);
+
+      const result = await client.callTool({
+        name: "register_project_file",
+        arguments: {
+          projectId: "project_123",
+          fileName: "malware.exe",
+          mimeType: "application/x-msdownload",
+          sizeBytes: 2048,
+          storageId: "storage_123",
+        },
+      });
+
+      expect(result.isError).toBe(true);
+      const content = result.content as Array<{ type: string; text?: string }>;
+      expect(content[0]?.text).toContain("not allowed in the project library");
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
+  it("returns chat-friendly project file listings with ephemeral download URLs", async () => {
+    const listCalls: Array<{ brainInstanceId: string; input: unknown }> = [];
+    const server = createMcpServer(
+      createFakeClient({
+        listProjectFiles: async (brainInstanceId, input) => {
+          listCalls.push({ brainInstanceId, input });
+          return [
+            {
+              _id: "project_file_123",
+              projectId: input.projectId,
+              taskId: "task_123",
+              fileName: "brand-guidelines.pdf",
+              mimeType: "application/pdf",
+              sizeBytes: 2048,
+              uploadedBy: "user",
+              note: "Use for all deliverables.",
+              createdAt: 1780850000000,
+              url: "https://files.convex.cloud/project_file_123?token=ephemeral",
+            },
+          ];
+        },
+      }),
+      "brain_123",
+    );
+    const client = new Client({ name: "list-files-test", version: "0.1.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    try {
+      await server.connect(serverTransport);
+      await client.connect(clientTransport);
+
+      const result = await client.callTool({
+        name: "list_project_files",
+        arguments: { projectId: "project_123" },
+      });
+
+      expect(listCalls).toEqual([
+        { brainInstanceId: "brain_123", input: { projectId: "project_123" } },
+      ]);
+      const confirmation = textResult(result);
+      expect(confirmation).toMatchObject({
+        status: "listed",
+        entityType: "project_file",
+        projectId: "project_123",
+        count: 1,
+      });
+      expect(confirmation.files).toEqual([
+        {
+          fileId: "project_file_123",
+          fileName: "brand-guidelines.pdf",
+          sizeBytes: 2048,
+          mimeType: "application/pdf",
+          taskId: "task_123",
+          note: "Use for all deliverables.",
+          uploadedBy: "user",
+          downloadUrl: "https://files.convex.cloud/project_file_123?token=ephemeral",
+        },
+      ]);
+      expect(String(confirmation.nextAction)).toContain("ephemeral");
+      expect(String(confirmation.nextAction)).toContain("effectiveAssetsPath");
     } finally {
       await client.close();
       await server.close();

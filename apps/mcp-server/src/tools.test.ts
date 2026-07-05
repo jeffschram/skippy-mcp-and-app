@@ -80,6 +80,9 @@ function createFakeClient(): { client: SkippyClient; calls: Array<{ name: string
       recordFinancialBalances: (brainInstanceId, input) =>
         record("recordFinancialBalances", brainInstanceId, input),
       getFinancialReport: (brainInstanceId, input) => record("getFinancialReport", brainInstanceId, input),
+      generateProjectFileUploadUrl: (brainInstanceId) => record("generateProjectFileUploadUrl", brainInstanceId),
+      registerProjectFile: (brainInstanceId, input) => record("registerProjectFile", brainInstanceId, input),
+      listProjectFiles: (brainInstanceId, input) => record("listProjectFiles", brainInstanceId, input),
     },
   };
 }
@@ -882,6 +885,89 @@ describe("Skippy MCP tool handlers", () => {
     await expect(tools.getFinancialReport({ accountId: "account_123", monthKey: "June 2026" })).rejects.toThrow(
       /invalid monthKey/,
     );
+  });
+
+  it("generates project file upload URLs against the brain without extra fields", async () => {
+    const { client, calls } = createFakeClient();
+    const tools = createSkippyToolHandlers(client, "brain_123");
+
+    await tools.generateProjectFileUploadUrl({ projectId: "project_123" });
+
+    expect(calls[0]).toEqual({
+      name: "generateProjectFileUploadUrl",
+      args: ["brain_123"],
+    });
+  });
+
+  it("registers project files with normalized fields and the MCP actor id", async () => {
+    const { client, calls } = createFakeClient();
+    const tools = createSkippyToolHandlers(client, "brain_123");
+
+    await tools.registerProjectFile({
+      projectId: "project_123",
+      taskId: "task_123",
+      storageId: "storage_123",
+      fileName: "  brand-guidelines.pdf  ",
+      mimeType: "Application/PDF; charset=binary",
+      sizeBytes: 2048,
+      note: "Use for all deliverables.",
+    });
+
+    expect(calls[0]).toMatchObject({
+      name: "registerProjectFile",
+      args: [
+        "brain_123",
+        {
+          projectId: "project_123",
+          taskId: "task_123",
+          storageId: "storage_123",
+          fileName: "brand-guidelines.pdf",
+          mimeType: "application/pdf",
+          sizeBytes: 2048,
+          note: "Use for all deliverables.",
+          actorId: "skippy_mcp",
+        },
+      ],
+    });
+  });
+
+  it("rejects project files that fail shared validation before calling Convex", async () => {
+    const { client, calls } = createFakeClient();
+    const tools = createSkippyToolHandlers(client, "brain_123");
+
+    await expect(
+      tools.registerProjectFile({
+        projectId: "project_123",
+        storageId: "storage_123",
+        fileName: "malware.exe",
+        mimeType: "application/x-msdownload",
+        sizeBytes: 2048,
+      }),
+    ).rejects.toThrow(/not allowed in the project library/);
+
+    await expect(
+      tools.registerProjectFile({
+        projectId: "project_123",
+        storageId: "storage_123",
+        fileName: "huge.pdf",
+        mimeType: "application/pdf",
+        sizeBytes: 25 * 1024 * 1024 + 1,
+      }),
+    ).rejects.toThrow(/too large/);
+
+    expect(calls).toHaveLength(0);
+  });
+
+  it("lists project files scoped to a project and optional task", async () => {
+    const { client, calls } = createFakeClient();
+    const tools = createSkippyToolHandlers(client, "brain_123");
+
+    await tools.listProjectFiles({ projectId: "project_123", taskId: "task_123" });
+
+    expect(calls[0]).toMatchObject({
+      name: "listProjectFiles",
+      args: ["brain_123", { projectId: "project_123", taskId: "task_123" }],
+    });
   });
 
   it("previews notification dispatch candidates in dry run mode", async () => {
