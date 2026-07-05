@@ -39,6 +39,7 @@ import {
 } from "../components";
 import { EXECUTION_COLUMNS, executionStateTone, taskStatusTone, titleCase } from "../../lib/display";
 import { useViewerReady } from "./use-viewer";
+import { ProjectLibrarySection, TaskAttachments } from "./project-library";
 import boardStyles from "./board.module.css";
 
 type AnyRecord = Record<string, any>;
@@ -604,6 +605,8 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
             </div>
           )}
 
+          <ProjectLibrarySection projectId={projectId} />
+
           <Drawer
             open={Boolean(selectedId)}
             onClose={() => setSelectedId(null)}
@@ -794,6 +797,8 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                     </>
                   )}
                 </section> : null}
+
+                <TaskAttachments projectId={projectId} taskId={selected._id} />
 
                 {detail?.dependencies?.length ? (
                   <section>

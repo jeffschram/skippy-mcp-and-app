@@ -1,0 +1,208 @@
+/* Project Library: collapsible file card on the project board plus the
+   compact task-attachment variant in the task sidepanel. */
+
+.libraryCard {
+  margin-top: 16px;
+}
+
+.libraryToggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 14px 16px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-weight: 760;
+  font-size: 15px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.libraryToggle:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: -2px;
+  border-radius: 12px;
+}
+
+.libraryCount {
+  display: inline-grid;
+  place-items: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: light-dark(#e8e2d3, #333);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.libraryBody {
+  display: grid;
+  gap: 12px;
+  padding: 0 16px 16px;
+}
+
+/* ---------------- Drop zone / picker ---------------- */
+
+.dropZone {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 18px 14px;
+  border: 1.5px dashed var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 14px;
+  text-align: center;
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease;
+}
+
+.dropZone:hover,
+.dropZone:focus-visible {
+  border-color: var(--blue);
+  outline: none;
+}
+
+.dropZoneActive {
+  border-color: var(--blue);
+  background: light-dark(#eef6ff, #18293a);
+}
+
+.dropZoneHint {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ---------------- Upload status ---------------- */
+
+.uploadRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.uploadRow[data-status="failed"] {
+  color: var(--red);
+}
+
+.uploadName {
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.uploadNote {
+  overflow-wrap: anywhere;
+}
+
+/* ---------------- File list ---------------- */
+
+.fileList {
+  display: grid;
+  gap: 8px;
+}
+
+.fileRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel-strong);
+}
+
+.thumb {
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  object-fit: cover;
+}
+
+.fileIcon {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--muted);
+}
+
+.fileRowCompact .thumb,
+.fileRowCompact .fileIcon {
+  width: 32px;
+  height: 32px;
+}
+
+.fileMeta {
+  display: grid;
+  gap: 2px;
+  flex: 1 1 160px;
+  min-width: 0;
+}
+
+.fileName {
+  color: inherit;
+  font-weight: 700;
+  font-size: 14px;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+a.fileName:hover,
+a.fileName:focus-visible {
+  color: var(--blue);
+  text-decoration: underline;
+}
+
+.fileSub {
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.fileActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.confirmDelete {
+  padding: 4px 10px;
+  border: 1px solid var(--red);
+  border-radius: 8px;
+  background: none;
+  color: var(--red);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.confirmDelete:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.emptyNote {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+}

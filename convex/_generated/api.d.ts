@@ -16,6 +16,7 @@ import type * as knowledge from "../knowledge.js";
 import type * as mcpTokens from "../mcpTokens.js";
 import type * as memoryGraph from "../memoryGraph.js";
 import type * as planning from "../planning.js";
+import type * as projectFiles from "../projectFiles.js";
 import type * as projects from "../projects.js";
 import type * as resurfacing from "../resurfacing.js";
 import type * as settings from "../settings.js";
@@ -37,6 +38,7 @@ declare const fullApi: ApiFromModules<{
   mcpTokens: typeof mcpTokens;
   memoryGraph: typeof memoryGraph;
   planning: typeof planning;
+  projectFiles: typeof projectFiles;
   projects: typeof projects;
   resurfacing: typeof resurfacing;
   settings: typeof settings;
