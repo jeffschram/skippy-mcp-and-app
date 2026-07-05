@@ -52,10 +52,10 @@ describe("normalizeFolderPathInput", () => {
 });
 
 describe("effectiveProjectPaths", () => {
-  it("derives _assets and _docs from localPath when no overrides are set", () => {
+  it("derives _library and _output from localPath when no overrides are set", () => {
     expect(effectiveProjectPaths({ localPath: "/Users/pat/projects/thing" })).toEqual({
-      effectiveAssetsPath: "/Users/pat/projects/thing/_assets",
-      effectiveOutputPath: "/Users/pat/projects/thing/_docs",
+      effectiveAssetsPath: "/Users/pat/projects/thing/_library",
+      effectiveOutputPath: "/Users/pat/projects/thing/_output",
     });
   });
 
@@ -77,7 +77,7 @@ describe("effectiveProjectPaths", () => {
       effectiveProjectPaths({ localPath: "/Users/pat/thing", assetsFolderPath: "/Volumes/inputs" }),
     ).toEqual({
       effectiveAssetsPath: "/Volumes/inputs",
-      effectiveOutputPath: "/Users/pat/thing/_docs",
+      effectiveOutputPath: "/Users/pat/thing/_output",
     });
   });
 
@@ -98,8 +98,8 @@ describe("effectiveProjectPaths", () => {
   it("tracks localPath edits because derivation happens at read time", () => {
     const before = effectiveProjectPaths({ localPath: "/old/spot" });
     const after = effectiveProjectPaths({ localPath: "/new/spot" });
-    expect(before.effectiveAssetsPath).toBe("/old/spot/_assets");
-    expect(after.effectiveAssetsPath).toBe("/new/spot/_assets");
-    expect(after.effectiveOutputPath).toBe("/new/spot/_docs");
+    expect(before.effectiveAssetsPath).toBe("/old/spot/_library");
+    expect(after.effectiveAssetsPath).toBe("/new/spot/_library");
+    expect(after.effectiveOutputPath).toBe("/new/spot/_output");
   });
 });
