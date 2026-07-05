@@ -3037,6 +3037,49 @@ export const updateLinkStatusForBrain = mutationGeneric({
   },
 });
 
+export const updatePersonForBrain = mutationGeneric({
+  args: {
+    brainInstanceId: v.id("brainInstances"),
+    personId: v.id("people"),
+    name: v.optional(v.string()),
+    relationshipContext: v.optional(v.string()),
+    notes: v.optional(v.string()),
+    actorId: v.optional(v.string()),
+  },
+  handler: async ({ db }, args) => {
+    const person = await db.get(args.personId);
+    if (!person || person.brainInstanceId !== args.brainInstanceId) {
+      throw new Error("person not found for brain instance");
+    }
+    const now = Date.now();
+    const patch: Record<string, unknown> = { updatedAt: now };
+    if (args.name !== undefined) {
+      const name = args.name.trim();
+      if (!name) throw new Error("person name cannot be empty");
+      patch.name = name;
+    }
+    if (args.relationshipContext !== undefined) {
+      patch.relationshipContext = args.relationshipContext.trim() || undefined;
+    }
+    if (args.notes !== undefined) {
+      patch.notes = args.notes.trim() || undefined;
+    }
+    await db.patch(args.personId, patch);
+
+    await db.insert("activityEvents", {
+      brainInstanceId: args.brainInstanceId,
+      entityRef: { entityType: "person", entityId: args.personId },
+      activityType: "entity_corrected",
+      actorType: "harness",
+      actorId: args.actorId,
+      timestamp: now,
+      summary: `Person record corrected: ${(patch.name as string) ?? person.name}`,
+    });
+
+    return { personId: args.personId, status: "updated" };
+  },
+});
+
 export const captureThoughtForBrain = mutationGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
