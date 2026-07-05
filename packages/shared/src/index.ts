@@ -52,6 +52,96 @@ export function effectiveProjectPaths(project: ProjectFolderPathFields): Effecti
   };
 }
 
+/* ------------------------------------------------------------------ */
+/* Project library files (Convex file storage)                         */
+/* ------------------------------------------------------------------ */
+
+/** Maximum size for a single project library file: 25 MiB. */
+export const PROJECT_FILE_MAX_BYTES = 25 * 1024 * 1024;
+
+/**
+ * MIME types allowed into the project library. Patterns ending in "/*" allow
+ * a whole top-level type; everything else is an exact match. Executables and
+ * arbitrary binaries (application/octet-stream, application/x-msdownload,
+ * archives of unknown content, etc.) are deliberately NOT on this list.
+ */
+export const PROJECT_FILE_ALLOWED_MIME_PATTERNS = [
+  // Images (png, jpeg, gif, webp, svg, ...).
+  "image/*",
+  // Documents.
+  "application/pdf",
+  // Text (text/plain, text/markdown, text/csv, text/html, ...).
+  "text/*",
+  // Structured data.
+  "application/json",
+  "application/csv",
+  // Common office documents.
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.ms-powerpoint",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "application/vnd.oasis.opendocument.text",
+  "application/vnd.oasis.opendocument.spreadsheet",
+  "application/vnd.oasis.opendocument.presentation",
+] as const;
+
+export function isAllowedProjectFileMimeType(mimeType: string): boolean {
+  const normalized = mimeType.trim().toLowerCase().split(";")[0]!.trim();
+  if (!normalized) return false;
+  return PROJECT_FILE_ALLOWED_MIME_PATTERNS.some((pattern) => {
+    if (pattern.endsWith("/*")) {
+      return normalized.startsWith(pattern.slice(0, -1));
+    }
+    return normalized === pattern;
+  });
+}
+
+export type ProjectFileInput = {
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+};
+
+/**
+ * Validate a project library file before registering it. Throws with a clear
+ * message when the file name is empty, the size exceeds PROJECT_FILE_MAX_BYTES,
+ * or the MIME type is not on the allowlist (executables/unknown binaries are
+ * rejected). Returns the normalized fileName and mimeType on success.
+ */
+export function validateProjectFileInput(input: ProjectFileInput): {
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+} {
+  const fileName = input.fileName.trim();
+  if (!fileName) {
+    throw new Error("fileName cannot be empty");
+  }
+
+  if (!Number.isFinite(input.sizeBytes) || input.sizeBytes < 0) {
+    throw new Error("sizeBytes must be a non-negative number");
+  }
+  if (input.sizeBytes > PROJECT_FILE_MAX_BYTES) {
+    throw new Error(
+      `file is too large: ${input.sizeBytes} bytes exceeds the ${PROJECT_FILE_MAX_BYTES} byte (25 MB) project library cap`,
+    );
+  }
+
+  const mimeType = input.mimeType.trim().toLowerCase().split(";")[0]!.trim();
+  if (!mimeType) {
+    throw new Error("mimeType cannot be empty");
+  }
+  if (!isAllowedProjectFileMimeType(mimeType)) {
+    throw new Error(
+      `mimeType '${mimeType}' is not allowed in the project library. Executables and arbitrary binaries are rejected; allowed types: images, PDFs, text (plain/markdown/csv), JSON, and common office documents.`,
+    );
+  }
+
+  return { fileName, mimeType, sizeBytes: input.sizeBytes };
+}
+
 export const ENTITY_TYPES = [
   "goal",
   "project",

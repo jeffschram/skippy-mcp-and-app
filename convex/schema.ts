@@ -669,6 +669,26 @@ export default defineSchema({
     .index("by_brain_project", ["brainInstanceId", "projectId"])
     .index("by_brain_created", ["brainInstanceId", "createdAt"]),
 
+  // Cloud-canonical project library backed by Convex file storage. The local
+  // `_library` folder (effectiveAssetsPath) is the harness's materialization of
+  // these rows; files found only locally are not in the library until registered.
+  // Never persist storage URLs — resolve them at read time with storage.getUrl.
+  projectFiles: defineTable({
+    brainInstanceId: v.id("brainInstances"),
+    projectId: v.id("projects"),
+    taskId: v.optional(v.id("tasks")),
+    storageId: v.id("_storage"),
+    fileName: v.string(),
+    mimeType: v.string(),
+    sizeBytes: v.number(),
+    uploadedBy: v.union(v.literal("user"), v.literal("harness")),
+    note: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_brain_project", ["brainInstanceId", "projectId"])
+    .index("by_brain_task", ["brainInstanceId", "taskId"]),
+
   ingestionRuns: defineTable({
     brainInstanceId: v.id("brainInstances"),
     harness: v.string(),

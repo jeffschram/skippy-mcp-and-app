@@ -10,6 +10,7 @@ import {
   type GetInterviewInput,
   type InterviewKind,
   type LinkMemoryInput,
+  type ListProjectFilesInput,
   type MemoryDetailInput,
   type MemoryKind,
   type MemoryListInput,
@@ -18,6 +19,7 @@ import {
   type RecordFinancialBalancesInput,
   type RecordFinancialTransactionsInput,
   type RecordMemoryInput,
+  type RegisterProjectFileInput,
   type SkippyClient,
   type StartInterviewInput,
   type UpsertFinancialAccountInput,
@@ -27,6 +29,7 @@ import {
   CONTRIBUTION_SOURCES,
   FINANCIAL_ACCOUNT_TYPES,
   MONTH_KEY_PATTERN,
+  PROJECT_FILE_MAX_BYTES,
   TX_CATEGORIES,
   TX_SOURCES,
   TX_TYPES,
@@ -342,6 +345,9 @@ function buildHarnessBootstrapMessage({
     "",
     "- Project payloads (task briefs, `get_current_context`) include `effectiveAssetsPath` and `effectiveOutputPath`, derived from the project local folder (`<localPath>/_library` and `<localPath>/_output`) unless the user set explicit overrides in project Settings.",
     "- Read user-provided inputs from `effectiveAssetsPath`; write generated artifacts and deliverables to `effectiveOutputPath`. An explicit user instruction always overrides these defaults.",
+    "- The project library is cloud-canonical: user-provided files live in Convex storage, and the local `_library` folder (`effectiveAssetsPath`) is just the harness's materialization of it.",
+    "- At task start, call `list_project_files` for the project (and task) and download any relevant files into `effectiveAssetsPath` before working, skipping files already present with a matching size. Download URLs are ephemeral — fetch promptly.",
+    "- Files found only locally are NOT in the library unless registered: upload with `generate_project_file_upload_url` + HTTP POST, then `register_project_file`.",
     "- Skippy never checks these folders exist — create them with `mkdir -p` on first write.",
     "- Never write deliverables into the project's code repo unless they ARE the product.",
     "",
@@ -537,6 +543,59 @@ function linkStatusUpdatedConfirmation(input: { status: string }, result: unknow
     linkId: resultRecord.linkId,
     title: resultRecord.title,
     reviewUrl: reviewUrl("/brain"),
+  };
+}
+
+function projectFileUploadUrlConfirmation(result: unknown) {
+  return {
+    status: "upload_url_generated",
+    entityType: "project_file",
+    uploadUrl: typeof result === "string" ? result : undefined,
+    nextAction:
+      "HTTP POST the raw file bytes to uploadUrl with the file's Content-Type header. The response JSON contains {storageId}; pass it to register_project_file. The URL is short-lived and single-use.",
+  };
+}
+
+function projectFileRegisteredConfirmation(input: RegisterProjectFileInput, result: unknown) {
+  const resultRecord = objectResult(result);
+  return {
+    status: "registered",
+    entityType: "project_file",
+    fileId: resultRecord.fileId,
+    projectId: resultRecord.projectId ?? input.projectId,
+    taskId: resultRecord.taskId ?? input.taskId,
+    fileName: resultRecord.fileName ?? input.fileName,
+    mimeType: resultRecord.mimeType ?? input.mimeType,
+    sizeBytes: resultRecord.sizeBytes ?? input.sizeBytes,
+    uploadedBy: resultRecord.uploadedBy ?? "harness",
+    reviewUrl: reviewUrl("/projects"),
+  };
+}
+
+function projectFilesListConfirmation(input: ListProjectFilesInput, result: unknown) {
+  const rows = Array.isArray(result) ? result : [];
+  const files = rows.map((row) => {
+    const record = objectResult(row);
+    return {
+      fileId: record._id,
+      fileName: record.fileName,
+      sizeBytes: record.sizeBytes,
+      mimeType: record.mimeType,
+      taskId: record.taskId,
+      note: record.note,
+      uploadedBy: record.uploadedBy,
+      downloadUrl: record.url,
+    };
+  });
+  return {
+    status: "listed",
+    entityType: "project_file",
+    projectId: input.projectId,
+    taskId: input.taskId,
+    count: files.length,
+    files,
+    nextAction:
+      "Download URLs are ephemeral — download promptly. Materialize the files you need into the project's effectiveAssetsPath (_library) before working, skipping files already present with a matching size.",
   };
 }
 
@@ -1718,6 +1777,73 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
           },
         ),
       ),
+  );
+
+  server.registerTool(
+    "list_project_files",
+    {
+      title: "List project library files",
+      description:
+        "Read-only. List the cloud-canonical project library files for a project (optionally scoped to one task), with fileName, sizeBytes, mimeType, taskId, note, and a downloadUrl per file plus a count. Download URLs are ephemeral — download promptly. At task start, materialize the files you need into the project's effectiveAssetsPath (the _library folder) before working, skipping files already present locally with a matching size. Files found only locally are not in the library unless registered with register_project_file.",
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: z.object({
+        projectId: z.string().describe("Project ID whose library files to list."),
+        taskId: z.string().optional().describe("Optional task ID to list only files attached to that task."),
+      }),
+    },
+    async (args) => {
+      const input = stripUndefined(args) as ListProjectFilesInput;
+      return toolResult(projectFilesListConfirmation(input, await tools.listProjectFiles(input)));
+    },
+  );
+
+  server.registerTool(
+    "generate_project_file_upload_url",
+    {
+      title: "Generate a project file upload URL",
+      description:
+        "Step 1 of adding a file to the cloud-canonical project library. Returns a short-lived, single-use Convex storage POST URL. HTTP POST the raw file bytes to it (set the file's Content-Type header); the response JSON contains {storageId}. Then call register_project_file with that storageId to make the file part of the library.",
+      annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      inputSchema: z.object({
+        projectId: z
+          .string()
+          .optional()
+          .describe("Optional project ID for chat context only; the upload URL itself is not project-scoped."),
+      }),
+    },
+    async (args) =>
+      toolResult(
+        projectFileUploadUrlConfirmation(
+          await tools.generateProjectFileUploadUrl(stripUndefined(args) as { projectId?: string }),
+        ),
+      ),
+  );
+
+  server.registerTool(
+    "register_project_file",
+    {
+      title: "Register an uploaded project file",
+      description:
+        `Step 2 of adding a file to the cloud-canonical project library: registers a file the harness already uploaded to Convex storage. Full flow: (1) call generate_project_file_upload_url, (2) HTTP POST the raw file bytes to the returned URL — the response JSON contains {storageId}, (3) call this tool with that storageId plus fileName, mimeType, and sizeBytes. Max ${PROJECT_FILE_MAX_BYTES} bytes (25 MB); allowed types are images, PDFs, text (plain/markdown/csv), JSON, and common office documents — executables and arbitrary binaries are rejected. Files found only locally in _library are not in the library until registered here.`,
+      annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      inputSchema: z.object({
+        projectId: z.string().describe("Project ID the file belongs to."),
+        taskId: z.string().optional().describe("Optional task ID to attach the file to."),
+        fileName: z.string().describe("File name including extension, e.g. 'brand-guidelines.pdf'."),
+        mimeType: z.string().describe("MIME type of the uploaded bytes, e.g. 'application/pdf'."),
+        sizeBytes: z
+          .number()
+          .int()
+          .min(0)
+          .describe(`File size in bytes. Maximum ${PROJECT_FILE_MAX_BYTES} (25 MB).`),
+        storageId: z.string().describe("Convex storageId returned by POSTing the bytes to the upload URL."),
+        note: z.string().optional().describe("Optional short note about what the file is for."),
+      }),
+    },
+    async (args) => {
+      const input = stripUndefined(args) as RegisterProjectFileInput;
+      return toolResult(projectFileRegisteredConfirmation(input, await tools.registerProjectFile(input)));
+    },
   );
 
   const upsertDescriptionNotes: Partial<Record<(typeof entityTypeValues)[number], string>> = {

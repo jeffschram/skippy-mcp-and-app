@@ -27,6 +27,7 @@ import {
   isValidMonthKey,
   linkAgeDays,
   normalizeCandidateObject,
+  validateProjectFileInput,
 } from "@skippy/shared";
 import webPush from "web-push";
 
@@ -251,6 +252,24 @@ export type SkippyClient = {
     input: RecordFinancialBalancesInput,
   ): Promise<unknown>;
   getFinancialReport(brainInstanceId: string, input: { accountId: string; monthKey: string }): Promise<unknown>;
+  generateProjectFileUploadUrl(brainInstanceId: string): Promise<unknown>;
+  registerProjectFile(brainInstanceId: string, input: RegisterProjectFileInput & { actorId?: string }): Promise<unknown>;
+  listProjectFiles(brainInstanceId: string, input: ListProjectFilesInput): Promise<unknown>;
+};
+
+export type RegisterProjectFileInput = {
+  projectId: string;
+  taskId?: string;
+  storageId: string;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  note?: string;
+};
+
+export type ListProjectFilesInput = {
+  projectId: string;
+  taskId?: string;
 };
 
 export type UpsertFinancialAccountInput = {
@@ -1122,6 +1141,27 @@ export function createSkippyToolHandlers(client: SkippyClient, brainInstanceId: 
         ...input,
         actorId: "skippy_mcp",
       });
+    },
+
+    async generateProjectFileUploadUrl(_input: { projectId?: string } = {}) {
+      // projectId is chat context only; the upload URL is brain-scoped.
+      return await client.generateProjectFileUploadUrl(brainInstanceId);
+    },
+
+    async registerProjectFile(input: RegisterProjectFileInput) {
+      // Validate locally for fast, clear errors; Convex re-validates server-side.
+      const { fileName, mimeType, sizeBytes } = validateProjectFileInput(input);
+      return await client.registerProjectFile(brainInstanceId, {
+        ...input,
+        fileName,
+        mimeType,
+        sizeBytes,
+        actorId: "skippy_mcp",
+      });
+    },
+
+    async listProjectFiles(input: ListProjectFilesInput) {
+      return await client.listProjectFiles(brainInstanceId, input);
     },
 
     async captureThought(input: CaptureThoughtInput) {

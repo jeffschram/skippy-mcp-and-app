@@ -39,6 +39,7 @@ Before capture or retrieval work that may create durable memory, read `reference
    - `brief_task`: write a repo-grounded execution brief plus acceptance criteria for a Proposed task and move it to Briefed.
    - `list_ready_tasks` / `get_task_brief`: find the next unblocked task and fetch its hand-off brief to execute.
    - `record_task_result`: report an executed task's outcome (summary + PR/commit URL) for owner review.
+   - `list_project_files` / `generate_project_file_upload_url` / `register_project_file`: read and add cloud-canonical project library files (see "Project library" below).
    - `mark_task_done`: only when the user says the Skippy task is complete.
 
 5. Apply the consent model.
@@ -96,6 +97,14 @@ Project payloads (task briefs, `get_current_context`) include `effectiveAssetsPa
 - An explicit user instruction always overrides these defaults.
 - Skippy never checks these folders exist — create them with `mkdir -p` on first write.
 - Never write deliverables into the project's code repo unless they ARE the product.
+
+### Project library (cloud-canonical files)
+
+The project library is cloud-canonical: user-provided project files live in Convex file storage, and the local `_library` folder (`effectiveAssetsPath`) is the harness's materialization of it.
+
+- At task start, call `list_project_files` for the project (and task, when the task ID is known) and download any relevant files into `effectiveAssetsPath` before working. Skip files already present locally with a matching size. Download URLs are ephemeral — fetch promptly, never store them.
+- Files found only locally are NOT in the library unless registered. To add a file: `generate_project_file_upload_url`, HTTP POST the raw bytes to the returned URL (the response JSON contains `{storageId}`), then `register_project_file` with that `storageId`, `fileName`, `mimeType`, and `sizeBytes`.
+- Library files are capped at 25 MB and limited to safe document types (images, PDFs, text/markdown/csv, JSON, common office documents); executables and arbitrary binaries are rejected.
 
 ## Entity Mapping
 

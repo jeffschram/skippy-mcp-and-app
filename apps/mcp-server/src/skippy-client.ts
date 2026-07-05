@@ -79,6 +79,11 @@ const recordDailyBalancesForBrainRef = makeFunctionReference<"mutation">(
   "finances:recordDailyBalancesForBrain",
 );
 const monthlyReportForBrainRef = makeFunctionReference<"query">("finances:monthlyReportForBrain");
+const generateProjectFileUploadUrlForBrainRef = makeFunctionReference<"mutation">(
+  "projectFiles:generateUploadUrlForBrain",
+);
+const registerProjectFileForBrainRef = makeFunctionReference<"mutation">("projectFiles:registerFileForBrain");
+const listProjectFilesForBrainRef = makeFunctionReference<"query">("projectFiles:listFilesForBrain");
 
 export function createConvexSkippyClient(convexUrl: string, authToken?: string): SkippyClient {
   const client = new ConvexHttpClient(convexUrl);
@@ -191,6 +196,12 @@ export function createConvexSkippyClient(convexUrl: string, authToken?: string):
       client.mutation(recordDailyBalancesForBrainRef, { brainInstanceId, ...input }),
     getFinancialReport: (brainInstanceId, input) =>
       client.query(monthlyReportForBrainRef, { brainInstanceId, ...input }),
+    generateProjectFileUploadUrl: (brainInstanceId) =>
+      client.mutation(generateProjectFileUploadUrlForBrainRef, { brainInstanceId }),
+    registerProjectFile: (brainInstanceId, input) =>
+      client.mutation(registerProjectFileForBrainRef, { brainInstanceId, ...input }),
+    listProjectFiles: (brainInstanceId, input) =>
+      client.query(listProjectFilesForBrainRef, { brainInstanceId, ...input }),
   };
 }
 
