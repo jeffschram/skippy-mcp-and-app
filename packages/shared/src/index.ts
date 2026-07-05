@@ -1,3 +1,57 @@
+/* ------------------------------------------------------------------ */
+/* Project folder paths (assets/output)                                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Format-only check that a value looks like an absolute path: '/', '~', or a
+ * Windows drive letter ("C:\" / "C:/"). The app (browser PWA + cloud Convex)
+ * cannot see the user's disk, so existence checks and `mkdir -p` on first
+ * write are the harness's job, never the app's.
+ */
+export function isValidFolderPathFormat(path: string): boolean {
+  return /^(?:\/|~|[A-Za-z]:[\\/])/.test(path);
+}
+
+/**
+ * Normalize a user-entered folder path for storage: trim, strip trailing
+ * slashes, and treat empty input as "clear the override" (undefined).
+ * Throws when a non-empty value does not look like an absolute path.
+ */
+export function normalizeFolderPathInput(value: string, label = "folder path"): string | undefined {
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  if (!isValidFolderPathFormat(trimmed)) {
+    throw new Error(`${label} must be an absolute path starting with '/', '~', or a drive letter like 'C:\\'`);
+  }
+  const stripped = trimmed.replace(/[\\/]+$/, "");
+  return stripped || trimmed;
+}
+
+export type ProjectFolderPathFields = {
+  localPath?: string;
+  assetsFolderPath?: string;
+  outputFolderPath?: string;
+};
+
+export type EffectiveProjectPaths = {
+  effectiveAssetsPath: string | undefined;
+  effectiveOutputPath: string | undefined;
+};
+
+/**
+ * Lazy read-time derivation of a project's assets (inputs) and output
+ * (artifacts) folders. An unset override IS the derived state — defaults
+ * automatically track localPath edits, so there is no backfill/migration.
+ */
+export function effectiveProjectPaths(project: ProjectFolderPathFields): EffectiveProjectPaths {
+  return {
+    effectiveAssetsPath:
+      project.assetsFolderPath ?? (project.localPath ? `${project.localPath}/_assets` : undefined),
+    effectiveOutputPath:
+      project.outputFolderPath ?? (project.localPath ? `${project.localPath}/_docs` : undefined),
+  };
+}
+
 export const ENTITY_TYPES = [
   "goal",
   "project",

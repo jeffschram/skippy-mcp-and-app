@@ -283,6 +283,8 @@ describe("Skippy MCP manifest", () => {
       const linkMemory = tools.find((tool) => tool.name === "link_memory");
       const listRequestedReadyTasks = tools.find((tool) => tool.name === "list_requested_ready_tasks");
       const briefTask = tools.find((tool) => tool.name === "brief_task");
+      const getTaskBriefTool = tools.find((tool) => tool.name === "get_task_brief");
+      const getCurrentContextTool = tools.find((tool) => tool.name === "get_current_context");
       const listInterviewTemplates = tools.find((tool) => tool.name === "list_interview_templates");
       const startInterview = tools.find((tool) => tool.name === "start_interview");
       const answerInterviewQuestion = tools.find((tool) => tool.name === "answer_interview_question");
@@ -310,6 +312,17 @@ describe("Skippy MCP manifest", () => {
       expect(createTask?.inputSchema.properties?.kind).toBeDefined();
       expect(listRequestedReadyTasks?.description).toContain("explicitly requested");
       expect(briefTask?.description).toContain("Ground the brief in the actual repo");
+      expect(getTaskBriefTool?.description).toContain("read user-provided inputs from effectiveAssetsPath");
+      expect(getTaskBriefTool?.description).toContain(
+        "write generated artifacts/deliverables to effectiveOutputPath",
+      );
+      expect(getTaskBriefTool?.description).toContain("mkdir -p");
+      expect(getTaskBriefTool?.description).toContain(
+        "never write deliverables into the project's code repo unless they ARE the product",
+      );
+      expect(getCurrentContextTool?.description).toContain("effectiveAssetsPath");
+      expect(getCurrentContextTool?.description).toContain("effectiveOutputPath");
+      expect(getCurrentContextTool?.description).toContain("localPath");
       expect(briefTask?.inputSchema.properties?.executionBrief).toBeDefined();
       expect(briefTask?.inputSchema.properties?.acceptanceCriteria).toBeDefined();
       expect(updateLinkStatus?.description).toContain("genuine lifecycle changes");
@@ -432,6 +445,14 @@ describe("Skippy MCP manifest", () => {
         expect(harnessBootstrap.messages[0].content.text).toContain("You are Claude Code");
         expect(harnessBootstrap.messages[0].content.text).toContain("First 5 Minutes");
         expect(harnessBootstrap.messages[0].content.text).toContain("`brief_task`");
+        expect(harnessBootstrap.messages[0].content.text).toContain("Project Folders");
+        expect(harnessBootstrap.messages[0].content.text).toContain(
+          "Read user-provided inputs from `effectiveAssetsPath`; write generated artifacts and deliverables to `effectiveOutputPath`.",
+        );
+        expect(harnessBootstrap.messages[0].content.text).toContain("`mkdir -p` on first write");
+        expect(harnessBootstrap.messages[0].content.text).toContain(
+          "Never write deliverables into the project's code repo unless they ARE the product.",
+        );
         expect(harnessBootstrap.messages[0].content.text).toContain("Consent And Capture Rules");
         expect(harnessBootstrap.messages[0].content.text).toContain("docs/codex-heartbeat.md");
       }

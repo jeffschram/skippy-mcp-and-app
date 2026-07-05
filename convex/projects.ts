@@ -1,5 +1,6 @@
 import { mutationGeneric, queryGeneric } from "convex/server";
 import { v } from "convex/values";
+import { effectiveProjectPaths, normalizeFolderPathInput } from "@skippy/shared";
 import { requireOwnedBrain } from "./auth";
 import { advanceDependentsAfterDone, dependencyTaskIds } from "./taskExecution";
 
@@ -19,6 +20,20 @@ async function projectTaskIds(db: any, brainInstanceId: any, projectId: string):
         rel.from.entityType === "task" && rel.to.entityType === "project" && rel.to.entityId === projectId,
     )
     .map((rel: any) => rel.from.entityId as string);
+}
+
+/**
+ * Assets (inputs) and output (artifacts) folders, derived lazily at read time:
+ * an unset override falls back to `${localPath}/_assets` / `${localPath}/_docs`,
+ * so defaults automatically track localPath edits. Use this everywhere a
+ * project payload leaves Convex.
+ */
+function effectivePaths(project: {
+  localPath?: string;
+  assetsFolderPath?: string;
+  outputFolderPath?: string;
+}) {
+  return effectiveProjectPaths(project);
 }
 
 function executionStateFor(task: any): string {
@@ -103,6 +118,9 @@ async function buildBoard(db: any, brainInstanceId: any, projectId: string) {
       repoUrl: project.repoUrl,
       defaultBaseBranch: project.defaultBaseBranch,
       localPath: project.localPath,
+      assetsFolderPath: project.assetsFolderPath,
+      outputFolderPath: project.outputFolderPath,
+      ...effectivePaths(project),
     },
     tasks,
     progress: {
@@ -218,6 +236,7 @@ async function taskBrief(db: any, brainInstanceId: any, taskId: string) {
         repoUrl: projectDoc.repoUrl,
         defaultBaseBranch: projectDoc.defaultBaseBranch,
         localPath: projectDoc.localPath,
+        ...effectivePaths(projectDoc),
       };
     }
   }
@@ -635,6 +654,10 @@ export const updateProjectForViewer = mutationGeneric({
     repoUrl: v.optional(v.string()),
     defaultBaseBranch: v.optional(v.string()),
     localPath: v.optional(v.string()),
+    // Explicit assets/output folder overrides. Empty string clears the
+    // override (falls back to the derived `${localPath}/_assets` / `_docs`).
+    assetsFolderPath: v.optional(v.string()),
+    outputFolderPath: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const { brain } = await requireOwnedBrain(ctx);
@@ -655,6 +678,15 @@ export const updateProjectForViewer = mutationGeneric({
     if (args.repoUrl !== undefined) patch.repoUrl = args.repoUrl.trim() || undefined;
     if (args.defaultBaseBranch !== undefined) patch.defaultBaseBranch = args.defaultBaseBranch.trim() || undefined;
     if (args.localPath !== undefined) patch.localPath = args.localPath.trim() || undefined;
+    // Format-check only — the app/Convex never checks existence (the browser
+    // PWA and cloud cannot see the user's disk); the harness `mkdir -p`s on
+    // first write.
+    if (args.assetsFolderPath !== undefined) {
+      patch.assetsFolderPath = normalizeFolderPathInput(args.assetsFolderPath, "assets folder");
+    }
+    if (args.outputFolderPath !== undefined) {
+      patch.outputFolderPath = normalizeFolderPathInput(args.outputFolderPath, "output folder");
+    }
     await ctx.db.patch(args.projectId, patch);
     return { projectId: args.projectId, status: "updated" };
   },
@@ -832,7 +864,14 @@ async function currentContext(db: any, brainInstanceId: any) {
   if (context.activeProjectId) {
     const project = await db.get(context.activeProjectId);
     if (project && project.brainInstanceId === brainInstanceId) {
-      activeProject = { _id: project._id, title: project.title, kind: project.kind, repoUrl: project.repoUrl };
+      activeProject = {
+        _id: project._id,
+        title: project.title,
+        kind: project.kind,
+        repoUrl: project.repoUrl,
+        localPath: project.localPath,
+        ...effectivePaths(project),
+      };
     }
   }
   return {
