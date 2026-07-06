@@ -33,6 +33,7 @@ import {
   LoadingRow,
   ProgressBar,
   Select,
+  Tabs,
   TextArea,
   TextInput,
   useToast,
@@ -128,6 +129,7 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
   const toast = useToast();
 
   const [planning, setPlanning] = useState(false);
+  const [view, setView] = useState<"tasks" | "library">("tasks");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [resultUrl, setResultUrl] = useState("");
   const [resultSummary, setResultSummary] = useState("");
@@ -513,6 +515,21 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
             </div>
           </div>
 
+          <div style={{ marginBottom: 16 }}>
+            <Tabs
+              items={[
+                { key: "tasks", label: "Tasks" },
+                { key: "library", label: "Library" },
+              ]}
+              active={view}
+              onChange={(key) => setView(key as "tasks" | "library")}
+            />
+          </div>
+
+          {view === "library" ? (
+            <ProjectLibrarySection projectId={projectId} alwaysOpen />
+          ) : (
+            <>
           {/* Progress */}
           <Card className={boardStyles.progressCard}>
             <div className={boardStyles.progressHead}>
@@ -604,8 +621,8 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
               })}
             </div>
           )}
-
-          <ProjectLibrarySection projectId={projectId} />
+            </>
+          )}
 
           <Drawer
             open={Boolean(selectedId)}

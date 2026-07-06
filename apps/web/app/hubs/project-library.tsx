@@ -314,27 +314,36 @@ function FileRow({ file, compact }: { file: LibraryFile; compact?: boolean }) {
 
 /* ---------------- Project-level library section ---------------- */
 
-export function ProjectLibrarySection({ projectId }: { projectId: string }) {
+export function ProjectLibrarySection({
+  projectId,
+  alwaysOpen = false,
+}: {
+  projectId: string;
+  alwaysOpen?: boolean;
+}) {
   const viewerReady = useViewerReady();
   const files = useQuery(
     api.projectFiles.listFilesForViewer,
     viewerReady ? { projectId: projectId as any } : "skip",
   ) as LibraryFile[] | undefined;
   const { entries, uploadFiles, removeEntry } = useProjectFileUploader(projectId);
-  const [open, setOpen] = useState(false);
+  const [openState, setOpenState] = useState(false);
+  const open = alwaysOpen || openState;
 
   return (
     <Card pad={false} className={styles.libraryCard}>
-      <button
-        type="button"
-        className={styles.libraryToggle}
-        aria-expanded={open}
-        onClick={() => setOpen((current) => !current)}
-      >
-        {open ? <ChevronDown size={16} aria-hidden /> : <ChevronRight size={16} aria-hidden />}
-        <span>Library</span>
-        {files !== undefined ? <span className={styles.libraryCount}>{files.length}</span> : null}
-      </button>
+      {!alwaysOpen ? (
+        <button
+          type="button"
+          className={styles.libraryToggle}
+          aria-expanded={open}
+          onClick={() => setOpenState((current) => !current)}
+        >
+          {open ? <ChevronDown size={16} aria-hidden /> : <ChevronRight size={16} aria-hidden />}
+          <span>Library</span>
+          {files !== undefined ? <span className={styles.libraryCount}>{files.length}</span> : null}
+        </button>
+      ) : null}
       {open ? (
         <div className={styles.libraryBody}>
           <UploadZone onFiles={(dropped) => void uploadFiles(dropped)} />
