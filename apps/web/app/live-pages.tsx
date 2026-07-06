@@ -1118,7 +1118,7 @@ function badgeColorForState(state: string) {
 
 function memoryHref(memory: AnyRecord) {
   const id = textValue(memory._id, memory.id, memory.memoryId, memory.entityId);
-  return id ? `/library/${encodeURIComponent(id)}` : "/library";
+  return id ? `/memory/${encodeURIComponent(id)}` : "/memory";
 }
 
 function sourceRefTitle(sourceRef: AnyRecord) {
@@ -1205,7 +1205,7 @@ function MemoryReviewActions({ memory, small }: { memory: AnyRecord; small?: boo
   );
 }
 
-function MemoryRow({ memory, variant = "library" }: { memory: AnyRecord; variant?: "inbox" | "library" }) {
+function MemoryRow({ memory, variant = "memory" }: { memory: AnyRecord; variant?: "inbox" | "memory" }) {
   const state = memoryState(memory);
   const reason = memoryReason(memory);
   const sourceRefs = arrayValue(memory.sourceRefs ?? memory.sources);
@@ -1434,7 +1434,7 @@ export function LiveMemoryInboxContent() {
   );
 }
 
-export function LiveMemoryLibraryContent({ objectTypes, emptyMessage }: MemoryCollectionFilter = {}) {
+export function LiveMemoryContent({ objectTypes, emptyMessage }: MemoryCollectionFilter = {}) {
   const viewerReady = useViewerReady();
   const memoryType = objectTypes?.length === 1 ? objectTypes[0] : undefined;
   const data = useQuery(
@@ -1494,7 +1494,7 @@ export function LiveMemoryDetailContent({ memoryId }: { memoryId: string }) {
       <section className="card section">
         <h2>Memory not found</h2>
         <p className="muted">
-          This memory may have been removed. <Link href="/library">Back to Memory</Link>.
+          This memory may have been removed. <Link href="/memory">Back to Memory</Link>.
         </p>
       </section>
     );

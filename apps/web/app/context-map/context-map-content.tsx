@@ -48,7 +48,7 @@ function memorySummary(memory: AnyRecord) {
 }
 
 function memoryHref(memory: AnyRecord) {
-  return memory._id ? `/library/${encodeURIComponent(String(memory._id))}` : "/library";
+  return memory._id ? `/memory/${encodeURIComponent(String(memory._id))}` : "/memory";
 }
 
 function sourceTitle(sourceRef: AnyRecord) {
