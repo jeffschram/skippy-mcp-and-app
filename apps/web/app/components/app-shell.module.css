@@ -132,8 +132,10 @@
   font-weight: 800;
 }
 
-.spacer {
-  flex: 1;
+.sidebarBottom {
+  display: grid;
+  gap: 10px;
+  margin-top: auto;
 }
 
 .sidebarFoot {
