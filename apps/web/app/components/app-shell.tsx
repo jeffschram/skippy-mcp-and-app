@@ -24,24 +24,20 @@ type NavProject = {
   status?: string;
 };
 
-export const hubs: Array<{
+type Hub = {
   href: string;
   label: string;
   icon: LucideIcon;
   match: (path: string) => boolean;
-}> = [
+};
+
+export const primaryHubs: Hub[] = [
   { href: "/", label: "Today", icon: CalendarCheck, match: (p) => p === "/" },
   {
-    href: "/projects",
-    label: "Projects",
-    icon: FolderKanban,
-    match: (p) => p.startsWith("/projects"),
-  },
-  {
-    href: "/brain",
-    label: "Brain",
-    icon: Brain,
-    match: (p) => p.startsWith("/brain"),
+    href: "/finances",
+    label: "Finances",
+    icon: Wallet,
+    match: (p) => p.startsWith("/finances"),
   },
   {
     href: "/review",
@@ -50,10 +46,19 @@ export const hubs: Array<{
     match: (p) => p.startsWith("/review"),
   },
   {
-    href: "/finances",
-    label: "Finances",
-    icon: Wallet,
-    match: (p) => p.startsWith("/finances"),
+    href: "/projects",
+    label: "Projects",
+    icon: FolderKanban,
+    match: (p) => p.startsWith("/projects"),
+  },
+];
+
+export const secondaryHubs: Hub[] = [
+  {
+    href: "/brain",
+    label: "Brain",
+    icon: Brain,
+    match: (p) => p.startsWith("/brain"),
   },
   {
     href: "/skills",
@@ -69,23 +74,30 @@ export const hubs: Array<{
   },
 ];
 
+export const hubs = [...primaryHubs, ...secondaryHubs];
+
 function NavLinks({
   pathname,
   projects = [],
+  hubs,
   mobile,
+  alwaysShowProjects,
 }: {
   pathname: string;
   projects?: NavProject[];
+  hubs: Hub[];
   mobile?: boolean;
+  alwaysShowProjects?: boolean;
 }) {
   return (
     <>
       {hubs.map((hub) => {
         const active = hub.match(pathname);
         const showProjectSubmenu = !mobile && hub.href === "/projects" && projects.length > 0;
+        const projectSubmenuOpen = showProjectSubmenu && (alwaysShowProjects || active);
         if (showProjectSubmenu) {
           return (
-            <div className={`${styles.navItem} ${active ? styles.navItemOpen : ""}`} key={hub.href}>
+            <div className={`${styles.navItem} ${projectSubmenuOpen ? styles.navItemOpen : ""}`} key={hub.href}>
               <Link
                 href={hub.href}
                 className={`${styles.navLink} ${active ? styles.active : ""}`}
@@ -142,11 +154,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             Skippy
           </div>
           <nav className={styles.nav} aria-label="Primary">
-            <NavLinks pathname={pathname} projects={activeProjects ?? []} />
+            <NavLinks pathname={pathname} hubs={primaryHubs} projects={activeProjects ?? []} alwaysShowProjects />
           </nav>
-          <div className={styles.spacer} />
-          <div className={styles.sidebarFoot}>
-            <AuthStatus />
+          <div className={styles.sidebarBottom}>
+            <nav className={styles.nav} aria-label="Secondary">
+              <NavLinks pathname={pathname} hubs={secondaryHubs} />
+            </nav>
+            <div className={styles.sidebarFoot}>
+              <AuthStatus />
+            </div>
           </div>
         </aside>
 
@@ -154,7 +170,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <header className={styles.mobileBar}>
             <AuthStatus />
             <nav className={styles.mobileNav} aria-label="Primary">
-              <NavLinks pathname={pathname} mobile />
+              <NavLinks pathname={pathname} hubs={hubs} mobile />
             </nav>
           </header>
           <main className={styles.page}>{children}</main>
