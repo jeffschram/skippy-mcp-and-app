@@ -14,7 +14,7 @@ import { LiveInterviewsIndex } from "../interviews/ui";
 import { LiveLinksAndNotesContent } from "../links-notes";
 
 const TABS = [
-  { key: "library", label: "Library" },
+  { key: "library", label: "Memory" },
   { key: "inbox", label: "Inbox" },
   { key: "links", label: "Links" },
   { key: "contacts", label: "Contacts" },

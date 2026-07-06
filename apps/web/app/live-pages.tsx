@@ -1448,7 +1448,7 @@ export function LiveMemoryLibraryContent({ objectTypes, emptyMessage }: MemoryCo
     <LiveGate>
       {!data ? (
         <section className="card section">
-          <h2>Loading library</h2>
+          <h2>Loading memory</h2>
           <p className="muted">Waiting for accepted memory objects from Convex.</p>
         </section>
       ) : (
@@ -1494,7 +1494,7 @@ export function LiveMemoryDetailContent({ memoryId }: { memoryId: string }) {
       <section className="card section">
         <h2>Memory not found</h2>
         <p className="muted">
-          This memory may have been removed. <Link href="/library">Back to library</Link>.
+          This memory may have been removed. <Link href="/library">Back to Memory</Link>.
         </p>
       </section>
     );
