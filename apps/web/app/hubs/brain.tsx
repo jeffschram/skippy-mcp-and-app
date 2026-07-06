@@ -7,14 +7,14 @@ import {
   LiveContactsContent,
   LiveGoalsContent,
   LiveMemoryInboxContent,
-  LiveMemoryLibraryContent,
+  LiveMemoryContent,
 } from "../live-pages";
 import { LiveContextMapContent } from "../context-map/context-map-content";
 import { LiveInterviewsIndex } from "../interviews/ui";
 import { LiveLinksAndNotesContent } from "../links-notes";
 
 const TABS = [
-  { key: "library", label: "Library" },
+  { key: "memory", label: "Memory" },
   { key: "inbox", label: "Inbox" },
   { key: "links", label: "Links" },
   { key: "contacts", label: "Contacts" },
@@ -24,7 +24,7 @@ const TABS = [
 ];
 
 export function BrainContent() {
-  const [tab, setTab] = useState("library");
+  const [tab, setTab] = useState("memory");
 
   return (
     <LiveGate>
@@ -42,7 +42,7 @@ export function BrainContent() {
         <Tabs items={TABS} active={tab} onChange={setTab} />
       </div>
 
-      {tab === "library" ? <LiveMemoryLibraryContent /> : null}
+      {tab === "memory" ? <LiveMemoryContent /> : null}
       {tab === "inbox" ? <LiveMemoryInboxContent /> : null}
       {tab === "links" ? <LiveLinksAndNotesContent /> : null}
       {tab === "contacts" ? <LiveContactsContent /> : null}

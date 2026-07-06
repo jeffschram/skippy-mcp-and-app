@@ -38,7 +38,7 @@ export const navItems = [
   { href: "/interviews", label: "Interviews", icon: MessageSquareText },
   { href: "/contacts", label: "Contacts", icon: Contact },
   { href: "/memory-inbox", label: "Inbox", icon: Brain },
-  { href: "/library", label: "Library", icon: BookOpen },
+  { href: "/memory", label: "Memory", icon: BookOpen },
   { href: "/context-map", label: "Map", icon: Map },
   { href: "/triage", label: "Review", icon: Inbox },
   { href: "/resurfacing", label: "Routines", icon: RefreshCw },
