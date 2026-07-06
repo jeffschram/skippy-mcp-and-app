@@ -111,12 +111,21 @@ export type ProjectPlanRequest = {
   policyVersion?: string;
 };
 
+export type TaskBriefAttachment = {
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  note?: string;
+};
+
 export type TaskBriefRequest = {
   projectTitle: string;
   projectSummary?: string;
   proposalTitle: string;
   proposalText: string;
   existingTasks?: string[];
+  /** Library files attached to the proposal; metadata only (URLs are ephemeral). */
+  attachments?: TaskBriefAttachment[];
   policyVersion?: string;
 };
 
@@ -926,6 +935,11 @@ export async function generateTaskBrief(
       : undefined,
     `Proposal title: ${request.proposalTitle}`,
     `Proposal notes:\n${request.proposalText}`,
+    request.attachments?.length
+      ? `Attached files in the project library (task-scoped): ${request.attachments
+          .map((file) => `${file.fileName} (${file.mimeType}${file.note ? `; note: ${file.note}` : ""})`)
+          .join(", ")}. The proposal likely refers to these. The execution brief must instruct the executing agent to download them from the project library (list_project_files with this task's id) into the project's assets folder before working, and should reference them by name where relevant.`
+      : undefined,
   ].filter(Boolean);
 
   const result = await client.complete({

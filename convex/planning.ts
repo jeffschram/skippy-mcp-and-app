@@ -174,6 +174,23 @@ export const taskBriefProposalContext = internalQueryGeneric({
       }
     }
 
+    // Attachment metadata only — file URLs are ephemeral and the brief
+    // writer just needs to know what exists; the executing agent fetches
+    // fresh URLs via list_project_files at work time.
+    const attachments = (
+      await db
+        .query("projectFiles")
+        .withIndex("by_brain_task", (q: any) =>
+          q.eq("brainInstanceId", args.brainInstanceId).eq("taskId", args.taskId),
+        )
+        .collect()
+    ).map((file: any) => ({
+      fileName: file.fileName as string,
+      mimeType: file.mimeType as string,
+      sizeBytes: file.sizeBytes as number,
+      ...(file.note ? { note: file.note as string } : {}),
+    }));
+
     return {
       ok: true,
       taskId: task._id,
@@ -183,6 +200,7 @@ export const taskBriefProposalContext = internalQueryGeneric({
       proposalTitle: task.title as string,
       proposalText: (task.description || task.executionBrief || task.title) as string,
       existingTasks,
+      attachments,
       aiMode: config?.llmProviderMode ?? "none",
       synthesisModel: config?.synthesisModel,
     };
@@ -519,6 +537,7 @@ export const briefTaskProposal = actionGeneric({
         proposalTitle: context.proposalTitle,
         proposalText: context.proposalText,
         ...(context.existingTasks?.length ? { existingTasks: context.existingTasks } : {}),
+        ...(context.attachments?.length ? { attachments: context.attachments } : {}),
         policyVersion: TASK_BRIEF_POLICY_VERSION,
       });
       brief = result;
