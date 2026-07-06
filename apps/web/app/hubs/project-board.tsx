@@ -40,7 +40,8 @@ import {
 } from "../components";
 import { EXECUTION_COLUMNS, executionStateTone, taskStatusTone, titleCase } from "../../lib/display";
 import { useViewerReady } from "./use-viewer";
-import { ProjectLibrarySection, TaskAttachments } from "./project-library";
+import { ProjectLibrarySection, TaskAttachments, useProjectFileUploader } from "./project-library";
+import { checkProjectFile, formatFileSize, PROJECT_FILE_ACCEPT } from "./project-library-helpers";
 import boardStyles from "./board.module.css";
 
 type AnyRecord = Record<string, any>;
@@ -120,6 +121,7 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
   const briefTaskProposal = useAction(api.planning.briefTaskProposal);
   const markDone = useMutation(api.knowledge.markTaskDoneForViewer);
   const createTaskProposal = useMutation(api.projects.createTaskProposalForViewer);
+  const { uploadFiles: uploadProposalFiles } = useProjectFileUploader(projectId);
   const recordResult = useMutation(api.projects.recordTaskResultForViewer);
   const requestAgent = useMutation(api.projects.requestAgentForTaskForViewer);
   const setExecState = useMutation(api.projects.setTaskExecutionStateForViewer);
@@ -153,6 +155,7 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
   const [proposalText, setProposalText] = useState("");
   const [proposalKind, setProposalKind] = useState("coding");
   const [proposalBusy, setProposalBusy] = useState(false);
+  const [proposalFiles, setProposalFiles] = useState<File[]>([]);
 
   // Project settings dialog
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -240,15 +243,23 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
     }
     setProposalBusy(true);
     try {
-      await createTaskProposal({
+      const result = (await createTaskProposal({
         projectId: projectId as any,
         proposalText: text,
         kind: proposalKind as any,
-      });
+      })) as { taskId: string };
+      // Attachments upload after the task exists so they land task-scoped;
+      // a failed upload never orphans the proposal (re-attach from the panel).
+      let uploadNote = "";
+      if (proposalFiles.length > 0 && result?.taskId) {
+        const { done, failed } = await uploadProposalFiles(proposalFiles, result.taskId);
+        uploadNote = failed > 0 ? ` ${done}/${done + failed} files attached.` : ` ${done} file${done === 1 ? "" : "s"} attached.`;
+      }
       setProposalOpen(false);
       setProposalText("");
       setProposalKind("coding");
-      toast("Task proposed.", "success");
+      setProposalFiles([]);
+      toast(`Task proposed.${uploadNote}`, "success");
     } catch (error) {
       toast(error instanceof Error ? error.message : "Could not propose task", "error");
     } finally {
@@ -975,6 +986,61 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                   placeholder="Describe the idea, problem, constraints, or proposed solution."
                   style={{ minHeight: 140 }}
                 />
+              </Field>
+              <Field label="Attachments (optional)">
+                <div style={{ display: "grid", gap: 6 }}>
+                  {proposalFiles.map((file, index) => (
+                    <div
+                      key={`${file.name}-${index}`}
+                      style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}
+                    >
+                      <Folder size={13} aria-hidden style={{ flexShrink: 0, opacity: 0.6 }} />
+                      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {file.name}
+                      </span>
+                      <span className="muted" style={{ flexShrink: 0 }}>
+                        {formatFileSize(file.size)}
+                      </span>
+                      <button
+                        type="button"
+                        className="text-button compact"
+                        style={{ marginLeft: "auto", flexShrink: 0 }}
+                        onClick={() => setProposalFiles((current) => current.filter((_, i) => i !== index))}
+                        disabled={proposalBusy}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ))}
+                  <label className="text-button compact" style={{ cursor: "pointer", width: "fit-content" }}>
+                    <Plus size={14} aria-hidden /> Add files
+                    <input
+                      type="file"
+                      multiple
+                      accept={PROJECT_FILE_ACCEPT}
+                      style={{ display: "none" }}
+                      disabled={proposalBusy}
+                      onChange={(event) => {
+                        const picked = Array.from(event.target.files ?? []);
+                        event.target.value = "";
+                        const accepted: File[] = [];
+                        for (const file of picked) {
+                          const check = checkProjectFile({
+                            fileName: file.name,
+                            mimeType: file.type,
+                            sizeBytes: file.size,
+                          });
+                          if (check.ok) accepted.push(file);
+                          else toast(`${file.name}: ${check.reason}`, "error");
+                        }
+                        if (accepted.length) setProposalFiles((current) => [...current, ...accepted]);
+                      }}
+                    />
+                  </label>
+                  <p className="muted" style={{ margin: 0, fontSize: 12 }}>
+                    Files upload to the project Library, attached to the new task.
+                  </p>
+                </div>
               </Field>
               <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
                 <Button onClick={() => setProposalOpen(false)} disabled={proposalBusy}>
