@@ -535,6 +535,20 @@ function taskBriefedConfirmation(result: unknown) {
   };
 }
 
+function taskCancelledConfirmation(input: { taskId: string }, result: unknown) {
+  const resultRecord = objectResult(result);
+  return {
+    status: "cancelled",
+    entityType: "task",
+    taskId: resultRecord.taskId ?? input.taskId,
+    title: resultRecord.title,
+    executionState: resultRecord.executionState ?? "cancelled",
+    reviewUrl: reviewUrl("/projects"),
+    nextAction:
+      "The task is abandoned: it leaves the board columns and no longer counts toward project progress. The owner can restore it from the Abandoned section in Skippy.",
+  };
+}
+
 function linkStatusUpdatedConfirmation(input: { status: string }, result: unknown) {
   const resultRecord = objectResult(result);
   return {
@@ -1777,6 +1791,24 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
           },
         ),
       ),
+  );
+
+  server.registerTool(
+    "cancel_task",
+    {
+      title: "Abandon a task",
+      description:
+        "Abandon (cancel) a Skippy task that has NOT been executed. Use ONLY when the owner explicitly asks to abandon or cancel a task. Only proposed/unplanned/briefed/ready/blocked tasks can be abandoned; in_progress, in_review, and done tasks are rejected server-side — record their result instead. Restoring an abandoned task is done by the owner in the app (there is no restore tool).",
+      annotations: { destructiveHint: true, idempotentHint: true, openWorldHint: false },
+      inputSchema: z.object({
+        taskId: z.string().describe("Task ID to abandon."),
+        reason: z.string().optional().describe("Short reason recorded in the task's activity history."),
+      }),
+    },
+    async (args) => {
+      const input = stripUndefined(args) as { taskId: string; reason?: string };
+      return toolResult(taskCancelledConfirmation(input, await tools.cancelTask(input)));
+    },
   );
 
   server.registerTool(

@@ -173,6 +173,14 @@ export type SkippyClient = {
       actorId?: string;
     },
   ): Promise<unknown>;
+  cancelTask(
+    brainInstanceId: string,
+    input: {
+      taskId: string;
+      reason?: string;
+      actorId?: string;
+    },
+  ): Promise<unknown>;
   updateLinkStatus(
     brainInstanceId: string,
     input: {
@@ -1131,6 +1139,13 @@ export function createSkippyToolHandlers(client: SkippyClient, brainInstanceId: 
       markDone?: boolean;
     }) {
       return await client.recordTaskResult(brainInstanceId, {
+        ...input,
+        actorId: "skippy_mcp",
+      });
+    },
+
+    async cancelTask(input: { taskId: string; reason?: string }) {
+      return await client.cancelTask(brainInstanceId, {
         ...input,
         actorId: "skippy_mcp",
       });

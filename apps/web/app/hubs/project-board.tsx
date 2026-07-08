@@ -7,6 +7,9 @@ import {
   ArrowLeft,
   Archive,
   ArchiveRestore,
+  Ban,
+  ChevronDown,
+  ChevronRight,
   ClipboardCopy,
   ExternalLink,
   Folder,
@@ -15,6 +18,7 @@ import {
   Pencil,
   Plus,
   Play,
+  RotateCcw,
   Settings2,
   Sparkles,
 } from "lucide-react";
@@ -50,6 +54,8 @@ type AnyRecord = Record<string, any>;
 const PRE_EXECUTION = new Set(["unplanned", "briefed", "ready", "blocked"]);
 // States where recording a result makes sense.
 const RESULT_STATES = new Set(["in_progress", "in_review"]);
+// States the owner can abandon — running or completed work records its result instead.
+const ABANDONABLE_STATES = new Set(["proposed", "unplanned", "briefed", "ready", "blocked"]);
 
 /**
  * Text input for an assets/output folder override. Unset means "derived from
@@ -125,6 +131,8 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
   const recordResult = useMutation(api.projects.recordTaskResultForViewer);
   const requestAgent = useMutation(api.projects.requestAgentForTaskForViewer);
   const setExecState = useMutation(api.projects.setTaskExecutionStateForViewer);
+  const cancelTask = useMutation(api.projects.cancelTaskForViewer);
+  const restoreTask = useMutation(api.projects.restoreTaskForViewer);
   const updateBrief = useMutation(api.projects.updateTaskBriefForViewer);
   const updateProject = useMutation(api.projects.updateProjectForViewer);
   const setViewerContext = useMutation(api.projects.setViewerContext);
@@ -139,6 +147,10 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
   const [briefingTaskIds, setBriefingTaskIds] = useState<Set<string>>(new Set());
   const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
   const [dragOverState, setDragOverState] = useState<string | null>(null);
+
+  // Abandon (cancel) flow: two-click confirm in the drawer + collapsed list below the board.
+  const [abandonConfirming, setAbandonConfirming] = useState(false);
+  const [abandonedOpen, setAbandonedOpen] = useState(false);
 
   // Brief editing
   const [editingBrief, setEditingBrief] = useState(false);
@@ -187,10 +199,18 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
     );
   }, [viewerReady, projectId, setViewerContext]);
 
+  // The 'Confirm?' abandon state resets on its own after a moment.
+  useEffect(() => {
+    if (!abandonConfirming) return;
+    const timer = window.setTimeout(() => setAbandonConfirming(false), 3500);
+    return () => window.clearTimeout(timer);
+  }, [abandonConfirming]);
+
   // Reset edit state whenever a different task is opened.
   useEffect(() => {
     setEditingBrief(false);
     setEditingProposal(false);
+    setAbandonConfirming(false);
     if (selected) {
       setBriefDraft(selected.executionBrief ?? "");
       setCriteriaDraft((selected.acceptanceCriteria ?? []).join("\n"));
@@ -200,6 +220,8 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
   }, [selectedId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const project = board?.project;
+  const cancelledTasks: AnyRecord[] =
+    board?.tasks?.filter((task: AnyRecord) => task.executionState === "cancelled") ?? [];
   const agentName = board?.agentName ?? "Agent";
   const ownerName = board?.ownerName ?? "Owner";
   const openSettings = () => {
@@ -327,6 +349,33 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
       toast(`${agentName} requested.`, "success");
     } catch (error) {
       toast(error instanceof Error ? error.message : `Could not request ${agentName}`, "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const abandonTask = async (taskId: string) => {
+    setBusy(true);
+    try {
+      await cancelTask({ taskId: taskId as any });
+      setAbandonConfirming(false);
+      setSelectedId(null);
+      toast("Task abandoned.", "info");
+    } catch (error) {
+      setAbandonConfirming(false);
+      toast(error instanceof Error ? error.message : "Could not abandon task", "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const restoreAbandonedTask = async (taskId: string) => {
+    setBusy(true);
+    try {
+      await restoreTask({ taskId: taskId as any });
+      toast("Task restored to Proposed.", "success");
+    } catch (error) {
+      toast(error instanceof Error ? error.message : "Could not restore task", "error");
     } finally {
       setBusy(false);
     }
@@ -632,6 +681,39 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
               })}
             </div>
           )}
+
+          {cancelledTasks.length > 0 ? (
+            <div className={boardStyles.abandonedSection}>
+              <button
+                type="button"
+                className={boardStyles.abandonedToggle}
+                aria-expanded={abandonedOpen}
+                onClick={() => setAbandonedOpen((open) => !open)}
+              >
+                {abandonedOpen ? <ChevronDown size={15} aria-hidden /> : <ChevronRight size={15} aria-hidden />}
+                Abandoned ({cancelledTasks.length})
+              </button>
+              {abandonedOpen ? (
+                <div className={boardStyles.abandonedList}>
+                  {cancelledTasks.map((task: AnyRecord) => (
+                    <div key={task._id} className={boardStyles.abandonedRow}>
+                      <span className={boardStyles.abandonedTitle}>{task.title}</span>
+                      {task.kind ? <Badge tone="neutral">{task.kind}</Badge> : null}
+                      <Button
+                        small
+                        disabled={busy}
+                        onClick={() => void restoreAbandonedTask(task._id)}
+                        title="Restore to Proposed"
+                        style={{ marginLeft: "auto" }}
+                      >
+                        <RotateCcw size={14} aria-hidden /> Restore
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
             </>
           )}
 
@@ -669,6 +751,28 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                     <Button variant="primary" disabled={busy} onClick={() => void moveTo(selected._id, "in_progress")}>
                       <Play size={16} aria-hidden /> Mark in progress
                     </Button>
+                  ) : null}
+                  {ABANDONABLE_STATES.has(selected.executionState) ? (
+                    abandonConfirming ? (
+                      <Button
+                        variant="danger"
+                        disabled={busy}
+                        onClick={() => void abandonTask(selected._id)}
+                        style={{ marginLeft: "auto" }}
+                      >
+                        Confirm?
+                      </Button>
+                    ) : (
+                      <Button
+                        variant="ghost"
+                        disabled={busy}
+                        onClick={() => setAbandonConfirming(true)}
+                        title="Abandon this task. It leaves the board but can be restored later."
+                        style={{ marginLeft: "auto" }}
+                      >
+                        <Ban size={15} aria-hidden /> Abandon task
+                      </Button>
+                    )
                   ) : null}
                 </>
               ) : null

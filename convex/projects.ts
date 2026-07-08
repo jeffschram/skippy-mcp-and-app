@@ -96,8 +96,11 @@ async function buildBoard(db: any, brainInstanceId: any, projectId: string) {
   }
   tasks.sort((a, b) => a.orderIndex - b.orderIndex);
 
-  const total = tasks.length;
-  const done = tasks.filter((task) => task.executionState === "done" || task.status === "done").length;
+  // Cancelled (abandoned) tasks stay in the returned tasks array so the UI can
+  // render them, but they never count toward progress.
+  const active = tasks.filter((task) => task.executionState !== "cancelled");
+  const total = active.length;
+  const done = active.filter((task) => task.executionState === "done" || task.status === "done").length;
 
   const plans = await db
     .query("projectPlans")
@@ -127,9 +130,9 @@ async function buildBoard(db: any, brainInstanceId: any, projectId: string) {
       total,
       done,
       percent: total ? Math.round((done / total) * 100) : 0,
-      ready: tasks.filter((task) => task.executionState === "ready").length,
-      blocked: tasks.filter((task) => task.executionState === "blocked").length,
-      inReview: tasks.filter((task) => task.executionState === "in_review").length,
+      ready: active.filter((task) => task.executionState === "ready").length,
+      blocked: active.filter((task) => task.executionState === "blocked").length,
+      inReview: active.filter((task) => task.executionState === "in_review").length,
     },
     agentName: config?.assistantDisplayName ?? "Agent",
     latestPlan: latestPlan
@@ -554,7 +557,75 @@ const executionStateValidator = v.union(
   v.literal("in_review"),
   v.literal("blocked"),
   v.literal("done"),
+  v.literal("cancelled"),
 );
+
+// Only not-yet-executed tasks can be abandoned; running or reviewed work must
+// record its result instead so nothing silently disappears mid-flight.
+const ABANDONABLE_STATES = new Set(["proposed", "unplanned", "briefed", "ready", "blocked"]);
+
+async function cancelTask(
+  db: any,
+  brainInstanceId: any,
+  taskId: string,
+  actor: { actorType: string; actorId?: string },
+  reason?: string,
+) {
+  const task = await db.get(taskId);
+  if (!task || task.brainInstanceId !== brainInstanceId) {
+    throw new Error("task not found");
+  }
+  const state = executionStateFor(task);
+  if (!ABANDONABLE_STATES.has(state)) {
+    throw new Error("running or completed work cannot be abandoned; record its result instead");
+  }
+  const now = Date.now();
+  const patch: Record<string, unknown> = {
+    executionState: "cancelled",
+    status: "cancelled",
+    updatedAt: now,
+  };
+  if (task.agentRequestStatus !== undefined) patch.agentRequestStatus = undefined;
+  await db.patch(taskId, patch);
+  await db.insert("activityEvents", {
+    brainInstanceId,
+    entityRef: { entityType: "task", entityId: taskId },
+    activityType: "task_cancelled",
+    actorType: actor.actorType,
+    actorId: actor.actorId,
+    timestamp: now,
+    summary: `Task abandoned: ${task.title}`,
+    ...(reason ? { metadata: { reason } } : {}),
+  });
+  return { taskId, title: task.title, executionState: "cancelled" };
+}
+
+async function restoreTask(
+  db: any,
+  brainInstanceId: any,
+  taskId: string,
+  actor: { actorType: string; actorId?: string },
+) {
+  const task = await db.get(taskId);
+  if (!task || task.brainInstanceId !== brainInstanceId) {
+    throw new Error("task not found");
+  }
+  if (executionStateFor(task) !== "cancelled") {
+    throw new Error("only abandoned tasks can be restored");
+  }
+  const now = Date.now();
+  await db.patch(taskId, { executionState: "proposed", status: "todo", updatedAt: now });
+  await db.insert("activityEvents", {
+    brainInstanceId,
+    entityRef: { entityType: "task", entityId: taskId },
+    activityType: "task_restored",
+    actorType: actor.actorType,
+    actorId: actor.actorId,
+    timestamp: now,
+    summary: `Task restored: ${task.title}`,
+  });
+  return { taskId, title: task.title, executionState: "proposed" };
+}
 
 const taskKindValidator = v.union(
   v.literal("coding"),
@@ -796,6 +867,8 @@ export const setTaskExecutionStateForViewer = mutationGeneric({
     else if (args.executionState === "done") {
       patch.status = "done";
       patch.completedAt = now;
+    } else if (args.executionState === "cancelled") {
+      patch.status = "cancelled";
     } else if (["proposed", "unplanned", "briefed", "ready", "blocked"].includes(args.executionState) && task.status === "in_progress") {
       patch.status = "todo";
     }
@@ -816,6 +889,22 @@ export const setTaskExecutionStateForViewer = mutationGeneric({
     });
 
     return { taskId: args.taskId, executionState: args.executionState };
+  },
+});
+
+export const cancelTaskForViewer = mutationGeneric({
+  args: { taskId: v.id("tasks") },
+  handler: async (ctx, args) => {
+    const { user, brain } = await requireOwnedBrain(ctx);
+    return cancelTask(ctx.db, brain._id, args.taskId, { actorType: "user", actorId: user._id });
+  },
+});
+
+export const restoreTaskForViewer = mutationGeneric({
+  args: { taskId: v.id("tasks") },
+  handler: async (ctx, args) => {
+    const { user, brain } = await requireOwnedBrain(ctx);
+    return restoreTask(ctx.db, brain._id, args.taskId, { actorType: "user", actorId: user._id });
   },
 });
 
@@ -1024,5 +1113,37 @@ export const setTaskKindForBrain = mutationGeneric({
       summary: `Task kind set to ${args.kind}${args.ownerType ? ` (${args.ownerType}-owned)` : ""}: ${task.title}`,
     });
     return { taskId: args.taskId, kind: args.kind, ownerType: args.ownerType ?? task.ownerType };
+  },
+});
+
+export const cancelTaskForBrain = mutationGeneric({
+  args: {
+    brainInstanceId: v.id("brainInstances"),
+    taskId: v.id("tasks"),
+    reason: v.optional(v.string()),
+    actorId: v.optional(v.string()),
+  },
+  handler: async ({ db }, args) => {
+    return cancelTask(
+      db,
+      args.brainInstanceId,
+      args.taskId,
+      { actorType: "harness", ...(args.actorId ? { actorId: args.actorId } : {}) },
+      args.reason,
+    );
+  },
+});
+
+export const restoreTaskForBrain = mutationGeneric({
+  args: {
+    brainInstanceId: v.id("brainInstances"),
+    taskId: v.id("tasks"),
+    actorId: v.optional(v.string()),
+  },
+  handler: async ({ db }, args) => {
+    return restoreTask(db, args.brainInstanceId, args.taskId, {
+      actorType: "harness",
+      ...(args.actorId ? { actorId: args.actorId } : {}),
+    });
   },
 });

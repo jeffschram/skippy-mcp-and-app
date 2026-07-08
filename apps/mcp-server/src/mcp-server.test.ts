@@ -66,6 +66,11 @@ function createFakeClient(overrides: Partial<SkippyClient> = {}): SkippyClient {
     getTaskBrief: async (_brainInstanceId, input) => ({ _id: input.taskId, title: "Task", executionBrief: "do it" }),
     briefTask: async (_brainInstanceId, input) => ({ taskId: input.taskId, executionState: "briefed" }),
     recordTaskResult: async (_brainInstanceId, input) => ({ taskId: input.taskId, executionState: "in_review" }),
+    cancelTask: async (_brainInstanceId, input) => ({
+      taskId: input.taskId,
+      title: "Task",
+      executionState: "cancelled",
+    }),
     updateLinkStatus: async (_brainInstanceId, input) => ({
       linkId: input.linkId,
       title: "Stored link",
@@ -307,6 +312,7 @@ describe("Skippy MCP manifest", () => {
       const linkMemory = tools.find((tool) => tool.name === "link_memory");
       const listRequestedReadyTasks = tools.find((tool) => tool.name === "list_requested_ready_tasks");
       const briefTask = tools.find((tool) => tool.name === "brief_task");
+      const cancelTaskTool = tools.find((tool) => tool.name === "cancel_task");
       const getTaskBriefTool = tools.find((tool) => tool.name === "get_task_brief");
       const getCurrentContextTool = tools.find((tool) => tool.name === "get_current_context");
       const listInterviewTemplates = tools.find((tool) => tool.name === "list_interview_templates");
@@ -354,6 +360,11 @@ describe("Skippy MCP manifest", () => {
       expect(getCurrentContextTool?.description).toContain("localPath");
       expect(briefTask?.inputSchema.properties?.executionBrief).toBeDefined();
       expect(briefTask?.inputSchema.properties?.acceptanceCriteria).toBeDefined();
+      expect(cancelTaskTool?.description).toContain("ONLY when the owner explicitly asks");
+      expect(cancelTaskTool?.description).toContain("rejected server-side");
+      expect(cancelTaskTool?.description).toContain("no restore tool");
+      expect(cancelTaskTool?.inputSchema.properties?.taskId).toBeDefined();
+      expect(cancelTaskTool?.inputSchema.properties?.reason).toBeDefined();
       expect(updateLinkStatus?.description).toContain("genuine lifecycle changes");
       expect(updateLinkStatus?.description).toContain("Never use it to fake user engagement");
       expect(updateLinkStatus?.inputSchema.properties?.linkId).toBeDefined();
@@ -929,6 +940,58 @@ describe("Skippy MCP manifest", () => {
         title: "Interesting article",
         reviewUrl: "http://127.0.0.1:3000/brain",
       });
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
+  it("returns chat-friendly confirmations for task cancellation", async () => {
+    const cancelCalls: Array<{ brainInstanceId: string; input: unknown }> = [];
+    const server = createMcpServer(
+      createFakeClient({
+        cancelTask: async (brainInstanceId, input) => {
+          cancelCalls.push({ brainInstanceId, input });
+          return { taskId: input.taskId, title: "Ship the widget", executionState: "cancelled" };
+        },
+      }),
+      "brain_123",
+    );
+    const client = new Client({ name: "cancel-task-test", version: "0.1.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    try {
+      await server.connect(serverTransport);
+      await client.connect(clientTransport);
+
+      const result = await client.callTool({
+        name: "cancel_task",
+        arguments: {
+          taskId: "task_123",
+          reason: "Owner decided the feature is no longer needed.",
+        },
+      });
+
+      expect(cancelCalls).toEqual([
+        {
+          brainInstanceId: "brain_123",
+          input: {
+            taskId: "task_123",
+            reason: "Owner decided the feature is no longer needed.",
+            actorId: "skippy_mcp",
+          },
+        },
+      ]);
+      const confirmation = textResult(result);
+      expect(confirmation).toMatchObject({
+        status: "cancelled",
+        entityType: "task",
+        taskId: "task_123",
+        title: "Ship the widget",
+        executionState: "cancelled",
+        reviewUrl: "http://127.0.0.1:3000/projects",
+      });
+      expect(String(confirmation.nextAction)).toContain("restore");
     } finally {
       await client.close();
       await server.close();
