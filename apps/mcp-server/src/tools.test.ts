@@ -50,6 +50,7 @@ function createFakeClient(): { client: SkippyClient; calls: Array<{ name: string
       getTaskBrief: (brainInstanceId, input) => record("getTaskBrief", brainInstanceId, input),
       briefTask: (brainInstanceId, input) => record("briefTask", brainInstanceId, input),
       recordTaskResult: (brainInstanceId, input) => record("recordTaskResult", brainInstanceId, input),
+      cancelTask: (brainInstanceId, input) => record("cancelTask", brainInstanceId, input),
       updateLinkStatus: (brainInstanceId, input) => record("updateLinkStatus", brainInstanceId, input),
       captureThought: (brainInstanceId, input) => record("captureThought", brainInstanceId, input),
       recordMemory: (brainInstanceId, input) => record("recordMemory", brainInstanceId, input),
@@ -216,6 +217,28 @@ describe("Skippy MCP tool handlers", () => {
           linkId: "link_123",
           status: "read",
           reason: "Ingested the article content during a sync.",
+          actorId: "skippy_mcp",
+        },
+      ],
+    });
+  });
+
+  it("cancels tasks with harness attribution", async () => {
+    const { client, calls } = createFakeClient();
+    const tools = createSkippyToolHandlers(client, "brain_123");
+
+    await tools.cancelTask({
+      taskId: "task_123",
+      reason: "Owner decided the feature is no longer needed.",
+    });
+
+    expect(calls[0]).toMatchObject({
+      name: "cancelTask",
+      args: [
+        "brain_123",
+        {
+          taskId: "task_123",
+          reason: "Owner decided the feature is no longer needed.",
           actorId: "skippy_mcp",
         },
       ],

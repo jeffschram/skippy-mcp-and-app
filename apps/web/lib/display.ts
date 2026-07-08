@@ -55,6 +55,7 @@ const EXECUTION_STATE_TONE: Record<string, BadgeTone> = {
   in_review: "gold",
   blocked: "red",
   done: "green",
+  cancelled: "red",
 };
 
 export function taskStatusTone(status: string | undefined): BadgeTone {

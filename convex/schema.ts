@@ -35,6 +35,7 @@ const taskKind = v.union(
 
 // Supervised execution lifecycle, distinct from the user-facing `status`.
 // proposed -> briefed -> ready -> in_progress -> in_review -> done (or blocked).
+// 'cancelled' is a terminal side-exit for not-yet-executed tasks the owner abandons.
 const taskExecutionState = v.union(
   v.literal("proposed"),
   v.literal("unplanned"),
@@ -44,6 +45,7 @@ const taskExecutionState = v.union(
   v.literal("in_review"),
   v.literal("blocked"),
   v.literal("done"),
+  v.literal("cancelled"),
 );
 
 const memoryType = v.union(
