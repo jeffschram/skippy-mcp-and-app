@@ -457,6 +457,9 @@ describe("Skippy MCP manifest", () => {
       expect(listQuickCaptures?.description).toContain("ingest_object");
       expect(listQuickCaptures?.description).toContain("mark_quick_capture_handled");
       expect(listQuickCaptures?.description).toContain("ephemeral fileUrl");
+      expect(listQuickCaptures?.description).toContain("hold intent");
+      expect(listQuickCaptures?.description).toContain("device-to-device transfers");
+      expect(listQuickCaptures?.description).toContain("must not be ingested");
       expect(listQuickCaptures?.inputSchema.properties?.status).toBeDefined();
       expect(markQuickCaptureHandled?.description).toContain("ingestion harness handled a quick capture");
       expect(markQuickCaptureHandled?.description).toContain("'processed'");
@@ -1267,6 +1270,19 @@ describe("Skippy MCP manifest", () => {
               createdAt: 1780850100000,
               fileUrl: "https://files.convex.cloud/quick_capture_456?token=ephemeral",
             },
+            // Hold-intent captures are private device-to-device transfers.
+            // Even if the backend leaked one, the MCP layer must drop it.
+            {
+              _id: "quick_capture_789",
+              fileName: "private-transfer.zip",
+              mimeType: "application/zip",
+              sizeBytes: 8192,
+              status: "pending",
+              intent: "hold",
+              capturedBy: "user",
+              createdAt: 1780850200000,
+              fileUrl: "https://files.convex.cloud/quick_capture_789?token=ephemeral",
+            },
           ];
         },
       }),
@@ -1315,6 +1331,9 @@ describe("Skippy MCP manifest", () => {
       ]);
       expect(String(confirmation.nextAction)).toContain("ingest_object");
       expect(String(confirmation.nextAction)).toContain("mark_quick_capture_handled");
+      // The hold-intent transfer never surfaces to the harness.
+      expect(JSON.stringify(confirmation)).not.toContain("quick_capture_789");
+      expect(JSON.stringify(confirmation)).not.toContain("private-transfer.zip");
     } finally {
       await client.close();
       await server.close();

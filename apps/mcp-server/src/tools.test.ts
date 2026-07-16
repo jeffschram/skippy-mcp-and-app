@@ -1020,6 +1020,22 @@ describe("Skippy MCP tool handlers", () => {
     });
   });
 
+  it("excludes hold-intent captures from quick capture listings defensively", async () => {
+    // The backend already excludes hold items; this layer filters again so a
+    // private device-to-device transfer can never reach an ingestion harness.
+    const { client } = createFakeClient();
+    client.listQuickCaptures = async () => [
+      { _id: "qc_remember", text: "keep me", status: "pending", intent: "remember", createdAt: 1 },
+      { _id: "qc_hold", text: "private transfer", status: "pending", intent: "hold", createdAt: 2 },
+      { _id: "qc_legacy", text: "row from before intent existed", status: "pending", createdAt: 3 },
+    ];
+    const tools = createSkippyToolHandlers(client, "brain_123");
+
+    const result = (await tools.listQuickCaptures()) as Array<{ _id: string }>;
+
+    expect(result.map((row) => row._id)).toEqual(["qc_remember", "qc_legacy"]);
+  });
+
   it("marks quick captures handled with harness attribution", async () => {
     const { client, calls } = createFakeClient();
     const tools = createSkippyToolHandlers(client, "brain_123");

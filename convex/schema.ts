@@ -705,6 +705,11 @@ export default defineSchema({
     mimeType: v.optional(v.string()),
     sizeBytes: v.optional(v.number()),
     status: v.union(v.literal("pending"), v.literal("processed"), v.literal("discarded")),
+    // Owner intent: "remember" = feed ingestion harnesses; "hold" = private
+    // device-to-device transfer that harnesses must never see (auto-expires
+    // after 7 days). Absent on pre-existing rows = "remember" — the default
+    // is composed at read time, no migration.
+    intent: v.optional(v.union(v.literal("remember"), v.literal("hold"))),
     capturedBy: v.optional(v.union(v.literal("user"), v.literal("harness"))),
     processedAt: v.optional(v.number()),
     processedBy: v.optional(v.string()),

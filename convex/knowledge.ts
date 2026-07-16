@@ -5,11 +5,14 @@ import {
   LINK_STATUSES,
   PROJECT_STATUSES,
   TASK_STATUSES,
+  QUICK_CAPTURE_HOLD_EXPIRY_MS,
   candidateFingerprint,
   isLinkFocusCandidate,
+  isQuickCaptureHoldExpired,
   linkAgeDays,
   matchDismissedFocusItem,
   normalizeAcceptedEntityPayload,
+  quickCaptureIntent,
 } from "@skippy/shared";
 import { requireOwnedBrain } from "./auth";
 import { advanceDependentsAfterDone } from "./taskExecution";
@@ -1660,12 +1663,26 @@ export const dashboardForViewer = queryGeneric({
       .withIndex("by_brain_key", (q) => q.eq("brainInstanceId", brain._id))
       .collect();
     // Home quick-capture inbox: recent captures, newest first, so the capture
-    // box can show submit feedback and pending/processed status chips.
-    const quickCaptures = await ctx.db
+    // box can show submit feedback, status/hold chips, and per-item actions.
+    // Hold items past their 7-day transfer window vanish at read time (the
+    // rows get physically swept lazily on the next capture write), and file
+    // captures carry a time-limited download URL resolved here.
+    const nowForCaptures = Date.now();
+    const quickCaptureRows = await ctx.db
       .query("quickCaptures")
       .withIndex("by_brain_created", (q) => q.eq("brainInstanceId", brain._id))
       .order("desc")
-      .take(10);
+      .take(20);
+    const quickCaptures = [];
+    for (const row of quickCaptureRows) {
+      if (isQuickCaptureHoldExpired(row, nowForCaptures)) continue;
+      quickCaptures.push({
+        ...row,
+        intent: quickCaptureIntent(row),
+        // Time-limited download URL resolved at read time. Never persist it.
+        fileUrl: row.storageId ? await ctx.storage.getUrl(row.storageId) : null,
+      });
+    }
 
     return {
       brain,
@@ -4574,6 +4591,9 @@ export const createQuickCaptureForViewer = mutationGeneric({
     fileName: v.optional(v.string()),
     mimeType: v.optional(v.string()),
     sizeBytes: v.optional(v.number()),
+    // "remember" (default) = ingestion harnesses process it; "hold" = private
+    // device-to-device transfer that harnesses never see, expiring in 7 days.
+    intent: v.optional(v.union(v.literal("remember"), v.literal("hold"))),
   },
   handler: async (ctx, args) => {
     const { user, brain } = await requireOwnedBrain(ctx);
@@ -4583,8 +4603,27 @@ export const createQuickCaptureForViewer = mutationGeneric({
     }
     // Only store url when the capture actually parses as an http/https URL.
     const url = inferHttpUrl(args.url) ?? inferHttpUrl(text);
+    const intent = args.intent ?? "remember";
 
     const now = Date.now();
+
+    // Lazy auto-expiry: every new capture sweeps this brain's hold captures
+    // past the 7-day transfer window — rows and their storage files. No cron;
+    // reads already hide expired holds, so this is pure cleanup.
+    const sweepCandidates = await ctx.db
+      .query("quickCaptures")
+      .withIndex("by_brain_created", (q: any) =>
+        q.eq("brainInstanceId", brain._id).lt("createdAt", now - QUICK_CAPTURE_HOLD_EXPIRY_MS),
+      )
+      .take(50);
+    for (const stale of sweepCandidates) {
+      if (!isQuickCaptureHoldExpired(stale, now)) continue;
+      if (stale.storageId) {
+        await ctx.storage.delete(stale.storageId);
+      }
+      await ctx.db.delete(stale._id);
+    }
+
     const captureId = await ctx.db.insert("quickCaptures", {
       brainInstanceId: brain._id,
       text,
@@ -4594,6 +4633,7 @@ export const createQuickCaptureForViewer = mutationGeneric({
       mimeType: args.storageId ? optionalTrimmed(args.mimeType) : undefined,
       sizeBytes: args.storageId ? args.sizeBytes : undefined,
       status: "pending",
+      intent,
       capturedBy: "user",
       createdAt: now,
       updatedAt: now,
@@ -4606,10 +4646,31 @@ export const createQuickCaptureForViewer = mutationGeneric({
       actorId: user._id,
       timestamp: now,
       summary: `Quick capture added: ${quickCaptureLabel({ text, fileName: args.fileName, url })}`,
-      metadata: { captureId, url, hasFile: Boolean(args.storageId), fileName: args.fileName },
+      metadata: { captureId, url, hasFile: Boolean(args.storageId), fileName: args.fileName, intent },
     });
 
-    return { captureId, status: "pending" };
+    return { captureId, status: "pending", intent };
+  },
+});
+
+export const deleteQuickCaptureForViewer = mutationGeneric({
+  args: {
+    captureId: v.id("quickCaptures"),
+  },
+  handler: async (ctx, args) => {
+    const { brain } = await requireOwnedBrain(ctx);
+    const capture = await ctx.db.get(args.captureId);
+    if (!capture || capture.brainInstanceId !== brain._id) {
+      throw new Error("quick capture not found");
+    }
+    // Allowed on any status: transfers get deleted after download, and stale
+    // processed/discarded rows can be cleared too. Remove the storage file
+    // with the row so nothing orphans.
+    if (capture.storageId) {
+      await ctx.storage.delete(capture.storageId);
+    }
+    await ctx.db.delete(args.captureId);
+    return { captureId: args.captureId, deleted: true };
   },
 });
 
@@ -4620,13 +4681,18 @@ export const listQuickCapturesForBrain = queryGeneric({
   },
   handler: async (ctx, args) => {
     const status = args.status ?? "pending";
-    const rows = await ctx.db
-      .query("quickCaptures")
-      .withIndex("by_brain_status", (q: any) =>
-        q.eq("brainInstanceId", args.brainInstanceId).eq("status", status),
-      )
-      .order("desc")
-      .take(50);
+    const rows = (
+      await ctx.db
+        .query("quickCaptures")
+        .withIndex("by_brain_status", (q: any) =>
+          q.eq("brainInstanceId", args.brainInstanceId).eq("status", status),
+        )
+        .order("desc")
+        .take(50)
+    )
+      // Hold-intent captures are private device-to-device transfers: ingestion
+      // harnesses must never see them, so they are excluded entirely here.
+      .filter((row) => quickCaptureIntent(row) !== "hold");
 
     const captures = [];
     for (const row of rows) {

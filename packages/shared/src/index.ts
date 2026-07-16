@@ -142,6 +142,79 @@ export function validateProjectFileInput(input: ProjectFileInput): {
   return { fileName, mimeType, sizeBytes: input.sizeBytes };
 }
 
+/* ------------------------------------------------------------------ */
+/* Quick captures (home-page inbox + device-to-device transfer)        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Owner intent for a quick capture. "remember" items feed ingestion harnesses;
+ * "hold" items are private device-to-device transfers that harnesses must
+ * never see. Rows written before this field existed have no intent — the
+ * default is composed at read time (no migration).
+ */
+export type QuickCaptureIntent = "remember" | "hold";
+
+/** Read-time intent default: absent = "remember" for pre-existing rows. */
+export function quickCaptureIntent(capture: {
+  intent?: QuickCaptureIntent | undefined;
+}): QuickCaptureIntent {
+  return capture.intent ?? "remember";
+}
+
+/**
+ * Maximum size for a single quick-capture file: 100 MiB. This is a product
+ * cap, not a platform one — Convex upload URLs do not limit file size (the
+ * upload POST just has a 2-minute timeout), so 100 MB stays comfortably
+ * uploadable while keeping the transfer inbox from eating storage quota.
+ */
+export const QUICK_CAPTURE_FILE_MAX_BYTES = 100 * 1024 * 1024;
+
+/**
+ * Hold-intent captures expire after 7 days: they disappear from reads
+ * immediately (read-time filter) and get physically swept lazily on the next
+ * capture write. No cron.
+ */
+export const QUICK_CAPTURE_HOLD_EXPIRY_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** True when a hold-intent capture is past its 7-day transfer window. */
+export function isQuickCaptureHoldExpired(
+  capture: { intent?: QuickCaptureIntent | undefined; createdAt: number },
+  now: number,
+): boolean {
+  return quickCaptureIntent(capture) === "hold" && now - capture.createdAt > QUICK_CAPTURE_HOLD_EXPIRY_MS;
+}
+
+/**
+ * Validate a quick-capture file before upload. Unlike the project library,
+ * ALL MIME types are allowed — the inbox doubles as a personal file-transfer
+ * channel between the owner's own devices, so executables/archives/unknown
+ * binaries are fine. Only the name (non-empty) and size (100 MB cap) are
+ * enforced; an empty MIME type normalizes to application/octet-stream.
+ */
+export function validateQuickCaptureFileInput(input: ProjectFileInput): {
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+} {
+  const fileName = input.fileName.trim();
+  if (!fileName) {
+    throw new Error("fileName cannot be empty");
+  }
+
+  if (!Number.isFinite(input.sizeBytes) || input.sizeBytes < 0) {
+    throw new Error("sizeBytes must be a non-negative number");
+  }
+  if (input.sizeBytes > QUICK_CAPTURE_FILE_MAX_BYTES) {
+    throw new Error(
+      `file is too large: ${input.sizeBytes} bytes exceeds the ${QUICK_CAPTURE_FILE_MAX_BYTES} byte (100 MB) quick-capture cap`,
+    );
+  }
+
+  const mimeType =
+    input.mimeType.trim().toLowerCase().split(";")[0]!.trim() || "application/octet-stream";
+  return { fileName, mimeType, sizeBytes: input.sizeBytes };
+}
+
 export const ENTITY_TYPES = [
   "goal",
   "project",

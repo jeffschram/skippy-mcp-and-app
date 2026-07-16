@@ -1,23 +1,27 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent } from "react";
 import { useMutation, useQuery } from "convex/react";
-import { ArrowRight, Bell, Check, Inbox, Paperclip, PenLine, RefreshCw, ShieldCheck, Sparkles, X } from "lucide-react";
+import { ArrowRight, Bell, Check, Copy, Download, Inbox, Paperclip, PenLine, RefreshCw, ShieldCheck, Sparkles, X } from "lucide-react";
+import type { QuickCaptureIntent } from "@skippy/shared";
 import { api } from "../../lib/skippy-api";
 import { focusItemKey, parseFocusSummary } from "../focus-summary";
 import { LiveGate } from "../live-auth";
 import { Badge, Button, Card, EmptyState, IconButton, InlineMarkdown, LoadingRow, Section, TextArea, useToast, type BadgeTone } from "../components";
 import { useViewerReady } from "./use-viewer";
-import { PROJECT_FILE_ACCEPT, checkProjectFile, formatFileSize } from "./project-library-helpers";
+import { formatFileSize } from "./project-library-helpers";
+import { QUICK_CAPTURE_INTENT_STORAGE_KEY, checkQuickCaptureFile, parseStoredIntent } from "./quick-capture-helpers";
 import todayStyles from "./today.module.css";
 
 type AnyRecord = Record<string, any>;
 
 /* ------------------------------------------------------------------ */
-/* Quick capture: a quiet inbox slot on the home page. Text/URLs/files */
-/* land as pending quickCaptures; ingestion harnesses turn useful ones */
-/* into Skippy objects later and mark them processed or discarded.     */
+/* Quick capture: a quiet inbox slot on the home page — one inbox, two */
+/* intents. "Remember" items land as pending quickCaptures for the     */
+/* ingestion harnesses; "Hold" items are private device-to-device      */
+/* transfers that harnesses never see and that expire after 7 days.    */
+/* The card doubles as a dropzone/paste target for files.              */
 /* ------------------------------------------------------------------ */
 
 const captureTone: Record<string, BadgeTone> = {
@@ -26,20 +30,97 @@ const captureTone: Record<string, BadgeTone> = {
   discarded: "neutral",
 };
 
+const CAPTURE_LIST_LIMIT = 6;
+
+function captureLabel(capture: AnyRecord): string {
+  return capture.text ?? capture.fileName ?? capture.url ?? "File";
+}
+
 function QuickCaptureBox({ captures }: { captures: AnyRecord[] | undefined }) {
   const generateUploadUrl = useMutation(api.knowledge.generateQuickCaptureUploadUrlForViewer);
   const createCapture = useMutation(api.knowledge.createQuickCaptureForViewer);
+  const deleteCapture = useMutation(api.knowledge.deleteQuickCaptureForViewer);
   const toast = useToast();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const dragDepth = useRef(0);
   const [text, setText] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [dragActive, setDragActive] = useState(false);
+  const [intent, setIntent] = useState<QuickCaptureIntent>("remember");
+  const [busyCaptureId, setBusyCaptureId] = useState<string | null>(null);
+
+  // Sticky per device. Read in an effect so the server render and hydration
+  // both see the "remember" default (localStorage is browser-only).
+  useEffect(() => {
+    setIntent(parseStoredIntent(window.localStorage.getItem(QUICK_CAPTURE_INTENT_STORAGE_KEY)));
+  }, []);
+
+  const chooseIntent = (next: QuickCaptureIntent) => {
+    setIntent(next);
+    try {
+      window.localStorage.setItem(QUICK_CAPTURE_INTENT_STORAGE_KEY, next);
+    } catch {
+      // Private mode etc. — the toggle still works for this page view.
+    }
+  };
 
   const canSubmit = !submitting && (text.trim().length > 0 || file !== null);
 
   const clearFile = () => {
     setFile(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const selectFile = (candidate: File | null | undefined) => {
+    if (!candidate) return;
+    const check = checkQuickCaptureFile({
+      fileName: candidate.name || "pasted-file",
+      mimeType: candidate.type,
+      sizeBytes: candidate.size,
+    });
+    if (!check.ok) {
+      toast(check.reason, "error");
+      return;
+    }
+    setFile(candidate);
+  };
+
+  /* Dropzone: depth counter so the highlight doesn't flicker while the drag
+     moves over child elements (enter/leave fire per descendant). */
+  const dragHasFiles = (event: DragEvent<HTMLDivElement>) =>
+    Array.from(event.dataTransfer?.types ?? []).includes("Files");
+  const onDragEnter = (event: DragEvent<HTMLDivElement>) => {
+    if (!dragHasFiles(event)) return;
+    event.preventDefault();
+    dragDepth.current += 1;
+    setDragActive(true);
+  };
+  const onDragOver = (event: DragEvent<HTMLDivElement>) => {
+    if (!dragHasFiles(event)) return;
+    event.preventDefault(); // required for the drop event to fire
+  };
+  const onDragLeave = (event: DragEvent<HTMLDivElement>) => {
+    if (!dragHasFiles(event)) return;
+    dragDepth.current = Math.max(0, dragDepth.current - 1);
+    if (dragDepth.current === 0) setDragActive(false);
+  };
+  const onDrop = (event: DragEvent<HTMLDivElement>) => {
+    if (!dragHasFiles(event)) return;
+    event.preventDefault();
+    dragDepth.current = 0;
+    setDragActive(false);
+    // First file when several are dropped — the box holds one attachment.
+    selectFile(event.dataTransfer?.files?.[0]);
+  };
+
+  /* Clipboard: pasting a file/image (e.g. a screenshot) attaches it. */
+  const onPaste = (event: ClipboardEvent<HTMLDivElement>) => {
+    const item = Array.from(event.clipboardData?.items ?? []).find((entry) => entry.kind === "file");
+    const pasted = item?.getAsFile();
+    if (!pasted) return;
+    event.preventDefault();
+    selectFile(pasted);
   };
 
   const submit = async () => {
@@ -49,7 +130,11 @@ function QuickCaptureBox({ captures }: { captures: AnyRecord[] | undefined }) {
       // Same upload flow as the project library: upload URL → POST bytes → register.
       let fileArgs: AnyRecord = {};
       if (file) {
-        const check = checkProjectFile({ fileName: file.name, mimeType: file.type, sizeBytes: file.size });
+        const check = checkQuickCaptureFile({
+          fileName: file.name || "pasted-file",
+          mimeType: file.type,
+          sizeBytes: file.size,
+        });
         if (!check.ok) throw new Error(check.reason);
         const uploadUrl = (await generateUploadUrl({})) as string;
         const response = await fetch(uploadUrl, {
@@ -62,10 +147,15 @@ function QuickCaptureBox({ captures }: { captures: AnyRecord[] | undefined }) {
         fileArgs = { storageId, fileName: check.fileName, mimeType: check.mimeType, sizeBytes: check.sizeBytes };
       }
       const trimmed = text.trim();
-      await createCapture({ ...(trimmed ? { text: trimmed } : {}), ...fileArgs } as any);
+      await createCapture({ ...(trimmed ? { text: trimmed } : {}), ...fileArgs, intent } as any);
       setText("");
       clearFile();
-      toast("Captured — Skippy will pick it up on the next ingestion run.", "info");
+      toast(
+        intent === "hold"
+          ? "Held — grab it from any device within 7 days. Skippy won't ingest it."
+          : "Captured — Skippy will pick it up on the next ingestion run.",
+        "info",
+      );
     } catch (error) {
       toast(error instanceof Error ? error.message : "Could not save capture", "error");
     } finally {
@@ -80,7 +170,58 @@ function QuickCaptureBox({ captures }: { captures: AnyRecord[] | undefined }) {
     }
   };
 
-  const recent = (captures ?? []).slice(0, 5);
+  const copyCapture = async (capture: AnyRecord) => {
+    try {
+      await navigator.clipboard.writeText(capture.text ?? capture.url ?? "");
+      toast("Copied to clipboard.", "info");
+    } catch {
+      toast("Could not copy — clipboard unavailable.", "error");
+    }
+  };
+
+  const downloadCapture = async (capture: AnyRecord) => {
+    if (!capture.fileUrl) return;
+    setBusyCaptureId(capture._id);
+    try {
+      // Convex file URLs are cross-origin, so an anchor download attribute
+      // cannot rename the file — fetch to a blob and download the object URL
+      // instead, preserving the real filename.
+      const response = await fetch(capture.fileUrl);
+      if (!response.ok) throw new Error(`download failed (HTTP ${response.status})`);
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = objectUrl;
+      anchor.download = capture.fileName ?? "capture";
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(objectUrl);
+    } catch (error) {
+      toast(error instanceof Error ? error.message : "Could not download file", "error");
+    } finally {
+      setBusyCaptureId(null);
+    }
+  };
+
+  const removeCapture = async (capture: AnyRecord) => {
+    setBusyCaptureId(capture._id);
+    try {
+      await deleteCapture({ captureId: capture._id } as any);
+    } catch (error) {
+      toast(error instanceof Error ? error.message : "Could not delete capture", "error");
+    } finally {
+      setBusyCaptureId(null);
+    }
+  };
+
+  // Pending items of both intents plus recently processed ones. Discarded
+  // rows stay out of sight; expired holds never arrive from the server.
+  const visible = (captures ?? []).filter(
+    (capture) => capture.status === "pending" || capture.status === "processed",
+  );
+  const recent = visible.slice(0, CAPTURE_LIST_LIMIT);
+  const moreCount = visible.length - recent.length;
 
   return (
     <Section
@@ -90,10 +231,17 @@ function QuickCaptureBox({ captures }: { captures: AnyRecord[] | undefined }) {
         </span>
       }
     >
-      <div style={{ display: "grid", gap: 8 }}>
+      <div
+        className={`${todayStyles.captureDropzone}${dragActive ? ` ${todayStyles.captureDropzoneActive}` : ""}`}
+        onDragEnter={onDragEnter}
+        onDragOver={onDragOver}
+        onDragLeave={onDragLeave}
+        onDrop={onDrop}
+        onPaste={onPaste}
+      >
         <TextArea
           rows={2}
-          placeholder="Drop a thought, note, or URL to remember later…"
+          placeholder="Drop a thought, note, URL, or file…"
           aria-label="Quick capture text"
           value={text}
           disabled={submitting}
@@ -101,50 +249,130 @@ function QuickCaptureBox({ captures }: { captures: AnyRecord[] | undefined }) {
           onKeyDown={onTextKeyDown}
         />
         <div className={todayStyles.captureActions}>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept={PROJECT_FILE_ACCEPT}
-            style={{ display: "none" }}
-            onChange={(event) => setFile(event.target.files?.[0] ?? null)}
-          />
-          {file ? (
-            <span className={todayStyles.captureFile}>
-              <Paperclip size={13} aria-hidden />
-              <span className={todayStyles.captureFileName}>{file.name}</span>
-              <span className="item-meta">{formatFileSize(file.size)}</span>
-              <IconButton small aria-label={`Remove ${file.name}`} disabled={submitting} onClick={clearFile}>
-                <X size={13} aria-hidden />
-              </IconButton>
-            </span>
-          ) : (
+          <div className={todayStyles.intentToggle} role="radiogroup" aria-label="Capture intent">
             <button
               type="button"
-              className="text-button compact"
+              role="radio"
+              aria-checked={intent === "remember"}
               disabled={submitting}
-              onClick={() => fileInputRef.current?.click()}
+              onClick={() => chooseIntent("remember")}
             >
-              <Paperclip size={14} aria-hidden /> Attach file
+              Remember
             </button>
-          )}
-          <Button small disabled={!canSubmit} onClick={() => void submit()}>
-            {submitting ? "Capturing…" : "Capture"}
-          </Button>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={intent === "hold"}
+              disabled={submitting}
+              onClick={() => chooseIntent("hold")}
+            >
+              Hold
+            </button>
+          </div>
+          <span className={todayStyles.captureActionsRight}>
+            <input
+              ref={fileInputRef}
+              type="file"
+              style={{ display: "none" }}
+              onChange={(event) => {
+                selectFile(event.target.files?.[0]);
+                if (event.target) event.target.value = "";
+              }}
+            />
+            {file ? (
+              <span className={todayStyles.captureFile}>
+                <Paperclip size={13} aria-hidden />
+                <span className={todayStyles.captureFileName}>{file.name}</span>
+                <span className="item-meta">{formatFileSize(file.size)}</span>
+                <IconButton small aria-label={`Remove ${file.name}`} disabled={submitting} onClick={clearFile}>
+                  <X size={13} aria-hidden />
+                </IconButton>
+              </span>
+            ) : (
+              <button
+                type="button"
+                className="text-button compact"
+                disabled={submitting}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <Paperclip size={14} aria-hidden /> Attach file
+              </button>
+            )}
+            <Button small disabled={!canSubmit} onClick={() => void submit()}>
+              {submitting ? "Capturing…" : "Capture"}
+            </Button>
+          </span>
         </div>
+        {intent === "hold" ? (
+          <p className="muted" style={{ margin: 0, fontSize: 12 }}>
+            Hold keeps this private for cross-device transfer — Skippy won&apos;t ingest it, and it
+            expires after 7 days.
+          </p>
+        ) : null}
         {recent.length ? (
           <div style={{ display: "grid", gap: 4 }}>
-            {recent.map((capture) => (
-              <div key={capture._id} className={todayStyles.captureRow}>
-                <span className={todayStyles.captureText} title={capture.text ?? capture.fileName ?? capture.url}>
-                  {capture.text ?? capture.fileName ?? capture.url ?? "File"}
-                </span>
-                <Badge tone={captureTone[capture.status] ?? "neutral"}>{capture.status}</Badge>
-              </div>
-            ))}
+            {recent.map((capture) => {
+              const label = captureLabel(capture);
+              const busy = busyCaptureId === capture._id;
+              return (
+                <div key={capture._id} className={todayStyles.captureRow}>
+                  <span className={todayStyles.captureText} title={label}>
+                    {label}
+                  </span>
+                  {typeof capture.sizeBytes === "number" ? (
+                    <span className="item-meta">{formatFileSize(capture.sizeBytes)}</span>
+                  ) : null}
+                  {capture.intent === "hold" ? (
+                    <Badge tone="neutral">hold</Badge>
+                  ) : (
+                    <Badge tone={captureTone[capture.status] ?? "neutral"}>{capture.status}</Badge>
+                  )}
+                  <span className={todayStyles.captureRowActions}>
+                    {capture.text || capture.url ? (
+                      <IconButton
+                        small
+                        title="Copy text"
+                        aria-label={`Copy ${label}`}
+                        disabled={busy}
+                        onClick={() => void copyCapture(capture)}
+                      >
+                        <Copy size={13} aria-hidden />
+                      </IconButton>
+                    ) : null}
+                    {capture.fileUrl && capture.fileName ? (
+                      <IconButton
+                        small
+                        title={`Download ${capture.fileName}`}
+                        aria-label={`Download ${capture.fileName}`}
+                        disabled={busy}
+                        onClick={() => void downloadCapture(capture)}
+                      >
+                        <Download size={13} aria-hidden />
+                      </IconButton>
+                    ) : null}
+                    <IconButton
+                      small
+                      title="Delete capture"
+                      aria-label={`Delete ${label}`}
+                      disabled={busy}
+                      onClick={() => void removeCapture(capture)}
+                    >
+                      <X size={13} aria-hidden />
+                    </IconButton>
+                  </span>
+                </div>
+              );
+            })}
+            {moreCount > 0 ? (
+              <p className="item-meta" style={{ margin: 0 }}>
+                +{moreCount} more
+              </p>
+            ) : null}
           </div>
         ) : (
           <p className="muted" style={{ margin: 0, fontSize: 13 }}>
-            Captures wait here until an ingestion run files them into Skippy.
+            Captures wait here until an ingestion run files them into Skippy. Held items stay for
+            you to grab on another device.
           </p>
         )}
       </div>
