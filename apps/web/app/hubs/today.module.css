@@ -105,6 +105,15 @@
 /* Recent captures: an aligned grid table so type-indicator / label / meta /
    status / actions line up across rows. Horizontal scroll on cramped
    viewports keeps columns readable rather than wrapping into a mess. */
+.captureListHeading {
+  margin: 4px 0 0;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
 .captureList {
   display: grid;
   overflow-x: auto;
