@@ -93,11 +93,16 @@ function NavLinks({
     <>
       {hubs.map((hub) => {
         const active = hub.match(pathname);
-        const showProjectSubmenu = !mobile && hub.href === "/projects" && projects.length > 0;
-        const projectSubmenuOpen = showProjectSubmenu && (alwaysShowProjects || active);
+        const showProjectSubmenu =
+          !mobile && hub.href === "/projects" && projects.length > 0;
+        const projectSubmenuOpen =
+          showProjectSubmenu && (alwaysShowProjects || active);
         if (showProjectSubmenu) {
           return (
-            <div className={`${styles.navItem} ${projectSubmenuOpen ? styles.navItemOpen : ""}`} key={hub.href}>
+            <div
+              className={`${styles.navItem} ${projectSubmenuOpen ? styles.navItemOpen : ""}`}
+              key={hub.href}
+            >
               <Link
                 href={hub.href}
                 className={`${styles.navLink} ${active ? styles.active : ""}`}
@@ -139,30 +144,30 @@ function NavLinks({
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname() ?? "/";
   const { isAuthenticated } = useConvexAuth();
-  const activeProjects = useQuery(api.projects.activeProjectsForViewer, isAuthenticated ? {} : "skip") as
-    | NavProject[]
-    | undefined;
+  const activeProjects = useQuery(
+    api.projects.activeProjectsForViewer,
+    isAuthenticated ? {} : "skip",
+  ) as NavProject[] | undefined;
 
   return (
     <ToastProvider>
       <div className={styles.shell}>
         <aside className={styles.sidebar}>
-          <div className={styles.brand}>
-            <span className={styles.brandMark}>
-              <Brain size={19} aria-hidden />
-            </span>
-            Skippy
-          </div>
           <nav className={styles.nav} aria-label="Primary">
-            <NavLinks pathname={pathname} hubs={primaryHubs} projects={activeProjects ?? []} alwaysShowProjects />
+            <div className={styles.sidebarFoot}>
+              <AuthStatus />
+            </div>
+            <NavLinks
+              pathname={pathname}
+              hubs={primaryHubs}
+              projects={activeProjects ?? []}
+              alwaysShowProjects
+            />
           </nav>
           <div className={styles.sidebarBottom}>
             <nav className={styles.nav} aria-label="Secondary">
               <NavLinks pathname={pathname} hubs={secondaryHubs} />
             </nav>
-            <div className={styles.sidebarFoot}>
-              <AuthStatus />
-            </div>
           </div>
         </aside>
 

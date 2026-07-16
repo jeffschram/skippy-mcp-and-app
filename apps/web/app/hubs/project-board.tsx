@@ -38,10 +38,23 @@ import {
   TextInput,
   useToast,
 } from "../components";
-import { EXECUTION_COLUMNS, executionStateTone, taskStatusTone, titleCase } from "../../lib/display";
+import {
+  EXECUTION_COLUMNS,
+  executionStateTone,
+  taskStatusTone,
+  titleCase,
+} from "../../lib/display";
 import { useViewerReady } from "./use-viewer";
-import { ProjectLibrarySection, TaskAttachments, useProjectFileUploader } from "./project-library";
-import { checkProjectFile, formatFileSize, PROJECT_FILE_ACCEPT } from "./project-library-helpers";
+import {
+  ProjectLibrarySection,
+  TaskAttachments,
+  useProjectFileUploader,
+} from "./project-library";
+import {
+  checkProjectFile,
+  formatFileSize,
+  PROJECT_FILE_ACCEPT,
+} from "./project-library-helpers";
 import boardStyles from "./board.module.css";
 
 type AnyRecord = Record<string, any>;
@@ -77,8 +90,20 @@ function FolderOverrideField({
         placeholder={derivedDefault ?? ""}
         disabled={disabled}
       />
-      <span className="muted" style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 12 }}>
-        <span>{disabled ? "set the project local folder first" : `default: ${derivedDefault}`}</span>
+      <span
+        className="muted"
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          gap: 8,
+          fontSize: 12,
+        }}
+      >
+        <span>
+          {disabled
+            ? "set the project local folder first"
+            : `default: ${derivedDefault}`}
+        </span>
         {!disabled && value ? (
           <button
             type="button"
@@ -106,22 +131,29 @@ function buildBriefText(task: AnyRecord, project?: AnyRecord): string {
   if (task.description) lines.push("", task.description);
   if (task.executionBrief) lines.push("", "## Brief", task.executionBrief);
   if (task.acceptanceCriteria?.length) {
-    lines.push("", "## Acceptance criteria", ...task.acceptanceCriteria.map((c: string) => `- [ ] ${c}`));
+    lines.push(
+      "",
+      "## Acceptance criteria",
+      ...task.acceptanceCriteria.map((c: string) => `- [ ] ${c}`),
+    );
   }
   return lines.join("\n");
 }
 
 export function ProjectBoardContent({ projectId }: { projectId: string }) {
   const viewerReady = useViewerReady();
-  const board = useQuery(api.projects.projectBoardForViewer, viewerReady ? { projectId: projectId as any } : "skip") as
-    | AnyRecord
-    | null
-    | undefined;
+  const board = useQuery(
+    api.projects.projectBoardForViewer,
+    viewerReady ? { projectId: projectId as any } : "skip",
+  ) as AnyRecord | null | undefined;
   const planProject = useAction(api.planning.planProject);
   const briefTaskProposal = useAction(api.planning.briefTaskProposal);
   const markDone = useMutation(api.knowledge.markTaskDoneForViewer);
-  const createTaskProposal = useMutation(api.projects.createTaskProposalForViewer);
-  const { uploadFiles: uploadProposalFiles } = useProjectFileUploader(projectId);
+  const createTaskProposal = useMutation(
+    api.projects.createTaskProposalForViewer,
+  );
+  const { uploadFiles: uploadProposalFiles } =
+    useProjectFileUploader(projectId);
   const recordResult = useMutation(api.projects.recordTaskResultForViewer);
   const requestAgent = useMutation(api.projects.requestAgentForTaskForViewer);
   const setExecState = useMutation(api.projects.setTaskExecutionStateForViewer);
@@ -136,7 +168,9 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
   const [resultUrl, setResultUrl] = useState("");
   const [resultSummary, setResultSummary] = useState("");
   const [busy, setBusy] = useState(false);
-  const [briefingTaskIds, setBriefingTaskIds] = useState<Set<string>>(new Set());
+  const [briefingTaskIds, setBriefingTaskIds] = useState<Set<string>>(
+    new Set(),
+  );
   const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
   const [dragOverState, setDragOverState] = useState<string | null>(null);
 
@@ -173,7 +207,8 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
     return trimmed.replace(/[\\/]+$/, "") || trimmed;
   }, [pFolder]);
 
-  const selected = board?.tasks?.find((task: AnyRecord) => task._id === selectedId) ?? null;
+  const selected =
+    board?.tasks?.find((task: AnyRecord) => task._id === selectedId) ?? null;
   const detail = useQuery(
     api.projects.getTaskBriefForViewer,
     viewerReady && selectedId ? { taskId: selectedId as any } : "skip",
@@ -182,9 +217,10 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
   // Tell the harness which project is open ("this project").
   useEffect(() => {
     if (!viewerReady) return;
-    void setViewerContext({ activeRoute: `/projects/${projectId}`, activeProjectId: projectId as any }).catch(
-      () => undefined,
-    );
+    void setViewerContext({
+      activeRoute: `/projects/${projectId}`,
+      activeProjectId: projectId as any,
+    }).catch(() => undefined);
   }, [viewerReady, projectId, setViewerContext]);
 
   // Reset edit state whenever a different task is opened.
@@ -217,10 +253,18 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
   const runPlan = async () => {
     setPlanning(true);
     try {
-      const result = (await planProject({ projectId: projectId as any })) as AnyRecord;
-      toast(`Skippy planned ${result.taskCount} task${result.taskCount === 1 ? "" : "s"}.`, "success");
+      const result = (await planProject({
+        projectId: projectId as any,
+      })) as AnyRecord;
+      toast(
+        `Skippy planned ${result.taskCount} task${result.taskCount === 1 ? "" : "s"}.`,
+        "success",
+      );
     } catch (error) {
-      toast(error instanceof Error ? error.message : "Planning failed", "error");
+      toast(
+        error instanceof Error ? error.message : "Planning failed",
+        "error",
+      );
     } finally {
       setPlanning(false);
     }
@@ -252,8 +296,14 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
       // a failed upload never orphans the proposal (re-attach from the panel).
       let uploadNote = "";
       if (proposalFiles.length > 0 && result?.taskId) {
-        const { done, failed } = await uploadProposalFiles(proposalFiles, result.taskId);
-        uploadNote = failed > 0 ? ` ${done}/${done + failed} files attached.` : ` ${done} file${done === 1 ? "" : "s"} attached.`;
+        const { done, failed } = await uploadProposalFiles(
+          proposalFiles,
+          result.taskId,
+        );
+        uploadNote =
+          failed > 0
+            ? ` ${done}/${done + failed} files attached.`
+            : ` ${done} file${done === 1 ? "" : "s"} attached.`;
       }
       setProposalOpen(false);
       setProposalText("");
@@ -261,7 +311,10 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
       setProposalFiles([]);
       toast(`Task proposed.${uploadNote}`, "success");
     } catch (error) {
-      toast(error instanceof Error ? error.message : "Could not propose task", "error");
+      toast(
+        error instanceof Error ? error.message : "Could not propose task",
+        "error",
+      );
     } finally {
       setProposalBusy(false);
     }
@@ -278,8 +331,10 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
   };
 
   // Briefing (transient, client-side) or executing (persistent, from board data) — both show the activity bar.
-  const isTaskActive = (task: AnyRecord) => briefingTaskIds.has(task._id) || task.executionState === "in_progress";
-  const activityLabel = (task: AnyRecord) => (briefingTaskIds.has(task._id) ? "Generating brief…" : "In progress…");
+  const isTaskActive = (task: AnyRecord) =>
+    briefingTaskIds.has(task._id) || task.executionState === "in_progress";
+  const activityLabel = (task: AnyRecord) =>
+    briefingTaskIds.has(task._id) ? "Generating brief…" : "In progress…";
 
   const createBriefForTask = async (taskId: string) => {
     setBusy(true);
@@ -288,15 +343,24 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
       await briefTaskProposal({ taskId: taskId as any });
       toast("Brief created.", "success");
     } catch (error) {
-      toast(error instanceof Error ? error.message : "Could not create brief", "error");
+      toast(
+        error instanceof Error ? error.message : "Could not create brief",
+        "error",
+      );
     } finally {
       setBusy(false);
       setTaskBriefing(taskId, false);
     }
   };
 
-  const moveTo = async (taskId: string, state: string, taskOverride?: AnyRecord | null) => {
-    const task = taskOverride ?? board?.tasks?.find((candidate: AnyRecord) => candidate._id === taskId);
+  const moveTo = async (
+    taskId: string,
+    state: string,
+    taskOverride?: AnyRecord | null,
+  ) => {
+    const task =
+      taskOverride ??
+      board?.tasks?.find((candidate: AnyRecord) => candidate._id === taskId);
     const briefing = task?.executionState === "proposed" && state === "briefed";
     setBusy(true);
     if (briefing) setTaskBriefing(taskId, true);
@@ -305,11 +369,17 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
         await briefTaskProposal({ taskId: taskId as any });
         toast("Brief created.", "success");
       } else {
-        await setExecState({ taskId: taskId as any, executionState: state as any });
+        await setExecState({
+          taskId: taskId as any,
+          executionState: state as any,
+        });
         toast(`Moved to ${titleCase(state)}.`, "info");
       }
     } catch (error) {
-      toast(error instanceof Error ? error.message : "Could not move task", "error");
+      toast(
+        error instanceof Error ? error.message : "Could not move task",
+        "error",
+      );
     } finally {
       setBusy(false);
       if (briefing) setTaskBriefing(taskId, false);
@@ -326,7 +396,12 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
       });
       toast(`${agentName} requested.`, "success");
     } catch (error) {
-      toast(error instanceof Error ? error.message : `Could not request ${agentName}`, "error");
+      toast(
+        error instanceof Error
+          ? error.message
+          : `Could not request ${agentName}`,
+        "error",
+      );
     } finally {
       setBusy(false);
     }
@@ -334,7 +409,9 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
 
   const dropTaskInState = async (state: string) => {
     if (!draggedTaskId) return;
-    const task = board?.tasks?.find((candidate: AnyRecord) => candidate._id === draggedTaskId);
+    const task = board?.tasks?.find(
+      (candidate: AnyRecord) => candidate._id === draggedTaskId,
+    );
     setDraggedTaskId(null);
     setDragOverState(null);
     if (!task || task.executionState === state) return;
@@ -355,7 +432,10 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
       toast("Brief updated.", "success");
       setEditingBrief(false);
     } catch (error) {
-      toast(error instanceof Error ? error.message : "Could not save brief", "error");
+      toast(
+        error instanceof Error ? error.message : "Could not save brief",
+        "error",
+      );
     } finally {
       setBusy(false);
     }
@@ -376,7 +456,10 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
       toast("Proposal updated.", "success");
       setEditingProposal(false);
     } catch (error) {
-      toast(error instanceof Error ? error.message : "Could not save proposal", "error");
+      toast(
+        error instanceof Error ? error.message : "Could not save proposal",
+        "error",
+      );
     } finally {
       setBusy(false);
     }
@@ -391,13 +474,20 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
         resultUrl: resultUrl || undefined,
         markDone: markComplete,
       } as any);
-      if (markComplete) await markDone({ taskId: taskId as any }).catch(() => undefined);
-      toast(markComplete ? "Task completed." : "Result recorded for review.", "success");
+      if (markComplete)
+        await markDone({ taskId: taskId as any }).catch(() => undefined);
+      toast(
+        markComplete ? "Task completed." : "Result recorded for review.",
+        "success",
+      );
       setSelectedId(null);
       setResultUrl("");
       setResultSummary("");
     } catch (error) {
-      toast(error instanceof Error ? error.message : "Could not record result", "error");
+      toast(
+        error instanceof Error ? error.message : "Could not record result",
+        "error",
+      );
     } finally {
       setBusy(false);
     }
@@ -412,7 +502,10 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
     ] as const) {
       const trimmed = value.trim();
       if (trimmed && !isValidFolderPathFormat(trimmed)) {
-        toast(`${label} must be an absolute path starting with '/', '~', or a drive letter.`, "error");
+        toast(
+          `${label} must be an absolute path starting with '/', '~', or a drive letter.`,
+          "error",
+        );
         return;
       }
     }
@@ -431,7 +524,10 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
       toast("Project updated.", "success");
       setSettingsOpen(false);
     } catch (error) {
-      toast(error instanceof Error ? error.message : "Could not update project", "error");
+      toast(
+        error instanceof Error ? error.message : "Could not update project",
+        "error",
+      );
     } finally {
       setBusy(false);
     }
@@ -439,16 +535,26 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
 
   const archiveProject = async () => {
     if (!project) return;
-    if (!window.confirm(`Archive "${project.title}"? It will disappear from primary project lists, but you can restore it from Settings.`)) {
+    if (
+      !window.confirm(
+        `Archive "${project.title}"? It will disappear from primary project lists, but you can restore it from Settings.`,
+      )
+    ) {
       return;
     }
     setBusy(true);
     try {
-      await updateProject({ projectId: projectId as any, status: "archived" } as any);
+      await updateProject({
+        projectId: projectId as any,
+        status: "archived",
+      } as any);
       toast("Project archived.", "success");
       setSettingsOpen(false);
     } catch (error) {
-      toast(error instanceof Error ? error.message : "Could not archive project", "error");
+      toast(
+        error instanceof Error ? error.message : "Could not archive project",
+        "error",
+      );
     } finally {
       setBusy(false);
     }
@@ -457,10 +563,16 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
   const restoreProject = async () => {
     setBusy(true);
     try {
-      await updateProject({ projectId: projectId as any, status: "planned" } as any);
+      await updateProject({
+        projectId: projectId as any,
+        status: "planned",
+      } as any);
       toast("Project restored.", "success");
     } catch (error) {
-      toast(error instanceof Error ? error.message : "Could not restore project", "error");
+      toast(
+        error instanceof Error ? error.message : "Could not restore project",
+        "error",
+      );
     } finally {
       setBusy(false);
     }
@@ -483,28 +595,56 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
       ) : (
         <>
           <div style={{ marginBottom: 18 }}>
-            <Link href="/projects" className="text-button compact" style={{ marginBottom: 14 }}>
+            <Link
+              href="/projects"
+              className="text-button compact"
+              style={{ marginBottom: 14 }}
+            >
               <ArrowLeft size={15} aria-hidden /> Projects
             </Link>
             <div className={boardStyles.projectHeader}>
               <div>
-                <p className="eyebrow">{project.kind === "code" ? "Code project" : "Project"}</p>
+                <p className="eyebrow">
+                  {project.kind === "code" ? "Code project" : "Project"}
+                </p>
                 <h1>{project.title}</h1>
                 {project.status === "archived" ? (
                   <p className="muted" style={{ maxWidth: 640 }}>
-                    This project is archived. It is hidden from primary project lists until restored.
+                    This project is archived. It is hidden from primary project
+                    lists until restored.
                   </p>
                 ) : null}
-                {project.summary ? <p className="muted" style={{ maxWidth: 640 }}>{project.summary}</p> : null}
+                {project.summary ? (
+                  <p className="muted" style={{ maxWidth: 640 }}>
+                    {project.summary}
+                  </p>
+                ) : null}
                 {project.repoUrl || project.localPath ? (
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      flexWrap: "wrap",
+                      gap: 8,
+                      marginTop: 8,
+                    }}
+                  >
                     {project.repoUrl ? (
-                      <a className="badge blue" href={project.repoUrl} target="_blank" rel="noreferrer" style={{ gap: 6 }}>
+                      <a
+                        className="badge blue"
+                        href={project.repoUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        style={{ gap: 6 }}
+                      >
                         <GitBranch size={13} aria-hidden /> Repo
                       </a>
                     ) : null}
                     {project.localPath ? (
-                      <span className="badge" style={{ gap: 6 }} title={project.localPath}>
+                      <span
+                        className="badge"
+                        style={{ gap: 6 }}
+                        title={project.localPath}
+                      >
                         <Folder size={13} aria-hidden /> {project.localPath}
                       </span>
                     ) : null}
@@ -515,13 +655,13 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                 <Button onClick={openSettings} title="Project settings">
                   <Settings2 size={16} aria-hidden /> Settings
                 </Button>
-                <Button onClick={() => setProposalOpen(true)}>
+                <Button variant="primary" onClick={() => setProposalOpen(true)}>
                   <Plus size={16} aria-hidden /> Propose task
                 </Button>
-                <Button variant="primary" onClick={() => void runPlan()} disabled={planning}>
+                {/* <Button variant="primary" onClick={() => void runPlan()} disabled={planning}>
                   <Sparkles size={17} aria-hidden />
                   {planning ? "Planning…" : board.tasks.length ? "Re-plan with AI" : "Plan with AI"}
-                </Button>
+                </Button> */}
               </div>
             </div>
           </div>
@@ -541,97 +681,143 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
             <ProjectLibrarySection projectId={projectId} alwaysOpen />
           ) : (
             <>
-          {/* Progress */}
-          <Card className={boardStyles.progressCard}>
-            <div className={boardStyles.progressHead}>
-              <strong>{board.progress.percent}% complete</strong>
-              <span className="muted">
-                {board.progress.done}/{board.progress.total} tasks · {board.progress.ready} ready · {board.progress.inReview} in
-                review · {board.progress.blocked} blocked
-              </span>
-            </div>
-            <ProgressBar value={board.progress.percent} tone={board.progress.percent === 100 ? "green" : "blue"} />
-            {board.latestPlan?.summary ? (
-              <p className="muted" style={{ margin: "12px 0 0", fontSize: 14 }}>
-                <Sparkles size={13} aria-hidden style={{ verticalAlign: "-1px" }} /> {board.latestPlan.summary}
-              </p>
-            ) : null}
-          </Card>
-
-          {board.tasks.length === 0 ? (
-            <Card>
-              <EmptyState icon={<Sparkles size={20} aria-hidden />} title="No tasks yet">
-                Click <strong>Plan with AI</strong> to decompose this project into executable task briefs you can hand to a
-                coding agent.
-              </EmptyState>
-            </Card>
-          ) : (
-            <div className={boardStyles.board}>
-              {EXECUTION_COLUMNS.map((column) => {
-                const tasks = board.tasks.filter((task: AnyRecord) => task.executionState === column.key);
-                return (
-                  <div
-                    key={column.key}
-                    className={`${boardStyles.column} ${dragOverState === column.key ? boardStyles.columnDropTarget : ""}`}
-                    onDragOver={(event) => {
-                      event.preventDefault();
-                      event.dataTransfer.dropEffect = "move";
-                      setDragOverState(column.key);
-                    }}
-                    onDragLeave={(event) => {
-                      if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
-                        setDragOverState(null);
-                      }
-                    }}
-                    onDrop={(event) => {
-                      event.preventDefault();
-                      void dropTaskInState(column.key);
-                    }}
+              {/* Progress */}
+              <Card className={boardStyles.progressCard}>
+                <div className={boardStyles.progressHead}>
+                  <strong>{board.progress.percent}% complete</strong>
+                  <span className="muted">
+                    {board.progress.done}/{board.progress.total} tasks ·{" "}
+                    {board.progress.ready} ready · {board.progress.inReview} in
+                    review · {board.progress.blocked} blocked
+                  </span>
+                </div>
+                <ProgressBar
+                  value={board.progress.percent}
+                  tone={board.progress.percent === 100 ? "green" : "blue"}
+                />
+                {board.latestPlan?.summary ? (
+                  <p
+                    className="muted"
+                    style={{ margin: "12px 0 0", fontSize: 14 }}
                   >
-                    <div className={boardStyles.columnHead}>
-                      <span>{column.label}</span>
-                      <span className={boardStyles.columnCount}>{tasks.length}</span>
-                    </div>
-                    <div className={boardStyles.columnBody}>
-                      {tasks.map((task: AnyRecord) => (
-                        <button
-                          key={task._id}
-                          className={`${boardStyles.taskCard} ${task.ownerType === "owner" ? boardStyles.ownerTaskCard : ""} ${draggedTaskId === task._id ? boardStyles.taskCardDragging : ""}`}
-                          draggable
-                          aria-grabbed={draggedTaskId === task._id}
-                          aria-label={`${task.title}. ${task.ownerType === "owner" ? `${ownerName} owned task` : `${agentName} owned task`}.`}
-                          onDragStart={(event) => {
-                            setDraggedTaskId(task._id);
-                            event.dataTransfer.effectAllowed = "move";
-                            event.dataTransfer.setData("text/plain", task._id);
-                          }}
-                          onDragEnd={() => {
-                            setDraggedTaskId(null);
+                    <Sparkles
+                      size={13}
+                      aria-hidden
+                      style={{ verticalAlign: "-1px" }}
+                    />{" "}
+                    {board.latestPlan.summary}
+                  </p>
+                ) : null}
+              </Card>
+
+              {board.tasks.length === 0 ? (
+                <Card>
+                  <EmptyState
+                    icon={<Sparkles size={20} aria-hidden />}
+                    title="No tasks yet"
+                  >
+                    Click <strong>Plan with AI</strong> to decompose this
+                    project into executable task briefs you can hand to a coding
+                    agent.
+                  </EmptyState>
+                </Card>
+              ) : (
+                <div className={boardStyles.board}>
+                  {EXECUTION_COLUMNS.map((column) => {
+                    const tasks = board.tasks.filter(
+                      (task: AnyRecord) => task.executionState === column.key,
+                    );
+                    return (
+                      <div
+                        key={column.key}
+                        className={`${boardStyles.column} ${dragOverState === column.key ? boardStyles.columnDropTarget : ""}`}
+                        onDragOver={(event) => {
+                          event.preventDefault();
+                          event.dataTransfer.dropEffect = "move";
+                          setDragOverState(column.key);
+                        }}
+                        onDragLeave={(event) => {
+                          if (
+                            !event.currentTarget.contains(
+                              event.relatedTarget as Node | null,
+                            )
+                          ) {
                             setDragOverState(null);
-                          }}
-                          onClick={() => setSelectedId(task._id)}
-                          type="button"
-                        >
-                          <span className={boardStyles.taskTitle}>{task.title}</span>
-                          <span className={boardStyles.taskMeta}>
-                            {task.ownerType === "owner" ? <Badge tone="gold">{ownerName}</Badge> : null}
-                            {task.kind ? <Badge tone="neutral">{task.kind}</Badge> : null}
-                            {task.agentRequestStatus === "requested" ? (
-                              <Badge tone="blue">Queued for {task.requestedHarness ?? agentName}</Badge>
-                            ) : null}
-                            {task.dependsOn?.length ? <Badge tone="gold">{task.dependsOn.length} dep</Badge> : null}
-                            {task.resultUrl ? <Badge tone="green">result</Badge> : null}
+                          }
+                        }}
+                        onDrop={(event) => {
+                          event.preventDefault();
+                          void dropTaskInState(column.key);
+                        }}
+                      >
+                        <div className={boardStyles.columnHead}>
+                          <span>{column.label}</span>
+                          <span className={boardStyles.columnCount}>
+                            {tasks.length}
                           </span>
-                          {isTaskActive(task) ? <ActivityBar label={activityLabel(task)} /> : null}
-                        </button>
-                      ))}
-                      {tasks.length === 0 ? <p className={boardStyles.columnEmpty}>—</p> : null}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
+                        </div>
+                        <div className={boardStyles.columnBody}>
+                          {tasks.map((task: AnyRecord) => (
+                            <button
+                              key={task._id}
+                              className={`${boardStyles.taskCard} ${task.ownerType === "owner" ? boardStyles.ownerTaskCard : ""} ${draggedTaskId === task._id ? boardStyles.taskCardDragging : ""}`}
+                              draggable
+                              aria-grabbed={draggedTaskId === task._id}
+                              aria-label={`${task.title}. ${task.ownerType === "owner" ? `${ownerName} owned task` : `${agentName} owned task`}.`}
+                              onDragStart={(event) => {
+                                setDraggedTaskId(task._id);
+                                event.dataTransfer.effectAllowed = "move";
+                                event.dataTransfer.setData(
+                                  "text/plain",
+                                  task._id,
+                                );
+                              }}
+                              onDragEnd={() => {
+                                setDraggedTaskId(null);
+                                setDragOverState(null);
+                              }}
+                              onClick={() => setSelectedId(task._id)}
+                              type="button"
+                            >
+                              <span className={boardStyles.taskTitle}>
+                                {task.title}
+                              </span>
+                              <span className={boardStyles.taskMeta}>
+                                {task.ownerType === "owner" ? (
+                                  <Badge tone="gold">{ownerName}</Badge>
+                                ) : null}
+                                {task.kind ? (
+                                  <Badge tone="neutral">{task.kind}</Badge>
+                                ) : null}
+                                {task.agentRequestStatus === "requested" ? (
+                                  <Badge tone="blue">
+                                    Queued for{" "}
+                                    {task.requestedHarness ?? agentName}
+                                  </Badge>
+                                ) : null}
+                                {task.dependsOn?.length ? (
+                                  <Badge tone="gold">
+                                    {task.dependsOn.length} dep
+                                  </Badge>
+                                ) : null}
+                                {task.resultUrl ? (
+                                  <Badge tone="green">result</Badge>
+                                ) : null}
+                              </span>
+                              {isTaskActive(task) ? (
+                                <ActivityBar label={activityLabel(task)} />
+                              ) : null}
+                            </button>
+                          ))}
+                          {tasks.length === 0 ? (
+                            <p className={boardStyles.columnEmpty}>—</p>
+                          ) : null}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </>
           )}
 
@@ -644,7 +830,11 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
               selected ? (
                 <>
                   {selected.executionState === "proposed" ? (
-                    <Button variant="primary" disabled={busy} onClick={() => void createBriefForTask(selected._id)}>
+                    <Button
+                      variant="primary"
+                      disabled={busy}
+                      onClick={() => void createBriefForTask(selected._id)}
+                    >
                       <Sparkles size={16} aria-hidden /> Create Brief
                     </Button>
                   ) : (
@@ -653,20 +843,33 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                     </Button>
                   )}
                   {selected.executionState === "briefed" ? (
-                    <Button variant="primary" disabled={busy} onClick={() => void moveTo(selected._id, "ready")}>
-                      Mark Ready
-                    </Button>
-                  ) : selected.executionState === "ready" && selected.ownerType === "agent" ? (
                     <Button
                       variant="primary"
-                      disabled={busy || selected.agentRequestStatus === "requested"}
+                      disabled={busy}
+                      onClick={() => void moveTo(selected._id, "ready")}
+                    >
+                      Mark Ready
+                    </Button>
+                  ) : selected.executionState === "ready" &&
+                    selected.ownerType === "agent" ? (
+                    <Button
+                      variant="primary"
+                      disabled={
+                        busy || selected.agentRequestStatus === "requested"
+                      }
                       onClick={() => void requestAgentForTask(selected)}
                     >
                       <Play size={16} aria-hidden />
-                      {selected.agentRequestStatus === "requested" ? `${agentName} requested` : `Request ${agentName}`}
+                      {selected.agentRequestStatus === "requested"
+                        ? `${agentName} requested`
+                        : `Request ${agentName}`}
                     </Button>
                   ) : selected.executionState === "ready" ? (
-                    <Button variant="primary" disabled={busy} onClick={() => void moveTo(selected._id, "in_progress")}>
+                    <Button
+                      variant="primary"
+                      disabled={busy}
+                      onClick={() => void moveTo(selected._id, "in_progress")}
+                    >
                       <Play size={16} aria-hidden /> Mark in progress
                     </Button>
                   ) : null}
@@ -676,28 +879,55 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
           >
             {selected ? (
               <div style={{ display: "grid", gap: 16 }}>
-                {isTaskActive(selected) ? <ActivityBar label={activityLabel(selected)} /> : null}
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                {isTaskActive(selected) ? (
+                  <ActivityBar label={activityLabel(selected)} />
+                ) : null}
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 6,
+                    flexWrap: "wrap",
+                    alignItems: "center",
+                  }}
+                >
                   <Badge tone={executionStateTone(selected.executionState)} dot>
                     {titleCase(selected.executionState)}
                   </Badge>
                   {selected.executionState !== "proposed" &&
-                  titleCase(selected.status) !== titleCase(selected.executionState) ? (
-                    <Badge tone={taskStatusTone(selected.status)}>Status: {titleCase(selected.status)}</Badge>
+                  titleCase(selected.status) !==
+                    titleCase(selected.executionState) ? (
+                    <Badge tone={taskStatusTone(selected.status)}>
+                      Status: {titleCase(selected.status)}
+                    </Badge>
                   ) : null}
-                  {selected.kind ? <Badge tone="neutral">{selected.kind}</Badge> : null}
+                  {selected.kind ? (
+                    <Badge tone="neutral">{selected.kind}</Badge>
+                  ) : null}
                   {selected.agentRequestStatus === "requested" ? (
-                    <Badge tone="blue">Queued for {selected.requestedHarness ?? agentName}</Badge>
+                    <Badge tone="blue">
+                      Queued for {selected.requestedHarness ?? agentName}
+                    </Badge>
                   ) : null}
                 </div>
 
                 {/* Move between states (kanban) */}
-                <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14 }}>
-                  <span className="muted" style={{ fontWeight: 700 }}>Move to</span>
+                <label
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    fontSize: 14,
+                  }}
+                >
+                  <span className="muted" style={{ fontWeight: 700 }}>
+                    Move to
+                  </span>
                   <Select
                     value={selected.executionState}
                     disabled={busy}
-                    onChange={(event) => void moveTo(selected._id, event.target.value, selected)}
+                    onChange={(event) =>
+                      void moveTo(selected._id, event.target.value, selected)
+                    }
                     style={{ maxWidth: 200 }}
                   >
                     {EXECUTION_COLUMNS.map((column) => (
@@ -708,13 +938,21 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                   </Select>
                 </label>
 
-                {selected.description && selected.executionState !== "proposed" ? (
+                {selected.description &&
+                selected.executionState !== "proposed" ? (
                   <p style={{ margin: 0 }}>{selected.description}</p>
                 ) : null}
 
                 {selected.executionState === "proposed" ? (
                   <section>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        gap: 8,
+                      }}
+                    >
                       <h3 style={{ margin: 0 }}>Proposal</h3>
                       {!editingProposal ? (
                         <Button
@@ -734,20 +972,27 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                         <Field label="Title">
                           <TextInput
                             value={titleDraft}
-                            onChange={(event) => setTitleDraft(event.target.value)}
+                            onChange={(event) =>
+                              setTitleDraft(event.target.value)
+                            }
                             placeholder="Task title"
                           />
                         </Field>
                         <Field label="Proposal">
                           <TextArea
                             value={proposalDraft}
-                            onChange={(event) => setProposalDraft(event.target.value)}
+                            onChange={(event) =>
+                              setProposalDraft(event.target.value)
+                            }
                             placeholder="Describe the idea, problem, constraints, or proposed solution."
                             style={{ minHeight: 120 }}
                           />
                         </Field>
                         <div style={{ display: "flex", gap: 8 }}>
-                          <Button disabled={busy} onClick={() => setEditingProposal(false)}>
+                          <Button
+                            disabled={busy}
+                            onClick={() => setEditingProposal(false)}
+                          >
                             Cancel
                           </Button>
                           <Button
@@ -761,9 +1006,12 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                       </div>
                     ) : (
                       <>
-                        <p className={boardStyles.brief}>{selected.description ?? selected.title}</p>
+                        <p className={boardStyles.brief}>
+                          {selected.description ?? selected.title}
+                        </p>
                         <p className="muted" style={{ fontSize: 14 }}>
-                          Create a brief to turn this proposal into an editable, hand-off-ready task.
+                          Create a brief to turn this proposal into an editable,
+                          hand-off-ready task.
                         </p>
                       </>
                     )}
@@ -771,60 +1019,98 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                 ) : null}
 
                 {/* Execution brief + acceptance criteria (editable pre-execution) */}
-                {selected.executionState !== "proposed" ? <section>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-                    <h3 style={{ margin: 0 }}>Execution brief</h3>
-                    {PRE_EXECUTION.has(selected.executionState) && !editingBrief ? (
-                      <Button small onClick={() => setEditingBrief(true)}>
-                        <Pencil size={14} aria-hidden /> Edit
-                      </Button>
-                    ) : null}
-                  </div>
-                  {editingBrief ? (
-                    <div style={{ display: "grid", gap: 10, marginTop: 8 }}>
-                      <TextArea
-                        value={briefDraft}
-                        onChange={(event) => setBriefDraft(event.target.value)}
-                        placeholder="What to do, where, and any context an executor needs."
-                        style={{ minHeight: 120 }}
-                      />
-                      <Field label="Acceptance criteria (one per line)">
-                        <TextArea
-                          value={criteriaDraft}
-                          onChange={(event) => setCriteriaDraft(event.target.value)}
-                          placeholder={"Tests pass\nFeature renders in the app"}
-                          style={{ minHeight: 90 }}
-                        />
-                      </Field>
-                      <div style={{ display: "flex", gap: 8 }}>
-                        <Button disabled={busy} onClick={() => setEditingBrief(false)}>
-                          Cancel
+                {selected.executionState !== "proposed" ? (
+                  <section>
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        gap: 8,
+                      }}
+                    >
+                      <h3 style={{ margin: 0 }}>Execution brief</h3>
+                      {PRE_EXECUTION.has(selected.executionState) &&
+                      !editingBrief ? (
+                        <Button small onClick={() => setEditingBrief(true)}>
+                          <Pencil size={14} aria-hidden /> Edit
                         </Button>
-                        <Button variant="primary" disabled={busy} onClick={() => void saveBrief(selected._id)}>
-                          Save brief
-                        </Button>
-                      </div>
-                    </div>
-                  ) : (
-                    <>
-                      {selected.executionBrief ? (
-                        <p className={boardStyles.brief}>{selected.executionBrief}</p>
-                      ) : (
-                        <p className="muted" style={{ fontSize: 14 }}>No brief yet.</p>
-                      )}
-                      {selected.acceptanceCriteria?.length ? (
-                        <>
-                          <h3 style={{ marginTop: 14 }}>Acceptance criteria</h3>
-                          <ul style={{ margin: 0, paddingLeft: 18, display: "grid", gap: 6 }}>
-                            {selected.acceptanceCriteria.map((criterion: string, index: number) => (
-                              <li key={index}>{criterion}</li>
-                            ))}
-                          </ul>
-                        </>
                       ) : null}
-                    </>
-                  )}
-                </section> : null}
+                    </div>
+                    {editingBrief ? (
+                      <div style={{ display: "grid", gap: 10, marginTop: 8 }}>
+                        <TextArea
+                          value={briefDraft}
+                          onChange={(event) =>
+                            setBriefDraft(event.target.value)
+                          }
+                          placeholder="What to do, where, and any context an executor needs."
+                          style={{ minHeight: 120 }}
+                        />
+                        <Field label="Acceptance criteria (one per line)">
+                          <TextArea
+                            value={criteriaDraft}
+                            onChange={(event) =>
+                              setCriteriaDraft(event.target.value)
+                            }
+                            placeholder={
+                              "Tests pass\nFeature renders in the app"
+                            }
+                            style={{ minHeight: 90 }}
+                          />
+                        </Field>
+                        <div style={{ display: "flex", gap: 8 }}>
+                          <Button
+                            disabled={busy}
+                            onClick={() => setEditingBrief(false)}
+                          >
+                            Cancel
+                          </Button>
+                          <Button
+                            variant="primary"
+                            disabled={busy}
+                            onClick={() => void saveBrief(selected._id)}
+                          >
+                            Save brief
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        {selected.executionBrief ? (
+                          <p className={boardStyles.brief}>
+                            {selected.executionBrief}
+                          </p>
+                        ) : (
+                          <p className="muted" style={{ fontSize: 14 }}>
+                            No brief yet.
+                          </p>
+                        )}
+                        {selected.acceptanceCriteria?.length ? (
+                          <>
+                            <h3 style={{ marginTop: 14 }}>
+                              Acceptance criteria
+                            </h3>
+                            <ul
+                              style={{
+                                margin: 0,
+                                paddingLeft: 18,
+                                display: "grid",
+                                gap: 6,
+                              }}
+                            >
+                              {selected.acceptanceCriteria.map(
+                                (criterion: string, index: number) => (
+                                  <li key={index}>{criterion}</li>
+                                ),
+                              )}
+                            </ul>
+                          </>
+                        ) : null}
+                      </>
+                    )}
+                  </section>
+                ) : null}
 
                 <TaskAttachments projectId={projectId} taskId={selected._id} />
 
@@ -833,9 +1119,18 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                     <h3>Depends on</h3>
                     <div style={{ display: "grid", gap: 6 }}>
                       {detail.dependencies.map((dep: AnyRecord) => (
-                        <div key={dep._id} style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                        <div
+                          key={dep._id}
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            gap: 8,
+                          }}
+                        >
                           <span>{dep.title}</span>
-                          <Badge tone={dep.done ? "green" : "gold"}>{dep.done ? "done" : dep.status}</Badge>
+                          <Badge tone={dep.done ? "green" : "gold"}>
+                            {dep.done ? "done" : dep.status}
+                          </Badge>
                         </div>
                       ))}
                     </div>
@@ -845,23 +1140,42 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                 {selected.resultSummary || selected.resultUrl ? (
                   <section>
                     <h3>Result</h3>
-                    {selected.resultSummary ? <p style={{ margin: "0 0 6px" }}>{selected.resultSummary}</p> : null}
+                    {selected.resultSummary ? (
+                      <p style={{ margin: "0 0 6px" }}>
+                        {selected.resultSummary}
+                      </p>
+                    ) : null}
                     {selected.resultUrl ? (
-                      <a className="code" href={selected.resultUrl} target="_blank" rel="noreferrer">
+                      <a
+                        className="code"
+                        href={selected.resultUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
                         {selected.resultUrl}
                       </a>
                     ) : null}
                   </section>
                 ) : null}
 
-                {(selected.prUrl || selected.gitBranchName || selected.executionState === "in_review") && project.repoUrl ? (
+                {(selected.prUrl ||
+                  selected.gitBranchName ||
+                  selected.executionState === "in_review") &&
+                project.repoUrl ? (
                   <section>
                     <h3>Pull Request</h3>
                     {selected.prUrl ? (
                       <p style={{ margin: 0 }}>
-                        <a className="text-button" href={selected.prUrl} target="_blank" rel="noreferrer">
+                        <a
+                          className="text-button"
+                          href={selected.prUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
                           <GitPullRequest size={16} aria-hidden />
-                          {selected.prNumber ? `PR #${selected.prNumber}` : "Open pull request"}
+                          {selected.prNumber
+                            ? `PR #${selected.prNumber}`
+                            : "Open pull request"}
                           <ExternalLink size={14} aria-hidden />
                         </a>
                       </p>
@@ -871,8 +1185,12 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                       </p>
                     ) : null}
                     {selected.gitBranchName ? (
-                      <p className="muted" style={{ margin: "6px 0 0", fontSize: 13 }}>
-                        Branch: <span className="code">{selected.gitBranchName}</span>
+                      <p
+                        className="muted"
+                        style={{ margin: "6px 0 0", fontSize: 13 }}
+                      >
+                        Branch:{" "}
+                        <span className="code">{selected.gitBranchName}</span>
                         {selected.prStatus ? ` · ${selected.prStatus}` : ""}
                       </p>
                     ) : null}
@@ -881,7 +1199,14 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
 
                 {/* Record result only once work is underway (not for briefed/ready). */}
                 {RESULT_STATES.has(selected.executionState) ? (
-                  <section style={{ borderTop: "1px solid var(--line)", paddingTop: 14, display: "grid", gap: 10 }}>
+                  <section
+                    style={{
+                      borderTop: "1px solid var(--line)",
+                      paddingTop: 14,
+                      display: "grid",
+                      gap: 10,
+                    }}
+                  >
                     <h3 style={{ margin: 0 }}>Record result (supervise)</h3>
                     <input
                       className="input"
@@ -897,10 +1222,17 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                       style={{ minHeight: 80 }}
                     />
                     <div style={{ display: "flex", gap: 8 }}>
-                      <Button disabled={busy} onClick={() => void submitResult(selected._id, false)}>
+                      <Button
+                        disabled={busy}
+                        onClick={() => void submitResult(selected._id, false)}
+                      >
                         Submit for review
                       </Button>
-                      <Button variant="primary" disabled={busy} onClick={() => void submitResult(selected._id, true)}>
+                      <Button
+                        variant="primary"
+                        disabled={busy}
+                        onClick={() => void submitResult(selected._id, true)}
+                      >
                         Mark done
                       </Button>
                     </div>
@@ -910,67 +1242,123 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
             ) : null}
           </Drawer>
 
-          <Dialog open={settingsOpen} onClose={() => setSettingsOpen(false)} title="Project settings">
+          <Dialog
+            open={settingsOpen}
+            onClose={() => setSettingsOpen(false)}
+            title="Project settings"
+          >
             <div style={{ display: "grid", gap: 14 }}>
               <Field label="Project type">
-                <Select value={pKind} onChange={(event) => setPKind(event.target.value)}>
+                <Select
+                  value={pKind}
+                  onChange={(event) => setPKind(event.target.value)}
+                >
                   <option value="general">General</option>
-                  <option value="code">Code (GitHub repo + branch/PR workflow)</option>
+                  <option value="code">
+                    Code (GitHub repo + branch/PR workflow)
+                  </option>
                 </Select>
               </Field>
               {pKind === "code" ? (
                 <Field label="GitHub repo URL">
-                  <TextInput value={pRepo} onChange={(event) => setPRepo(event.target.value)} placeholder="https://github.com/you/repo" />
+                  <TextInput
+                    value={pRepo}
+                    onChange={(event) => setPRepo(event.target.value)}
+                    placeholder="https://github.com/you/repo"
+                  />
                 </Field>
               ) : null}
               {pKind === "code" ? (
                 <Field label="Default base branch">
-                  <TextInput value={pBaseBranch} onChange={(event) => setPBaseBranch(event.target.value)} placeholder="main" />
+                  <TextInput
+                    value={pBaseBranch}
+                    onChange={(event) => setPBaseBranch(event.target.value)}
+                    placeholder="main"
+                  />
                 </Field>
               ) : null}
               <Field label="Project local folder">
-                <TextInput value={pFolder} onChange={(event) => setPFolder(event.target.value)} placeholder="/Users/you/projects/thing" />
+                <TextInput
+                  value={pFolder}
+                  onChange={(event) => setPFolder(event.target.value)}
+                  placeholder="/Users/you/projects/thing"
+                />
               </Field>
               <FolderOverrideField
                 label="Library folder (user files)"
                 value={pAssets}
                 onChange={setPAssets}
-                derivedDefault={pFolderBase ? `${pFolderBase}/_library` : undefined}
+                derivedDefault={
+                  pFolderBase ? `${pFolderBase}/_library` : undefined
+                }
                 disabled={!pFolderBase}
               />
               <FolderOverrideField
                 label="Output folder (artifacts)"
                 value={pOutput}
                 onChange={setPOutput}
-                derivedDefault={pFolderBase ? `${pFolderBase}/_output` : undefined}
+                derivedDefault={
+                  pFolderBase ? `${pFolderBase}/_output` : undefined
+                }
                 disabled={!pFolderBase}
               />
               <Field label="Summary">
-                <TextArea value={pSummary} onChange={(event) => setPSummary(event.target.value)} />
+                <TextArea
+                  value={pSummary}
+                  onChange={(event) => setPSummary(event.target.value)}
+                />
               </Field>
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  gap: 8,
+                  flexWrap: "wrap",
+                }}
+              >
                 {project.status === "archived" ? (
                   <Button disabled={busy} onClick={() => void restoreProject()}>
                     <ArchiveRestore size={16} aria-hidden /> Restore project
                   </Button>
                 ) : (
-                  <Button variant="danger" disabled={busy} onClick={() => void archiveProject()}>
+                  <Button
+                    variant="danger"
+                    disabled={busy}
+                    onClick={() => void archiveProject()}
+                  >
                     <Archive size={16} aria-hidden /> Archive project
                   </Button>
                 )}
-                <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "flex-end",
+                    gap: 8,
+                  }}
+                >
                   <Button onClick={() => setSettingsOpen(false)}>Cancel</Button>
-                  <Button variant="primary" disabled={busy} onClick={() => void saveSettings()}>
+                  <Button
+                    variant="primary"
+                    disabled={busy}
+                    onClick={() => void saveSettings()}
+                  >
                     Save
                   </Button>
                 </div>
               </div>
             </div>
           </Dialog>
-          <Dialog open={proposalOpen} onClose={() => setProposalOpen(false)} title="New task proposal">
+          <Dialog
+            open={proposalOpen}
+            onClose={() => setProposalOpen(false)}
+            title="New task proposal"
+          >
             <div style={{ display: "grid", gap: 14 }}>
               <Field label="Kind">
-                <Select value={proposalKind} onChange={(event) => setProposalKind(event.target.value)}>
+                <Select
+                  value={proposalKind}
+                  onChange={(event) => setProposalKind(event.target.value)}
+                >
                   <option value="coding">Coding</option>
                   <option value="review">Review</option>
                   <option value="design">Design</option>
@@ -992,10 +1380,25 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                   {proposalFiles.map((file, index) => (
                     <div
                       key={`${file.name}-${index}`}
-                      style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        fontSize: 13,
+                      }}
                     >
-                      <Folder size={13} aria-hidden style={{ flexShrink: 0, opacity: 0.6 }} />
-                      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      <Folder
+                        size={13}
+                        aria-hidden
+                        style={{ flexShrink: 0, opacity: 0.6 }}
+                      />
+                      <span
+                        style={{
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
                         {file.name}
                       </span>
                       <span className="muted" style={{ flexShrink: 0 }}>
@@ -1005,14 +1408,21 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                         type="button"
                         className="text-button compact"
                         style={{ marginLeft: "auto", flexShrink: 0 }}
-                        onClick={() => setProposalFiles((current) => current.filter((_, i) => i !== index))}
+                        onClick={() =>
+                          setProposalFiles((current) =>
+                            current.filter((_, i) => i !== index),
+                          )
+                        }
                         disabled={proposalBusy}
                       >
                         Remove
                       </button>
                     </div>
                   ))}
-                  <label className="text-button compact" style={{ cursor: "pointer", width: "fit-content" }}>
+                  <label
+                    className="text-button compact"
+                    style={{ cursor: "pointer", width: "fit-content" }}
+                  >
                     <Plus size={14} aria-hidden /> Add files
                     <input
                       type="file"
@@ -1033,17 +1443,27 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                           if (check.ok) accepted.push(file);
                           else toast(`${file.name}: ${check.reason}`, "error");
                         }
-                        if (accepted.length) setProposalFiles((current) => [...current, ...accepted]);
+                        if (accepted.length)
+                          setProposalFiles((current) => [
+                            ...current,
+                            ...accepted,
+                          ]);
                       }}
                     />
                   </label>
                   <p className="muted" style={{ margin: 0, fontSize: 12 }}>
-                    Files upload to the project Library, attached to the new task.
+                    Files upload to the project Library, attached to the new
+                    task.
                   </p>
                 </div>
               </Field>
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-                <Button onClick={() => setProposalOpen(false)} disabled={proposalBusy}>
+              <div
+                style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}
+              >
+                <Button
+                  onClick={() => setProposalOpen(false)}
+                  disabled={proposalBusy}
+                >
                   Cancel
                 </Button>
                 <Button
@@ -1051,7 +1471,8 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                   disabled={proposalBusy || !proposalText.trim()}
                   onClick={() => void proposeTask()}
                 >
-                  <Plus size={16} aria-hidden /> {proposalBusy ? "Proposing…" : "Propose Task"}
+                  <Plus size={16} aria-hidden />{" "}
+                  {proposalBusy ? "Proposing…" : "Propose Task"}
                 </Button>
               </div>
             </div>

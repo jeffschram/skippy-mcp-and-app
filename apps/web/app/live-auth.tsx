@@ -38,8 +38,12 @@ export function AuthStatus() {
         </SignInButton>
       ) : (
         <>
-          <span className="badge blue">{isAuthenticated ? viewer?.brain?.displayName ?? "Skippy" : "Connecting Convex"}</span>
           <UserButton />
+          <h1 className="brain-title">
+            {isAuthenticated
+              ? (viewer?.brain?.displayName ?? "Skippy")
+              : "Connecting Convex"}
+          </h1>
         </>
       )}
     </div>
@@ -51,11 +55,17 @@ export function LiveGate({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading } = useConvexAuth();
   const viewer = useQuery(api.auth.viewer, isAuthenticated ? {} : "skip");
 
-  if (!isClerkLoaded || isLoading || (isAuthenticated && viewer === undefined)) {
+  if (
+    !isClerkLoaded ||
+    isLoading ||
+    (isAuthenticated && viewer === undefined)
+  ) {
     return (
       <section className="card section">
         <h2>Loading brain</h2>
-        <p className="muted">Connecting to Convex and checking your brain instance.</p>
+        <p className="muted">
+          Connecting to Convex and checking your brain instance.
+        </p>
       </section>
     );
   }
@@ -78,7 +88,10 @@ export function LiveGate({ children }: { children: React.ReactNode }) {
     return (
       <section className="card section">
         <h2>Connecting Convex</h2>
-        <p className="muted">Clerk sign-in is active. Waiting for Convex to accept the session token.</p>
+        <p className="muted">
+          Clerk sign-in is active. Waiting for Convex to accept the session
+          token.
+        </p>
       </section>
     );
   }

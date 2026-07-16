@@ -88,6 +88,8 @@
   gap: 8px;
   padding: 10px;
   align-content: start;
+  max-height: 50vh;
+  overflow-y: auto;
 }
 
 .taskCard {
