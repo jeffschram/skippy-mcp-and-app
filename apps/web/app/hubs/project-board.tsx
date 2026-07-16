@@ -649,10 +649,12 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                 <Button onClick={() => setProposalOpen(true)}>
                   <Plus size={16} aria-hidden /> Propose task
                 </Button>
-                <Button variant="primary" onClick={() => void runPlan()} disabled={planning}>
-                  <Sparkles size={17} aria-hidden />
-                  {planning ? "Planning…" : board.tasks.length ? "Re-plan with AI" : "Plan with AI"}
-                </Button>
+                {board.tasks.length === 0 ? (
+                  <Button variant="primary" onClick={() => void runPlan()} disabled={planning}>
+                    <Sparkles size={17} aria-hidden />
+                    {planning ? "Planning…" : "Plan with AI"}
+                  </Button>
+                ) : null}
               </div>
             </div>
           </div>
