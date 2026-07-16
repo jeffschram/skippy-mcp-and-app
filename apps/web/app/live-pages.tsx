@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { useConvexAuth, useMutation, useQuery } from "convex/react";
+import { activeSourceSyncStatus } from "@skippy/shared";
 import { api } from "../lib/skippy-api";
 import { focusItemKey, focusSummaryBullets, focusSummaryPresentation } from "./focus-summary";
 import { LiveGate } from "./live-auth";
@@ -213,13 +214,6 @@ function formatRunDuration(run: AnyRecord) {
   return `${Math.round(seconds / 60)}m`;
 }
 
-function activeSourceSyncStatus(statuses: AnyRecord[] | undefined) {
-  const running = (statuses ?? [])
-    .filter((status) => status.status === "running")
-    .sort((left, right) => (right.lastHeartbeatAt ?? right.updatedAt ?? 0) - (left.lastHeartbeatAt ?? left.updatedAt ?? 0));
-  return running[0] ?? null;
-}
-
 export function LiveHomeContent() {
   const viewerReady = useViewerReady();
   const data = useQuery(api.knowledge.dashboardForViewer, viewerReady ? {} : "skip") as AnyRecord | undefined;
@@ -231,7 +225,12 @@ export function LiveHomeContent() {
     () => focusSummaryPresentation(focusBullets),
     [focusBullets],
   );
-  const sourceSyncStatus = useMemo(() => activeSourceSyncStatus(data?.sourceSyncStatuses), [data?.sourceSyncStatuses]);
+  // Stale running rows (dead harness, no heartbeat) read as inactive — the
+  // "Updating" pill self-heals instead of pinning forever.
+  const sourceSyncStatus = useMemo(
+    () => activeSourceSyncStatus<AnyRecord>(data?.sourceSyncStatuses, Date.now()),
+    [data?.sourceSyncStatuses],
+  );
   const focusActionByKey = useMemo(() => {
     const lookup = new Map<string, AnyRecord>();
     for (const action of data?.focusItemActions ?? []) {

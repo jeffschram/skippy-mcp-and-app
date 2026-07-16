@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { ArrowRight, Bell, Check, Copy, Download, Inbox, Paperclip, PenLine, RefreshCw, ShieldCheck, Sparkles, X } from "lucide-react";
-import type { QuickCaptureIntent } from "@skippy/shared";
+import { activeSourceSyncStatus, type QuickCaptureIntent } from "@skippy/shared";
 import { api } from "../../lib/skippy-api";
 import { focusItemKey, parseFocusSummary } from "../focus-summary";
 import { LiveGate } from "../live-auth";
@@ -380,13 +380,6 @@ function QuickCaptureBox({ captures }: { captures: AnyRecord[] | undefined }) {
   );
 }
 
-function activeSourceSyncStatus(statuses: AnyRecord[] | undefined) {
-  const running = (statuses ?? [])
-    .filter((status) => status.status === "running")
-    .sort((l, r) => (r.lastHeartbeatAt ?? r.updatedAt ?? 0) - (l.lastHeartbeatAt ?? l.updatedAt ?? 0));
-  return running[0] ?? null;
-}
-
 export function TodayContent() {
   const viewerReady = useViewerReady();
   const data = useQuery(api.knowledge.dashboardForViewer, viewerReady ? {} : "skip") as AnyRecord | undefined;
@@ -405,7 +398,12 @@ export function TodayContent() {
     () => parseFocusSummary(data?.focusSummary?.summaryText),
     [data?.focusSummary?.summaryText],
   );
-  const sync = useMemo(() => activeSourceSyncStatus(data?.sourceSyncStatuses), [data?.sourceSyncStatuses]);
+  // Stale running rows (dead harness, no heartbeat) read as inactive — the
+  // "Updating" pill self-heals instead of pinning forever.
+  const sync = useMemo(
+    () => activeSourceSyncStatus<AnyRecord>(data?.sourceSyncStatuses, Date.now()),
+    [data?.sourceSyncStatuses],
+  );
   const actionedKeys = useMemo(() => {
     const set = new Set<string>();
     for (const action of data?.focusItemActions ?? []) set.add(action.itemKey);

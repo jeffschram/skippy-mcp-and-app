@@ -215,6 +215,56 @@ export function validateQuickCaptureFileInput(input: ProjectFileInput): {
   return { fileName, mimeType, sizeBytes: input.sizeBytes };
 }
 
+/**
+ * Source-sync staleness window: a "running" sourceSyncStatuses row only
+ * counts as active while its freshest timestamp is within this window.
+ * Harnesses heartbeat through updateSourceSyncStatus; one that dies mid-run
+ * stops heartbeating and its row self-expires at read time — no cron, no
+ * migration, no manual clearing. A new run reusing the same statusKey
+ * supersedes the stale row via the mutation's upsert.
+ */
+export const SOURCE_SYNC_STALE_MS = 15 * 60 * 1000;
+
+/**
+ * Shape shared by sourceSyncStatuses rows wherever they are consumed. All
+ * fields are optional so loosely-typed UI records qualify; a row without a
+ * "running" status is simply never active.
+ */
+export type SourceSyncStatusLike = {
+  status?: string | undefined;
+  startedAt?: number | undefined;
+  lastHeartbeatAt?: number | undefined;
+  updatedAt?: number | undefined;
+};
+
+/** Freshest known timestamp for a sync row: heartbeat, update, or start. */
+function sourceSyncFreshestAt(row: SourceSyncStatusLike): number {
+  return Math.max(row.lastHeartbeatAt ?? 0, row.updatedAt ?? 0, row.startedAt ?? 0);
+}
+
+/**
+ * True only while a row is status "running" AND its freshest timestamp
+ * (max of lastHeartbeatAt/updatedAt/startedAt) is within
+ * SOURCE_SYNC_STALE_MS of `now`. Stale running rows read as inactive.
+ */
+export function isSourceSyncActive(row: SourceSyncStatusLike, now: number): boolean {
+  return row.status === "running" && now - sourceSyncFreshestAt(row) <= SOURCE_SYNC_STALE_MS;
+}
+
+/**
+ * The freshest active sync row (heartbeat-ordered), or null when nothing is
+ * actively running. Drives the home page "Updating" pill.
+ */
+export function activeSourceSyncStatus<T extends SourceSyncStatusLike>(
+  statuses: T[] | undefined,
+  now: number,
+): T | null {
+  const running = (statuses ?? [])
+    .filter((row) => isSourceSyncActive(row, now))
+    .sort((left, right) => sourceSyncFreshestAt(right) - sourceSyncFreshestAt(left));
+  return running[0] ?? null;
+}
+
 export const ENTITY_TYPES = [
   "goal",
   "project",
