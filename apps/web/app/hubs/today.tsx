@@ -26,7 +26,7 @@ import { activeSourceSyncStatus, type QuickCaptureIntent } from "@skippy/shared"
 import { api } from "../../lib/skippy-api";
 import { focusItemKey, parseFocusSummary } from "../focus-summary";
 import { LiveGate } from "../live-auth";
-import { Badge, Button, Card, EmptyState, IconButton, InlineMarkdown, LoadingRow, Section, TextArea, useToast, type BadgeTone } from "../components";
+import { Badge, Button, Card, EmptyState, IconButton, InlineMarkdown, LoadingRow, Section, TextArea, useToast } from "../components";
 import { useViewerReady } from "./use-viewer";
 import { formatFileSize } from "./project-library-helpers";
 import { QUICK_CAPTURE_INTENT_STORAGE_KEY, checkQuickCaptureFile, parseStoredIntent } from "./quick-capture-helpers";
@@ -42,11 +42,6 @@ type AnyRecord = Record<string, any>;
 /* The card doubles as a dropzone/paste target for files.              */
 /* ------------------------------------------------------------------ */
 
-const captureTone: Record<string, BadgeTone> = {
-  pending: "gold",
-  processed: "green",
-  discarded: "neutral",
-};
 
 const CAPTURE_LIST_LIMIT = 6;
 
@@ -354,12 +349,6 @@ function QuickCaptureBox({ captures }: { captures: AnyRecord[] | undefined }) {
             {submitting ? "Capturing…" : "Capture"}
           </Button>
         </div>
-        {intent === "hold" ? (
-          <p className="muted" style={{ margin: 0, fontSize: 12 }}>
-            Hold keeps this private for cross-device transfer — Skippy won&apos;t ingest it, and it
-            expires after 7 days.
-          </p>
-        ) : null}
         {recent.length ? (
           <div className={todayStyles.captureList}>
             {recent.map((capture) => {
@@ -370,9 +359,14 @@ function QuickCaptureBox({ captures }: { captures: AnyRecord[] | undefined }) {
                 capture.mimeType.startsWith("image/") &&
                 Boolean(capture.fileUrl);
               const isFile = Boolean(capture.fileName) && !isImage;
+              const pending = capture.intent !== "hold" && capture.status === "pending";
               return (
                 <div key={capture._id} className={todayStyles.captureRow}>
-                  <span className={todayStyles.captureType} aria-hidden>
+                  <span
+                    className={`${todayStyles.captureType}${pending ? ` ${todayStyles.captureTypePending}` : ""}`}
+                    title={pending ? "Pending — awaiting the next ingestion run" : undefined}
+                    aria-hidden
+                  >
                     {isImage ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img src={capture.fileUrl} alt="" className={todayStyles.captureThumb} />
@@ -387,16 +381,12 @@ function QuickCaptureBox({ captures }: { captures: AnyRecord[] | undefined }) {
                   <span className={todayStyles.captureText} title={label}>
                     {label}
                   </span>
-                  {typeof capture.sizeBytes === "number" ? (
-                    <span className="item-meta">{formatFileSize(capture.sizeBytes)}</span>
-                  ) : (
-                    <span />
-                  )}
-                  {capture.intent === "hold" ? (
-                    <Badge tone="neutral">hold</Badge>
-                  ) : (
-                    <Badge tone={captureTone[capture.status] ?? "neutral"}>{capture.status}</Badge>
-                  )}
+                  <span className={todayStyles.captureMeta}>
+                    {!isImage && typeof capture.sizeBytes === "number" ? (
+                      <span className="item-meta">{formatFileSize(capture.sizeBytes)}</span>
+                    ) : null}
+                    {capture.intent === "hold" ? <Badge tone="neutral">hold</Badge> : null}
+                  </span>
                   <span className={todayStyles.captureRowActions}>
                     {isImage ? (
                       <>
