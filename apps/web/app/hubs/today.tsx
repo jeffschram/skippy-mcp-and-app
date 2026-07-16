@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { ArrowRight, Bell, Check, Copy, Download, Inbox, Paperclip, PenLine, RefreshCw, ShieldCheck, Sparkles, X } from "lucide-react";
@@ -380,8 +381,37 @@ function QuickCaptureBox({ captures }: { captures: AnyRecord[] | undefined }) {
   );
 }
 
+/**
+ * One-shot toast for the Web Share Target round-trip: /share redirects to
+ * /?shared=ok|err, we surface the result and strip the param. The query is
+ * read from window.location in an effect (not useSearchParams) so the static
+ * home page needs no Suspense boundary.
+ */
+function useSharedParamToast() {
+  const toast = useToast();
+  const router = useRouter();
+  const handled = useRef(false);
+
+  useEffect(() => {
+    if (handled.current) return;
+    const params = new URLSearchParams(window.location.search);
+    const shared = params.get("shared");
+    if (!shared) return;
+    handled.current = true;
+    if (shared === "ok") {
+      toast("Captured from share — Skippy will pick it up on the next ingestion run.", "info");
+    } else {
+      toast("Share failed — nothing was captured.", "error");
+    }
+    params.delete("shared");
+    const query = params.toString();
+    router.replace(query ? `/?${query}` : "/", { scroll: false });
+  }, [router, toast]);
+}
+
 export function TodayContent() {
   const viewerReady = useViewerReady();
+  useSharedParamToast();
   const data = useQuery(api.knowledge.dashboardForViewer, viewerReady ? {} : "skip") as AnyRecord | undefined;
   const ready = useQuery(api.projects.readyTasksForViewer, viewerReady ? { limit: 6 } : "skip") as
     | AnyRecord[]

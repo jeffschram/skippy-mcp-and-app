@@ -216,6 +216,42 @@ export function validateQuickCaptureFileInput(input: ProjectFileInput): {
 }
 
 /**
+ * Extract the token from an `Authorization: Bearer <token>` header value.
+ * Returns null for a missing header, a non-Bearer scheme, or an empty token.
+ * Used by the token-authenticated Convex HTTP /capture endpoint.
+ */
+export function parseBearerToken(header: string | null | undefined): string | null {
+  if (!header) return null;
+  const match = /^Bearer\s+(.+)$/i.exec(header.trim());
+  const token = match?.[1]?.trim();
+  return token ? token : null;
+}
+
+/**
+ * Normalize an intent value arriving from an untrusted share/HTTP payload.
+ * Absent or empty means the "remember" default; unknown values return null
+ * so callers can reject the request instead of silently misfiling.
+ */
+export function normalizeQuickCaptureIntentInput(value: unknown): QuickCaptureIntent | null {
+  if (value === undefined || value === null || value === "") return "remember";
+  return value === "remember" || value === "hold" ? value : null;
+}
+
+/**
+ * Combine a share-sheet title and text into one capture text. Either part
+ * may be absent; both present joins them on a newline so the title survives
+ * as the first line. Returns undefined when there is nothing to keep.
+ */
+export function combineSharedCaptureText(
+  title: string | null | undefined,
+  text: string | null | undefined,
+): string | undefined {
+  const parts = [title?.trim(), text?.trim()].filter((part): part is string => Boolean(part));
+  if (parts.length === 0) return undefined;
+  return parts.join("\n");
+}
+
+/**
  * Source-sync staleness window: a "running" sourceSyncStatuses row only
  * counts as active while its freshest timestamp is within this window.
  * Harnesses heartbeat through updateSourceSyncStatus; one that dies mid-run
