@@ -9,6 +9,7 @@ import {
   candidateFingerprint,
   isLinkFocusCandidate,
   isQuickCaptureHoldExpired,
+  isSourceSyncActive,
   linkAgeDays,
   matchDismissedFocusItem,
   normalizeAcceptedEntityPayload,
@@ -1658,10 +1659,17 @@ export const dashboardForViewer = queryGeneric({
       await ctx.db.query("links").filter(acceptedFilter).take(20)
     ).filter((link) => isLinkFocusCandidate(link));
     const notes = await ctx.db.query("notes").filter(acceptedFilter).take(20);
-    const sourceSyncStatuses = await ctx.db
-      .query("sourceSyncStatuses")
-      .withIndex("by_brain_key", (q) => q.eq("brainInstanceId", brain._id))
-      .collect();
+    // Read-time self-heal: a "running" row whose harness died stops
+    // heartbeating; once past the staleness window it is filtered out here so
+    // no consumer can pin the "Updating" pill forever. A new run reusing the
+    // statusKey supersedes the stale row via updateSourceSyncStatus's upsert.
+    const nowForSync = Date.now();
+    const sourceSyncStatuses = (
+      await ctx.db
+        .query("sourceSyncStatuses")
+        .withIndex("by_brain_key", (q) => q.eq("brainInstanceId", brain._id))
+        .collect()
+    ).filter((row) => row.status !== "running" || isSourceSyncActive(row, nowForSync));
     // Home quick-capture inbox: recent captures, newest first, so the capture
     // box can show submit feedback, status/hold chips, and per-item actions.
     // Hold items past their 7-day transfer window vanish at read time (the
