@@ -225,11 +225,19 @@ a.chip:hover {
 .toastWrap {
   position: fixed;
   right: 18px;
-  bottom: 18px;
+  top: 18px;
   z-index: 60;
   display: grid;
   gap: 8px;
   max-width: min(380px, calc(100% - 36px));
+}
+
+/* Below the desktop breakpoint the app shell shows a sticky top bar
+   (~57px tall); keep toasts clear of it. */
+@media (max-width: 880px) {
+  .toastWrap {
+    top: 68px;
+  }
 }
 
 .toast {
@@ -242,7 +250,14 @@ a.chip:hover {
   background: var(--panel-strong);
   box-shadow: var(--shadow);
   font-size: 14px;
-  animation: drawer-in 0.18s ease;
+  animation: toast-in 0.18s ease;
+}
+
+@keyframes toast-in {
+  from {
+    transform: translateY(-12px);
+    opacity: 0.4;
+  }
 }
 
 .toast.error {
