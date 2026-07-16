@@ -32,6 +32,34 @@ function formString(value: FormDataEntryValue | null): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
+const TEXT_UPLOAD_MAX_BYTES = 100_000;
+
+/**
+ * The iOS Shortcut posts the raw shared item as the `file` field with no
+ * client-side branching (Shortcuts' Get Text / Get Images actions both coerce
+ * their input, so they can't reliably tell a photo from a note). Instead we
+ * decide here: a small, valid-UTF-8, NUL-free upload IS a text/URL share and
+ * becomes a text capture; anything binary (photos, PDFs, video) stays a file.
+ * Returns the decoded text, or undefined to keep treating it as a file.
+ */
+async function decodeTextUpload(file: Blob & { name?: string }): Promise<string | undefined> {
+  if (file.size === 0 || file.size > TEXT_UPLOAD_MAX_BYTES) return undefined;
+  const mime = (file.type || "").toLowerCase();
+  const looksTextByType =
+    mime.startsWith("text/") || mime === "application/json" || mime === "application/xml";
+  const unknownType = mime === "" || mime === "application/octet-stream";
+  // image/*, application/pdf, video/*, etc. are declared binary — never text.
+  if (!looksTextByType && !unknownType) return undefined;
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  if (bytes.includes(0)) return undefined; // NUL byte ⇒ binary
+  try {
+    const decoded = new TextDecoder("utf-8", { fatal: true }).decode(bytes).trim();
+    return decoded || undefined;
+  } catch {
+    return undefined; // not valid UTF-8 ⇒ binary
+  }
+}
+
 export const capture = httpActionGeneric(async (ctx, request) => {
   const token = parseBearerToken(request.headers.get("authorization"));
   if (!token) {
@@ -87,6 +115,17 @@ export const capture = httpActionGeneric(async (ctx, request) => {
   const intent = normalizeQuickCaptureIntentInput(rawIntent);
   if (intent === null) {
     return json(400, { error: "intent must be 'remember' or 'hold'" });
+  }
+
+  // Branchless-shortcut support: when the only payload is a `file` that is
+  // actually text (a shared note or URL), reclassify it as a text capture so
+  // it doesn't get stored as a junk .txt attachment. Photos stay files.
+  if (file && !text && !url) {
+    const decoded = await decodeTextUpload(file);
+    if (decoded) {
+      text = decoded;
+      file = undefined;
+    }
   }
 
   // A URL-only share still needs capture text (the write path requires text
