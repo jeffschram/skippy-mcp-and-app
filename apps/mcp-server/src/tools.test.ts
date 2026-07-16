@@ -84,6 +84,9 @@ function createFakeClient(): { client: SkippyClient; calls: Array<{ name: string
       generateProjectFileUploadUrl: (brainInstanceId) => record("generateProjectFileUploadUrl", brainInstanceId),
       registerProjectFile: (brainInstanceId, input) => record("registerProjectFile", brainInstanceId, input),
       listProjectFiles: (brainInstanceId, input) => record("listProjectFiles", brainInstanceId, input),
+      listQuickCaptures: (brainInstanceId, input) => record("listQuickCaptures", brainInstanceId, input),
+      markQuickCaptureHandled: (brainInstanceId, input) =>
+        record("markQuickCaptureHandled", brainInstanceId, input),
     },
   };
 }
@@ -990,6 +993,56 @@ describe("Skippy MCP tool handlers", () => {
     expect(calls[0]).toMatchObject({
       name: "listProjectFiles",
       args: ["brain_123", { projectId: "project_123", taskId: "task_123" }],
+    });
+  });
+
+  it("lists quick captures defaulting to the pending inbox", async () => {
+    const { client, calls } = createFakeClient();
+    const tools = createSkippyToolHandlers(client, "brain_123");
+
+    await tools.listQuickCaptures();
+
+    expect(calls[0]).toMatchObject({
+      name: "listQuickCaptures",
+      args: ["brain_123", { status: "pending" }],
+    });
+  });
+
+  it("lists quick captures with an explicit status filter", async () => {
+    const { client, calls } = createFakeClient();
+    const tools = createSkippyToolHandlers(client, "brain_123");
+
+    await tools.listQuickCaptures({ status: "processed" });
+
+    expect(calls[0]).toMatchObject({
+      name: "listQuickCaptures",
+      args: ["brain_123", { status: "processed" }],
+    });
+  });
+
+  it("marks quick captures handled with harness attribution", async () => {
+    const { client, calls } = createFakeClient();
+    const tools = createSkippyToolHandlers(client, "brain_123");
+
+    await tools.markQuickCaptureHandled({
+      captureId: "capture_123",
+      outcome: "processed",
+      processingNote: "Created a task from the captured URL.",
+      sourceRunId: "ingestion_run_123",
+    });
+
+    expect(calls[0]).toMatchObject({
+      name: "markQuickCaptureHandled",
+      args: [
+        "brain_123",
+        {
+          captureId: "capture_123",
+          outcome: "processed",
+          processingNote: "Created a task from the captured URL.",
+          sourceRunId: "ingestion_run_123",
+          processedBy: "skippy_mcp",
+        },
+      ],
     });
   });
 

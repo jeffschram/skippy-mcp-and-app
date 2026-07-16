@@ -11,6 +11,8 @@ import {
   type InterviewKind,
   type LinkMemoryInput,
   type ListProjectFilesInput,
+  type ListQuickCapturesInput,
+  type MarkQuickCaptureHandledInput,
   type MemoryDetailInput,
   type MemoryKind,
   type MemoryListInput,
@@ -92,6 +94,7 @@ const skippyInstructions = [
   "Use capture_thought, record_memory, record_decision, and record_principle for durable second-brain memory. Include source refs, related entity refs, confidence, captureReason/rubricDecision, and reviewBehavior when available.",
   "Use submit_memory_review_candidate when a possible memory is useful but uncertain. Do not queue transient alerts (balance notifications, promo deadlines, ToS notices); skip them or record directly with expiry context. Use list_memory/get_context_bundle/get_memory_detail before adding likely duplicates or answering from memory, and link_memory to attach memories to accepted entities.",
   "Use list_interview_templates/start_interview/get_interview/answer_interview_question/complete_interview/archive_interview to run guided second-brain interviews inside the harness chat. Ask one question at a time in chat, using the assistantDisplayName returned by Skippy.",
+  "During scheduled or batch source-ingestion runs, also drain the Home quick-capture inbox in addition to external sources: call list_quick_captures for pending captures the owner dropped on the home page, turn useful ones into Skippy objects with the ingestion tools (ingest_object etc.), then call mark_quick_capture_handled with 'processed' or 'discarded' for each.",
   "Use ask/summarize_focus/list_pending_actions for retrieval. Internal AI synthesis may be disabled, so expect structured context rather than polished answers.",
   "Financial data from Plaid is ground truth: map it to the fixed Conscious Spending Plan taxonomy at ingest time and record it directly with upsert_financial_account/record_financial_transactions (never queue it for review). Transfers between the owner's own accounts are txType 'Transfer' ('Transfers In'/'Transfers Out'), never Income or an outgoing bucket; they are excluded from budget totals automatically. Amounts are integer cents; pass Plaid transaction_ids as externalIds for idempotency, and store only account last-4 masks, never full account numbers.",
 ].join("\n");
@@ -250,6 +253,7 @@ function buildSkillsMessage() {
     "7. Close source-sync status when used.",
     "   - For batch/scheduled ingestion, call `update_source_sync_status` with `running` at start, heartbeat during long runs, and `completed` or `failed` before ending.",
     "   - Use `failed` only when the whole run cannot complete; otherwise include partial source errors and finish `completed`.",
+    "   - During every source-ingestion run, also check the Home quick-capture inbox in addition to external sources: `list_quick_captures` returns pending text/URL/file captures the owner dropped on the home page. Turn useful ones into Skippy objects with `ingest_object` (or the other ingestion tools), then `mark_quick_capture_handled` each as `processed` or `discarded` so the inbox drains itself.",
     "",
     "8. Explain actions plainly.",
     "   - Tell the user what was stored, skipped, asked, sent to Review, retrieved, linked, or archived.",
@@ -610,6 +614,47 @@ function projectFilesListConfirmation(input: ListProjectFilesInput, result: unkn
     files,
     nextAction:
       "Download URLs are ephemeral — download promptly. Materialize the files you need into the project's effectiveAssetsPath (_library) before working, skipping files already present with a matching size.",
+  };
+}
+
+function quickCapturesListConfirmation(input: ListQuickCapturesInput, result: unknown) {
+  const rows = Array.isArray(result) ? result : [];
+  const captures = rows.map((row) => {
+    const record = objectResult(row);
+    return {
+      captureId: record._id,
+      text: record.text,
+      url: record.url,
+      fileName: record.fileName,
+      mimeType: record.mimeType,
+      sizeBytes: record.sizeBytes,
+      status: record.status,
+      capturedBy: record.capturedBy,
+      createdAt: record.createdAt,
+      processingNote: record.processingNote,
+      fileUrl: record.fileUrl,
+    };
+  });
+  return {
+    status: "listed",
+    entityType: "quick_capture",
+    requestedStatus: input.status ?? "pending",
+    count: captures.length,
+    captures,
+    nextAction:
+      "For each pending capture, apply the importance rubric: create Skippy objects with ingest_object (or record_memory etc.), then call mark_quick_capture_handled with 'processed' — or 'discarded' when nothing is worth storing. File download URLs are ephemeral — fetch promptly.",
+  };
+}
+
+function quickCaptureHandledConfirmation(input: MarkQuickCaptureHandledInput, result: unknown) {
+  const resultRecord = objectResult(result);
+  return {
+    status: resultRecord.status ?? input.outcome,
+    entityType: "quick_capture",
+    captureId: resultRecord.captureId ?? input.captureId,
+    outcome: input.outcome,
+    processingNote: input.processingNote,
+    reviewUrl: reviewUrl("/"),
   };
 }
 
@@ -1875,6 +1920,54 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
     async (args) => {
       const input = stripUndefined(args) as RegisterProjectFileInput;
       return toolResult(projectFileRegisteredConfirmation(input, await tools.registerProjectFile(input)));
+    },
+  );
+
+  server.registerTool(
+    "list_quick_captures",
+    {
+      title: "List quick captures",
+      description:
+        "Read-only. List the owner's Home quick-capture inbox: free-form thoughts, notes, URLs, and uploaded files dropped on the home page to be remembered later (default status 'pending'). During every source-ingestion run, inspect pending quick captures in addition to external sources: apply the importance rubric to each, create accepted or review-worthy Skippy objects with ingest_object (or record_memory, submit_candidate_object, etc.), then call mark_quick_capture_handled with 'processed' — or 'discarded' when nothing is worth storing. File captures include an ephemeral fileUrl download link — fetch promptly and never persist it.",
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: z.object({
+        status: z
+          .enum(["pending", "processed", "discarded"])
+          .optional()
+          .describe("Capture status to list. Defaults to pending — the unprocessed inbox."),
+      }),
+    },
+    async (args) => {
+      const input = stripUndefined(args) as ListQuickCapturesInput;
+      return toolResult(quickCapturesListConfirmation(input, await tools.listQuickCaptures(input)));
+    },
+  );
+
+  server.registerTool(
+    "mark_quick_capture_handled",
+    {
+      title: "Mark a quick capture handled",
+      description:
+        "Record that an ingestion harness handled a quick capture from the Home inbox. Call this after inspecting a pending capture during a source-ingestion run: use outcome 'processed' once useful Skippy objects were created from it (ingest_object, record_memory, etc.), or 'discarded' when the capture holds nothing worth storing under the importance rubric. Include a short processingNote saying what was created or why it was discarded, and pass the ingestion run ID from record_ingestion_run as sourceRunId when available. Only pending captures can be marked; already-handled captures are rejected server-side.",
+      annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      inputSchema: z.object({
+        captureId: z.string().describe("Quick capture ID from list_quick_captures."),
+        outcome: z
+          .enum(["processed", "discarded"])
+          .describe("processed = useful Skippy objects were created from the capture; discarded = nothing worth storing."),
+        processingNote: z
+          .string()
+          .optional()
+          .describe("Short note on what was created from the capture or why it was discarded."),
+        sourceRunId: z
+          .string()
+          .optional()
+          .describe("Ingestion run ID from record_ingestion_run that handled this capture."),
+      }),
+    },
+    async (args) => {
+      const input = stripUndefined(args) as MarkQuickCaptureHandledInput;
+      return toolResult(quickCaptureHandledConfirmation(input, await tools.markQuickCaptureHandled(input)));
     },
   );
 

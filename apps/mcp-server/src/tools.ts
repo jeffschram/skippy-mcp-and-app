@@ -263,6 +263,24 @@ export type SkippyClient = {
   generateProjectFileUploadUrl(brainInstanceId: string): Promise<unknown>;
   registerProjectFile(brainInstanceId: string, input: RegisterProjectFileInput & { actorId?: string }): Promise<unknown>;
   listProjectFiles(brainInstanceId: string, input: ListProjectFilesInput): Promise<unknown>;
+  listQuickCaptures(brainInstanceId: string, input: ListQuickCapturesInput): Promise<unknown>;
+  markQuickCaptureHandled(
+    brainInstanceId: string,
+    input: MarkQuickCaptureHandledInput & { processedBy?: string },
+  ): Promise<unknown>;
+};
+
+export type QuickCaptureStatus = "pending" | "processed" | "discarded";
+
+export type ListQuickCapturesInput = {
+  status?: QuickCaptureStatus;
+};
+
+export type MarkQuickCaptureHandledInput = {
+  captureId: string;
+  outcome: "processed" | "discarded";
+  processingNote?: string;
+  sourceRunId?: string;
 };
 
 export type RegisterProjectFileInput = {
@@ -1177,6 +1195,19 @@ export function createSkippyToolHandlers(client: SkippyClient, brainInstanceId: 
 
     async listProjectFiles(input: ListProjectFilesInput) {
       return await client.listProjectFiles(brainInstanceId, input);
+    },
+
+    async listQuickCaptures(input: ListQuickCapturesInput = {}) {
+      return await client.listQuickCaptures(brainInstanceId, {
+        status: input.status ?? "pending",
+      });
+    },
+
+    async markQuickCaptureHandled(input: MarkQuickCaptureHandledInput) {
+      return await client.markQuickCaptureHandled(brainInstanceId, {
+        ...input,
+        processedBy: "skippy_mcp",
+      });
     },
 
     async captureThought(input: CaptureThoughtInput) {

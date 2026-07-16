@@ -691,6 +691,31 @@ export default defineSchema({
     .index("by_brain_project", ["brainInstanceId", "projectId"])
     .index("by_brain_task", ["brainInstanceId", "taskId"]),
 
+  // Home quick-capture inbox: thoughts, notes, URLs, and files the owner drops
+  // on the home page to be remembered later. Source-ingestion harnesses read
+  // pending captures, turn useful ones into Skippy objects, then mark each
+  // capture processed or discarded.
+  quickCaptures: defineTable({
+    brainInstanceId: v.id("brainInstances"),
+    text: v.optional(v.string()),
+    // Normalized http/https URL inferred from the text (or passed explicitly).
+    url: v.optional(v.string()),
+    storageId: v.optional(v.id("_storage")),
+    fileName: v.optional(v.string()),
+    mimeType: v.optional(v.string()),
+    sizeBytes: v.optional(v.number()),
+    status: v.union(v.literal("pending"), v.literal("processed"), v.literal("discarded")),
+    capturedBy: v.optional(v.union(v.literal("user"), v.literal("harness"))),
+    processedAt: v.optional(v.number()),
+    processedBy: v.optional(v.string()),
+    processingNote: v.optional(v.string()),
+    sourceRunId: v.optional(v.id("ingestionRuns")),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_brain_status", ["brainInstanceId", "status"])
+    .index("by_brain_created", ["brainInstanceId", "createdAt"]),
+
   ingestionRuns: defineTable({
     brainInstanceId: v.id("brainInstances"),
     harness: v.string(),

@@ -260,6 +260,21 @@ function createFakeClient(overrides: Partial<SkippyClient> = {}): SkippyClient {
         url: "https://files.convex.cloud/project_file_123?token=ephemeral",
       },
     ],
+    listQuickCaptures: async (_brainInstanceId, input) => [
+      {
+        _id: "quick_capture_123",
+        text: "https://example.com/interesting-article",
+        url: "https://example.com/interesting-article",
+        status: input.status ?? "pending",
+        capturedBy: "user",
+        createdAt: 1780850000000,
+        fileUrl: null,
+      },
+    ],
+    markQuickCaptureHandled: async (_brainInstanceId, input) => ({
+      captureId: input.captureId,
+      status: input.outcome,
+    }),
   };
 
   return { ...client, ...overrides };
@@ -288,6 +303,9 @@ describe("Skippy MCP manifest", () => {
       expect(client.getInstructions()).toContain("importance rubric");
       expect(client.getInstructions()).toContain("status defaults to 'saved'");
       expect(client.getInstructions()).toContain("Links are reference material, not a reading queue.");
+      expect(client.getInstructions()).toContain("also drain the Home quick-capture inbox");
+      expect(client.getInstructions()).toContain("list_quick_captures");
+      expect(client.getInstructions()).toContain("mark_quick_capture_handled");
 
       const { tools } = await client.listTools();
       const ingestObject = tools.find((tool) => tool.name === "ingest_object");
@@ -332,6 +350,8 @@ describe("Skippy MCP manifest", () => {
         (tool) => tool.name === "generate_project_file_upload_url",
       );
       const registerProjectFile = tools.find((tool) => tool.name === "register_project_file");
+      const listQuickCaptures = tools.find((tool) => tool.name === "list_quick_captures");
+      const markQuickCaptureHandled = tools.find((tool) => tool.name === "mark_quick_capture_handled");
 
       expect(ingestObject?.description).toContain("importance rubric");
       expect(ingestObject?.description).toContain("default to 'saved'");
@@ -431,6 +451,21 @@ describe("Skippy MCP manifest", () => {
       expect(registerProjectFile?.inputSchema.properties?.fileName).toBeDefined();
       expect(registerProjectFile?.inputSchema.properties?.mimeType).toBeDefined();
       expect(registerProjectFile?.inputSchema.properties?.sizeBytes).toBeDefined();
+      expect(listQuickCaptures?.annotations?.readOnlyHint).toBe(true);
+      expect(listQuickCaptures?.description).toContain("Home quick-capture inbox");
+      expect(listQuickCaptures?.description).toContain("source-ingestion run");
+      expect(listQuickCaptures?.description).toContain("ingest_object");
+      expect(listQuickCaptures?.description).toContain("mark_quick_capture_handled");
+      expect(listQuickCaptures?.description).toContain("ephemeral fileUrl");
+      expect(listQuickCaptures?.inputSchema.properties?.status).toBeDefined();
+      expect(markQuickCaptureHandled?.description).toContain("ingestion harness handled a quick capture");
+      expect(markQuickCaptureHandled?.description).toContain("'processed'");
+      expect(markQuickCaptureHandled?.description).toContain("'discarded'");
+      expect(markQuickCaptureHandled?.description).toContain("Only pending captures can be marked");
+      expect(markQuickCaptureHandled?.inputSchema.properties?.captureId).toBeDefined();
+      expect(markQuickCaptureHandled?.inputSchema.properties?.outcome).toBeDefined();
+      expect(markQuickCaptureHandled?.inputSchema.properties?.processingNote).toBeDefined();
+      expect(markQuickCaptureHandled?.inputSchema.properties?.sourceRunId).toBeDefined();
       expect(capture?.description).toContain("accepted note directly");
       expect(ask?.annotations?.readOnlyHint).toBe(true);
       expect(refreshFocusSummary?.description).toContain("Generate and store");
@@ -488,6 +523,9 @@ describe("Skippy MCP manifest", () => {
         expect(skills.messages[0].content.text).toContain("Use `get_importance_rubric`");
         expect(skills.messages[0].content.text).toContain("/task ...");
         expect(skills.messages[0].content.text).toContain("mark_task_done");
+        expect(skills.messages[0].content.text).toContain("Home quick-capture inbox");
+        expect(skills.messages[0].content.text).toContain("`list_quick_captures`");
+        expect(skills.messages[0].content.text).toContain("`mark_quick_capture_handled`");
       }
 
       const taskHeartbeat = await client.getPrompt({ name: "skippy_task_heartbeat" });
@@ -1197,6 +1235,140 @@ describe("Skippy MCP manifest", () => {
       ]);
       expect(String(confirmation.nextAction)).toContain("ephemeral");
       expect(String(confirmation.nextAction)).toContain("effectiveAssetsPath");
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
+  it("returns chat-friendly quick capture listings with a pending default", async () => {
+    const listCalls: Array<{ brainInstanceId: string; input: unknown }> = [];
+    const server = createMcpServer(
+      createFakeClient({
+        listQuickCaptures: async (brainInstanceId, input) => {
+          listCalls.push({ brainInstanceId, input });
+          return [
+            {
+              _id: "quick_capture_123",
+              text: "https://example.com/interesting-article",
+              url: "https://example.com/interesting-article",
+              status: "pending",
+              capturedBy: "user",
+              createdAt: 1780850000000,
+              fileUrl: null,
+            },
+            {
+              _id: "quick_capture_456",
+              fileName: "receipt.pdf",
+              mimeType: "application/pdf",
+              sizeBytes: 4096,
+              status: "pending",
+              capturedBy: "user",
+              createdAt: 1780850100000,
+              fileUrl: "https://files.convex.cloud/quick_capture_456?token=ephemeral",
+            },
+          ];
+        },
+      }),
+      "brain_123",
+    );
+    const client = new Client({ name: "list-quick-captures-test", version: "0.1.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    try {
+      await server.connect(serverTransport);
+      await client.connect(clientTransport);
+
+      const result = await client.callTool({
+        name: "list_quick_captures",
+        arguments: {},
+      });
+
+      expect(listCalls).toEqual([{ brainInstanceId: "brain_123", input: { status: "pending" } }]);
+      const confirmation = textResult(result);
+      expect(confirmation).toMatchObject({
+        status: "listed",
+        entityType: "quick_capture",
+        requestedStatus: "pending",
+        count: 2,
+      });
+      expect(confirmation.captures).toEqual([
+        {
+          captureId: "quick_capture_123",
+          text: "https://example.com/interesting-article",
+          url: "https://example.com/interesting-article",
+          status: "pending",
+          capturedBy: "user",
+          createdAt: 1780850000000,
+          fileUrl: null,
+        },
+        {
+          captureId: "quick_capture_456",
+          fileName: "receipt.pdf",
+          mimeType: "application/pdf",
+          sizeBytes: 4096,
+          status: "pending",
+          capturedBy: "user",
+          createdAt: 1780850100000,
+          fileUrl: "https://files.convex.cloud/quick_capture_456?token=ephemeral",
+        },
+      ]);
+      expect(String(confirmation.nextAction)).toContain("ingest_object");
+      expect(String(confirmation.nextAction)).toContain("mark_quick_capture_handled");
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
+  it("returns chat-friendly confirmations for handled quick captures", async () => {
+    const markCalls: Array<{ brainInstanceId: string; input: unknown }> = [];
+    const server = createMcpServer(
+      createFakeClient({
+        markQuickCaptureHandled: async (brainInstanceId, input) => {
+          markCalls.push({ brainInstanceId, input });
+          return { captureId: input.captureId, status: input.outcome };
+        },
+      }),
+      "brain_123",
+    );
+    const client = new Client({ name: "mark-quick-capture-test", version: "0.1.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    try {
+      await server.connect(serverTransport);
+      await client.connect(clientTransport);
+
+      const result = await client.callTool({
+        name: "mark_quick_capture_handled",
+        arguments: {
+          captureId: "quick_capture_123",
+          outcome: "processed",
+          processingNote: "Saved the article as a link and created a follow-up task.",
+          sourceRunId: "ingestion_run_123",
+        },
+      });
+
+      expect(markCalls).toEqual([
+        {
+          brainInstanceId: "brain_123",
+          input: {
+            captureId: "quick_capture_123",
+            outcome: "processed",
+            processingNote: "Saved the article as a link and created a follow-up task.",
+            sourceRunId: "ingestion_run_123",
+            processedBy: "skippy_mcp",
+          },
+        },
+      ]);
+      expect(textResult(result)).toMatchObject({
+        status: "processed",
+        entityType: "quick_capture",
+        captureId: "quick_capture_123",
+        outcome: "processed",
+        processingNote: "Saved the article as a link and created a follow-up task.",
+        reviewUrl: "http://127.0.0.1:3000/",
+      });
     } finally {
       await client.close();
       await server.close();
