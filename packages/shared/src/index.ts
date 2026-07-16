@@ -2373,3 +2373,21 @@ export function matchDismissedFocusItem<T extends DismissedFocusItemCandidate>(
 
   return best.candidate;
 }
+
+/* ------------------------------------------------------------------ */
+/* Task ordering (kanban drag-reorder)                                 */
+/* ------------------------------------------------------------------ */
+
+/**
+ * orderIndex for a task dropped between two neighbors (either side may be
+ * open-ended). Returns a value strictly between them, or undefined when the
+ * neighbors leave no numeric room — the caller should renumber the bucket.
+ */
+export function orderIndexBetween(prev: number | undefined, next: number | undefined): number | undefined {
+  if (prev === undefined && next === undefined) return 0;
+  if (prev === undefined) return (next as number) - 1;
+  if (next === undefined) return prev + 1;
+  if (!(prev < next)) return undefined;
+  const mid = prev + (next - prev) / 2;
+  return mid > prev && mid < next ? mid : undefined;
+}
