@@ -4,7 +4,24 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent } from "react";
 import { useMutation, useQuery } from "convex/react";
-import { ArrowRight, Bell, Check, Copy, Download, Inbox, Paperclip, PenLine, RefreshCw, ShieldCheck, Sparkles, X } from "lucide-react";
+import {
+  ArrowRight,
+  Bell,
+  Check,
+  Copy,
+  Download,
+  Eye,
+  File as FileIcon,
+  FileText,
+  Inbox,
+  Link as LinkIcon,
+  Paperclip,
+  PenLine,
+  RefreshCw,
+  ShieldCheck,
+  Sparkles,
+  X,
+} from "lucide-react";
 import { activeSourceSyncStatus, type QuickCaptureIntent } from "@skippy/shared";
 import { api } from "../../lib/skippy-api";
 import { focusItemKey, parseFocusSummary } from "../focus-summary";
@@ -205,6 +222,36 @@ function QuickCaptureBox({ captures }: { captures: AnyRecord[] | undefined }) {
     }
   };
 
+  const copyImageCapture = async (capture: AnyRecord) => {
+    if (!capture.fileUrl) return;
+    setBusyCaptureId(capture._id);
+    try {
+      const response = await fetch(capture.fileUrl);
+      if (!response.ok) throw new Error(`fetch failed (HTTP ${response.status})`);
+      let blob = await response.blob();
+      // Browsers reliably accept image/png on the clipboard; anything else
+      // (jpeg, webp, …) gets redrawn onto a canvas and re-encoded as PNG.
+      if (blob.type !== "image/png") {
+        const bitmap = await createImageBitmap(blob);
+        const canvas = document.createElement("canvas");
+        canvas.width = bitmap.width;
+        canvas.height = bitmap.height;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) throw new Error("canvas unavailable");
+        ctx.drawImage(bitmap, 0, 0);
+        const pngBlob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
+        if (!pngBlob) throw new Error("could not encode image");
+        blob = pngBlob;
+      }
+      await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
+      toast("Image copied to clipboard.", "info");
+    } catch (error) {
+      toast(error instanceof Error ? error.message : "Could not copy image", "error");
+    } finally {
+      setBusyCaptureId(null);
+    }
+  };
+
   const removeCapture = async (capture: AnyRecord) => {
     setBusyCaptureId(capture._id);
     try {
@@ -231,6 +278,28 @@ function QuickCaptureBox({ captures }: { captures: AnyRecord[] | undefined }) {
           <PenLine size={18} aria-hidden /> Quick capture
         </span>
       }
+      action={
+        <div className={todayStyles.intentToggle} role="radiogroup" aria-label="Capture intent">
+          <button
+            type="button"
+            role="radio"
+            aria-checked={intent === "remember"}
+            disabled={submitting}
+            onClick={() => chooseIntent("remember")}
+          >
+            Remember
+          </button>
+          <button
+            type="button"
+            role="radio"
+            aria-checked={intent === "hold"}
+            disabled={submitting}
+            onClick={() => chooseIntent("hold")}
+          >
+            Hold
+          </button>
+        </div>
+      }
     >
       <div
         className={`${todayStyles.captureDropzone}${dragActive ? ` ${todayStyles.captureDropzoneActive}` : ""}`}
@@ -240,69 +309,50 @@ function QuickCaptureBox({ captures }: { captures: AnyRecord[] | undefined }) {
         onDrop={onDrop}
         onPaste={onPaste}
       >
-        <TextArea
-          rows={2}
-          placeholder="Drop a thought, note, URL, or file…"
-          aria-label="Quick capture text"
-          value={text}
-          disabled={submitting}
-          onChange={(event) => setText(event.target.value)}
-          onKeyDown={onTextKeyDown}
+        <input
+          ref={fileInputRef}
+          type="file"
+          style={{ display: "none" }}
+          onChange={(event) => {
+            selectFile(event.target.files?.[0]);
+            if (event.target) event.target.value = "";
+          }}
         />
-        <div className={todayStyles.captureActions}>
-          <div className={todayStyles.intentToggle} role="radiogroup" aria-label="Capture intent">
-            <button
-              type="button"
-              role="radio"
-              aria-checked={intent === "remember"}
-              disabled={submitting}
-              onClick={() => chooseIntent("remember")}
-            >
-              Remember
-            </button>
-            <button
-              type="button"
-              role="radio"
-              aria-checked={intent === "hold"}
-              disabled={submitting}
-              onClick={() => chooseIntent("hold")}
-            >
-              Hold
-            </button>
-          </div>
-          <span className={todayStyles.captureActionsRight}>
-            <input
-              ref={fileInputRef}
-              type="file"
-              style={{ display: "none" }}
-              onChange={(event) => {
-                selectFile(event.target.files?.[0]);
-                if (event.target) event.target.value = "";
-              }}
-            />
-            {file ? (
-              <span className={todayStyles.captureFile}>
-                <Paperclip size={13} aria-hidden />
-                <span className={todayStyles.captureFileName}>{file.name}</span>
-                <span className="item-meta">{formatFileSize(file.size)}</span>
-                <IconButton small aria-label={`Remove ${file.name}`} disabled={submitting} onClick={clearFile}>
-                  <X size={13} aria-hidden />
-                </IconButton>
-              </span>
-            ) : (
-              <button
-                type="button"
-                className="text-button compact"
-                disabled={submitting}
-                onClick={() => fileInputRef.current?.click()}
-              >
-                <Paperclip size={14} aria-hidden /> Attach file
-              </button>
-            )}
-            <Button small disabled={!canSubmit} onClick={() => void submit()}>
-              {submitting ? "Capturing…" : "Capture"}
-            </Button>
+        <div className={todayStyles.captureField}>
+          <TextArea
+            rows={2}
+            placeholder="Drop a thought, note, URL, or file…"
+            aria-label="Quick capture text"
+            value={text}
+            disabled={submitting}
+            onChange={(event) => setText(event.target.value)}
+            onKeyDown={onTextKeyDown}
+          />
+          <IconButton
+            small
+            className={todayStyles.captureAttach}
+            title="Attach file"
+            aria-label="Attach file"
+            disabled={submitting}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <Paperclip size={16} aria-hidden />
+          </IconButton>
+        </div>
+        {file ? (
+          <span className={todayStyles.captureFile}>
+            <Paperclip size={13} aria-hidden />
+            <span className={todayStyles.captureFileName}>{file.name}</span>
+            <span className="item-meta">{formatFileSize(file.size)}</span>
+            <IconButton small aria-label={`Remove ${file.name}`} disabled={submitting} onClick={clearFile}>
+              <X size={13} aria-hidden />
+            </IconButton>
           </span>
+        ) : null}
+        <div className={todayStyles.captureSubmitRow}>
+          <Button disabled={!canSubmit} onClick={() => void submit()}>
+            {submitting ? "Capturing…" : "Capture"}
+          </Button>
         </div>
         {intent === "hold" ? (
           <p className="muted" style={{ margin: 0, fontSize: 12 }}>
@@ -311,36 +361,74 @@ function QuickCaptureBox({ captures }: { captures: AnyRecord[] | undefined }) {
           </p>
         ) : null}
         {recent.length ? (
-          <div style={{ display: "grid", gap: 4 }}>
+          <div className={todayStyles.captureList}>
             {recent.map((capture) => {
               const label = captureLabel(capture);
               const busy = busyCaptureId === capture._id;
+              const isImage =
+                typeof capture.mimeType === "string" &&
+                capture.mimeType.startsWith("image/") &&
+                Boolean(capture.fileUrl);
+              const isFile = Boolean(capture.fileName) && !isImage;
               return (
                 <div key={capture._id} className={todayStyles.captureRow}>
+                  <span className={todayStyles.captureType} aria-hidden>
+                    {isImage ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={capture.fileUrl} alt="" className={todayStyles.captureThumb} />
+                    ) : isFile ? (
+                      <FileIcon size={18} />
+                    ) : capture.url ? (
+                      <LinkIcon size={18} />
+                    ) : (
+                      <FileText size={18} />
+                    )}
+                  </span>
                   <span className={todayStyles.captureText} title={label}>
                     {label}
                   </span>
                   {typeof capture.sizeBytes === "number" ? (
                     <span className="item-meta">{formatFileSize(capture.sizeBytes)}</span>
-                  ) : null}
+                  ) : (
+                    <span />
+                  )}
                   {capture.intent === "hold" ? (
                     <Badge tone="neutral">hold</Badge>
                   ) : (
                     <Badge tone={captureTone[capture.status] ?? "neutral"}>{capture.status}</Badge>
                   )}
                   <span className={todayStyles.captureRowActions}>
-                    {capture.text || capture.url ? (
-                      <IconButton
-                        small
-                        title="Copy text"
-                        aria-label={`Copy ${label}`}
-                        disabled={busy}
-                        onClick={() => void copyCapture(capture)}
-                      >
-                        <Copy size={13} aria-hidden />
-                      </IconButton>
-                    ) : null}
-                    {capture.fileUrl && capture.fileName ? (
+                    {isImage ? (
+                      <>
+                        <IconButton
+                          small
+                          title="View image"
+                          aria-label={`View ${label}`}
+                          disabled={busy}
+                          onClick={() => window.open(capture.fileUrl, "_blank", "noopener,noreferrer")}
+                        >
+                          <Eye size={13} aria-hidden />
+                        </IconButton>
+                        <IconButton
+                          small
+                          title="Copy image"
+                          aria-label={`Copy ${label}`}
+                          disabled={busy}
+                          onClick={() => void copyImageCapture(capture)}
+                        >
+                          <Copy size={13} aria-hidden />
+                        </IconButton>
+                        <IconButton
+                          small
+                          title={`Download ${capture.fileName}`}
+                          aria-label={`Download ${capture.fileName}`}
+                          disabled={busy}
+                          onClick={() => void downloadCapture(capture)}
+                        >
+                          <Download size={13} aria-hidden />
+                        </IconButton>
+                      </>
+                    ) : isFile ? (
                       <IconButton
                         small
                         title={`Download ${capture.fileName}`}
@@ -350,7 +438,17 @@ function QuickCaptureBox({ captures }: { captures: AnyRecord[] | undefined }) {
                       >
                         <Download size={13} aria-hidden />
                       </IconButton>
-                    ) : null}
+                    ) : (
+                      <IconButton
+                        small
+                        title="Copy text"
+                        aria-label={`Copy ${label}`}
+                        disabled={busy}
+                        onClick={() => void copyCapture(capture)}
+                      >
+                        <Copy size={13} aria-hidden />
+                      </IconButton>
+                    )}
                     <IconButton
                       small
                       title="Delete capture"
