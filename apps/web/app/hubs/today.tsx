@@ -350,6 +350,8 @@ function QuickCaptureBox({ captures }: { captures: AnyRecord[] | undefined }) {
           </Button>
         </div>
         {recent.length ? (
+          <>
+          <h3 className={todayStyles.captureListHeading}>Captures</h3>
           <div className={todayStyles.captureList}>
             {recent.map((capture) => {
               const label = captureLabel(capture);
@@ -458,12 +460,8 @@ function QuickCaptureBox({ captures }: { captures: AnyRecord[] | undefined }) {
               </p>
             ) : null}
           </div>
-        ) : (
-          <p className="muted" style={{ margin: 0, fontSize: 13 }}>
-            Captures wait here until an ingestion run files them into Skippy. Held items stay for
-            you to grab on another device.
-          </p>
-        )}
+          </>
+        ) : null}
       </div>
     </Section>
   );
