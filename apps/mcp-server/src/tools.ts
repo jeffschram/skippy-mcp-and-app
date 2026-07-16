@@ -27,6 +27,7 @@ import {
   isValidMonthKey,
   linkAgeDays,
   normalizeCandidateObject,
+  quickCaptureIntent,
   validateProjectFileInput,
 } from "@skippy/shared";
 import webPush from "web-push";
@@ -1198,9 +1199,16 @@ export function createSkippyToolHandlers(client: SkippyClient, brainInstanceId: 
     },
 
     async listQuickCaptures(input: ListQuickCapturesInput = {}) {
-      return await client.listQuickCaptures(brainInstanceId, {
+      const rows = await client.listQuickCaptures(brainInstanceId, {
         status: input.status ?? "pending",
       });
+      // Hold-intent captures are private device-to-device transfers. The
+      // backend already excludes them; filter defensively so they can never
+      // reach an ingestion harness through this tool.
+      if (!Array.isArray(rows)) return rows;
+      return rows.filter(
+        (row) => quickCaptureIntent((row ?? {}) as { intent?: "remember" | "hold" }) !== "hold",
+      );
     },
 
     async markQuickCaptureHandled(input: MarkQuickCaptureHandledInput) {

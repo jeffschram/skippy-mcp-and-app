@@ -10,13 +10,65 @@
   align-content: start;
 }
 
-/* Quick capture: a quiet inbox slot, not a hero. */
+/* Quick capture: a quiet inbox slot, not a hero. The whole card body is a
+   dropzone for files (and a paste target for screenshots). */
+.captureDropzone {
+  display: grid;
+  gap: 8px;
+  border-radius: 10px;
+}
+
+.captureDropzoneActive {
+  outline: 2px dashed var(--gold);
+  outline-offset: 6px;
+  background: color-mix(in srgb, var(--gold) 7%, transparent);
+}
+
 .captureActions {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.captureActionsRight {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* Remember | Hold segmented control — sticky per device. */
+.intentToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+}
+
+.intentToggle button {
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 620;
+  color: var(--muted);
+  padding: 2px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.intentToggle button[aria-checked="true"] {
+  color: var(--gold);
+  background: color-mix(in srgb, var(--gold) 14%, transparent);
+}
+
+.intentToggle button:disabled {
+  cursor: default;
+  opacity: 0.6;
 }
 
 .captureFile {
@@ -37,16 +89,25 @@
 .captureRow {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
   min-width: 0;
 }
 
 .captureText {
+  flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 13px;
   color: var(--muted);
+}
+
+/* Per-item copy/download/delete cluster, right-aligned. */
+.captureRowActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+  flex-shrink: 0;
 }
