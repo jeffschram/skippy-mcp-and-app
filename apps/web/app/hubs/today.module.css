@@ -24,22 +24,32 @@
   background: color-mix(in srgb, var(--gold) 7%, transparent);
 }
 
-.captureActions {
+/* Textarea + inline attach button share a positioning context so the
+   Paperclip button can sit in the lower-right corner of the field. */
+.captureField {
+  position: relative;
+}
+
+.captureField textarea {
+  /* Reserve room in the lower-right so text never runs under the button. */
+  padding-right: 44px;
+}
+
+.captureAttach {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+}
+
+/* Capture button row — primary action, right-aligned on desktop, full
+   width on narrow viewports (see media query below). */
+.captureSubmitRow {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
-.captureActionsRight {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-/* Remember | Hold segmented control — sticky per device. */
+/* Remember | Hold segmented control — sticky per device. Lives in the
+   Section title row now, so keep it compact. */
 .intentToggle {
   display: inline-flex;
   align-items: center;
@@ -71,12 +81,18 @@
   opacity: 0.6;
 }
 
+/* Attached-file chip, shown between the textarea and the capture button. */
 .captureFile {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   min-width: 0;
+  max-width: 100%;
   font-size: 13px;
+  padding: 4px 6px 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  align-self: flex-start;
 }
 
 .captureFileName {
@@ -86,15 +102,43 @@
   white-space: nowrap;
 }
 
+/* Recent captures: an aligned grid table so type-indicator / label / meta /
+   status / actions line up across rows. Horizontal scroll on cramped
+   viewports keeps columns readable rather than wrapping into a mess. */
+.captureList {
+  display: grid;
+  gap: 2px;
+  overflow-x: auto;
+}
+
 .captureRow {
-  display: flex;
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) auto auto auto;
   align-items: center;
   gap: 8px;
   min-width: 0;
+  padding: 3px 0;
+}
+
+/* Type indicator cell: thumbnail or icon, fixed width so labels align. */
+.captureType {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  color: var(--muted);
+}
+
+.captureThumb {
+  width: 36px;
+  height: 36px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid var(--line);
 }
 
 .captureText {
-  flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -103,11 +147,19 @@
   color: var(--muted);
 }
 
-/* Per-item copy/download/delete cluster, right-aligned. */
+/* Per-item action cluster, right-aligned. */
 .captureRowActions {
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  margin-left: auto;
+  justify-content: flex-end;
   flex-shrink: 0;
+}
+
+/* On narrow viewports the primary action goes full-width with a
+   comfortable tap target; the intent toggle stays inline in the title. */
+@media (max-width: 560px) {
+  .captureSubmitRow :global(button) {
+    width: 100%;
+  }
 }
