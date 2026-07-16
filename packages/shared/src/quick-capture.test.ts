@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   QUICK_CAPTURE_FILE_MAX_BYTES,
   QUICK_CAPTURE_HOLD_EXPIRY_MS,
+  combineSharedCaptureText,
   isQuickCaptureHoldExpired,
+  normalizeQuickCaptureIntentInput,
+  parseBearerToken,
   quickCaptureIntent,
   validateQuickCaptureFileInput,
 } from "./index";
@@ -109,5 +112,66 @@ describe("validateQuickCaptureFileInput", () => {
     expect(() =>
       validateQuickCaptureFileInput({ fileName: "a", mimeType: "text/plain", sizeBytes: Number.NaN }),
     ).toThrow(/non-negative/);
+  });
+});
+
+describe("parseBearerToken", () => {
+  it("extracts the token from a Bearer header, trimming whitespace", () => {
+    expect(parseBearerToken("Bearer skippy_abc123")).toBe("skippy_abc123");
+    expect(parseBearerToken("  Bearer   skippy_abc123  ")).toBe("skippy_abc123");
+  });
+
+  it("accepts a case-insensitive scheme", () => {
+    expect(parseBearerToken("bearer skippy_abc123")).toBe("skippy_abc123");
+    expect(parseBearerToken("BEARER skippy_abc123")).toBe("skippy_abc123");
+  });
+
+  it("rejects missing headers, other schemes, and empty tokens", () => {
+    expect(parseBearerToken(null)).toBeNull();
+    expect(parseBearerToken(undefined)).toBeNull();
+    expect(parseBearerToken("")).toBeNull();
+    expect(parseBearerToken("Basic dXNlcjpwYXNz")).toBeNull();
+    expect(parseBearerToken("Bearer")).toBeNull();
+    expect(parseBearerToken("Bearer   ")).toBeNull();
+  });
+});
+
+describe("normalizeQuickCaptureIntentInput", () => {
+  it("defaults absent or empty values to remember", () => {
+    expect(normalizeQuickCaptureIntentInput(undefined)).toBe("remember");
+    expect(normalizeQuickCaptureIntentInput(null)).toBe("remember");
+    expect(normalizeQuickCaptureIntentInput("")).toBe("remember");
+  });
+
+  it("passes through the two valid intents", () => {
+    expect(normalizeQuickCaptureIntentInput("remember")).toBe("remember");
+    expect(normalizeQuickCaptureIntentInput("hold")).toBe("hold");
+  });
+
+  it("returns null for anything unknown so callers can 400", () => {
+    expect(normalizeQuickCaptureIntentInput("forget")).toBeNull();
+    expect(normalizeQuickCaptureIntentInput("HOLD")).toBeNull();
+    expect(normalizeQuickCaptureIntentInput(42)).toBeNull();
+    expect(normalizeQuickCaptureIntentInput({})).toBeNull();
+  });
+});
+
+describe("combineSharedCaptureText", () => {
+  it("joins title and text on a newline, title first", () => {
+    expect(combineSharedCaptureText("A headline", "Some body")).toBe("A headline\nSome body");
+  });
+
+  it("returns whichever part is present when the other is missing", () => {
+    expect(combineSharedCaptureText("Only title", undefined)).toBe("Only title");
+    expect(combineSharedCaptureText(null, "Only text")).toBe("Only text");
+  });
+
+  it("trims parts and drops whitespace-only ones", () => {
+    expect(combineSharedCaptureText("  spaced  ", "   ")).toBe("spaced");
+  });
+
+  it("returns undefined when both parts are empty", () => {
+    expect(combineSharedCaptureText(undefined, undefined)).toBeUndefined();
+    expect(combineSharedCaptureText("  ", "")).toBeUndefined();
   });
 });

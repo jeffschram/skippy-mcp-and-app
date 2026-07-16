@@ -11,6 +11,7 @@
 import type * as auth from "../auth.js";
 import type * as bootstrap from "../bootstrap.js";
 import type * as finances from "../finances.js";
+import type * as http from "../http.js";
 import type * as interviews from "../interviews.js";
 import type * as knowledge from "../knowledge.js";
 import type * as mcpTokens from "../mcpTokens.js";
@@ -33,6 +34,7 @@ declare const fullApi: ApiFromModules<{
   auth: typeof auth;
   bootstrap: typeof bootstrap;
   finances: typeof finances;
+  http: typeof http;
   interviews: typeof interviews;
   knowledge: typeof knowledge;
   mcpTokens: typeof mcpTokens;

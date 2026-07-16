@@ -1,4 +1,4 @@
-import { mutationGeneric, queryGeneric } from "convex/server";
+import { internalMutationGeneric, mutationGeneric, queryGeneric } from "convex/server";
 import { v } from "convex/values";
 import {
   GOAL_STATUSES,
@@ -4591,73 +4591,119 @@ export const generateQuickCaptureUploadUrlForViewer = mutationGeneric({
   },
 });
 
+/** Capture fields shared by every write path (viewer mutation, HTTP /capture). */
+const quickCaptureWriteArgs = {
+  text: v.optional(v.string()),
+  url: v.optional(v.string()),
+  storageId: v.optional(v.id("_storage")),
+  fileName: v.optional(v.string()),
+  mimeType: v.optional(v.string()),
+  sizeBytes: v.optional(v.number()),
+  // "remember" (default) = ingestion harnesses process it; "hold" = private
+  // device-to-device transfer that harnesses never see, expiring in 7 days.
+  intent: v.optional(v.union(v.literal("remember"), v.literal("hold"))),
+};
+
+type QuickCaptureWriteInput = {
+  text?: string;
+  url?: string;
+  storageId?: string;
+  fileName?: string;
+  mimeType?: string;
+  sizeBytes?: number;
+  intent?: "remember" | "hold";
+};
+
+/**
+ * Single write path for quick captures. The viewer mutation and the
+ * token-authenticated HTTP /capture action (convex/http.ts) both go through
+ * here so the trim/require rules, URL inference, timestamps, and the lazy
+ * hold-expiry sweep cannot drift apart. `actorId` is the viewer's user id
+ * when the capture comes from a signed-in session; token captures have none.
+ */
+async function insertQuickCapture(
+  ctx: any,
+  brainInstanceId: any,
+  args: QuickCaptureWriteInput,
+  actorId?: string,
+) {
+  const text = optionalTrimmed(args.text);
+  if (!text && !args.storageId) {
+    throw new Error("quick capture needs text or a file");
+  }
+  // Only store url when the capture actually parses as an http/https URL.
+  const url = inferHttpUrl(args.url) ?? inferHttpUrl(text);
+  const intent = args.intent ?? "remember";
+
+  const now = Date.now();
+
+  // Lazy auto-expiry: every new capture sweeps this brain's hold captures
+  // past the 7-day transfer window — rows and their storage files. No cron;
+  // reads already hide expired holds, so this is pure cleanup.
+  const sweepCandidates = await ctx.db
+    .query("quickCaptures")
+    .withIndex("by_brain_created", (q: any) =>
+      q.eq("brainInstanceId", brainInstanceId).lt("createdAt", now - QUICK_CAPTURE_HOLD_EXPIRY_MS),
+    )
+    .take(50);
+  for (const stale of sweepCandidates) {
+    if (!isQuickCaptureHoldExpired(stale, now)) continue;
+    if (stale.storageId) {
+      await ctx.storage.delete(stale.storageId);
+    }
+    await ctx.db.delete(stale._id);
+  }
+
+  const captureId = await ctx.db.insert("quickCaptures", {
+    brainInstanceId,
+    text,
+    url,
+    storageId: args.storageId,
+    fileName: args.storageId ? optionalTrimmed(args.fileName) : undefined,
+    mimeType: args.storageId ? optionalTrimmed(args.mimeType) : undefined,
+    sizeBytes: args.storageId ? args.sizeBytes : undefined,
+    status: "pending",
+    intent,
+    capturedBy: "user",
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  await ctx.db.insert("activityEvents", {
+    brainInstanceId,
+    activityType: "quick_capture_created",
+    actorType: "user",
+    actorId,
+    timestamp: now,
+    summary: `Quick capture added: ${quickCaptureLabel({ text, fileName: args.fileName, url })}`,
+    metadata: { captureId, url, hasFile: Boolean(args.storageId), fileName: args.fileName, intent },
+  });
+
+  return { captureId, status: "pending" as const, intent };
+}
+
 export const createQuickCaptureForViewer = mutationGeneric({
-  args: {
-    text: v.optional(v.string()),
-    url: v.optional(v.string()),
-    storageId: v.optional(v.id("_storage")),
-    fileName: v.optional(v.string()),
-    mimeType: v.optional(v.string()),
-    sizeBytes: v.optional(v.number()),
-    // "remember" (default) = ingestion harnesses process it; "hold" = private
-    // device-to-device transfer that harnesses never see, expiring in 7 days.
-    intent: v.optional(v.union(v.literal("remember"), v.literal("hold"))),
-  },
+  args: quickCaptureWriteArgs,
   handler: async (ctx, args) => {
     const { user, brain } = await requireOwnedBrain(ctx);
-    const text = optionalTrimmed(args.text);
-    if (!text && !args.storageId) {
-      throw new Error("quick capture needs text or a file");
-    }
-    // Only store url when the capture actually parses as an http/https URL.
-    const url = inferHttpUrl(args.url) ?? inferHttpUrl(text);
-    const intent = args.intent ?? "remember";
+    return await insertQuickCapture(ctx, brain._id, args, user._id);
+  },
+});
 
-    const now = Date.now();
-
-    // Lazy auto-expiry: every new capture sweeps this brain's hold captures
-    // past the 7-day transfer window — rows and their storage files. No cron;
-    // reads already hide expired holds, so this is pure cleanup.
-    const sweepCandidates = await ctx.db
-      .query("quickCaptures")
-      .withIndex("by_brain_created", (q: any) =>
-        q.eq("brainInstanceId", brain._id).lt("createdAt", now - QUICK_CAPTURE_HOLD_EXPIRY_MS),
-      )
-      .take(50);
-    for (const stale of sweepCandidates) {
-      if (!isQuickCaptureHoldExpired(stale, now)) continue;
-      if (stale.storageId) {
-        await ctx.storage.delete(stale.storageId);
-      }
-      await ctx.db.delete(stale._id);
-    }
-
-    const captureId = await ctx.db.insert("quickCaptures", {
-      brainInstanceId: brain._id,
-      text,
-      url,
-      storageId: args.storageId,
-      fileName: args.storageId ? optionalTrimmed(args.fileName) : undefined,
-      mimeType: args.storageId ? optionalTrimmed(args.mimeType) : undefined,
-      sizeBytes: args.storageId ? args.sizeBytes : undefined,
-      status: "pending",
-      intent,
-      capturedBy: "user",
-      createdAt: now,
-      updatedAt: now,
-    });
-
-    await ctx.db.insert("activityEvents", {
-      brainInstanceId: brain._id,
-      activityType: "quick_capture_created",
-      actorType: "user",
-      actorId: user._id,
-      timestamp: now,
-      summary: `Quick capture added: ${quickCaptureLabel({ text, fileName: args.fileName, url })}`,
-      metadata: { captureId, url, hasFile: Boolean(args.storageId), fileName: args.fileName, intent },
-    });
-
-    return { captureId, status: "pending", intent };
+/**
+ * Internal write path for the token-authenticated HTTP /capture endpoint
+ * (convex/http.ts). The HTTP action authenticates the bearer token via
+ * mcpTokens:authenticate first, then calls this with the resolved brain.
+ * internal-only: external clients cannot pass an arbitrary brainInstanceId.
+ */
+export const createQuickCaptureFromCaptureEndpoint = internalMutationGeneric({
+  args: {
+    brainInstanceId: v.id("brainInstances"),
+    ...quickCaptureWriteArgs,
+  },
+  handler: async (ctx, args) => {
+    const { brainInstanceId, ...capture } = args;
+    return await insertQuickCapture(ctx, brainInstanceId, capture);
   },
 });
 
