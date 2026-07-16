@@ -191,7 +191,9 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const push = (message: string, tone: ToastTone = "info") => {
     toastSeq += 1;
     const id = toastSeq;
-    setToasts((current) => [...current, { id, tone, message }]);
+    // Newest first: the wrap is anchored to the top of the screen, so the
+    // first item in the stack is the most visible.
+    setToasts((current) => [{ id, tone, message }, ...current]);
     setTimeout(() => {
       setToasts((current) => current.filter((toast) => toast.id !== id));
     }, 4200);
