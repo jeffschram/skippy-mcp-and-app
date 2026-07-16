@@ -111,6 +111,9 @@
 .iconButton.small {
   width: 32px;
   height: 32px;
+  /* Icon buttons center via grid; the shared .small horizontal padding
+     would squeeze the fixed 32px box and push the glyph off-center. */
+  padding: 0;
 }
 
 /* ---------- Card / Section ---------- */
