@@ -1,6 +1,6 @@
 import { mutationGeneric, queryGeneric } from "convex/server";
 import { v } from "convex/values";
-import { effectiveProjectPaths, normalizeFolderPathInput } from "@skippy/shared";
+import { effectiveProjectPaths, normalizeFolderPathInput, orderIndexBetween } from "@skippy/shared";
 import { requireOwnedBrain } from "./auth";
 import { advanceDependentsAfterDone, dependencyTaskIds } from "./taskExecution";
 
@@ -852,6 +852,44 @@ export const requestAgentForTaskForViewer = mutationGeneric({
   },
 });
 
+// Shared by setTaskExecutionStateForViewer and reorderTaskForViewer so column
+// drops and reorder drags apply identical status/dependency side effects.
+async function applyExecutionStateChange(
+  ctx: any,
+  user: any,
+  brain: any,
+  task: any,
+  executionState: string,
+  now: number,
+) {
+  const patch: Record<string, unknown> = { executionState, updatedAt: now };
+  // Keep the user-facing status roughly in sync with the lifecycle.
+  if (executionState === "in_progress") patch.status = "in_progress";
+  else if (executionState === "done") {
+    patch.status = "done";
+    patch.completedAt = now;
+  } else if (executionState === "cancelled") {
+    patch.status = "cancelled";
+  } else if (["proposed", "unplanned", "briefed", "ready", "blocked"].includes(executionState) && task.status === "in_progress") {
+    patch.status = "todo";
+  }
+  await ctx.db.patch(task._id, patch);
+
+  if (executionState === "done") {
+    await advanceDependentsAfterDone(ctx.db, brain._id, task._id, now);
+  }
+
+  await ctx.db.insert("activityEvents", {
+    brainInstanceId: brain._id,
+    entityRef: { entityType: "task", entityId: task._id },
+    activityType: "task_execution_state_changed",
+    actorType: "user",
+    actorId: user._id,
+    timestamp: now,
+    summary: `Task moved to ${executionState}: ${task.title}`,
+  });
+}
+
 export const setTaskExecutionStateForViewer = mutationGeneric({
   args: { taskId: v.id("tasks"), executionState: executionStateValidator },
   handler: async (ctx, args) => {
@@ -860,35 +898,71 @@ export const setTaskExecutionStateForViewer = mutationGeneric({
     if (!task || task.brainInstanceId !== brain._id) {
       throw new Error("task not found");
     }
-    const now = Date.now();
-    const patch: Record<string, unknown> = { executionState: args.executionState, updatedAt: now };
-    // Keep the user-facing status roughly in sync with the lifecycle.
-    if (args.executionState === "in_progress") patch.status = "in_progress";
-    else if (args.executionState === "done") {
-      patch.status = "done";
-      patch.completedAt = now;
-    } else if (args.executionState === "cancelled") {
-      patch.status = "cancelled";
-    } else if (["proposed", "unplanned", "briefed", "ready", "blocked"].includes(args.executionState) && task.status === "in_progress") {
-      patch.status = "todo";
-    }
-    await ctx.db.patch(args.taskId, patch);
-
-    if (args.executionState === "done") {
-      await advanceDependentsAfterDone(ctx.db, brain._id, args.taskId, now);
-    }
-
-    await ctx.db.insert("activityEvents", {
-      brainInstanceId: brain._id,
-      entityRef: { entityType: "task", entityId: args.taskId },
-      activityType: "task_execution_state_changed",
-      actorType: "user",
-      actorId: user._id,
-      timestamp: now,
-      summary: `Task moved to ${args.executionState}: ${task.title}`,
-    });
-
+    await applyExecutionStateChange(ctx, user, brain, task, args.executionState, Date.now());
     return { taskId: args.taskId, executionState: args.executionState };
+  },
+});
+
+/**
+ * Drag-reorder on the board: place a task before `beforeTaskId` in the target
+ * status bucket (or at the end when omitted), reusing the existing orderIndex
+ * ordering that buildBoard sorts by. Cross-bucket drops also apply the same
+ * execution-state change as a column drop.
+ */
+export const reorderTaskForViewer = mutationGeneric({
+  args: {
+    taskId: v.id("tasks"),
+    projectId: v.id("projects"),
+    executionState: executionStateValidator,
+    beforeTaskId: v.optional(v.id("tasks")),
+  },
+  handler: async (ctx, args) => {
+    const { user, brain } = await requireOwnedBrain(ctx);
+    const task = await ctx.db.get(args.taskId);
+    if (!task || task.brainInstanceId !== brain._id) {
+      throw new Error("task not found");
+    }
+    const taskIds = await projectTaskIds(ctx.db, brain._id, args.projectId);
+    if (!taskIds.includes(args.taskId)) {
+      throw new Error("task does not belong to this project");
+    }
+    const now = Date.now();
+    if (executionStateFor(task) !== args.executionState) {
+      await applyExecutionStateChange(ctx, user, brain, task, args.executionState, now);
+    }
+
+    // The destination bucket in board display order, excluding the moved task.
+    const bucket: any[] = [];
+    for (const id of taskIds) {
+      if (id === args.taskId) continue;
+      const candidate = await ctx.db.get(id as any);
+      if (
+        candidate &&
+        candidate.processingState === "accepted" &&
+        executionStateFor(candidate) === args.executionState
+      ) {
+        bucket.push(candidate);
+      }
+    }
+    bucket.sort((a, b) => (a.orderIndex ?? 0) - (b.orderIndex ?? 0));
+
+    const beforePosition = args.beforeTaskId ? bucket.findIndex((t) => t._id === args.beforeTaskId) : -1;
+    const insertAt = beforePosition === -1 ? bucket.length : beforePosition;
+    const orderIndex = orderIndexBetween(
+      insertAt > 0 ? (bucket[insertAt - 1].orderIndex ?? 0) : undefined,
+      insertAt < bucket.length ? (bucket[insertAt].orderIndex ?? 0) : undefined,
+    );
+    if (orderIndex !== undefined) {
+      await ctx.db.patch(args.taskId, { orderIndex, updatedAt: now });
+      return { taskId: args.taskId, orderIndex };
+    }
+    // No numeric room between the neighbors — renumber the bucket in place.
+    bucket.splice(insertAt, 0, task);
+    const base = Math.min(...bucket.map((t) => t.orderIndex ?? 0));
+    for (let i = 0; i < bucket.length; i += 1) {
+      await ctx.db.patch(bucket[i]._id, { orderIndex: base + i, updatedAt: now });
+    }
+    return { taskId: args.taskId, orderIndex: base + insertAt };
   },
 });
 

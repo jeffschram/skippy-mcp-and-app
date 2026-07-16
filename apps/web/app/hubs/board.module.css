@@ -212,3 +212,69 @@
   text-decoration: line-through;
   text-decoration-color: color-mix(in srgb, var(--muted) 55%, transparent);
 }
+
+/* Stacked board (small viewports) ---------------------------------- */
+
+/* Touch-drag grip: hidden on desktop, where native card drag applies. */
+.dragHandle {
+  display: none;
+}
+
+/* Secondary badges participate in the meta flex row on desktop… */
+.metaSecondary {
+  display: contents;
+}
+
+/* Insertion line while a grip drag hovers a slot. */
+.dropBefore {
+  box-shadow: 0 -3px 0 0 var(--blue);
+}
+
+.dropAfter {
+  box-shadow: 0 3px 0 0 var(--blue);
+}
+
+/* Below the app shell's mobile breakpoint (881px) the columns become
+   full-width buckets stacked in workflow order, scrolling with the page. */
+@media (max-width: 880px) {
+  .board {
+    grid-auto-flow: row;
+    grid-auto-columns: unset;
+    grid-template-columns: minmax(0, 1fr);
+    overflow-x: visible;
+    padding-bottom: 0;
+  }
+
+  .columnBody {
+    gap: 6px;
+  }
+
+  /* Compact list cards: title + key badges, comfortable tap target, and
+     room on the right for the grip. */
+  .taskCard {
+    position: relative;
+    gap: 5px;
+    min-height: 52px;
+    padding: 9px 48px 9px 12px;
+    align-content: center;
+  }
+
+  /* …and drop out of the compact cards on small screens. */
+  .taskCard .metaSecondary {
+    display: none;
+  }
+
+  .dragHandle {
+    display: grid;
+    place-items: center;
+    position: absolute;
+    top: 50%;
+    right: 3px;
+    width: 42px;
+    height: 42px;
+    transform: translateY(-50%);
+    color: var(--muted);
+    touch-action: none;
+    cursor: grab;
+  }
+}

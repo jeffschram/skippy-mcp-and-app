@@ -15,6 +15,7 @@ import {
   Folder,
   GitBranch,
   GitPullRequest,
+  GripVertical,
   Pencil,
   Plus,
   Play,
@@ -131,6 +132,7 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
   const recordResult = useMutation(api.projects.recordTaskResultForViewer);
   const requestAgent = useMutation(api.projects.requestAgentForTaskForViewer);
   const setExecState = useMutation(api.projects.setTaskExecutionStateForViewer);
+  const reorderTask = useMutation(api.projects.reorderTaskForViewer);
   const cancelTask = useMutation(api.projects.cancelTaskForViewer);
   const restoreTask = useMutation(api.projects.restoreTaskForViewer);
   const updateBrief = useMutation(api.projects.updateTaskBriefForViewer);
@@ -147,6 +149,12 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
   const [briefingTaskIds, setBriefingTaskIds] = useState<Set<string>>(new Set());
   const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
   const [dragOverState, setDragOverState] = useState<string | null>(null);
+
+  // Stacked (mobile) board drag: native HTML drag events never fire for touch,
+  // so the grip handle drives a pointer-event drag instead. `index` is the
+  // insertion position among the target bucket's visible cards.
+  const [touchDrag, setTouchDrag] = useState<{ taskId: string; fromState: string } | null>(null);
+  const [touchDropTarget, setTouchDropTarget] = useState<{ state: string; index: number } | null>(null);
 
   // Abandon (cancel) flow: two-click confirm in the drawer + collapsed list below the board.
   const [abandonConfirming, setAbandonConfirming] = useState(false);
@@ -390,6 +398,80 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
     await moveTo(draggedTaskId, state, task);
   };
 
+  // Which bucket/insertion-slot sits under the pointer, via hit test against
+  // the bucket + card data attributes rendered below.
+  const touchDropTargetAt = (x: number, y: number): { state: string; index: number } | null => {
+    const bucketEl = (document.elementFromPoint(x, y) as HTMLElement | null)?.closest?.(
+      "[data-bucket-state]",
+    ) as HTMLElement | null;
+    if (!bucketEl?.dataset.bucketState) return null;
+    const cards = Array.from(bucketEl.querySelectorAll<HTMLElement>("[data-task-id]"));
+    let index = cards.length;
+    for (let i = 0; i < cards.length; i += 1) {
+      const rect = cards[i]?.getBoundingClientRect();
+      if (rect && y < rect.top + rect.height / 2) {
+        index = i;
+        break;
+      }
+    }
+    return { state: bucketEl.dataset.bucketState, index };
+  };
+
+  const startTouchDrag = (event: React.PointerEvent<HTMLElement>, task: AnyRecord) => {
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setTouchDrag({ taskId: task._id, fromState: task.executionState });
+    setTouchDropTarget(touchDropTargetAt(event.clientX, event.clientY));
+  };
+
+  const moveTouchDrag = (event: React.PointerEvent<HTMLElement>) => {
+    if (!touchDrag) return;
+    setTouchDropTarget(touchDropTargetAt(event.clientX, event.clientY));
+    // Keep long stacked boards reachable: nudge the page near the viewport edges.
+    const edge = 72;
+    if (event.clientY < edge) window.scrollBy(0, -14);
+    else if (event.clientY > window.innerHeight - edge) window.scrollBy(0, 14);
+  };
+
+  const cancelTouchDrag = () => {
+    setTouchDrag(null);
+    setTouchDropTarget(null);
+  };
+
+  const endTouchDrag = () => {
+    const drag = touchDrag;
+    const target = touchDropTarget;
+    cancelTouchDrag();
+    if (!drag || !target) return;
+    const bucketTasks: AnyRecord[] =
+      board?.tasks?.filter((task: AnyRecord) => task.executionState === target.state) ?? [];
+    if (target.state === drag.fromState) {
+      const from = bucketTasks.findIndex((task) => task._id === drag.taskId);
+      // Dropped back where it started — nothing to persist.
+      if (from === -1 || target.index === from || target.index === from + 1) return;
+    }
+    if (target.state !== drag.fromState && drag.fromState === "proposed" && target.state === "briefed") {
+      // Mirror desktop column drops: moving a proposal to Briefed generates the brief.
+      void moveTo(drag.taskId, target.state);
+      return;
+    }
+    let beforeTask = bucketTasks[target.index];
+    if (beforeTask?._id === drag.taskId) beforeTask = bucketTasks[target.index + 1];
+    void (async () => {
+      try {
+        await reorderTask({
+          taskId: drag.taskId as any,
+          projectId: projectId as any,
+          executionState: target.state as any,
+          beforeTaskId: (beforeTask?._id ?? undefined) as any,
+        });
+        if (target.state !== drag.fromState) toast(`Moved to ${titleCase(target.state)}.`, "info");
+      } catch (error) {
+        toast(error instanceof Error ? error.message : "Could not move task", "error");
+      }
+    })();
+  };
+
   const saveBrief = async (taskId: string) => {
     setBusy(true);
     try {
@@ -621,7 +703,8 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                 return (
                   <div
                     key={column.key}
-                    className={`${boardStyles.column} ${dragOverState === column.key ? boardStyles.columnDropTarget : ""}`}
+                    data-bucket-state={column.key}
+                    className={`${boardStyles.column} ${dragOverState === column.key || touchDropTarget?.state === column.key ? boardStyles.columnDropTarget : ""}`}
                     onDragOver={(event) => {
                       event.preventDefault();
                       event.dataTransfer.dropEffect = "move";
@@ -642,10 +725,11 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                       <span className={boardStyles.columnCount}>{tasks.length}</span>
                     </div>
                     <div className={boardStyles.columnBody}>
-                      {tasks.map((task: AnyRecord) => (
+                      {tasks.map((task: AnyRecord, index: number) => (
                         <button
                           key={task._id}
-                          className={`${boardStyles.taskCard} ${task.ownerType === "owner" ? boardStyles.ownerTaskCard : ""} ${draggedTaskId === task._id ? boardStyles.taskCardDragging : ""}`}
+                          data-task-id={task._id}
+                          className={`${boardStyles.taskCard} ${task.ownerType === "owner" ? boardStyles.ownerTaskCard : ""} ${draggedTaskId === task._id || touchDrag?.taskId === task._id ? boardStyles.taskCardDragging : ""} ${touchDropTarget?.state === column.key && touchDropTarget.index === index ? boardStyles.dropBefore : ""} ${touchDropTarget?.state === column.key && touchDropTarget.index === tasks.length && index === tasks.length - 1 ? boardStyles.dropAfter : ""}`}
                           draggable
                           aria-grabbed={draggedTaskId === task._id}
                           aria-label={`${task.title}. ${task.ownerType === "owner" ? `${ownerName} owned task` : `${agentName} owned task`}.`}
@@ -664,14 +748,33 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                           <span className={boardStyles.taskTitle}>{task.title}</span>
                           <span className={boardStyles.taskMeta}>
                             {task.ownerType === "owner" ? <Badge tone="gold">{ownerName}</Badge> : null}
-                            {task.kind ? <Badge tone="neutral">{task.kind}</Badge> : null}
+                            {task.kind ? (
+                              <span className={boardStyles.metaSecondary}>
+                                <Badge tone="neutral">{task.kind}</Badge>
+                              </span>
+                            ) : null}
                             {task.agentRequestStatus === "requested" ? (
                               <Badge tone="blue">Queued for {task.requestedHarness ?? agentName}</Badge>
                             ) : null}
-                            {task.dependsOn?.length ? <Badge tone="gold">{task.dependsOn.length} dep</Badge> : null}
+                            {task.dependsOn?.length ? (
+                              <span className={boardStyles.metaSecondary}>
+                                <Badge tone="gold">{task.dependsOn.length} dep</Badge>
+                              </span>
+                            ) : null}
                             {task.resultUrl ? <Badge tone="green">result</Badge> : null}
                           </span>
                           {isTaskActive(task) ? <ActivityBar label={activityLabel(task)} /> : null}
+                          <span
+                            className={boardStyles.dragHandle}
+                            aria-hidden
+                            onClick={(event) => event.stopPropagation()}
+                            onPointerDown={(event) => startTouchDrag(event, task)}
+                            onPointerMove={moveTouchDrag}
+                            onPointerUp={endTouchDrag}
+                            onPointerCancel={cancelTouchDrag}
+                          >
+                            <GripVertical size={17} aria-hidden />
+                          </span>
                         </button>
                       ))}
                       {tasks.length === 0 ? <p className={boardStyles.columnEmpty}>—</p> : null}
