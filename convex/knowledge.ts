@@ -1659,6 +1659,13 @@ export const dashboardForViewer = queryGeneric({
       .query("sourceSyncStatuses")
       .withIndex("by_brain_key", (q) => q.eq("brainInstanceId", brain._id))
       .collect();
+    // Home quick-capture inbox: recent captures, newest first, so the capture
+    // box can show submit feedback and pending/processed status chips.
+    const quickCaptures = await ctx.db
+      .query("quickCaptures")
+      .withIndex("by_brain_created", (q) => q.eq("brainInstanceId", brain._id))
+      .order("desc")
+      .take(10);
 
     return {
       brain,
@@ -1674,6 +1681,7 @@ export const dashboardForViewer = queryGeneric({
       companies,
       links,
       notes,
+      quickCaptures,
     };
   },
 });
@@ -4513,5 +4521,176 @@ export const updateSourceSyncStatus = mutationGeneric({
       createdAt: now,
     });
     return { statusSyncId, status: args.status, statusKey };
+  },
+});
+
+/* ------------------------------------------------------------------ */
+/* Quick captures: home-page inbox for thoughts, URLs, and files.      */
+/* Viewer functions write captures; brain functions let ingestion      */
+/* harnesses read pending captures and mark them handled.              */
+/* ------------------------------------------------------------------ */
+
+const quickCaptureStatus = v.union(
+  v.literal("pending"),
+  v.literal("processed"),
+  v.literal("discarded"),
+);
+
+/** Return a normalized http/https URL when the value parses as one; otherwise undefined. */
+function inferHttpUrl(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  if (!trimmed || /\s/.test(trimmed)) {
+    return undefined;
+  }
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+      return parsed.toString();
+    }
+  } catch {
+    // Not a URL — plain text capture.
+  }
+  return undefined;
+}
+
+function quickCaptureLabel(capture: { text?: string | undefined; fileName?: string | undefined; url?: string | undefined }) {
+  const label = capture.text ?? capture.fileName ?? capture.url ?? "file";
+  return label.length > 80 ? `${label.slice(0, 77)}...` : label;
+}
+
+export const generateQuickCaptureUploadUrlForViewer = mutationGeneric({
+  args: {},
+  handler: async (ctx) => {
+    await requireOwnedBrain(ctx);
+    return await ctx.storage.generateUploadUrl();
+  },
+});
+
+export const createQuickCaptureForViewer = mutationGeneric({
+  args: {
+    text: v.optional(v.string()),
+    url: v.optional(v.string()),
+    storageId: v.optional(v.id("_storage")),
+    fileName: v.optional(v.string()),
+    mimeType: v.optional(v.string()),
+    sizeBytes: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const { user, brain } = await requireOwnedBrain(ctx);
+    const text = optionalTrimmed(args.text);
+    if (!text && !args.storageId) {
+      throw new Error("quick capture needs text or a file");
+    }
+    // Only store url when the capture actually parses as an http/https URL.
+    const url = inferHttpUrl(args.url) ?? inferHttpUrl(text);
+
+    const now = Date.now();
+    const captureId = await ctx.db.insert("quickCaptures", {
+      brainInstanceId: brain._id,
+      text,
+      url,
+      storageId: args.storageId,
+      fileName: args.storageId ? optionalTrimmed(args.fileName) : undefined,
+      mimeType: args.storageId ? optionalTrimmed(args.mimeType) : undefined,
+      sizeBytes: args.storageId ? args.sizeBytes : undefined,
+      status: "pending",
+      capturedBy: "user",
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    await ctx.db.insert("activityEvents", {
+      brainInstanceId: brain._id,
+      activityType: "quick_capture_created",
+      actorType: "user",
+      actorId: user._id,
+      timestamp: now,
+      summary: `Quick capture added: ${quickCaptureLabel({ text, fileName: args.fileName, url })}`,
+      metadata: { captureId, url, hasFile: Boolean(args.storageId), fileName: args.fileName },
+    });
+
+    return { captureId, status: "pending" };
+  },
+});
+
+export const listQuickCapturesForBrain = queryGeneric({
+  args: {
+    brainInstanceId: v.id("brainInstances"),
+    status: v.optional(quickCaptureStatus),
+  },
+  handler: async (ctx, args) => {
+    const status = args.status ?? "pending";
+    const rows = await ctx.db
+      .query("quickCaptures")
+      .withIndex("by_brain_status", (q: any) =>
+        q.eq("brainInstanceId", args.brainInstanceId).eq("status", status),
+      )
+      .order("desc")
+      .take(50);
+
+    const captures = [];
+    for (const row of rows) {
+      captures.push({
+        _id: row._id,
+        text: row.text,
+        url: row.url,
+        fileName: row.fileName,
+        mimeType: row.mimeType,
+        sizeBytes: row.sizeBytes,
+        status: row.status,
+        capturedBy: row.capturedBy,
+        processedAt: row.processedAt,
+        processedBy: row.processedBy,
+        processingNote: row.processingNote,
+        createdAt: row.createdAt,
+        // Time-limited download URL resolved at read time. Never persist it.
+        fileUrl: row.storageId ? await ctx.storage.getUrl(row.storageId) : null,
+      });
+    }
+    return captures;
+  },
+});
+
+export const markQuickCaptureHandledForBrain = mutationGeneric({
+  args: {
+    brainInstanceId: v.id("brainInstances"),
+    captureId: v.id("quickCaptures"),
+    outcome: v.union(v.literal("processed"), v.literal("discarded")),
+    processingNote: v.optional(v.string()),
+    processedBy: v.optional(v.string()),
+    sourceRunId: v.optional(v.id("ingestionRuns")),
+  },
+  handler: async (ctx, args) => {
+    const capture = await ctx.db.get(args.captureId);
+    if (!capture || capture.brainInstanceId !== args.brainInstanceId) {
+      throw new Error("quick capture not found for brain instance");
+    }
+    if (capture.status !== "pending") {
+      throw new Error(`quick capture is already ${capture.status}`);
+    }
+
+    const now = Date.now();
+    const processedBy = optionalTrimmed(args.processedBy) ?? "harness";
+    await ctx.db.patch(args.captureId, {
+      status: args.outcome,
+      processedAt: now,
+      processedBy,
+      processingNote: optionalTrimmed(args.processingNote),
+      sourceRunId: args.sourceRunId,
+      updatedAt: now,
+    });
+
+    await ctx.db.insert("activityEvents", {
+      brainInstanceId: args.brainInstanceId,
+      activityType: args.outcome === "processed" ? "quick_capture_processed" : "quick_capture_discarded",
+      actorType: "harness",
+      actorId: processedBy,
+      timestamp: now,
+      summary: `Quick capture ${args.outcome}: ${quickCaptureLabel(capture)}`,
+      metadata: { captureId: args.captureId, outcome: args.outcome, processingNote: args.processingNote },
+      ingestionRunId: args.sourceRunId,
+    });
+
+    return { captureId: args.captureId, status: args.outcome };
   },
 });

@@ -1,17 +1,156 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { useMutation, useQuery } from "convex/react";
-import { ArrowRight, Bell, Check, Inbox, RefreshCw, ShieldCheck, Sparkles, X } from "lucide-react";
+import { ArrowRight, Bell, Check, Inbox, Paperclip, PenLine, RefreshCw, ShieldCheck, Sparkles, X } from "lucide-react";
 import { api } from "../../lib/skippy-api";
 import { focusItemKey, parseFocusSummary } from "../focus-summary";
 import { LiveGate } from "../live-auth";
-import { Badge, Card, EmptyState, IconButton, InlineMarkdown, LoadingRow, Section } from "../components";
+import { Badge, Button, Card, EmptyState, IconButton, InlineMarkdown, LoadingRow, Section, TextArea, useToast, type BadgeTone } from "../components";
 import { useViewerReady } from "./use-viewer";
+import { PROJECT_FILE_ACCEPT, checkProjectFile, formatFileSize } from "./project-library-helpers";
 import todayStyles from "./today.module.css";
 
 type AnyRecord = Record<string, any>;
+
+/* ------------------------------------------------------------------ */
+/* Quick capture: a quiet inbox slot on the home page. Text/URLs/files */
+/* land as pending quickCaptures; ingestion harnesses turn useful ones */
+/* into Skippy objects later and mark them processed or discarded.     */
+/* ------------------------------------------------------------------ */
+
+const captureTone: Record<string, BadgeTone> = {
+  pending: "gold",
+  processed: "green",
+  discarded: "neutral",
+};
+
+function QuickCaptureBox({ captures }: { captures: AnyRecord[] | undefined }) {
+  const generateUploadUrl = useMutation(api.knowledge.generateQuickCaptureUploadUrlForViewer);
+  const createCapture = useMutation(api.knowledge.createQuickCaptureForViewer);
+  const toast = useToast();
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [text, setText] = useState("");
+  const [file, setFile] = useState<File | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  const canSubmit = !submitting && (text.trim().length > 0 || file !== null);
+
+  const clearFile = () => {
+    setFile(null);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const submit = async () => {
+    if (!canSubmit) return;
+    setSubmitting(true);
+    try {
+      // Same upload flow as the project library: upload URL → POST bytes → register.
+      let fileArgs: AnyRecord = {};
+      if (file) {
+        const check = checkProjectFile({ fileName: file.name, mimeType: file.type, sizeBytes: file.size });
+        if (!check.ok) throw new Error(check.reason);
+        const uploadUrl = (await generateUploadUrl({})) as string;
+        const response = await fetch(uploadUrl, {
+          method: "POST",
+          headers: { "Content-Type": check.mimeType },
+          body: file,
+        });
+        if (!response.ok) throw new Error(`upload failed (HTTP ${response.status})`);
+        const { storageId } = (await response.json()) as { storageId: string };
+        fileArgs = { storageId, fileName: check.fileName, mimeType: check.mimeType, sizeBytes: check.sizeBytes };
+      }
+      const trimmed = text.trim();
+      await createCapture({ ...(trimmed ? { text: trimmed } : {}), ...fileArgs } as any);
+      setText("");
+      clearFile();
+      toast("Captured — Skippy will pick it up on the next ingestion run.", "info");
+    } catch (error) {
+      toast(error instanceof Error ? error.message : "Could not save capture", "error");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const onTextKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+      event.preventDefault();
+      void submit();
+    }
+  };
+
+  const recent = (captures ?? []).slice(0, 5);
+
+  return (
+    <Section
+      title={
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+          <PenLine size={18} aria-hidden /> Quick capture
+        </span>
+      }
+    >
+      <div style={{ display: "grid", gap: 8 }}>
+        <TextArea
+          rows={2}
+          placeholder="Drop a thought, note, or URL to remember later…"
+          aria-label="Quick capture text"
+          value={text}
+          disabled={submitting}
+          onChange={(event) => setText(event.target.value)}
+          onKeyDown={onTextKeyDown}
+        />
+        <div className={todayStyles.captureActions}>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept={PROJECT_FILE_ACCEPT}
+            style={{ display: "none" }}
+            onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+          />
+          {file ? (
+            <span className={todayStyles.captureFile}>
+              <Paperclip size={13} aria-hidden />
+              <span className={todayStyles.captureFileName}>{file.name}</span>
+              <span className="item-meta">{formatFileSize(file.size)}</span>
+              <IconButton small aria-label={`Remove ${file.name}`} disabled={submitting} onClick={clearFile}>
+                <X size={13} aria-hidden />
+              </IconButton>
+            </span>
+          ) : (
+            <button
+              type="button"
+              className="text-button compact"
+              disabled={submitting}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <Paperclip size={14} aria-hidden /> Attach file
+            </button>
+          )}
+          <Button small disabled={!canSubmit} onClick={() => void submit()}>
+            {submitting ? "Capturing…" : "Capture"}
+          </Button>
+        </div>
+        {recent.length ? (
+          <div style={{ display: "grid", gap: 4 }}>
+            {recent.map((capture) => (
+              <div key={capture._id} className={todayStyles.captureRow}>
+                <span className={todayStyles.captureText} title={capture.text ?? capture.fileName ?? capture.url}>
+                  {capture.text ?? capture.fileName ?? capture.url ?? "File"}
+                </span>
+                <Badge tone={captureTone[capture.status] ?? "neutral"}>{capture.status}</Badge>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+            Captures wait here until an ingestion run files them into Skippy.
+          </p>
+        )}
+      </div>
+    </Section>
+  );
+}
 
 function activeSourceSyncStatus(statuses: AnyRecord[] | undefined) {
   const running = (statuses ?? [])
@@ -162,6 +301,8 @@ export function TodayContent() {
 
           {/* Right rail */}
           <div className={todayStyles.rail}>
+            <QuickCaptureBox captures={data?.quickCaptures} />
+
             <Section
               title={
                 <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>

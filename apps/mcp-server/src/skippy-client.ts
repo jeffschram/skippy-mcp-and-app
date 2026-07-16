@@ -85,6 +85,10 @@ const generateProjectFileUploadUrlForBrainRef = makeFunctionReference<"mutation"
 );
 const registerProjectFileForBrainRef = makeFunctionReference<"mutation">("projectFiles:registerFileForBrain");
 const listProjectFilesForBrainRef = makeFunctionReference<"query">("projectFiles:listFilesForBrain");
+const listQuickCapturesForBrainRef = makeFunctionReference<"query">("knowledge:listQuickCapturesForBrain");
+const markQuickCaptureHandledForBrainRef = makeFunctionReference<"mutation">(
+  "knowledge:markQuickCaptureHandledForBrain",
+);
 
 export function createConvexSkippyClient(convexUrl: string, authToken?: string): SkippyClient {
   const client = new ConvexHttpClient(convexUrl);
@@ -205,6 +209,10 @@ export function createConvexSkippyClient(convexUrl: string, authToken?: string):
       client.mutation(registerProjectFileForBrainRef, { brainInstanceId, ...input }),
     listProjectFiles: (brainInstanceId, input) =>
       client.query(listProjectFilesForBrainRef, { brainInstanceId, ...input }),
+    listQuickCaptures: (brainInstanceId, input) =>
+      client.query(listQuickCapturesForBrainRef, { brainInstanceId, ...input }),
+    markQuickCaptureHandled: (brainInstanceId, input) =>
+      client.mutation(markQuickCaptureHandledForBrainRef, { brainInstanceId, ...input }),
   };
 }
 
