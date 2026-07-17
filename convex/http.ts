@@ -20,6 +20,24 @@ const authenticateMcpTokenRef = makeFunctionReference<"mutation">("mcpTokens:aut
 const createCaptureRef = makeFunctionReference<"mutation">(
   "knowledge:createQuickCaptureFromCaptureEndpoint",
 );
+// Structured ingestion, reused by the /ingest endpoint (same mutations the MCP
+// ingest_object / record_ingestion_run / update_source_sync_status tools call).
+const ingestObjectRef = makeFunctionReference<"mutation">("knowledge:ingestObject");
+const recordIngestionRunRef = makeFunctionReference<"mutation">("knowledge:recordIngestionRun");
+const updateSourceSyncStatusRef = makeFunctionReference<"mutation">(
+  "knowledge:updateSourceSyncStatus",
+);
+
+const INGEST_ENTITY_TYPES = new Set([
+  "goal",
+  "project",
+  "task",
+  "note",
+  "person",
+  "company",
+  "link",
+  "knowledgeObject",
+]);
 
 function json(status: number, body: Record<string, unknown>) {
   return new Response(JSON.stringify(body), {
@@ -171,12 +189,128 @@ export const capture = httpActionGeneric(async (ctx, request) => {
   return json(200, { captureId: result.captureId });
 });
 
+/* ------------------------------------------------------------------ */
+/* POST /ingest — token-authed structured ingestion for scheduled      */
+/* harnesses that can't attach the Skippy MCP (e.g. the claude.ai cloud */
+/* routine that reads Gmail/Calendar). One batch call: ingest N objects,*/
+/* record the run, and update the source-sync status pill. Auth reuses  */
+/* the same MCP bearer tokens as /capture — a SCOPED token, never a     */
+/* Convex admin key. Body (JSON):                                       */
+/*   { harness?, statusKey?, sourceSystemsChecked?: string[],           */
+/*     message?, items: [{ candidateEntityType, candidatePayload,       */
+/*                         rubricDecision, confidence?, sourceRefs? }] } */
+/* ------------------------------------------------------------------ */
+export const ingest = httpActionGeneric(async (ctx, request) => {
+  const token = parseBearerToken(request.headers.get("authorization"));
+  if (!token) {
+    return json(401, { error: "missing bearer token" });
+  }
+
+  let brainInstanceId: string;
+  try {
+    const auth = (await ctx.runMutation(authenticateMcpTokenRef, { token })) as {
+      brainInstanceId: string;
+    };
+    brainInstanceId = auth.brainInstanceId;
+  } catch {
+    return json(401, { error: "invalid bearer token" });
+  }
+
+  let body: any;
+  try {
+    body = await request.json();
+  } catch {
+    return json(400, { error: "expected a JSON body" });
+  }
+  if (typeof body !== "object" || body === null || !Array.isArray(body.items)) {
+    return json(400, { error: "body must be an object with an items array" });
+  }
+
+  const harness = typeof body.harness === "string" && body.harness.trim() ? body.harness.trim() : "http-ingest";
+  const statusKey =
+    typeof body.statusKey === "string" && body.statusKey.trim() ? body.statusKey.trim() : "http-ingest";
+  const sourceSystemsChecked = Array.isArray(body.sourceSystemsChecked)
+    ? body.sourceSystemsChecked.filter((s: unknown): s is string => typeof s === "string")
+    : [];
+
+  const errors: string[] = [];
+  const created: Array<{ index: number; entityType: string }> = [];
+
+  for (let i = 0; i < body.items.length; i++) {
+    const item = body.items[i];
+    if (typeof item !== "object" || item === null) {
+      errors.push(`item ${i}: not an object`);
+      continue;
+    }
+    const entityType = item.candidateEntityType;
+    if (!INGEST_ENTITY_TYPES.has(entityType)) {
+      errors.push(`item ${i}: invalid candidateEntityType '${entityType}'`);
+      continue;
+    }
+    if (typeof item.candidatePayload !== "object" || item.candidatePayload === null) {
+      errors.push(`item ${i}: candidatePayload must be an object`);
+      continue;
+    }
+    if (typeof item.rubricDecision !== "string" || !item.rubricDecision.trim()) {
+      errors.push(`item ${i}: rubricDecision is required`);
+      continue;
+    }
+    try {
+      await ctx.runMutation(ingestObjectRef, {
+        brainInstanceId,
+        candidateEntityType: entityType,
+        candidatePayload: item.candidatePayload,
+        rubricDecision: item.rubricDecision.trim(),
+        ...(typeof item.confidence === "number" ? { confidence: item.confidence } : {}),
+        ...(Array.isArray(item.sourceRefs) ? { sourceRefs: item.sourceRefs } : {}),
+      });
+      created.push({ index: i, entityType });
+    } catch (error) {
+      errors.push(`item ${i}: ${error instanceof Error ? error.message : "ingest failed"}`);
+    }
+  }
+
+  // Record the run and settle the "Updating" pill — best-effort, never fail the
+  // whole request over bookkeeping.
+  try {
+    await ctx.runMutation(recordIngestionRunRef, {
+      brainInstanceId,
+      harness,
+      status: errors.length && !created.length ? "failed" : "completed",
+      sourceSystemsChecked,
+      objectsCreated: created.length,
+      ...(errors.length ? { errors } : {}),
+    });
+    await ctx.runMutation(updateSourceSyncStatusRef, {
+      brainInstanceId,
+      statusKey,
+      harness,
+      status: errors.length && !created.length ? "failed" : "completed",
+      sourceSystemsChecked,
+      ...(typeof body.message === "string" && body.message.trim()
+        ? { message: body.message.trim() }
+        : {}),
+      ...(errors.length ? { errors } : {}),
+    });
+  } catch {
+    // Ignore bookkeeping errors; the ingested objects are what matter.
+  }
+
+  return json(200, { objectsCreated: created.length, created, errors });
+});
+
 const http = httpRouter();
 
 http.route({
   path: "/capture",
   method: "POST",
   handler: capture,
+});
+
+http.route({
+  path: "/ingest",
+  method: "POST",
+  handler: ingest,
 });
 
 export default http;
