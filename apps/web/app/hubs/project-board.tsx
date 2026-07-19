@@ -137,7 +137,6 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
   const restoreTask = useMutation(api.projects.restoreTaskForViewer);
   const updateBrief = useMutation(api.projects.updateTaskBriefForViewer);
   const updateProject = useMutation(api.projects.updateProjectForViewer);
-  const setViewerContext = useMutation(api.projects.setViewerContext);
   const toast = useToast();
 
   const [planning, setPlanning] = useState(false);
@@ -198,14 +197,6 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
     api.projects.getTaskBriefForViewer,
     viewerReady && selectedId ? { taskId: selectedId as any } : "skip",
   ) as AnyRecord | null | undefined;
-
-  // Tell the harness which project is open ("this project").
-  useEffect(() => {
-    if (!viewerReady) return;
-    void setViewerContext({ activeRoute: `/projects/${projectId}`, activeProjectId: projectId as any }).catch(
-      () => undefined,
-    );
-  }, [viewerReady, projectId, setViewerContext]);
 
   // The 'Confirm?' abandon state resets on its own after a moment.
   useEffect(() => {

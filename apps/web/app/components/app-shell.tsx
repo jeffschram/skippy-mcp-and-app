@@ -16,6 +16,7 @@ import {
 import { api } from "../../lib/skippy-api";
 import { AuthStatus } from "../live-auth";
 import { ToastProvider } from "./widgets";
+import { ViewerContextTracker } from "./viewer-context-tracker";
 import styles from "./app-shell.module.css";
 
 type NavProject = {
@@ -145,6 +146,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <ToastProvider>
+      <ViewerContextTracker />
       <div className={styles.shell}>
         <aside className={styles.sidebar}>
           <div className={styles.brand}>

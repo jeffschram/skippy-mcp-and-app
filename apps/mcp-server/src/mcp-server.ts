@@ -1705,7 +1705,7 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
     {
       title: "Get the user's current app context",
       description:
-        "Read-only. Returns what the user currently has open in the Skippy web app — notably the active project (id, title, kind, repoUrl, localPath, effectiveAssetsPath, effectiveOutputPath) and route. Use this to resolve references like 'this project' or 'add a task here' when the user does not name the project explicitly. effectiveAssetsPath is where user-provided inputs live; effectiveOutputPath is where generated artifacts belong. Returns null if nothing is open.",
+        "Read-only. Returns the page the user currently has open in the Skippy web app: activeRoute covers every page ('/' is Today/home, '/settings', '/review', '/finances', ...), and activeProject (id, title, kind, repoUrl, localPath, effectiveAssetsPath, effectiveOutputPath) is populated only on /projects/<id> pages. With multiple tabs or browsers open, the most-recently-focused one wins; updatedAt indicates freshness. Use this to resolve references like 'this project', 'this page', or 'add a task here' when the user does not name the target explicitly. effectiveAssetsPath is where user-provided inputs live; effectiveOutputPath is where generated artifacts belong. Returns null if nothing has been opened yet.",
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: z.object({}),
     },
