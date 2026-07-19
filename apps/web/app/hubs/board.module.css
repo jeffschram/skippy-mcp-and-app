@@ -88,6 +88,11 @@
   gap: 8px;
   padding: 10px;
   align-content: start;
+  /* Cap tall columns on desktop/wide screens and scroll when tasks are
+     numerous, so a single busy column can't stretch the board sky-high. */
+  max-height: min(70vh, 720px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .taskCard {
@@ -247,6 +252,9 @@
 
   .columnBody {
     gap: 6px;
+    /* Stacked buckets scroll with the page, not inside each column. */
+    max-height: none;
+    overflow-y: visible;
   }
 
   /* Compact list cards: title + key badges, comfortable tap target, and
