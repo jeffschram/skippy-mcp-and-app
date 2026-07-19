@@ -5,8 +5,8 @@ import { usePathname } from "next/navigation";
 import { useConvexAuth, useQuery } from "convex/react";
 import {
   Brain,
-  CalendarCheck,
   FolderKanban,
+  House,
   Inbox,
   ScrollText,
   Settings,
@@ -33,7 +33,7 @@ type Hub = {
 };
 
 export const primaryHubs: Hub[] = [
-  { href: "/", label: "Today", icon: CalendarCheck, match: (p) => p === "/" },
+  { href: "/", label: "Home", icon: House, match: (p) => p === "/" },
   {
     href: "/finances",
     label: "Finances",
