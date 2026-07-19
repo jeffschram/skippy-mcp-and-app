@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { activeSourceSyncStatus, type QuickCaptureIntent } from "@skippy/shared";
 import { api } from "../../lib/skippy-api";
+import { formatRelative } from "../../lib/display";
 import { focusItemKey, parseFocusSummary } from "../focus-summary";
 import { LiveGate } from "../live-auth";
 import { Badge, Button, Card, EmptyState, IconButton, InlineMarkdown, LoadingRow, Section, TextArea, useToast } from "../components";
@@ -258,13 +259,15 @@ function QuickCaptureBox({ captures }: { captures: AnyRecord[] | undefined }) {
     }
   };
 
-  // Pending items of both intents plus recently processed ones. Discarded
-  // rows stay out of sight; expired holds never arrive from the server.
-  const visible = (captures ?? []).filter(
-    (capture) => capture.status === "pending" || capture.status === "processed",
-  );
-  const recent = visible.slice(0, CAPTURE_LIST_LIMIT);
-  const moreCount = visible.length - recent.length;
+  // Split the stream into the live inbox (pending) and what Skippy did with the
+  // rest (processed → "actions taken"). Discarded rows stay out of sight;
+  // expired holds never arrive from the server.
+  const pendingCaptures = (captures ?? []).filter((capture) => capture.status === "pending");
+  const processedCaptures = (captures ?? []).filter((capture) => capture.status === "processed");
+  const recent = pendingCaptures.slice(0, CAPTURE_LIST_LIMIT);
+  const moreCount = pendingCaptures.length - recent.length;
+  const recentActions = processedCaptures.slice(0, CAPTURE_LIST_LIMIT);
+  const moreActions = processedCaptures.length - recentActions.length;
 
   return (
     <Section
@@ -457,6 +460,42 @@ function QuickCaptureBox({ captures }: { captures: AnyRecord[] | undefined }) {
             {moreCount > 0 ? (
               <p className="item-meta" style={{ margin: 0 }}>
                 +{moreCount} more
+              </p>
+            ) : null}
+          </div>
+          </>
+        ) : null}
+        {recentActions.length ? (
+          <>
+          <h3 className={todayStyles.captureListHeading}>Actions taken</h3>
+          <div className={todayStyles.captureList}>
+            {recentActions.map((capture) => {
+              const label = captureLabel(capture);
+              const note = capture.processingNote || "Filed";
+              return (
+                <div key={capture._id} className={todayStyles.captureRow}>
+                  <span className={todayStyles.captureType} aria-hidden>
+                    <Sparkles size={18} />
+                  </span>
+                  <span className={todayStyles.captureAction}>
+                    <span className={todayStyles.captureActionNote} title={note}>
+                      {note}
+                    </span>
+                    <span className={todayStyles.captureActionSource} title={label}>
+                      {label}
+                    </span>
+                  </span>
+                  <span className={todayStyles.captureMeta}>
+                    {capture.processedAt ? (
+                      <span className="item-meta">{formatRelative(capture.processedAt)}</span>
+                    ) : null}
+                  </span>
+                </div>
+              );
+            })}
+            {moreActions > 0 ? (
+              <p className="item-meta" style={{ margin: 0 }}>
+                +{moreActions} more
               </p>
             ) : null}
           </div>
