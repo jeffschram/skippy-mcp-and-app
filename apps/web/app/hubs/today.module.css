@@ -32,13 +32,13 @@
 
 .captureField textarea {
   /* Reserve room in the lower-right so text never runs under the button. */
-  padding-right: 44px;
+  padding-right: 52px;
 }
 
 .captureAttach {
   position: absolute;
-  right: 6px;
-  bottom: 6px;
+  right: 12px;
+  bottom: 12px;
 }
 
 /* Capture button row — primary action, right-aligned on desktop, full
