@@ -714,6 +714,10 @@ export default defineSchema({
     processedAt: v.optional(v.number()),
     processedBy: v.optional(v.string()),
     processingNote: v.optional(v.string()),
+    // Entities the processor created/updated from this capture, so the
+    // "Actions taken" digest can deep-link to what Skippy did with it. Older
+    // processed rows have none — the link is simply omitted, no migration.
+    relatedEntityRefs: v.optional(v.array(entityRef)),
     sourceRunId: v.optional(v.id("ingestionRuns")),
     createdAt: v.number(),
     updatedAt: v.number(),

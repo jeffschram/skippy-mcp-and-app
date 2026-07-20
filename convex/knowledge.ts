@@ -714,6 +714,31 @@ function entityDisplay(ref: { entityType: string; entityId: string }, entity: an
   return display;
 }
 
+// Resolve a quick capture's related entity refs into lightweight link targets
+// for the Home "Actions taken" digest: type, id, and a display label. Refs
+// whose entity was deleted or belongs to another brain are dropped, so a stale
+// ref never renders a dead link. Hrefs are composed on the client (routing
+// lives there); this only supplies what the DB knows.
+async function resolveCaptureEntityLinks(
+  db: any,
+  brainInstanceId: any,
+  relatedEntityRefs: Array<{ entityType: keyof typeof entityTableByType; entityId: string }> | undefined,
+) {
+  const links = [];
+  for (const ref of relatedEntityRefs ?? []) {
+    const entityTable = entityTableByType[ref.entityType];
+    const entity = entityTable ? await db.get(ref.entityId as any) : null;
+    if (entity && entity.brainInstanceId === brainInstanceId) {
+      links.push({
+        entityType: ref.entityType,
+        entityId: ref.entityId,
+        label: entityDisplay(ref, entity).title,
+      });
+    }
+  }
+  return links;
+}
+
 function entityContextText(item: { title?: string; summary?: string; ref: { entityType: string; entityId: string } }) {
   return [item.ref.entityType, item.ref.entityId, item.title, item.summary].filter(Boolean).join(" ");
 }
@@ -1689,6 +1714,8 @@ export const dashboardForViewer = queryGeneric({
         intent: quickCaptureIntent(row),
         // Time-limited download URL resolved at read time. Never persist it.
         fileUrl: row.storageId ? await ctx.storage.getUrl(row.storageId) : null,
+        // Deep-link targets for the "Actions taken" digest (processed rows).
+        relatedEntities: await resolveCaptureEntityLinks(ctx.db, brain._id, row.relatedEntityRefs),
       });
     }
 
@@ -4778,6 +4805,9 @@ export const markQuickCaptureHandledForBrain = mutationGeneric({
     outcome: v.union(v.literal("processed"), v.literal("discarded")),
     processingNote: v.optional(v.string()),
     processedBy: v.optional(v.string()),
+    // Entities the caller created/updated from this capture. Surfaced as
+    // deep-links in the Home "Actions taken" digest.
+    relatedEntityRefs: v.optional(v.array(entityRef)),
     sourceRunId: v.optional(v.id("ingestionRuns")),
   },
   handler: async (ctx, args) => {
@@ -4791,11 +4821,13 @@ export const markQuickCaptureHandledForBrain = mutationGeneric({
 
     const now = Date.now();
     const processedBy = optionalTrimmed(args.processedBy) ?? "harness";
+    const relatedEntityRefs = dedupeEntityRefs(args.relatedEntityRefs ?? []);
     await ctx.db.patch(args.captureId, {
       status: args.outcome,
       processedAt: now,
       processedBy,
       processingNote: optionalTrimmed(args.processingNote),
+      relatedEntityRefs: relatedEntityRefs.length ? relatedEntityRefs : undefined,
       sourceRunId: args.sourceRunId,
       updatedAt: now,
     });

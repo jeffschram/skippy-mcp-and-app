@@ -50,6 +50,32 @@ function captureLabel(capture: AnyRecord): string {
   return capture.text ?? capture.fileName ?? capture.url ?? "File";
 }
 
+// Where an "Actions taken" item points once Skippy has filed the capture as an
+// entity. Projects have their own page; links/notes live on the Brain "Links"
+// tab (deep-linked by row anchor); everything else lands on its Brain sub-page.
+function captureEntityHref(entityType: string, entityId: string): string | undefined {
+  const id = encodeURIComponent(entityId);
+  switch (entityType) {
+    case "project":
+      return `/projects/${id}`;
+    case "task":
+      return `/tasks`;
+    case "link":
+      return `/brain/links#link-${id}`;
+    case "note":
+      return `/brain/links#note-${id}`;
+    case "goal":
+      return `/brain/goals#goal-${id}`;
+    case "person":
+    case "company":
+      return `/brain/contacts`;
+    case "knowledgeObject":
+      return `/brain/memory`;
+    default:
+      return undefined;
+  }
+}
+
 function QuickCaptureBox({ captures }: { captures: AnyRecord[] | undefined }) {
   const generateUploadUrl = useMutation(api.knowledge.generateQuickCaptureUploadUrlForViewer);
   const createCapture = useMutation(api.knowledge.createQuickCaptureForViewer);
@@ -472,6 +498,18 @@ function QuickCaptureBox({ captures }: { captures: AnyRecord[] | undefined }) {
             {recentActions.map((capture) => {
               const label = captureLabel(capture);
               const note = capture.processingNote || "Filed";
+              const busy = busyCaptureId === capture._id;
+              const relatedEntities: AnyRecord[] = Array.isArray(capture.relatedEntities)
+                ? capture.relatedEntities
+                : [];
+              const links = relatedEntities
+                .map((entity) => ({
+                  entityType: String(entity.entityType),
+                  entityId: String(entity.entityId),
+                  label: String(entity.label ?? entity.entityId),
+                  href: captureEntityHref(entity.entityType, entity.entityId),
+                }))
+                .filter((entity) => entity.href);
               return (
                 <div key={capture._id} className={todayStyles.captureRow}>
                   <span className={todayStyles.captureType} aria-hidden>
@@ -484,11 +522,37 @@ function QuickCaptureBox({ captures }: { captures: AnyRecord[] | undefined }) {
                     <span className={todayStyles.captureActionSource} title={label}>
                       {label}
                     </span>
+                    {links.length ? (
+                      <span className={todayStyles.captureActionLinks}>
+                        {links.map((entity) => (
+                          <Link
+                            key={`${entity.entityType}:${entity.entityId}`}
+                            href={entity.href as string}
+                            className={todayStyles.captureActionLink}
+                            title={`Open ${entity.label}`}
+                          >
+                            <ArrowRight size={12} aria-hidden />
+                            <span className={todayStyles.captureActionLinkLabel}>{entity.label}</span>
+                          </Link>
+                        ))}
+                      </span>
+                    ) : null}
                   </span>
                   <span className={todayStyles.captureMeta}>
                     {capture.processedAt ? (
                       <span className="item-meta">{formatRelative(capture.processedAt)}</span>
                     ) : null}
+                  </span>
+                  <span className={todayStyles.captureRowActions}>
+                    <IconButton
+                      small
+                      title="Dismiss"
+                      aria-label={`Dismiss ${note}`}
+                      disabled={busy}
+                      onClick={() => void removeCapture(capture)}
+                    >
+                      <X size={13} aria-hidden />
+                    </IconButton>
                   </span>
                 </div>
               );
