@@ -10,6 +10,10 @@ out/
 coverage/
 .turbo/
 
+# Assets & generated files
+_assets/
+_output/
+
 # Environment
 .env
 .env.local
