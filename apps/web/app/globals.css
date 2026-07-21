@@ -358,6 +358,14 @@ p {
   grid-template-columns: auto 1fr;
 }
 
+/* Briefly highlight a row scrolled to via a deep-link anchor (e.g. arriving at
+   /brain/links#link-<id> from the Home "Actions taken" digest). */
+.item[data-anchor-flash="true"] {
+  border-color: var(--gold);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--gold) 35%, transparent);
+  transition: box-shadow 0.4s ease, border-color 0.4s ease;
+}
+
 .project-row {
   align-items: center;
   color: inherit;

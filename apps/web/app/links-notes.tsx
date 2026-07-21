@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useConvexAuth, useMutation, useQuery } from "convex/react";
 import { UNREAD_LINK_FOCUS_MAX_AGE_DAYS, isLinkFocusCandidate } from "@skippy/shared";
 import { api } from "../lib/skippy-api";
@@ -18,6 +18,24 @@ function useViewerReady() {
     | undefined;
 
   return Boolean(viewer?.brain);
+}
+
+// Deep links from elsewhere (e.g. the Home "Actions taken" digest) arrive as
+// /brain/links#link-<id> or #note-<id>. The target row only exists once its
+// Convex query resolves, so re-run whenever `ready` flips and briefly highlight
+// the row so the eye lands on it.
+function useHashScroll(ready: boolean) {
+  useEffect(() => {
+    if (!ready || typeof window === "undefined") return;
+    const hash = window.location.hash.slice(1);
+    if (!hash) return;
+    const el = document.getElementById(hash);
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    el.setAttribute("data-anchor-flash", "true");
+    const timer = window.setTimeout(() => el.removeAttribute("data-anchor-flash"), 2000);
+    return () => window.clearTimeout(timer);
+  }, [ready]);
 }
 
 function domainForUrl(url: unknown) {
@@ -57,7 +75,7 @@ function LinkRow({ link }: { link: AnyRecord }) {
     .join(" · ");
 
   return (
-    <article className="item">
+    <article className="item" id={`link-${link._id}`}>
       <span className={`item-icon ${link.status === "unread" && !agedOut ? "is-active" : ""}`}>
         <icons.LinkIcon size={17} aria-hidden />
       </span>
@@ -102,7 +120,7 @@ function NoteRow({ note }: { note: AnyRecord }) {
   const excerpt = body.length > 180 ? `${body.slice(0, 180).trimEnd()}…` : body;
 
   return (
-    <article className="item">
+    <article className="item" id={`note-${note._id}`}>
       <span className="item-icon">
         <icons.BookOpen size={17} aria-hidden />
       </span>
@@ -123,6 +141,8 @@ export function LiveLinksAndNotesContent() {
   const notesData = useQuery(api.knowledge.listNotesForViewer, viewerReady ? {} : "skip") as
     | AnyRecord
     | undefined;
+
+  useHashScroll(Boolean(linksData && notesData));
 
   return (
     <LiveGate>

@@ -1948,7 +1948,7 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
     {
       title: "Mark a quick capture handled",
       description:
-        "Record that an ingestion harness handled a quick capture from the Home inbox. Call this after inspecting a pending capture during a source-ingestion run: use outcome 'processed' once useful Skippy objects were created from it (ingest_object, record_memory, etc.), or 'discarded' when the capture holds nothing worth storing under the importance rubric. Include a short processingNote saying what was created or why it was discarded, and pass the ingestion run ID from record_ingestion_run as sourceRunId when available. Only pending captures can be marked; already-handled captures are rejected server-side.",
+        "Record that an ingestion harness handled a quick capture from the Home inbox. Call this after inspecting a pending capture during a source-ingestion run: use outcome 'processed' once useful Skippy objects were created from it (ingest_object, record_memory, etc.), or 'discarded' when the capture holds nothing worth storing under the importance rubric. Include a short processingNote saying what was created or why it was discarded, and pass relatedEntityRefs listing the accepted entities you created or updated from the capture (project, link, note, etc.) so the Home 'Actions taken' digest can deep-link to them. Pass the ingestion run ID from record_ingestion_run as sourceRunId when available. Only pending captures can be marked; already-handled captures are rejected server-side.",
       annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: false },
       inputSchema: z.object({
         captureId: z.string().describe("Quick capture ID from list_quick_captures."),
@@ -1959,6 +1959,12 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
           .string()
           .optional()
           .describe("Short note on what was created from the capture or why it was discarded."),
+        relatedEntityRefs: z
+          .array(entityRefSchema)
+          .optional()
+          .describe(
+            "Accepted Skippy entities created or updated from this capture (e.g. the new project, link, or note). Surfaced as deep-links in the Home 'Actions taken' digest so the owner can jump to what was filed.",
+          ),
         sourceRunId: z
           .string()
           .optional()

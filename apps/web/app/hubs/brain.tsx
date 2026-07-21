@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { LiveGate } from "../live-auth";
 import { Tabs } from "../components";
 import {
@@ -23,8 +23,24 @@ const TABS = [
   { key: "map", label: "Map" },
 ];
 
-export function BrainContent() {
-  const [tab, setTab] = useState("memory");
+const TAB_KEYS = new Set(TABS.map((tab) => tab.key));
+const DEFAULT_TAB = "memory";
+
+// The Brain hub's sub-views each own a URL (/brain/links, /brain/contacts, …)
+// so processed captures and other surfaces can deep-link — and anchor into a
+// specific row. Unknown or missing segments fall back to Memory.
+export function resolveBrainTab(section: string | undefined): string {
+  return section && TAB_KEYS.has(section) ? section : DEFAULT_TAB;
+}
+
+export function BrainContent({ section }: { section?: string | undefined }) {
+  const router = useRouter();
+  const tab = resolveBrainTab(section);
+
+  const goToTab = (key: string) => {
+    // Keep the canonical Brain root on Memory; every other view gets its path.
+    router.push(key === DEFAULT_TAB ? "/brain" : `/brain/${key}`);
+  };
 
   return (
     <LiveGate>
@@ -39,7 +55,7 @@ export function BrainContent() {
       </div>
 
       <div style={{ marginBottom: 18 }}>
-        <Tabs items={TABS} active={tab} onChange={setTab} />
+        <Tabs items={TABS} active={tab} onChange={goToTab} />
       </div>
 
       {tab === "memory" ? <LiveMemoryContent /> : null}

@@ -281,6 +281,7 @@ export type MarkQuickCaptureHandledInput = {
   captureId: string;
   outcome: "processed" | "discarded";
   processingNote?: string;
+  relatedEntityRefs?: EntityRef[];
   sourceRunId?: string;
 };
 
