@@ -638,6 +638,7 @@ export function TodayContent() {
     [bullets, actionedKeys],
   );
 
+  const focusStale = Boolean(data?.focusSummaryStale);
   const unclear = data?.triageItems?.length ?? 0;
   const pending = data?.pendingActions?.length ?? 0;
   const activeProjects = (projectsData?.projects ?? []).filter(
@@ -697,8 +698,20 @@ export function TodayContent() {
                 </p>
               ) : null}
               <h1 className="focus-heading">
-                {visibleBullets.length ? <InlineMarkdown>{headline}</InlineMarkdown> : "Nothing new needs focus right now."}
+                {visibleBullets.length ? (
+                  <InlineMarkdown>{headline}</InlineMarkdown>
+                ) : focusStale ? (
+                  "Focus summary is out of date."
+                ) : (
+                  "Nothing new needs focus right now."
+                )}
               </h1>
+              {focusStale ? (
+                <p className="muted">
+                  Last updated {formatRelative(data.focusSummary?.generatedAt ?? data.focusSummary?.createdAt)} — a
+                  refresh is due on the next Skippy run.
+                </p>
+              ) : null}
               {visibleBullets.length ? (
                 <ul className="focus-summary-list">
                   {visibleBullets.map((item) => (

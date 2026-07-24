@@ -978,6 +978,8 @@ async function contextBundleForBrainId(
 }
 
 const FOCUS_DISMISSAL_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+// A summary with no explicit validUntil is treated as stale after this long.
+const FOCUS_SUMMARY_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const FOCUS_DISMISSAL_CONTEXT_LIMIT = 25;
 const FOCUS_SNOOZE_MS = 14 * 24 * 60 * 60 * 1000;
 const FOCUS_SNOOZABLE_ENTITY_TYPES = new Set(["project", "task", "note", "company", "person"]);
@@ -1644,6 +1646,16 @@ export const dashboardForViewer = queryGeneric({
       .filter((q) => q.eq(q.field("brainInstanceId"), brain._id))
       .order("desc")
       .first();
+    // An expired summary (or one with no validUntil that is over a day old)
+    // must not read as a current assessment on Home; the client renders an
+    // out-of-date state instead of presenting old text as fresh.
+    const nowForFocus = Date.now();
+    const focusSummaryStale = Boolean(
+      focusSummary &&
+        (typeof focusSummary.validUntil === "number"
+          ? focusSummary.validUntil < nowForFocus
+          : (focusSummary.generatedAt ?? focusSummary.createdAt) + FOCUS_SUMMARY_MAX_AGE_MS < nowForFocus),
+    );
     const focusItemActions = focusSummary
       ? await ctx.db
           .query("focusItemActions")
@@ -1722,6 +1734,7 @@ export const dashboardForViewer = queryGeneric({
     return {
       brain,
       focusSummary,
+      focusSummaryStale,
       focusItemActions,
       recentFocusDismissals,
       sourceSyncStatuses,
