@@ -27,6 +27,7 @@ import type * as resurfacing from "../resurfacing.js";
 import type * as settings from "../settings.js";
 import type * as skills from "../skills.js";
 import type * as taskExecution from "../taskExecution.js";
+import type * as waiting from "../waiting.js";
 
 import type {
   ApiFromModules,
@@ -54,6 +55,7 @@ declare const fullApi: ApiFromModules<{
   settings: typeof settings;
   skills: typeof skills;
   taskExecution: typeof taskExecution;
+  waiting: typeof waiting;
 }>;
 
 /**

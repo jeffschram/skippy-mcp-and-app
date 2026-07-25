@@ -1,4 +1,4 @@
-import { TASK_AREAS, type TaskArea } from "@skippy/shared";
+import { TASK_AREAS, sortWaitingTasks, waitingAgeDays, type TaskArea } from "@skippy/shared";
 
 /* ------------------------------------------------------------------ */
 /* Lane bucketing for the /tasks surface                               */
@@ -93,8 +93,9 @@ export function bucketLifeTasks(tasks: LifeTask[] | undefined): LifeTaskLanes {
   lanes.due.sort((a, b) => (a.dueAt ?? 0) - (b.dueAt ?? 0));
   lanes.anytime.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
   lanes.wants.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
-  // Oldest unanswered thing first — that is the one most likely to need a nudge.
-  lanes.waiting.sort((a, b) => (a.waitingSince ?? 0) - (b.waitingSince ?? 0));
+  // Oldest unanswered thing first — and once nudged, an item sorts by time
+  // since the nudge, because you are now waiting on the follow-up.
+  lanes.waiting = sortWaitingTasks(lanes.waiting);
 
   return lanes;
 }
@@ -116,8 +117,10 @@ export function filterByArea(tasks: LifeTask[], area: string | null): LifeTask[]
   return tasks.filter((task) => (task.area ?? "unsorted") === area);
 }
 
-/** How long something has been waiting, in whole days. */
+/**
+ * How long something has been outstanding, in whole days — measured from the
+ * last nudge once one has been sent.
+ */
 export function waitingDays(task: LifeTask, now: number): number | undefined {
-  if (typeof task.waitingSince !== "number") return undefined;
-  return Math.max(0, Math.floor((now - task.waitingSince) / (24 * 60 * 60 * 1000)));
+  return waitingAgeDays(task, now);
 }

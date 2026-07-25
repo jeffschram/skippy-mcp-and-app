@@ -2,7 +2,7 @@
 
 import { useMemo, useState, type FormEvent } from "react";
 import { useMutation, useQuery } from "convex/react";
-import { Check, Clock, Hourglass, ListTodo, Sparkles } from "lucide-react";
+import { BellRing, Check, Clock, Hourglass, ListTodo, Sparkles } from "lucide-react";
 import { TASK_AREAS } from "@skippy/shared";
 import { api } from "../../lib/skippy-api";
 import { formatRelative } from "../../lib/display";
@@ -11,6 +11,7 @@ import {
   Badge,
   Button,
   EmptyState,
+  IconButton,
   LoadingRow,
   Section,
   Select,
@@ -41,10 +42,12 @@ function TaskRow({
   task,
   now,
   onComplete,
+  onNudge,
 }: {
   task: LifeTask;
   now: number;
   onComplete: (task: LifeTask) => void;
+  onNudge?: ((task: LifeTask) => void) | undefined;
 }) {
   const overdue = isOverdue(task, now);
   const waited = waitingDays(task, now);
@@ -75,11 +78,21 @@ function TaskRow({
           ) : null}
           {waited !== undefined ? (
             <span>
-              waiting {waited} day{waited === 1 ? "" : "s"}
+              {task.lastNudgedAt ? "nudged" : "waiting"} {waited} day{waited === 1 ? "" : "s"}
             </span>
           ) : null}
         </span>
       </div>
+
+      {onNudge ? (
+        <IconButton
+          aria-label={`Nudge about ${task.title}`}
+          title="Draft a nudge"
+          onClick={() => onNudge(task)}
+        >
+          <BellRing size={15} />
+        </IconButton>
+      ) : null}
     </div>
   );
 }
@@ -92,6 +105,7 @@ function Lane({
   emptyLabel,
   note,
   onComplete,
+  onNudge,
   className,
 }: {
   title: string;
@@ -101,6 +115,7 @@ function Lane({
   emptyLabel: string;
   note?: string | undefined;
   onComplete: (task: LifeTask) => void;
+  onNudge?: ((task: LifeTask) => void) | undefined;
   className?: string | undefined;
 }) {
   return (
@@ -116,7 +131,13 @@ function Lane({
       ) : (
         <div className={styles.list}>
           {tasks.map((task) => (
-            <TaskRow key={task._id} task={task} now={now} onComplete={onComplete} />
+            <TaskRow
+              key={task._id}
+              task={task}
+              now={now}
+              onComplete={onComplete}
+              onNudge={onNudge}
+            />
           ))}
         </div>
       )}
@@ -199,6 +220,7 @@ export function LifeTasksContent() {
     | LifeTask[]
     | undefined;
   const setStatus = useMutation(api.lifeTasks.setLifeTaskStatus);
+  const nudge = useMutation(api.waiting.nudgeWaitingTask);
   const toast = useToast();
 
   const [area, setArea] = useState<string | null>(null);
@@ -215,6 +237,16 @@ export function LifeTasksContent() {
       toast(`Done: ${task.title}`, "success");
     } catch (error) {
       toast(error instanceof Error ? error.message : "Could not update that.", "error");
+    }
+  }
+
+  async function onNudge(task: LifeTask) {
+    try {
+      await nudge({ taskId: task._id as any });
+      // Nothing is sent from here — the draft waits for the owner to release it.
+      toast("Nudge drafted — review it in Pending actions.", "success");
+    } catch (error) {
+      toast(error instanceof Error ? error.message : "Could not draft that.", "error");
     }
   }
 
@@ -280,6 +312,7 @@ export function LifeTasksContent() {
           now={now}
           emptyLabel="Not waiting on anyone."
           onComplete={complete}
+          onNudge={onNudge}
           className={styles.fullWidth}
         />
       ) : null}
