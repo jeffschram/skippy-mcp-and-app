@@ -8,6 +8,7 @@ import {
   FolderKanban,
   House,
   Inbox,
+  ListTodo,
   ScrollText,
   Settings,
   Wallet,
@@ -34,6 +35,15 @@ type Hub = {
 
 export const primaryHubs: Hub[] = [
   { href: "/", label: "Home", icon: House, match: (p) => p === "/" },
+  // Second slot deliberately: day-to-day task checking is the most frequent
+  // reason to open the app. The mobile nav scrolls and the desktop nav is a
+  // vertical sidebar, so a fifth primary hub costs no layout.
+  {
+    href: "/tasks",
+    label: "Tasks",
+    icon: ListTodo,
+    match: (p) => p.startsWith("/tasks"),
+  },
   {
     href: "/finances",
     label: "Finances",

@@ -59,7 +59,7 @@ function captureEntityHref(entityType: string, entityId: string): string | undef
     case "project":
       return `/projects/${id}`;
     case "task":
-      return `/tasks`;
+      return `/tasks#task-${id}`;
     case "link":
       return `/brain/links#link-${id}`;
     case "note":

@@ -10,15 +10,18 @@
 
 import type * as auth from "../auth.js";
 import type * as bootstrap from "../bootstrap.js";
+import type * as calendar from "../calendar.js";
 import type * as finances from "../finances.js";
 import type * as http from "../http.js";
 import type * as interviews from "../interviews.js";
 import type * as knowledge from "../knowledge.js";
+import type * as lifeTasks from "../lifeTasks.js";
 import type * as mcpTokens from "../mcpTokens.js";
 import type * as memoryGraph from "../memoryGraph.js";
 import type * as planning from "../planning.js";
 import type * as projectFiles from "../projectFiles.js";
 import type * as projects from "../projects.js";
+import type * as recurrences from "../recurrences.js";
 import type * as resurfacing from "../resurfacing.js";
 import type * as settings from "../settings.js";
 import type * as skills from "../skills.js";
@@ -33,15 +36,18 @@ import type {
 declare const fullApi: ApiFromModules<{
   auth: typeof auth;
   bootstrap: typeof bootstrap;
+  calendar: typeof calendar;
   finances: typeof finances;
   http: typeof http;
   interviews: typeof interviews;
   knowledge: typeof knowledge;
+  lifeTasks: typeof lifeTasks;
   mcpTokens: typeof mcpTokens;
   memoryGraph: typeof memoryGraph;
   planning: typeof planning;
   projectFiles: typeof projectFiles;
   projects: typeof projects;
+  recurrences: typeof recurrences;
   resurfacing: typeof resurfacing;
   settings: typeof settings;
   skills: typeof skills;
