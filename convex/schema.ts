@@ -24,6 +24,9 @@ const entityRef = v.object({
   entityId: v.string(),
 });
 
+// Execution-dispatch axis: how a task gets worked, read by the task-heartbeat
+// harness. NOT a life/work classification — that is `area` below. Do not add
+// life semantics here; it would break agent dispatch.
 const taskKind = v.union(
   v.literal("coding"),
   v.literal("review"),
@@ -32,6 +35,22 @@ const taskKind = v.union(
   v.literal("manual"),
   v.literal("planning"),
 );
+
+// Which part of life a task belongs to. Mirrors TASK_AREAS in @skippy/shared.
+const taskArea = v.union(
+  v.literal("work"),
+  v.literal("personal"),
+  v.literal("household"),
+  v.literal("health"),
+  v.literal("finance"),
+  v.literal("social"),
+  v.literal("errand"),
+);
+
+// Obligation vs desire. Absent reads as "must" (see effectiveCommitment in
+// @skippy/shared) — every task written before the life layer is an obligation.
+// "want" items are browsable and never overdue, so wants do not create guilt.
+const taskCommitment = v.union(v.literal("must"), v.literal("want"));
 
 // Supervised execution lifecycle, distinct from the user-facing `status`.
 // proposed -> briefed -> ready -> in_progress -> in_review -> done (or blocked).
@@ -307,6 +326,15 @@ export default defineSchema({
     ),
     ownerType: v.optional(v.union(v.literal("owner"), v.literal("agent"))),
     dueAt: v.optional(v.number()),
+    // Life-layer axes. Project linkage stays in `relationships` (belongs_to),
+    // so a project-less task is already legal — these make it classifiable.
+    area: v.optional(taskArea),
+    commitment: v.optional(taskCommitment),
+    // What the owner is waiting on, and since when. Cleared automatically when
+    // a reply lands rather than requiring the owner to groom a queue.
+    waitingOn: v.optional(entityRef),
+    waitingSince: v.optional(v.number()),
+    lastNudgedAt: v.optional(v.number()),
     startedAt: v.optional(v.number()),
     startedBy: v.optional(v.string()),
     completedAt: v.optional(v.number()),
@@ -339,6 +367,7 @@ export default defineSchema({
     .index("by_brain_state", ["brainInstanceId", "processingState"])
     .index("by_brain_status", ["brainInstanceId", "status"])
     .index("by_brain_due", ["brainInstanceId", "dueAt"])
+    .index("by_brain_commitment", ["brainInstanceId", "commitment"])
     .index("by_brain_execution_state", ["brainInstanceId", "executionState"])
     .index("by_brain_plan", ["brainInstanceId", "planRunId"]),
 

@@ -14,6 +14,7 @@ import {
   matchDismissedFocusItem,
   normalizeAcceptedEntityPayload,
   quickCaptureIntent,
+  taskDuplicateScopeMatches,
 } from "@skippy/shared";
 import { requireOwnedBrain } from "./auth";
 import { advanceDependentsAfterDone } from "./taskExecution";
@@ -246,11 +247,36 @@ function companyLooksDuplicate(left: any, right: any) {
   return Boolean(leftName && rightName && leftName === rightName);
 }
 
+/**
+ * Maps every task that belongs to a project to that project's id, so duplicate
+ * detection can tell a life task from a project task. Tasks absent from the map
+ * are project-less.
+ */
+async function taskProjectIdByTaskId(db: any, brainInstanceId: any): Promise<Map<string, string>> {
+  const relationships = await db
+    .query("relationships")
+    .withIndex("by_brain_type", (q: any) => q.eq("brainInstanceId", brainInstanceId))
+    .filter((q: any) => q.eq(q.field("type"), "belongs_to"))
+    .collect();
+
+  const byTaskId = new Map<string, string>();
+  for (const relationship of relationships) {
+    if (relationship.from?.entityType === "task" && relationship.to?.entityType === "project") {
+      byTaskId.set(relationship.from.entityId as string, relationship.to.entityId as string);
+    }
+  }
+
+  return byTaskId;
+}
+
 async function findAcceptedEntityDuplicate(
   db: any,
   brainInstanceId: any,
   entityTypeName: keyof typeof entityTableByType,
   payload: any,
+  // Project the incoming task is destined for. Omitted means project-less,
+  // which is what every ingestion path produces.
+  incomingProjectId?: string | null,
 ) {
   if (!["task", "person", "company"].includes(entityTypeName)) {
     return null;
@@ -264,10 +290,15 @@ async function findAcceptedEntityDuplicate(
     .take(300);
 
   if (entityTypeName === "task") {
+    // Title similarity alone would merge a life task into an identically named
+    // project task. Only tasks sitting in the same place may merge.
+    const projectIdByTaskId = await taskProjectIdByTaskId(db, brainInstanceId);
+
     return acceptedEntities.find(
       (task: any) =>
         task.status !== "done" &&
         task.status !== "cancelled" &&
+        taskDuplicateScopeMatches(projectIdByTaskId.get(task._id as string), incomingProjectId) &&
         taskTitleLooksDuplicate(payload.title, task.title),
     ) ?? null;
   }
@@ -3844,7 +3875,13 @@ export const createTaskDirect = mutationGeneric({
       dueAt: args.dueAt,
       priorityReason: args.priorityReason,
     });
-    const duplicateTask = await findAcceptedEntityDuplicate(db, args.brainInstanceId, "task", normalizedPayload);
+    const duplicateTask = await findAcceptedEntityDuplicate(
+      db,
+      args.brainInstanceId,
+      "task",
+      normalizedPayload,
+      args.projectId,
+    );
 
     let projectTitle = undefined;
     let relationshipId = undefined;

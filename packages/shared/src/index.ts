@@ -342,6 +342,66 @@ export type TaskStatus = (typeof TASK_STATUSES)[number];
 export const TASK_OWNER_TYPES = ["owner", "agent"] as const;
 export type TaskOwnerType = (typeof TASK_OWNER_TYPES)[number];
 
+/**
+ * Which part of life a task belongs to. Distinct from `kind`, which is the
+ * execution-dispatch axis the task-heartbeat harness reads.
+ */
+export const TASK_AREAS = [
+  "work",
+  "personal",
+  "household",
+  "health",
+  "finance",
+  "social",
+  "errand",
+] as const;
+export type TaskArea = (typeof TASK_AREAS)[number];
+
+/**
+ * Obligation vs desire.
+ *
+ * "must" is something the owner owes: it can be overdue, it can nag. "want" is
+ * something the owner would enjoy — a restaurant to try, a book to read. The
+ * split exists so wants never generate guilt; the Wants lane deliberately has
+ * no due dates, no overdue styling, and no counts. Mixing the two means either
+ * the wants nag or the obligations get buried.
+ */
+export const TASK_COMMITMENTS = ["must", "want"] as const;
+export type TaskCommitment = (typeof TASK_COMMITMENTS)[number];
+
+/**
+ * Read-time default for `commitment`, which is absent on every task written
+ * before the life layer existed. Those are all obligations, so absent reads as
+ * "must". Follows the same no-migration convention as effectiveProjectPaths.
+ *
+ * Always go through this rather than scattering `?? "must"` at call sites.
+ */
+export function effectiveCommitment(task: {
+  commitment?: string | null | undefined;
+}): TaskCommitment {
+  return task.commitment === "want" ? "want" : "must";
+}
+
+/**
+ * Whether two tasks are even eligible to be considered duplicates of each
+ * other, based on project linkage.
+ *
+ * Task duplicate detection matches on fuzzy *title* similarity, which is fine
+ * within one lane and wrong across lanes: a life task "Call dentist" and a
+ * project task "Call dentist" are unrelated pieces of work that happen to share
+ * a name. Two tasks may only merge when they sit in the same place — both
+ * project-less, or both under the same project.
+ *
+ * Project linkage lives in `relationships` (belongs_to), not on the task row,
+ * so callers resolve the candidate's project id before calling this.
+ */
+export function taskDuplicateScopeMatches(
+  candidateProjectId: string | null | undefined,
+  incomingProjectId: string | null | undefined,
+): boolean {
+  return (candidateProjectId ?? null) === (incomingProjectId ?? null);
+}
+
 export const LINK_STATUSES = ["unread", "read", "saved", "discarded"] as const;
 export type LinkStatus = (typeof LINK_STATUSES)[number];
 
@@ -524,6 +584,10 @@ export type TaskInput = PriorityMetadata & {
   startedAt?: number;
   startedBy?: string;
   completedAt?: number;
+  area?: TaskArea;
+  commitment?: TaskCommitment;
+  waitingOn?: EntityRef;
+  waitingSince?: number;
 };
 
 export type NoteInput = {
@@ -787,6 +851,25 @@ function timestampValue(...values: unknown[]): number | undefined {
   return undefined;
 }
 
+/**
+ * Lenient entity-ref normalizer for untrusted payloads. Returns undefined
+ * rather than throwing, since a malformed waitingOn should drop the field, not
+ * reject the whole task.
+ */
+function entityRefValue(value: unknown): EntityRef | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  const entityId = stringValue(candidate.entityId);
+  if (!entityId || !isEntityType(candidate.entityType)) {
+    return undefined;
+  }
+
+  return { entityType: candidate.entityType, entityId };
+}
+
 function firstString(...values: unknown[]): string | undefined {
   for (const value of values) {
     const normalizedValue = stringValue(value);
@@ -898,6 +981,10 @@ export function normalizeAcceptedEntityPayload<T extends EntityType>(
           oneOfValue(TASK_OWNER_TYPES, payload.assignee),
         dueAt: timestampValue(payload.dueAt, payload.dueDate, payload.due, payload.start),
         completedAt: timestampValue(payload.completedAt),
+        area: oneOfValue(TASK_AREAS, payload.area) ?? oneOfValue(TASK_AREAS, payload.lifeArea),
+        commitment: oneOfValue(TASK_COMMITMENTS, payload.commitment),
+        waitingOn: entityRefValue(payload.waitingOn),
+        waitingSince: timestampValue(payload.waitingSince),
         ...priorityFields(payload),
       }) as EntityInputMap[T];
     }
