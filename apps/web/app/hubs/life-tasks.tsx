@@ -14,9 +14,11 @@ import {
   LoadingRow,
   Section,
   Select,
+  Tabs,
   TextInput,
   useToast,
 } from "../components";
+import { RecurrencesContent } from "./recurrences";
 import { useViewerReady } from "./use-viewer";
 import {
   areaLabel,
@@ -296,10 +298,33 @@ export function LifeTasksContent() {
   );
 }
 
+/**
+ * One-off items and repeating obligations are the same mental mode — "what do
+ * I need to do?" — so they share a surface behind a segmented control rather
+ * than living in two hubs.
+ */
+function LifeTasksTabs() {
+  const [tab, setTab] = useState<"tasks" | "recurring">("tasks");
+
+  return (
+    <>
+      <Tabs
+        items={[
+          { key: "tasks", label: "Tasks" },
+          { key: "recurring", label: "Recurring" },
+        ]}
+        active={tab}
+        onChange={(key) => setTab(key as "tasks" | "recurring")}
+      />
+      {tab === "tasks" ? <LifeTasksContent /> : <RecurrencesContent />}
+    </>
+  );
+}
+
 export function LifeTasksPage() {
   return (
     <LiveGate>
-      <LifeTasksContent />
+      <LifeTasksTabs />
     </LiveGate>
   );
 }
