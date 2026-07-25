@@ -740,6 +740,11 @@ export default defineSchema({
     metadata: v.optional(v.any()),
   }).index("by_brain_started", ["brainInstanceId", "startedAt"]),
 
+  // Sync bookkeeping for ingestion harnesses.
+  //
+  // Google Calendar incremental sync tokens live here rather than in a table of
+  // their own: statusKey `google_calendar:<calendarId>` with the opaque token at
+  // `metadata.syncToken`. Look them up through `by_brain_key`.
   sourceSyncStatuses: defineTable({
     brainInstanceId: v.id("brainInstances"),
     statusKey: v.string(),
@@ -757,6 +762,80 @@ export default defineSchema({
   })
     .index("by_brain_key", ["brainInstanceId", "statusKey"])
     .index("by_brain_status", ["brainInstanceId", "status"]),
+
+  // Read-mostly mirror of the owner's external calendars. Google stays the
+  // source of truth; this table exists so Skippy has a persisted sense of time
+  // (agenda, focus summaries, free/busy) without a live API call per read.
+  //
+  // Calendar deliberately does NOT flow through ingestObject/triageItems. That
+  // path is built for noisy prose sources and dedupes tasks on fuzzy *title*
+  // similarity (see findAcceptedEntityDuplicate in convex/knowledge.ts), which
+  // is exactly wrong here: "Dentist" and "1:1 with Dan" are supposed to repeat.
+  // Calendar rows are matched on identity — `by_brain_external` — never
+  // similarity. `calendar_event` is likewise kept out of the `entityType` union
+  // above; that exclusion is what keeps this table off the rubric path. Links
+  // to real entities go outward through `relatedEntityRefs`.
+  //
+  // Privacy: never persist a full event description. Callers truncate to a
+  // short summary before writing (see skills/skippy-harness/SKILL.md).
+  calendarEvents: defineTable({
+    brainInstanceId: v.id("brainInstances"),
+
+    // --- Identity. This is the echo-loop defense: when Skippy creates an event
+    // it mints `externalId` itself and writes this row *before* calling Google,
+    // so the next ingest recognizes its own write instead of duplicating it.
+    sourceSystem: v.string(),
+    calendarId: v.string(),
+    externalId: v.string(),
+    iCalUID: v.optional(v.string()),
+    etag: v.optional(v.string()),
+    origin: v.union(v.literal("google"), v.literal("skippy")),
+
+    // --- Recurrence. Instances are identified by (recurringEventId,
+    // originalStartAt); a moved instance keeps its original start.
+    recurringEventId: v.optional(v.string()),
+    originalStartAt: v.optional(v.number()),
+    recurrence: v.optional(v.array(v.string())),
+    isMaster: v.optional(v.boolean()),
+
+    // --- Content.
+    title: v.string(),
+    description: v.optional(v.string()),
+    location: v.optional(v.string()),
+    startAt: v.number(),
+    endAt: v.number(),
+    isAllDay: v.optional(v.boolean()),
+    timeZone: v.optional(v.string()),
+    status: v.union(v.literal("confirmed"), v.literal("tentative"), v.literal("cancelled")),
+    attendees: v.optional(
+      v.array(
+        v.object({
+          email: v.string(),
+          displayName: v.optional(v.string()),
+          responseStatus: v.optional(v.string()),
+          organizer: v.optional(v.boolean()),
+          self: v.optional(v.boolean()),
+        }),
+      ),
+    ),
+    conferenceUrl: v.optional(v.string()),
+    htmlLink: v.optional(v.string()),
+
+    // --- Skippy layer.
+    relatedEntityRefs: v.optional(v.array(entityRef)),
+    focusSnoozedUntil: v.optional(v.number()),
+    remoteState: v.optional(
+      v.union(v.literal("synced"), v.literal("pending_remote"), v.literal("remote_failed")),
+    ),
+    remoteError: v.optional(v.string()),
+
+    lastSyncedAt: v.number(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_brain_external", ["brainInstanceId", "sourceSystem", "externalId"])
+    .index("by_brain_start", ["brainInstanceId", "startAt"])
+    .index("by_brain_series", ["brainInstanceId", "recurringEventId", "originalStartAt"]),
 
   activityEvents: defineTable({
     brainInstanceId: v.id("brainInstances"),
