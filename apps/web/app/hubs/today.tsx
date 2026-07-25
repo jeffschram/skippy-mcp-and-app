@@ -28,6 +28,7 @@ import { formatRelative } from "../../lib/display";
 import { focusItemKey, parseFocusSummary } from "../focus-summary";
 import { LiveGate } from "../live-auth";
 import { Badge, Button, Card, EmptyState, IconButton, InlineMarkdown, LoadingRow, Section, TextArea, useToast } from "../components";
+import { AgendaSection } from "./agenda";
 import { useViewerReady } from "./use-viewer";
 import { formatFileSize } from "./project-library-helpers";
 import { QUICK_CAPTURE_INTENT_STORAGE_KEY, checkQuickCaptureFile, parseStoredIntent } from "./quick-capture-helpers";
@@ -760,6 +761,10 @@ export function TodayContent() {
           {/* Right rail */}
           <div className={todayStyles.rail}>
             <QuickCaptureBox captures={data?.quickCaptures} />
+
+            {/* Calendar events, due tasks, and firing recurrences merged into
+                one list — the answer to "what does my day look like". */}
+            <AgendaSection />
 
             <Section
               title={
