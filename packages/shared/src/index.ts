@@ -1,3 +1,7 @@
+// Recurring life obligations. Kept in its own module because the zoned
+// calendar arithmetic is substantial and self-contained.
+export * from "./recurrence";
+
 // Google Calendar mirror: identity, normalization, and echo-safe merge rules.
 // Its own module because the merge semantics are subtle enough to deserve
 // isolation from the generic entity-ingestion helpers below.

@@ -371,6 +371,63 @@ export default defineSchema({
     .index("by_brain_execution_state", ["brainInstanceId", "executionState"])
     .index("by_brain_plan", ["brainInstanceId", "planRunId"]),
 
+  // Repeating life obligations: furnace filters, oil changes, renewals, trash
+  // night, quarterly taxes. A task with a dueAt cannot express any of these,
+  // and completing such a task destroys the record of when it was last done —
+  // which is usually the fact the owner actually wants.
+  //
+  // The anchor distinction is the load-bearing design decision:
+  //   completion — "every 3 months after I finish it". Next due is measured
+  //                from lastCompletedAt. Do it five weeks late and the next one
+  //                shifts with you. This is right for maintenance.
+  //   schedule   — "the 1st of the month, regardless". Next due is a fixed
+  //                calendar date and ignores when (or whether) you did it.
+  // Conflating the two is why repeat reminders drift into nonsense.
+  //
+  // Like calendarEvents, `recurrence` is deliberately NOT in the entityType
+  // union: this is scheduling state, not owner-authored knowledge, and must
+  // stay off the ingestObject/triageItems rubric path.
+  recurrences: defineTable({
+    brainInstanceId: v.id("brainInstances"),
+    title: v.string(),
+    description: v.optional(v.string()),
+    area: v.optional(taskArea),
+
+    rule: v.union(
+      v.object({ kind: v.literal("interval"), everyDays: v.number() }),
+      v.object({ kind: v.literal("calendar"), rrule: v.string() }),
+    ),
+    anchor: v.union(v.literal("completion"), v.literal("schedule")),
+
+    lastCompletedAt: v.optional(v.number()),
+    nextDueAt: v.number(),
+    // Surface this many days before nextDueAt, so renewals get a runway.
+    leadTimeDays: v.optional(v.number()),
+
+    status: v.union(v.literal("active"), v.literal("paused"), v.literal("retired")),
+
+    // Whether firing materializes a real task the owner checks off, or the
+    // obligation only appears on the agenda. Per-recurrence rather than a
+    // global setting: chores want to be tasks, trash night does not.
+    spawnTask: v.boolean(),
+    // The live spawned task, so re-firing cannot duplicate it.
+    currentTaskId: v.optional(v.id("tasks")),
+
+    // Capped completion log — see RECURRENCE_HISTORY_LIMIT in @skippy/shared.
+    // "When did I last change the filter?" is half the value of this table.
+    history: v.optional(
+      v.array(v.object({ completedAt: v.number(), note: v.optional(v.string()) })),
+    ),
+
+    // The car, the house, the person this obligation attaches to.
+    relatedEntityRefs: v.optional(v.array(entityRef)),
+
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_brain_next_due", ["brainInstanceId", "nextDueAt"])
+    .index("by_brain_status", ["brainInstanceId", "status"]),
+
   notes: defineTable({
     brainInstanceId: v.id("brainInstances"),
     title: v.optional(v.string()),
