@@ -25,6 +25,7 @@ import {
   type SkippyClient,
   type StartInterviewInput,
   type UpsertFinancialAccountInput,
+  type UpsertRecurrenceInput,
 } from "./tools.js";
 import {
   BALANCE_SOURCES,
@@ -95,6 +96,10 @@ const skippyInstructions = [
   "Use submit_memory_review_candidate when a possible memory is useful but uncertain. Do not queue transient alerts (balance notifications, promo deadlines, ToS notices); skip them or record directly with expiry context. Use list_memory/get_context_bundle/get_memory_detail before adding likely duplicates or answering from memory, and link_memory to attach memories to accepted entities.",
   "Use list_interview_templates/start_interview/get_interview/answer_interview_question/complete_interview/archive_interview to run guided second-brain interviews inside the harness chat. Ask one question at a time in chat, using the assistantDisplayName returned by Skippy.",
   "During scheduled or batch source-ingestion runs, also drain the Home quick-capture inbox in addition to external sources: call list_quick_captures for pending captures the owner dropped on the home page, turn useful ones into Skippy objects with the ingestion tools (ingest_object etc.), then call mark_quick_capture_handled with 'processed' or 'discarded' for each. Hold-intent captures are private device-to-device transfers: they are never returned by list_quick_captures and must never be ingested.",
+  "The life layer covers everything that is not project work. A one-off errand or obligation is a task with no project: set `area` and leave `commitment` as 'must'. Something the owner would simply enjoy — a restaurant to try, a book to read — is a task with `commitment: \"want\"`, not a link and not a note; wants never carry due dates and never go overdue.",
+  "Anything that comes around again belongs in upsert_recurrence, not a dated task: completing a task destroys the record of when it was last done, which is usually the fact worth keeping. Use anchor 'completion' when the cadence restarts from when the work is finished (change the furnace filter every 3 months) and anchor 'schedule' for fixed calendar dates that ignore completion (rent on the 1st).",
+  "Something with a specific time and place is a calendar event, not a task; a deadline with no appointment is a task with a dueAt. Use list_agenda to see calendar events, due tasks, and firing recurrences merged into one timeline before proposing times or answering what a day looks like. Read the life layer with list_life_tasks and list_recurrences.",
+  "When the owner is blocked on a person, set the task to status 'waiting' with waitingOn pointing at them. It clears itself when a reply arrives, so never ask the owner to groom that list.",
   "Use ask/summarize_focus/list_pending_actions for retrieval. Internal AI synthesis may be disabled, so expect structured context rather than polished answers.",
   "Financial data from Plaid is ground truth: map it to the fixed Conscious Spending Plan taxonomy at ingest time and record it directly with upsert_financial_account/record_financial_transactions (never queue it for review). Transfers between the owner's own accounts are txType 'Transfer' ('Transfers In'/'Transfers Out'), never Income or an outgoing bucket; they are excluded from budget totals automatically. Amounts are integer cents; pass Plaid transaction_ids as externalIds for idempotency, and store only account last-4 masks, never full account numbers.",
 ].join("\n");
@@ -142,6 +147,8 @@ function buildSlashCommandsMessage() {
     "| Slash command | Use | MCP mapping |",
     "| --- | --- | --- |",
     "| `/task ...` | Create an accepted task from an explicit user command. | `create_task` |",
+    "| `/repeat ...` | Record something that comes around again. | `upsert_recurrence` |",
+    "| `/agenda` | What is happening and what is due. | `list_agenda` |",
     "| `/project ...` | Create an accepted project from an explicit user command. | `create_project` |",
     "| `/remember ...` | Store a durable memory or capture a thought. | `record_memory` or `capture_thought` |",
     "| `/decision ...` | Record a durable decision memory. | `record_decision` |",
@@ -194,7 +201,9 @@ function buildSkillsMessage() {
     "   - `capture_thought`: explicit user thought or preference that should become memory or review.",
     "   - `submit_memory_review_candidate`: possible memory that seems useful but uncertain.",
     "   - `submit_candidate_object`: legacy review fallback for non-memory objects when classification or importance is uncertain.",
-    "   - `create_project` / `create_task`: only for explicit user commands.",
+    "   - `create_project` / `create_task`: only for explicit user commands. For a task with no project, set `area` and `commitment` (`want` for things the owner would enjoy, so they never nag).",
+    "   - `upsert_recurrence`: anything that comes around again. Prefer it over a dated task whenever the thing repeats — completing a task destroys the record of when it was last done.",
+    "   - `list_agenda`: what is happening and what is due over a range; use before proposing times.",
     "   - `link_entities` / `link_memory`: only after accepted entity IDs or memory IDs are known.",
     "   - `list_pending_actions`: inspect external side effects awaiting approval. Do not send emails/messages or alter external systems through Skippy.",
     "",
@@ -203,6 +212,8 @@ function buildSkillsMessage() {
     "When a user types a command-like message, treat it as shorthand for the matching MCP workflow:",
     "",
     "- `/task ...` -> `create_task`",
+    "- `/repeat ...` -> `upsert_recurrence`",
+    "- `/agenda` -> `list_agenda`",
     "- `/project ...` -> `create_project`",
     "- `/remember ...` -> `record_memory` or `capture_thought`",
     "- `/decision ...` -> `record_decision`",
@@ -359,6 +370,8 @@ function buildHarnessBootstrapMessage({
     "",
     "- `get_current_context`: resolve active app route/project.",
     "- `create_task` / `create_project`: explicit user-created items.",
+    "- `list_life_tasks` / `list_recurrences` / `list_agenda`: the life layer — project-less tasks, repeating obligations, and the merged timeline.",
+    "- `upsert_recurrence` / `complete_recurrence`: manage and log repeating obligations.",
     "- `plan_project`: decompose accepted projects.",
     "- `brief_task`: write a repo-grounded execution brief plus acceptance criteria for a proposed task and move it to Briefed.",
     "- `list_ready_tasks` / `list_requested_ready_tasks`: find executable work.",
@@ -1689,6 +1702,18 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
         priorityReason: z.string().optional().describe("Why this task matters or its intended priority."),
         projectId: z.string().optional().describe("Accepted project ID to assign the task to."),
         createdBy: z.string().optional().describe("Harness/user identifier for audit logging."),
+        area: z
+          .enum(["work", "personal", "household", "health", "finance", "social", "errand"])
+          .optional()
+          .describe(
+            "Which part of life this belongs to. Distinct from kind, which is how the work gets executed.",
+          ),
+        commitment: z
+          .enum(["must", "want"])
+          .optional()
+          .describe(
+            "must = an obligation that can be overdue and can nag. want = something the owner would enjoy (a restaurant to try, a book to read); these are browsable and never overdue. Defaults to must.",
+          ),
       }),
     },
     async (args) =>
@@ -1698,6 +1723,115 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
           "task",
         ),
       ),
+  );
+
+  /* ---------------- Life layer ---------------- */
+
+  server.registerTool(
+    "upsert_recurrence",
+    {
+      title: "Create or update a repeating obligation",
+      description:
+        "Record something that comes around again — furnace filter, oil change, rent, trash night, annual renewal. Use this instead of a task with a due date whenever the thing repeats: completing a task destroys the record of when it was last done, which is usually the fact worth keeping. Choose the anchor carefully, it changes the behavior: 'completion' measures the next due date from when the work is actually finished (maintenance — do it five weeks late and the cadence shifts with you), while 'schedule' is a fixed calendar date that ignores completion (bills and dues). Calendar rules use a supported RRULE subset: FREQ=DAILY|WEEKLY|MONTHLY|YEARLY with optional INTERVAL, BYDAY, BYMONTHDAY, BYMONTH.",
+      annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      inputSchema: z.object({
+        recurrenceId: z.string().optional().describe("Existing recurrence ID to update."),
+        title: z.string().describe("What recurs, e.g. 'Change the furnace filter'."),
+        description: z.string().optional(),
+        area: z
+          .enum(["work", "personal", "household", "health", "finance", "social", "errand"])
+          .optional(),
+        rule: z
+          .union([
+            z.object({ kind: z.literal("interval"), everyDays: z.number().int().min(1) }),
+            z.object({ kind: z.literal("calendar"), rrule: z.string() }),
+          ])
+          .describe("Either an every-N-days interval or an RRULE calendar rule."),
+        anchor: z
+          .enum(["completion", "schedule"])
+          .describe(
+            "completion = counted from when it is finished; schedule = a fixed date regardless of completion.",
+          ),
+        startAt: z.number().optional().describe("First due date in epoch milliseconds."),
+        leadTimeDays: z.number().optional().describe("Surface this many days early."),
+        spawnTask: z
+          .boolean()
+          .optional()
+          .describe(
+            "true (default) materializes a real task when due; false keeps it on the agenda only. Chores want to be tasks; ambient things like trash night do not.",
+          ),
+        timeZone: z.string().optional().describe("IANA zone the wall-clock schedule is anchored to."),
+      }),
+    },
+    async (args) => toolResult(await tools.upsertRecurrence(stripUndefined(args) as UpsertRecurrenceInput)),
+  );
+
+  server.registerTool(
+    "complete_recurrence",
+    {
+      title: "Log a completion of a repeating obligation",
+      description:
+        "Record that a recurring obligation was done, advancing its schedule and appending to its history. Pass completedAt to backdate ('I did this last Tuesday') — for a completion-anchored recurrence that timestamp directly determines the next due date, so it is not cosmetic.",
+      annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      inputSchema: z.object({
+        recurrenceId: z.string(),
+        completedAt: z
+          .number()
+          .optional()
+          .describe("Epoch milliseconds. Defaults to now; pass an earlier value to backdate."),
+        note: z.string().optional(),
+      }),
+    },
+    async (args) => toolResult(await tools.completeRecurrence(stripUndefined(args) as any)),
+  );
+
+  server.registerTool(
+    "list_recurrences",
+    {
+      title: "List repeating obligations",
+      description:
+        "Read-only. Every active or paused recurrence with its cadence, when it was last done, and when it is next due. Use dueOnly to get just what has surfaced.",
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: z.object({ dueOnly: z.boolean().optional() }),
+    },
+    async (args) => toolResult(await tools.listRecurrences(stripUndefined(args) as any)),
+  );
+
+  server.registerTool(
+    "list_agenda",
+    {
+      title: "List what is happening and what is due",
+      description:
+        "Read-only. Calendar events, tasks with due dates, and firing recurrences merged into one chronological list over a date range. This is how to answer 'what does my day look like' or find free time — a recurrence that already spawned a task appears once, as the task.",
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: z.object({
+        from: z.number().describe("Range start, epoch milliseconds."),
+        to: z.number().describe("Range end, epoch milliseconds."),
+        includeProjectTasks: z
+          .boolean()
+          .optional()
+          .describe("Include project work too. Off by default: the agenda is about the day, not the roadmap."),
+      }),
+    },
+    async (args) => toolResult(await tools.listAgenda(stripUndefined(args) as any)),
+  );
+
+  server.registerTool(
+    "list_life_tasks",
+    {
+      title: "List tasks that belong to no project",
+      description:
+        "Read-only. Open life tasks — errands, obligations, and wants — optionally filtered by commitment or area.",
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: z.object({
+        commitment: z.enum(["must", "want"]).optional(),
+        area: z
+          .enum(["work", "personal", "household", "health", "finance", "social", "errand"])
+          .optional(),
+        limit: z.number().int().min(1).max(200).optional(),
+      }),
+    },
+    async (args) => toolResult(await tools.listLifeTasks(stripUndefined(args) as any)),
   );
 
   server.registerTool(

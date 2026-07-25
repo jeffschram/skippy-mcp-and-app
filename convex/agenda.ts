@@ -27,15 +27,12 @@ async function projectLinkedTaskIds(db: any, brainInstanceId: any): Promise<Set<
   return ids;
 }
 
-export const agendaForViewer = queryGeneric({
-  args: {
-    from: v.number(),
-    to: v.number(),
-    /** Project tasks are excluded by default; the agenda is about the day, not the roadmap. */
-    includeProjectTasks: v.optional(v.boolean()),
-  },
-  handler: async (ctx, args) => {
-    const { brain } = await requireOwnedBrain(ctx);
+async function buildAgendaForBrain(
+  ctx: any,
+  brain: { _id: any },
+  args: { from: number; to: number; includeProjectTasks?: boolean },
+) {
+  {
     const now = Date.now();
 
     const events = await ctx.db
@@ -109,5 +106,29 @@ export const agendaForViewer = queryGeneric({
       args.to,
       now,
     );
+  }
+}
+
+export const agendaForViewer = queryGeneric({
+  args: {
+    from: v.number(),
+    to: v.number(),
+    /** Project tasks are excluded by default; the agenda is about the day, not the roadmap. */
+    includeProjectTasks: v.optional(v.boolean()),
   },
+  handler: async (ctx, args) => {
+    const { brain } = await requireOwnedBrain(ctx);
+    return buildAgendaForBrain(ctx, brain, args);
+  },
+});
+
+/** Brain-scoped entry point for the MCP surface, which authenticates by token. */
+export const agendaForBrain = queryGeneric({
+  args: {
+    brainInstanceId: v.id("brainInstances"),
+    from: v.number(),
+    to: v.number(),
+    includeProjectTasks: v.optional(v.boolean()),
+  },
+  handler: async (ctx, args) => buildAgendaForBrain(ctx, { _id: args.brainInstanceId }, args),
 });

@@ -86,6 +86,12 @@ const generateProjectFileUploadUrlForBrainRef = makeFunctionReference<"mutation"
 const registerProjectFileForBrainRef = makeFunctionReference<"mutation">("projectFiles:registerFileForBrain");
 const listProjectFilesForBrainRef = makeFunctionReference<"query">("projectFiles:listFilesForBrain");
 const listQuickCapturesForBrainRef = makeFunctionReference<"query">("knowledge:listQuickCapturesForBrain");
+// Life layer.
+const upsertRecurrenceRef = makeFunctionReference<"mutation">("recurrences:upsertRecurrence");
+const completeRecurrenceRef = makeFunctionReference<"mutation">("recurrences:completeRecurrence");
+const recurrencesForBrainRef = makeFunctionReference<"query">("recurrences:recurrencesForBrain");
+const agendaForBrainRef = makeFunctionReference<"query">("agenda:agendaForBrain");
+const lifeTasksForBrainRef = makeFunctionReference<"query">("lifeTasks:lifeTasksForBrain");
 const markQuickCaptureHandledForBrainRef = makeFunctionReference<"mutation">(
   "knowledge:markQuickCaptureHandledForBrain",
 );
@@ -211,6 +217,16 @@ export function createConvexSkippyClient(convexUrl: string, authToken?: string):
       client.query(listProjectFilesForBrainRef, { brainInstanceId, ...input }),
     listQuickCaptures: (brainInstanceId, input) =>
       client.query(listQuickCapturesForBrainRef, { brainInstanceId, ...input }),
+    upsertRecurrence: (brainInstanceId, input) =>
+      client.mutation(upsertRecurrenceRef, { brainInstanceId, ...input }),
+    completeRecurrence: (brainInstanceId, input) =>
+      client.mutation(completeRecurrenceRef, { brainInstanceId, ...input }),
+    listRecurrences: (brainInstanceId, input) =>
+      client.query(recurrencesForBrainRef, { brainInstanceId, ...input }),
+    listAgenda: (brainInstanceId, input) =>
+      client.query(agendaForBrainRef, { brainInstanceId, ...input }),
+    listLifeTasks: (brainInstanceId, input) =>
+      client.query(lifeTasksForBrainRef, { brainInstanceId, ...input }),
     markQuickCaptureHandled: (brainInstanceId, input) =>
       client.mutation(markQuickCaptureHandledForBrainRef, { brainInstanceId, ...input }),
   };

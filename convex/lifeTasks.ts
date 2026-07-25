@@ -101,6 +101,43 @@ export const lifeTasksForViewer = queryGeneric({
   },
 });
 
+/** Brain-scoped entry point for the MCP surface, which authenticates by token. */
+export const lifeTasksForBrain = queryGeneric({
+  args: {
+    brainInstanceId: v.id("brainInstances"),
+    commitment: v.optional(taskCommitment),
+    area: v.optional(taskArea),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const tasks = await ctx.db
+      .query("tasks")
+      .withIndex("by_brain_state", (q: any) => q.eq("brainInstanceId", args.brainInstanceId))
+      .filter((q: any) => q.eq(q.field("processingState"), "accepted"))
+      .collect();
+
+    const linked = await projectLinkedTaskIds(ctx.db, args.brainInstanceId);
+
+    return tasks
+      .filter((task: any) => !linked.has(task._id as string))
+      .filter((task: any) => task.status !== "done" && task.status !== "cancelled")
+      .filter((task: any) => !args.commitment || effectiveCommitment(task) === args.commitment)
+      .filter((task: any) => !args.area || task.area === args.area)
+      .slice(0, args.limit ?? 50)
+      .map((task: any) => ({
+        _id: task._id,
+        title: task.title,
+        description: task.description,
+        status: task.status,
+        area: task.area,
+        commitment: effectiveCommitment(task),
+        dueAt: task.dueAt,
+        waitingOn: task.waitingOn,
+        waitingSince: task.waitingSince,
+      }));
+  },
+});
+
 export const createLifeTask = mutationGeneric({
   args: {
     title: v.string(),

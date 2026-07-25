@@ -87,6 +87,14 @@ function createFakeClient(): { client: SkippyClient; calls: Array<{ name: string
       listQuickCaptures: (brainInstanceId, input) => record("listQuickCaptures", brainInstanceId, input),
       markQuickCaptureHandled: (brainInstanceId, input) =>
         record("markQuickCaptureHandled", brainInstanceId, input),
+      upsertRecurrence: (brainInstanceId, input) =>
+        record("upsertRecurrence", brainInstanceId, input),
+      completeRecurrence: (brainInstanceId, input) =>
+        record("completeRecurrence", brainInstanceId, input),
+      listRecurrences: (brainInstanceId, input) =>
+        record("listRecurrences", brainInstanceId, input),
+      listAgenda: (brainInstanceId, input) => record("listAgenda", brainInstanceId, input),
+      listLifeTasks: (brainInstanceId, input) => record("listLifeTasks", brainInstanceId, input),
     },
   };
 }

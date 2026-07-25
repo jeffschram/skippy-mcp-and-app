@@ -29,7 +29,23 @@ import {
   normalizeCandidateObject,
   quickCaptureIntent,
   validateProjectFileInput,
+  type TaskArea,
+  type TaskCommitment,
 } from "@skippy/shared";
+
+/** Args for creating or updating a repeating life obligation. */
+export type UpsertRecurrenceInput = {
+  recurrenceId?: string;
+  title: string;
+  description?: string;
+  area?: TaskArea;
+  rule: { kind: "interval"; everyDays: number } | { kind: "calendar"; rrule: string };
+  anchor: "completion" | "schedule";
+  startAt?: number;
+  leadTimeDays?: number;
+  spawnTask?: boolean;
+  timeZone?: string;
+};
 import webPush from "web-push";
 
 type AiContextRecord = {
@@ -101,6 +117,9 @@ export type SkippyClient = {
       priorityReason?: string;
       projectId?: string;
       createdBy?: string;
+      // Life-layer axes. Optional so existing callers are unaffected.
+      area?: TaskArea;
+      commitment?: TaskCommitment;
     },
   ): Promise<unknown>;
   addSourceRef(brainInstanceId: string, sourceRef: SourceRefInput): Promise<unknown>;
@@ -265,6 +284,20 @@ export type SkippyClient = {
   registerProjectFile(brainInstanceId: string, input: RegisterProjectFileInput & { actorId?: string }): Promise<unknown>;
   listProjectFiles(brainInstanceId: string, input: ListProjectFilesInput): Promise<unknown>;
   listQuickCaptures(brainInstanceId: string, input: ListQuickCapturesInput): Promise<unknown>;
+  upsertRecurrence(brainInstanceId: string, input: UpsertRecurrenceInput): Promise<unknown>;
+  completeRecurrence(
+    brainInstanceId: string,
+    input: { recurrenceId: string; completedAt?: number; note?: string },
+  ): Promise<unknown>;
+  listRecurrences(brainInstanceId: string, input: { dueOnly?: boolean }): Promise<unknown>;
+  listAgenda(
+    brainInstanceId: string,
+    input: { from: number; to: number; includeProjectTasks?: boolean },
+  ): Promise<unknown>;
+  listLifeTasks(
+    brainInstanceId: string,
+    input: { commitment?: "must" | "want"; area?: TaskArea; limit?: number },
+  ): Promise<unknown>;
   markQuickCaptureHandled(
     brainInstanceId: string,
     input: MarkQuickCaptureHandledInput & { processedBy?: string },
@@ -1035,6 +1068,39 @@ export function createSkippyToolHandlers(client: SkippyClient, brainInstanceId: 
         title,
         createdBy: input.createdBy ?? "skippy_mcp",
       });
+    },
+
+    async upsertRecurrence(input: UpsertRecurrenceInput) {
+      const title = input.title.trim();
+      if (!title) {
+        throw new Error("title is required");
+      }
+      return await client.upsertRecurrence(brainInstanceId, { ...input, title });
+    },
+
+    async completeRecurrence(input: {
+      recurrenceId: string;
+      completedAt?: number;
+      note?: string;
+    }) {
+      return await client.completeRecurrence(brainInstanceId, input);
+    },
+
+    async listRecurrences(input: { dueOnly?: boolean } = {}) {
+      return await client.listRecurrences(brainInstanceId, input);
+    },
+
+    async listAgenda(input: { from: number; to: number; includeProjectTasks?: boolean }) {
+      if (input.to < input.from) {
+        throw new Error("`to` cannot precede `from`");
+      }
+      return await client.listAgenda(brainInstanceId, input);
+    },
+
+    async listLifeTasks(
+      input: { commitment?: "must" | "want"; area?: TaskArea; limit?: number } = {},
+    ) {
+      return await client.listLifeTasks(brainInstanceId, input);
     },
 
     async upsertEntity<T extends EntityType>(entityType: T, payload: CandidateObjectInput<T>["candidatePayload"]) {

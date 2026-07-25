@@ -288,6 +288,39 @@ export const recurrencesForViewer = queryGeneric({
   },
 });
 
+/** Brain-scoped entry point for the MCP surface, which authenticates by token. */
+export const recurrencesForBrain = queryGeneric({
+  args: {
+    brainInstanceId: v.id("brainInstances"),
+    dueOnly: v.optional(v.boolean()),
+  },
+  handler: async ({ db }, args) => {
+    const rows = await db
+      .query("recurrences")
+      .withIndex("by_brain_next_due", (q: any) => q.eq("brainInstanceId", args.brainInstanceId))
+      .collect();
+
+    const now = Date.now();
+    return rows
+      .filter((row: any) => row.status !== "retired")
+      .filter((row: any) => (args.dueOnly ? isDueNow(schedulingView(row), now) : true))
+      .map((row: any) => ({
+        _id: row._id,
+        title: row.title,
+        area: row.area,
+        rule: row.rule,
+        anchor: row.anchor,
+        status: row.status,
+        spawnTask: row.spawnTask,
+        lastCompletedAt: row.lastCompletedAt,
+        nextDueAt: row.nextDueAt,
+        surfacesAt: surfacesAt(schedulingView(row)),
+        isDue: isDueNow(schedulingView(row), now),
+      }))
+      .sort((a: any, b: any) => a.nextDueAt - b.nextDueAt);
+  },
+});
+
 /* ------------------------------------------------------------------ */
 /* Viewer-scoped wrappers                                              */
 /*                                                                     */
