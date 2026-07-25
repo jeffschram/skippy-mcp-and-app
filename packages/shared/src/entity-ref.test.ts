@@ -25,6 +25,16 @@ describe("entity references", () => {
     expect(isEntityType(42)).toBe(false);
   });
 
+  // Guard, not a triviality: keeping life-layer primitives out of the entity
+  // union is what stops them flowing through ingestObject/triageItems and the
+  // importance rubric. Calendar mirrors an external system and recurrences are
+  // scheduling state; neither is owner-authored knowledge. Both link outward
+  // via relatedEntityRefs instead. Do not "fix" this by widening the union.
+  it("keeps life-layer primitives out of the rubric path", () => {
+    expect(isEntityType("calendar_event")).toBe(false);
+    expect(isEntityType("recurrence")).toBe(false);
+  });
+
   it("builds a normalized entity ref for valid inputs", () => {
     expect(makeEntityRef("task", "task_123")).toEqual({
       entityType: "task",
