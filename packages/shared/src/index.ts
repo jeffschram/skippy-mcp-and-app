@@ -1,3 +1,7 @@
+// Recurring life obligations. Kept in its own module because the zoned
+// calendar arithmetic is substantial and self-contained.
+export * from "./recurrence";
+
 /* ------------------------------------------------------------------ */
 /* Project folder paths (assets/output)                                */
 /* ------------------------------------------------------------------ */
