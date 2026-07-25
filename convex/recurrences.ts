@@ -270,7 +270,6 @@ export const recurrencesForViewer = queryGeneric({
   args: { includeRetired: v.optional(v.boolean()) },
   handler: async (ctx, args) => {
     const { brain } = await requireOwnedBrain(ctx);
-    if (!brain) return [];
 
     const rows = await ctx.db
       .query("recurrences")
@@ -286,5 +285,169 @@ export const recurrencesForViewer = queryGeneric({
         isDue: isDueNow(schedulingView(row), now),
       }))
       .sort((a: any, b: any) => a.nextDueAt - b.nextDueAt);
+  },
+});
+
+/** Brain-scoped entry point for the MCP surface, which authenticates by token. */
+export const recurrencesForBrain = queryGeneric({
+  args: {
+    brainInstanceId: v.id("brainInstances"),
+    dueOnly: v.optional(v.boolean()),
+  },
+  handler: async ({ db }, args) => {
+    const rows = await db
+      .query("recurrences")
+      .withIndex("by_brain_next_due", (q: any) => q.eq("brainInstanceId", args.brainInstanceId))
+      .collect();
+
+    const now = Date.now();
+    return rows
+      .filter((row: any) => row.status !== "retired")
+      .filter((row: any) => (args.dueOnly ? isDueNow(schedulingView(row), now) : true))
+      .map((row: any) => ({
+        _id: row._id,
+        title: row.title,
+        area: row.area,
+        rule: row.rule,
+        anchor: row.anchor,
+        status: row.status,
+        spawnTask: row.spawnTask,
+        lastCompletedAt: row.lastCompletedAt,
+        nextDueAt: row.nextDueAt,
+        surfacesAt: surfacesAt(schedulingView(row)),
+        isDue: isDueNow(schedulingView(row), now),
+      }))
+      .sort((a: any, b: any) => a.nextDueAt - b.nextDueAt);
+  },
+});
+
+/* ------------------------------------------------------------------ */
+/* Viewer-scoped wrappers                                              */
+/*                                                                     */
+/* The mutations above take an explicit brainInstanceId because the MCP */
+/* surface calls them. The app is authenticated, so these resolve the   */
+/* brain from the session instead of trusting a client-supplied id.     */
+/* ------------------------------------------------------------------ */
+
+export const upsertRecurrenceForViewer = mutationGeneric({
+  args: {
+    recurrenceId: v.optional(v.id("recurrences")),
+    title: v.string(),
+    description: v.optional(v.string()),
+    area: v.optional(taskArea),
+    rule: recurrenceRule,
+    anchor: recurrenceAnchor,
+    startAt: v.optional(v.number()),
+    leadTimeDays: v.optional(v.number()),
+    status: v.optional(recurrenceStatus),
+    spawnTask: v.optional(v.boolean()),
+    timeZone: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const { brain } = await requireOwnedBrain(ctx);
+    const now = Date.now();
+    validateRule(args.rule);
+
+    const title = args.title.trim();
+    if (!title) {
+      throw new Error("title is required");
+    }
+
+    const timeZone = args.timeZone ?? DEFAULT_RECURRENCE_TIME_ZONE;
+    const existing = args.recurrenceId ? await ctx.db.get(args.recurrenceId) : null;
+    if (args.recurrenceId && (!existing || existing.brainInstanceId !== brain._id)) {
+      throw new Error("recurrence not found for brain instance");
+    }
+
+    const seed = args.startAt ?? existing?.nextDueAt ?? now;
+    const nextDueAt =
+      args.rule.kind === "calendar"
+        ? nextCalendarOccurrence(args.rule.rrule, seed - 1, timeZone, seed)
+        : seed;
+
+    if (existing) {
+      await ctx.db.patch(existing._id, {
+        title,
+        description: args.description,
+        area: args.area,
+        rule: args.rule,
+        anchor: args.anchor,
+        nextDueAt,
+        leadTimeDays: args.leadTimeDays,
+        status: args.status ?? existing.status,
+        spawnTask: args.spawnTask ?? existing.spawnTask,
+        timeZone,
+        updatedAt: now,
+      });
+      return { status: "updated", recurrenceId: existing._id, nextDueAt };
+    }
+
+    const recurrenceId = await ctx.db.insert("recurrences", {
+      brainInstanceId: brain._id,
+      title,
+      description: args.description,
+      area: args.area,
+      rule: args.rule,
+      anchor: args.anchor,
+      nextDueAt,
+      leadTimeDays: args.leadTimeDays,
+      status: args.status ?? "active",
+      spawnTask: args.spawnTask ?? true,
+      timeZone,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    return { status: "created", recurrenceId, nextDueAt };
+  },
+});
+
+export const completeRecurrenceForViewer = mutationGeneric({
+  args: {
+    recurrenceId: v.id("recurrences"),
+    completedAt: v.optional(v.number()),
+    note: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const { brain } = await requireOwnedBrain(ctx);
+    const now = Date.now();
+    const recurrence = await ctx.db.get(args.recurrenceId);
+    if (!recurrence || recurrence.brainInstanceId !== brain._id) {
+      throw new Error("recurrence not found for brain instance");
+    }
+
+    const completedAt = args.completedAt ?? now;
+    const nextDueAt = computeNextDue(schedulingView(recurrence), completedAt, now);
+
+    if (recurrence.currentTaskId) {
+      const task = await ctx.db.get(recurrence.currentTaskId);
+      if (task && task.status !== "done" && task.status !== "cancelled") {
+        await ctx.db.patch(task._id, { status: "done", completedAt, updatedAt: now });
+      }
+    }
+
+    await ctx.db.patch(recurrence._id, {
+      lastCompletedAt: completedAt,
+      nextDueAt,
+      currentTaskId: undefined,
+      history: appendCompletion(recurrence.history, { completedAt, note: args.note }),
+      updatedAt: now,
+    });
+
+    return { recurrenceId: recurrence._id, completedAt, nextDueAt };
+  },
+});
+
+export const setRecurrenceStatusForViewer = mutationGeneric({
+  args: { recurrenceId: v.id("recurrences"), status: recurrenceStatus },
+  handler: async (ctx, args) => {
+    const { brain } = await requireOwnedBrain(ctx);
+    const recurrence = await ctx.db.get(args.recurrenceId);
+    if (!recurrence || recurrence.brainInstanceId !== brain._id) {
+      throw new Error("recurrence not found for brain instance");
+    }
+
+    await ctx.db.patch(recurrence._id, { status: args.status, updatedAt: Date.now() });
+    return { recurrenceId: recurrence._id, status: args.status };
   },
 });

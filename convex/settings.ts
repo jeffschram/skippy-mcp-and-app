@@ -332,6 +332,24 @@ async function composeEffectiveRubric(db: any, brainInstanceId: any) {
     );
   }
 
+  // Routing policy for the life layer. Composed here rather than hardcoded in
+  // the capture processor so it stays part of the rubric the owner can see and
+  // the same text reaches every harness.
+  //
+  // The distinction that matters most is the last one: something with a time
+  // and a place belongs on the calendar, something with a deadline belongs on
+  // a task. Conflating them fills the agenda with noise.
+  sections.push(
+    [
+      "Life-layer routing (where non-project captures belong):",
+      "- An errand or obligation with no project -> task with `commitment: \"must\"` and a fitting `area` (e.g. \"pick up the dry cleaning\" -> area \"errand\").",
+      "- Something the owner would simply enjoy -> task with `commitment: \"want\"`, NOT a link and NOT a note. \"Try that ramen place on Burnside\" is a want, not reference material. Wants never carry due dates.",
+      "- Anything that comes around again -> `upsert_recurrence`, never a dated task. Use anchor \"completion\" when the cadence restarts from when it is finished (\"change the furnace filter every 3 months\" -> interval, everyDays 90) and anchor \"schedule\" for fixed calendar dates (\"rent is due the 1st\" -> FREQ=MONTHLY;BYMONTHDAY=1). Completing a plain task would destroy the record of when it was last done.",
+      "- Something the owner is blocked on from a person -> task in status \"waiting\" with `waitingOn` set to that person. It clears itself when they reply; do not ask the owner to groom it.",
+      "- Something with a specific time and place -> a calendar event, NOT a task. \"Dentist appointment Tuesday at 2\" is an event. A deadline with no appointment (\"registration due Friday\") is a task with a dueAt.",
+    ].join("\n"),
+  );
+
   const renderedText = sections.filter(Boolean).join("\n\n");
 
   return { manualRubric, goals, activeProjects, favoriteContacts, renderedText };

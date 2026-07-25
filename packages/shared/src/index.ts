@@ -7,6 +7,12 @@ export * from "./recurrence";
 // isolation from the generic entity-ingestion helpers below.
 export * from "./calendar";
 
+// Agenda: merges events, due tasks, and firing recurrences into one timeline.
+export * from "./agenda";
+
+// Waiting-on ledger: identity matching so replies clear entries automatically.
+export * from "./waiting";
+
 /* ------------------------------------------------------------------ */
 /* Project folder paths (assets/output)                                */
 /* ------------------------------------------------------------------ */

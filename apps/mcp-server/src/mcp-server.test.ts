@@ -275,6 +275,18 @@ function createFakeClient(overrides: Partial<SkippyClient> = {}): SkippyClient {
       captureId: input.captureId,
       status: input.outcome,
     }),
+    upsertRecurrence: async (_brainInstanceId, input) => ({
+      status: "created",
+      recurrenceId: "rec_1",
+      title: input.title,
+    }),
+    completeRecurrence: async (_brainInstanceId, input) => ({
+      recurrenceId: input.recurrenceId,
+      completedAt: input.completedAt ?? 0,
+    }),
+    listRecurrences: async () => [],
+    listAgenda: async () => [],
+    listLifeTasks: async () => [],
   };
 
   return { ...client, ...overrides };
@@ -1774,6 +1786,156 @@ describe("Skippy MCP manifest", () => {
         current: { netCents: 300000 },
         reviewUrl: "http://127.0.0.1:3000/finances",
       });
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+});
+
+describe("life-layer tools", () => {
+  async function withClient(fake: SkippyClient, run: (client: Client) => Promise<void>) {
+    const server = createMcpServer(fake, "brain_123");
+    const client = new Client({ name: "life-test", version: "0.1.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    try {
+      await server.connect(serverTransport);
+      await client.connect(clientTransport);
+      await run(client);
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  }
+
+  it("registers the life-layer tools", async () => {
+    await withClient(createFakeClient(), async (client) => {
+      const { tools } = await client.listTools();
+      const names = tools.map((tool) => tool.name);
+
+      expect(names).toContain("upsert_recurrence");
+      expect(names).toContain("complete_recurrence");
+      expect(names).toContain("list_recurrences");
+      expect(names).toContain("list_agenda");
+      expect(names).toContain("list_life_tasks");
+    });
+  });
+
+  it("marks the life-layer reads as read-only", async () => {
+    await withClient(createFakeClient(), async (client) => {
+      const { tools } = await client.listTools();
+
+      for (const name of ["list_recurrences", "list_agenda", "list_life_tasks"]) {
+        expect(tools.find((tool) => tool.name === name)?.annotations?.readOnlyHint).toBe(true);
+      }
+      expect(
+        tools.find((tool) => tool.name === "upsert_recurrence")?.annotations?.readOnlyHint,
+      ).toBeUndefined();
+    });
+  });
+
+  // The anchor is the field most likely to be set wrong, so its description has
+  // to explain the behavior rather than just name the options.
+  it("explains the anchor distinction in the tool description", async () => {
+    await withClient(createFakeClient(), async (client) => {
+      const { tools } = await client.listTools();
+      const description = tools.find((tool) => tool.name === "upsert_recurrence")?.description ?? "";
+
+      expect(description).toContain("completion");
+      expect(description).toContain("schedule");
+      expect(description).toMatch(/actually finished|shifts with you/);
+    });
+  });
+
+  it("extends create_task with the life axes without breaking existing callers", async () => {
+    const calls: any[] = [];
+    const fake = createFakeClient({
+      createTaskDirect: async (_brainInstanceId, input) => {
+        calls.push(input);
+        return { status: "created", entityType: "task", entityId: "task_1", title: input.title };
+      },
+    });
+
+    await withClient(fake, async (client) => {
+      await client.callTool({ name: "create_task", arguments: { title: "Legacy caller" } });
+      await client.callTool({
+        name: "create_task",
+        arguments: { title: "Try the ramen place", commitment: "want", area: "personal" },
+      });
+    });
+
+    // A caller that passes nothing new must behave exactly as before.
+    expect(calls[0]).toMatchObject({ title: "Legacy caller" });
+    expect(calls[0].commitment).toBeUndefined();
+    expect(calls[0].area).toBeUndefined();
+    expect(calls[1]).toMatchObject({ commitment: "want", area: "personal" });
+  });
+
+  it("round-trips a recurrence upsert and completion", async () => {
+    const calls: Array<{ name: string; input: any }> = [];
+    const fake = createFakeClient({
+      upsertRecurrence: async (_brainInstanceId, input) => {
+        calls.push({ name: "upsert", input });
+        return { status: "created", recurrenceId: "rec_1" };
+      },
+      completeRecurrence: async (_brainInstanceId, input) => {
+        calls.push({ name: "complete", input });
+        return { recurrenceId: input.recurrenceId, nextDueAt: 123 };
+      },
+    });
+
+    await withClient(fake, async (client) => {
+      await client.callTool({
+        name: "upsert_recurrence",
+        arguments: {
+          title: "Change the furnace filter",
+          rule: { kind: "interval", everyDays: 90 },
+          anchor: "completion",
+        },
+      });
+      await client.callTool({
+        name: "complete_recurrence",
+        arguments: { recurrenceId: "rec_1", completedAt: 1000 },
+      });
+    });
+
+    expect(calls[0]?.input).toMatchObject({
+      title: "Change the furnace filter",
+      anchor: "completion",
+      rule: { kind: "interval", everyDays: 90 },
+    });
+    expect(calls[1]?.input).toMatchObject({ recurrenceId: "rec_1", completedAt: 1000 });
+  });
+
+  it("passes an agenda range through", async () => {
+    let received: any;
+    const fake = createFakeClient({
+      listAgenda: async (_brainInstanceId, input) => {
+        received = input;
+        return [];
+      },
+    });
+
+    await withClient(fake, async (client) => {
+      await client.callTool({ name: "list_agenda", arguments: { from: 1000, to: 2000 } });
+    });
+
+    expect(received).toMatchObject({ from: 1000, to: 2000 });
+  });
+
+  it("advertises the life-layer tools in its instructions", async () => {
+    const server = createMcpServer(createFakeClient(), "brain_123");
+    const client = new Client({ name: "life-manifest", version: "0.1.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    try {
+      await server.connect(serverTransport);
+      await client.connect(clientTransport);
+
+      const instructions = client.getInstructions() ?? "";
+      expect(instructions).toContain("upsert_recurrence");
+      expect(instructions).toContain("list_agenda");
     } finally {
       await client.close();
       await server.close();

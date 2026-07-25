@@ -28,6 +28,7 @@ import { formatRelative } from "../../lib/display";
 import { focusItemKey, parseFocusSummary } from "../focus-summary";
 import { LiveGate } from "../live-auth";
 import { Badge, Button, Card, EmptyState, IconButton, InlineMarkdown, LoadingRow, Section, TextArea, useToast } from "../components";
+import { AgendaSection } from "./agenda";
 import { useViewerReady } from "./use-viewer";
 import { formatFileSize } from "./project-library-helpers";
 import { QUICK_CAPTURE_INTENT_STORAGE_KEY, checkQuickCaptureFile, parseStoredIntent } from "./quick-capture-helpers";
@@ -59,7 +60,7 @@ function captureEntityHref(entityType: string, entityId: string): string | undef
     case "project":
       return `/projects/${id}`;
     case "task":
-      return `/tasks`;
+      return `/tasks#task-${id}`;
     case "link":
       return `/brain/links#link-${id}`;
     case "note":
@@ -71,6 +72,15 @@ function captureEntityHref(entityType: string, entityId: string): string | undef
       return `/brain/contacts`;
     case "knowledgeObject":
       return `/brain/memory`;
+    // Life-layer primitives. These are NOT entityType members — keeping
+    // calendar events and recurrences out of that union is what stops them
+    // flowing through triage — so they arrive as plain strings and are matched
+    // here rather than widening the union just to get a link.
+    case "recurrence":
+      return `/tasks#recurrence-${id}`;
+    case "calendarEvent":
+    case "calendar_event":
+      return `/`;
     default:
       return undefined;
   }
@@ -760,6 +770,10 @@ export function TodayContent() {
           {/* Right rail */}
           <div className={todayStyles.rail}>
             <QuickCaptureBox captures={data?.quickCaptures} />
+
+            {/* Calendar events, due tasks, and firing recurrences merged into
+                one list — the answer to "what does my day look like". */}
+            <AgendaSection />
 
             <Section
               title={
