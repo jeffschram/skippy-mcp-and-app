@@ -2,6 +2,11 @@
 // calendar arithmetic is substantial and self-contained.
 export * from "./recurrence";
 
+// Google Calendar mirror: identity, normalization, and echo-safe merge rules.
+// Its own module because the merge semantics are subtle enough to deserve
+// isolation from the generic entity-ingestion helpers below.
+export * from "./calendar";
+
 /* ------------------------------------------------------------------ */
 /* Project folder paths (assets/output)                                */
 /* ------------------------------------------------------------------ */
