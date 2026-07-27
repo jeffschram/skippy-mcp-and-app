@@ -417,6 +417,114 @@ export function taskDuplicateScopeMatches(
   return (candidateProjectId ?? null) === (incomingProjectId ?? null);
 }
 
+/**
+ * Strips a task title down to comparable words: lowercased, punctuation
+ * removed, and the filler verbs that captures habitually pick up ("review",
+ * "track", "decide whether to…") dropped so they cannot inflate similarity.
+ */
+export function normalizedTaskMatchText(value: string | undefined): string {
+  return (value ?? "")
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/\b(incoming|the|a|an|to|and|or|whether|keep|decide|review|track|incoming)\b/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function numericTokens(normalized: string): Set<string> {
+  return new Set(normalized.split(" ").filter((word) => /^\d+$/.test(word)));
+}
+
+function isSubsetOf(smaller: Set<string>, larger: Set<string>): boolean {
+  for (const value of smaller) {
+    if (!larger.has(value)) return false;
+  }
+  return true;
+}
+
+/**
+ * Whether two task titles describe the same work.
+ *
+ * Numbers are treated as identifiers, not as ordinary words. Word overlap alone
+ * cannot tell "PR #13 nav links" from "PR #11 deploy fix" — the shared words
+ * outvote the one token that actually distinguishes them — and string
+ * containment cannot tell "invoice 100" from "invoice 1000". So when both
+ * titles carry numbers and neither set of numbers contains the other, they are
+ * held to be different work regardless of how much prose they share.
+ *
+ * The asymmetry is deliberate: merging two distinct tasks destroys one of them,
+ * while failing to merge leaves a visible duplicate the owner can resolve. Bias
+ * toward the recoverable failure.
+ */
+export function taskTitleLooksDuplicate(left: string, right: string): boolean {
+  const normalizedLeft = normalizedTaskMatchText(left);
+  const normalizedRight = normalizedTaskMatchText(right);
+  if (!normalizedLeft || !normalizedRight) {
+    return false;
+  }
+
+  // Checked before containment: "invoice 100" is a substring of "invoice 1000".
+  const leftNumbers = numericTokens(normalizedLeft);
+  const rightNumbers = numericTokens(normalizedRight);
+  if (
+    leftNumbers.size > 0 &&
+    rightNumbers.size > 0 &&
+    !isSubsetOf(leftNumbers, rightNumbers) &&
+    !isSubsetOf(rightNumbers, leftNumbers)
+  ) {
+    return false;
+  }
+
+  if (normalizedLeft.includes(normalizedRight) || normalizedRight.includes(normalizedLeft)) {
+    return true;
+  }
+
+  const leftWords = new Set(normalizedLeft.split(" "));
+  const rightWords = new Set(normalizedRight.split(" "));
+  let overlap = 0;
+  for (const word of leftWords) {
+    if (rightWords.has(word)) {
+      overlap += 1;
+    }
+  }
+  return (
+    overlap / Math.max(leftWords.size, rightWords.size) >= 0.55 ||
+    overlap / Math.min(leftWords.size, rightWords.size) >= 0.75
+  );
+}
+
+export type DuplicateTaskCandidate = {
+  _id: string;
+  title: string;
+  _creationTime?: number | undefined;
+};
+
+/**
+ * Picks the task an incoming one should merge into, or null.
+ *
+ * Callers pass the full set of open candidates. This deliberately takes no
+ * limit: the bug this replaced capped the candidate scan, and because the
+ * underlying index is ordered oldest-first, every task created past the cap
+ * stopped being compared against anything at all. Newly captured items are
+ * exactly the ones most likely to duplicate each other, so the check failed
+ * precisely where it was needed. Position in the candidate list must never
+ * decide whether a duplicate is found.
+ */
+export function selectTaskDuplicate(
+  candidates: DuplicateTaskCandidate[],
+  incoming: { title: string; projectId?: string | null | undefined },
+  projectIdByTaskId: Map<string, string> = new Map(),
+): DuplicateTaskCandidate | null {
+  return (
+    candidates.find(
+      (candidate) =>
+        taskDuplicateScopeMatches(projectIdByTaskId.get(candidate._id), incoming.projectId) &&
+        taskTitleLooksDuplicate(incoming.title, candidate.title),
+    ) ?? null
+  );
+}
+
 export const LINK_STATUSES = ["unread", "read", "saved", "discarded"] as const;
 export type LinkStatus = (typeof LINK_STATUSES)[number];
 

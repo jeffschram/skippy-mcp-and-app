@@ -14,7 +14,8 @@ import {
   matchDismissedFocusItem,
   normalizeAcceptedEntityPayload,
   quickCaptureIntent,
-  taskDuplicateScopeMatches,
+  selectTaskDuplicate,
+  taskTitleLooksDuplicate,
 } from "@skippy/shared";
 import { requireOwnedBrain } from "./auth";
 import { advanceDependentsAfterDone } from "./taskExecution";
@@ -151,36 +152,9 @@ function statusAllowedForEntity(entityTypeName: keyof typeof entityTableByType, 
   }
 }
 
-function normalizedTaskMatchText(value: string | undefined) {
-  return (value ?? "")
-    .toLowerCase()
-    .replace(/&/g, " and ")
-    .replace(/\b(incoming|the|a|an|to|and|or|whether|keep|decide|review|track|incoming)\b/g, " ")
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim()
-    .replace(/\s+/g, " ");
-}
-
-function taskTitleLooksDuplicate(left: string, right: string) {
-  const normalizedLeft = normalizedTaskMatchText(left);
-  const normalizedRight = normalizedTaskMatchText(right);
-  if (!normalizedLeft || !normalizedRight) {
-    return false;
-  }
-  if (normalizedLeft.includes(normalizedRight) || normalizedRight.includes(normalizedLeft)) {
-    return true;
-  }
-
-  const leftWords = new Set(normalizedLeft.split(" "));
-  const rightWords = new Set(normalizedRight.split(" "));
-  let overlap = 0;
-  for (const word of leftWords) {
-    if (rightWords.has(word)) {
-      overlap += 1;
-    }
-  }
-  return overlap / Math.max(leftWords.size, rightWords.size) >= 0.55 || overlap / Math.min(leftWords.size, rightWords.size) >= 0.75;
-}
+// normalizedTaskMatchText / taskTitleLooksDuplicate now live in @skippy/shared
+// (imported above) so the matching rules are unit-testable — convex/ has no
+// test runner, and these are pure.
 
 function normalizedContactText(value: string | undefined) {
   return (value ?? "")
@@ -269,6 +243,48 @@ async function taskProjectIdByTaskId(db: any, brainInstanceId: any): Promise<Map
   return byTaskId;
 }
 
+/**
+ * Statuses a task can be in and still absorb a duplicate. Done and cancelled
+ * tasks are never merge targets — re-raising finished work is how a completed
+ * obligation silently comes back.
+ */
+const OPEN_TASK_STATUSES = ["todo", "in_progress", "waiting"] as const;
+
+/**
+ * Every open accepted task, queried through `by_brain_status`.
+ *
+ * Deliberately NOT `by_brain_state` + `.take(N)`. That index is ordered
+ * (brainInstanceId, processingState, _creationTime), so a bounded take returns
+ * the *oldest* accepted tasks — and once a brain accumulates more than the cap,
+ * newly created tasks fall outside the window entirely and stop being compared
+ * against anything. Freshly captured items are exactly the ones most likely to
+ * duplicate each other, so the check silently stopped working precisely where
+ * it mattered. (Observed live: three near-identical tasks ranked 316/321/328 of
+ * 333, all past a 300 cap, none visible to the others.)
+ *
+ * Uncapped on purpose: the candidate set is bounded by *open* work rather than
+ * by total history, so it stays flat as the archive grows — closed tasks were
+ * being fetched only to be discarded by the predicate below.
+ */
+async function openAcceptedTasks(db: any, brainInstanceId: any): Promise<any[]> {
+  const tasks: any[] = [];
+
+  for (const status of OPEN_TASK_STATUSES) {
+    const rows = await db
+      .query("tasks")
+      .withIndex("by_brain_status", (q: any) =>
+        q.eq("brainInstanceId", brainInstanceId).eq("status", status),
+      )
+      .filter((q: any) => q.eq(q.field("processingState"), "accepted"))
+      .collect();
+    tasks.push(...rows);
+  }
+
+  // Newest first: when several open tasks match, merging into the most recent
+  // keeps the freshest context rather than resurrecting a stale row.
+  return tasks.sort((a, b) => (b._creationTime ?? 0) - (a._creationTime ?? 0));
+}
+
 async function findAcceptedEntityDuplicate(
   db: any,
   brainInstanceId: any,
@@ -282,26 +298,28 @@ async function findAcceptedEntityDuplicate(
     return null;
   }
 
+  if (entityTypeName === "task") {
+    // Title similarity alone would merge a life task into an identically named
+    // project task. Only tasks sitting in the same place may merge.
+    const projectIdByTaskId = await taskProjectIdByTaskId(db, brainInstanceId);
+    const candidates = await openAcceptedTasks(db, brainInstanceId);
+
+    return selectTaskDuplicate(
+      candidates,
+      { title: payload.title, projectId: incomingProjectId },
+      projectIdByTaskId,
+    );
+  }
+
+  // people/companies stay on the bounded scan: both tables are small (tens of
+  // rows), and neither is fed by the high-volume capture pipeline that pushed
+  // tasks past the cap. Revisit if either approaches this bound.
   const tableName = entityTableByType[entityTypeName];
   const acceptedEntities = await db
     .query(tableName)
     .withIndex("by_brain_state", (q: any) => q.eq("brainInstanceId", brainInstanceId))
     .filter((q: any) => q.eq(q.field("processingState"), "accepted"))
     .take(300);
-
-  if (entityTypeName === "task") {
-    // Title similarity alone would merge a life task into an identically named
-    // project task. Only tasks sitting in the same place may merge.
-    const projectIdByTaskId = await taskProjectIdByTaskId(db, brainInstanceId);
-
-    return acceptedEntities.find(
-      (task: any) =>
-        task.status !== "done" &&
-        task.status !== "cancelled" &&
-        taskDuplicateScopeMatches(projectIdByTaskId.get(task._id as string), incomingProjectId) &&
-        taskTitleLooksDuplicate(payload.title, task.title),
-    ) ?? null;
-  }
 
   if (entityTypeName === "person") {
     return acceptedEntities.find((person: any) => personLooksDuplicate(payload, person)) ?? null;
