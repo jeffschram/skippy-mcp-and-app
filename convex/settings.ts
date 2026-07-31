@@ -350,6 +350,19 @@ async function composeEffectiveRubric(db: any, brainInstanceId: any) {
     ].join("\n"),
   );
 
+  // Guidance aimed squarely at two real failures: monthly bills arriving as a
+  // brand-new task on every ingestion run, and due dates landing a year in the
+  // past. Both traced to RECURRING calendar events being read as one-off items.
+  sections.push(
+    [
+      "Recurring sources (read this before turning a calendar event or bill reminder into a task):",
+      "- A repeating calendar event is ONE obligation, not a new task per run. \"Mortgage Due\" and \"Optimum bill $84\" repeat monthly; each ingestion run must not create another task for them. Record the obligation once with `upsert_recurrence` (anchor \"schedule\", e.g. FREQ=MONTHLY;BYMONTHDAY=1) and let Skippy materialize the task when it comes due.",
+      "- ALWAYS use the NEXT occurrence, never the series' first. A recurring Google Calendar event reports the start of the series it was created from, so a bill set up last year still says last year — that is where past-dated tasks come from. Expand instances (singleEvents=true) or compute the next occurrence yourself before setting any date.",
+      "- Sanity-check every date before sending it: a due date in the past on something newly captured is almost always a wrong-year error. Skippy repairs whole-year mistakes automatically, but do not rely on that — send the correct date.",
+      "- Before creating a task from a recurring source, check whether an open task for the same obligation already exists and update it instead of adding another.",
+    ].join("\n"),
+  );
+
   const renderedText = sections.filter(Boolean).join("\n\n");
 
   return { manualRubric, goals, activeProjects, favoriteContacts, renderedText };

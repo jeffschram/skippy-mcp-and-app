@@ -494,6 +494,67 @@ export function taskTitleLooksDuplicate(left: string, right: string): boolean {
   );
 }
 
+/**
+ * How far in the past a freshly captured due date may sit before it is treated
+ * as a wrong-year error rather than genuinely overdue.
+ *
+ * Six months is deliberately generous: real overdue work is days or weeks old,
+ * never half a year, so nothing legitimately late is touched.
+ */
+export const STALE_DUE_DATE_THRESHOLD_DAYS = 180;
+
+/**
+ * Repairs due dates that land a whole number of years in the past.
+ *
+ * Harnesses reading external sources routinely emit last year's date: recurring
+ * Google Calendar events report the *series' first occurrence* rather than the
+ * next one (a monthly bill created in 2025 still says 2025), and email dates get
+ * mis-yeared the same way. Observed live across both calendar and gmail — every
+ * bad case was off by exactly one year, and every one was corrected by rolling
+ * forward whole years.
+ *
+ * Only fires when the date is more than STALE_DUE_DATE_THRESHOLD_DAYS in the
+ * past, so a genuinely overdue task keeps its real date and keeps showing as
+ * overdue. Rolls whole years only, preserving month and day — a "due the 1st"
+ * obligation stays on the 1st. Feb 29 clamps to Feb 28 rather than sliding into
+ * March.
+ *
+ * Returns the input unchanged when it is absent, not a finite number, or
+ * plausibly current.
+ */
+export function repairStaleDueDate(dueAt: number | undefined, now: number): number | undefined {
+  if (typeof dueAt !== "number" || !Number.isFinite(dueAt)) return dueAt;
+
+  const staleBefore = now - STALE_DUE_DATE_THRESHOLD_DAYS * 86_400_000;
+  if (dueAt >= staleBefore) return dueAt;
+
+  const source = new Date(dueAt);
+  const month = source.getUTCMonth();
+  const day = source.getUTCDate();
+  const isLeapDay = month === 1 && day === 29;
+
+  // Advance year by year until the date is no longer stale, so a date two years
+  // back lands on this year rather than still in the past.
+  for (let addedYears = 1; addedYears <= 25; addedYears += 1) {
+    const year = source.getUTCFullYear() + addedYears;
+    // Feb 29 in a non-leap year would roll into March; pin it to Feb 28.
+    const safeDay = isLeapDay && new Date(Date.UTC(year, 1, 29)).getUTCDate() !== 29 ? 28 : day;
+    const candidate = Date.UTC(
+      year,
+      month,
+      safeDay,
+      source.getUTCHours(),
+      source.getUTCMinutes(),
+      source.getUTCSeconds(),
+      source.getUTCMilliseconds(),
+    );
+    if (candidate >= staleBefore) return candidate;
+  }
+
+  // Implausibly old (decades). Leave it alone rather than inventing a date.
+  return dueAt;
+}
+
 export type DuplicateTaskCandidate = {
   _id: string;
   title: string;
@@ -1070,6 +1131,8 @@ function stripUndefinedValues<T extends Record<string, unknown>>(payload: T): T 
 export function normalizeAcceptedEntityPayload<T extends EntityType>(
   entityType: T,
   rawPayload: unknown,
+  // Injectable so due-date repair is deterministic in tests.
+  now: number = Date.now(),
 ): EntityInputMap[T] {
   const payload = asRecord(rawPayload);
 
@@ -1102,7 +1165,12 @@ export function normalizeAcceptedEntityPayload<T extends EntityType>(
           oneOfValue(TASK_OWNER_TYPES, payload.taskOwner) ??
           oneOfValue(TASK_OWNER_TYPES, payload.assignedTo) ??
           oneOfValue(TASK_OWNER_TYPES, payload.assignee),
-        dueAt: timestampValue(payload.dueAt, payload.dueDate, payload.due, payload.start),
+        // Harnesses routinely emit last year's date for recurring calendar
+        // events and mis-yeared email dates; see repairStaleDueDate.
+        dueAt: repairStaleDueDate(
+          timestampValue(payload.dueAt, payload.dueDate, payload.due, payload.start),
+          now,
+        ),
         completedAt: timestampValue(payload.completedAt),
         area: oneOfValue(TASK_AREAS, payload.area) ?? oneOfValue(TASK_AREAS, payload.lifeArea),
         commitment: oneOfValue(TASK_COMMITMENTS, payload.commitment),
