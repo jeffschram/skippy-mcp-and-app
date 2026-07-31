@@ -7,8 +7,8 @@ export default function TasksPage() {
   return (
     <AppShell>
       <PageHeader
-        title="Tasks"
-        description="Everything that isn't a project: obligations, errands, and things you'd like to get to."
+        title="Agenda"
+        description="Everything that isn't a project — tasks, events, and repeating obligations in one list."
       />
       {isLiveConfigured() ? <LifeTasksPage /> : <NotConfigured />}
     </AppShell>

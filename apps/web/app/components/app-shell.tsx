@@ -5,10 +5,10 @@ import { usePathname } from "next/navigation";
 import { useConvexAuth, useQuery } from "convex/react";
 import {
   Brain,
+  CalendarDays,
   FolderKanban,
   House,
   Inbox,
-  ListTodo,
   ScrollText,
   Settings,
   Wallet,
@@ -35,13 +35,17 @@ type Hub = {
 
 export const primaryHubs: Hub[] = [
   { href: "/", label: "Home", icon: House, match: (p) => p === "/" },
-  // Second slot deliberately: day-to-day task checking is the most frequent
-  // reason to open the app. The mobile nav scrolls and the desktop nav is a
-  // vertical sidebar, so a fifth primary hub costs no layout.
+  // Second slot deliberately: checking the day is the most frequent reason to
+  // open the app. The mobile nav scrolls and the desktop nav is a vertical
+  // sidebar, so a fifth primary hub costs no layout.
+  //
+  // The route stays /tasks on purpose. "Actions taken" deep-links use
+  // /tasks#task-<id>, and a server-side redirect would drop the hash — it is
+  // never sent to the server — silently breaking every one of those links.
   {
     href: "/tasks",
-    label: "Tasks",
-    icon: ListTodo,
+    label: "Agenda",
+    icon: CalendarDays,
     match: (p) => p.startsWith("/tasks"),
   },
   {
