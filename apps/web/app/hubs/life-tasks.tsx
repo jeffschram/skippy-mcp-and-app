@@ -2,7 +2,7 @@
 
 import { useMemo, useState, type FormEvent } from "react";
 import { useMutation, useQuery } from "convex/react";
-import { BellRing, Check, Clock, Hourglass, ListTodo, Sparkles } from "lucide-react";
+import { BellRing, CalendarDays, Check, Inbox, MapPin, PauseCircle } from "lucide-react";
 import { TASK_AREAS } from "@skippy/shared";
 import { api } from "../../lib/skippy-api";
 import { formatRelative } from "../../lib/display";
@@ -10,148 +10,171 @@ import { LiveGate } from "../live-auth";
 import {
   Badge,
   Button,
+  Checkbox,
   EmptyState,
   IconButton,
   LoadingRow,
   Section,
   Select,
-  Tabs,
   TextInput,
   useToast,
 } from "../components";
-import { RecurrencesContent } from "./recurrences";
 import { useViewerReady } from "./use-viewer";
+import { areaLabel } from "./life-tasks-helpers";
+import type { LifeTask } from "./life-tasks-helpers";
 import {
-  areaLabel,
-  areasPresent,
-  bucketLifeTasks,
-  filterByArea,
-  isOverdue,
-  waitingDays,
-  type LifeTask,
-} from "./life-tasks-helpers";
+  agendaAreas,
+  buildAgendaRows,
+  filterAgendaRows,
+  type AgendaRow,
+  type CalendarEventRow,
+  type RecurrenceRowInput,
+} from "./agenda-rows";
+import { CADENCE_PRESETS, type CadencePresetKey } from "./recurrences-helpers";
 import styles from "./life-tasks.module.css";
 
 /* ------------------------------------------------------------------ */
-/* The life-task surface: obligations and wants that belong to no        */
-/* project. Three lanes plus a waiting list — see life-tasks-helpers.ts  */
-/* for why wants are kept apart from obligations.                       */
+/* Agenda: one table for everything the owner is on the hook for —      */
+/* tasks, calendar events, and repeating obligations. Type is carried   */
+/* by a badge rather than by which section a row lives in, so there is  */
+/* one place to look instead of four.                                   */
 /* ------------------------------------------------------------------ */
 
-function TaskRow({
-  task,
+const DAY_MS = 86_400_000;
+const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+function dateLabel(row: AgendaRow): string | undefined {
+  if (typeof row.at !== "number") return undefined;
+  // All-day events are stored at UTC midnight and belong to that calendar
+  // date, so they are rendered in UTC rather than shifted into local time.
+  if (row.isAllDay) {
+    return new Intl.DateTimeFormat("en-US", {
+      timeZone: "UTC",
+      month: "short",
+      day: "numeric",
+    }).format(new Date(row.at));
+  }
+  return formatRelative(row.at);
+}
+
+function waitingDayCount(row: AgendaRow, now: number): number | undefined {
+  const since = row.lastNudgedAt ?? row.waitingSince;
+  if (typeof since !== "number") return undefined;
+  return Math.max(0, Math.floor((now - since) / DAY_MS));
+}
+
+function AgendaRowView({
+  row,
   now,
   onComplete,
   onNudge,
+  onPause,
 }: {
-  task: LifeTask;
+  row: AgendaRow;
   now: number;
-  onComplete: (task: LifeTask) => void;
-  onNudge?: ((task: LifeTask) => void) | undefined;
+  onComplete: (row: AgendaRow) => void;
+  onNudge: (row: AgendaRow) => void;
+  onPause: (row: AgendaRow) => void;
 }) {
-  const overdue = isOverdue(task, now);
-  const waited = waitingDays(task, now);
+  const waited = row.isWaiting ? waitingDayCount(row, now) : undefined;
+  const when = dateLabel(row);
 
   return (
-    <div className={styles.row} id={`task-${task._id}`}>
-      <button
-        type="button"
-        className={styles.check}
-        onClick={() => onComplete(task)}
-        aria-label={`Complete ${task.title}`}
-        title="Complete"
-      >
-        <Check size={14} />
-      </button>
+    <div className={styles.row} id={`${row.kind}-${row.id}`}>
+      {/* Events are attended, not completed, so they get no check control —
+          a checkbox that does nothing is worse than no checkbox. */}
+      {row.kind === "event" ? (
+        <span className={styles.eventMarker} aria-hidden>
+          <CalendarDays size={15} />
+        </span>
+      ) : (
+        <button
+          type="button"
+          className={styles.check}
+          onClick={() => onComplete(row)}
+          aria-label={`Complete ${row.title}`}
+          title={row.kind === "recurrence" ? "Log that you did this" : "Complete"}
+        >
+          <Check size={14} />
+        </button>
+      )}
 
       <div className={styles.rowBody}>
-        <span className={styles.rowTitle}>{task.title}</span>
+        <span className={styles.rowTitle}>{row.title}</span>
         <span className={styles.rowMeta}>
-          {task.area ? <Badge tone="neutral">{areaLabel(task.area)}</Badge> : null}
-          {task.recurrenceId ? <Badge tone="blue">Recurring</Badge> : null}
-          {/* Wants never render a date or an overdue state. */}
-          {task.commitment !== "want" && typeof task.dueAt === "number" ? (
-            <span className={overdue ? styles.overdue : undefined}>
-              {overdue ? "Overdue " : "Due "}
-              {formatRelative(task.dueAt)}
+          {row.kind === "event" ? <Badge tone="blue">Event</Badge> : null}
+          {row.kind === "recurrence" || row.fromRecurrence ? (
+            <Badge tone="gold">Recurring</Badge>
+          ) : null}
+          {row.isWaiting ? <Badge tone="neutral">Waiting</Badge> : null}
+          {row.isWant ? <Badge tone="neutral">Want</Badge> : null}
+          {row.areaLabel ? <Badge tone="neutral">{row.areaLabel}</Badge> : null}
+
+          {when ? (
+            <span className={row.isOverdue ? styles.overdue : undefined}>
+              {row.isOverdue ? "overdue — " : ""}
+              {when}
             </span>
           ) : null}
+
+          {row.location ? (
+            <span className={styles.metaItem}>
+              <MapPin size={12} aria-hidden /> {row.location}
+            </span>
+          ) : null}
+
           {waited !== undefined ? (
             <span>
-              {task.lastNudgedAt ? "nudged" : "waiting"} {waited} day{waited === 1 ? "" : "s"}
+              {row.lastNudgedAt ? "nudged" : "waiting"} {waited} day{waited === 1 ? "" : "s"}
             </span>
           ) : null}
         </span>
       </div>
 
-      {onNudge ? (
-        <IconButton
-          aria-label={`Nudge about ${task.title}`}
-          title="Draft a nudge"
-          onClick={() => onNudge(task)}
-        >
-          <BellRing size={15} />
-        </IconButton>
-      ) : null}
+      <div className={styles.rowActions}>
+        {row.isWaiting ? (
+          <IconButton
+            aria-label={`Nudge about ${row.title}`}
+            title="Draft a nudge"
+            onClick={() => onNudge(row)}
+          >
+            <BellRing size={15} />
+          </IconButton>
+        ) : null}
+        {row.kind === "recurrence" ? (
+          <IconButton
+            aria-label={`Pause ${row.title}`}
+            title="Pause this repeat"
+            onClick={() => onPause(row)}
+          >
+            <PauseCircle size={15} />
+          </IconButton>
+        ) : null}
+      </div>
     </div>
   );
 }
 
-function Lane({
-  title,
-  icon,
-  tasks,
-  now,
-  emptyLabel,
-  note,
-  onComplete,
-  onNudge,
-  className,
-}: {
-  title: string;
-  icon: React.ReactNode;
-  tasks: LifeTask[];
-  now: number;
-  emptyLabel: string;
-  note?: string | undefined;
-  onComplete: (task: LifeTask) => void;
-  onNudge?: ((task: LifeTask) => void) | undefined;
-  className?: string | undefined;
-}) {
-  return (
-    <Section
-      title={title}
-      className={className}
-      // Wants get no count badge: a number turns a browsable list into a backlog.
-      action={note ? null : <Badge tone="neutral">{tasks.length}</Badge>}
-    >
-      {note ? <p className={styles.wantsNote}>{note}</p> : null}
-      {tasks.length === 0 ? (
-        <EmptyState icon={icon} title={emptyLabel} />
-      ) : (
-        <div className={styles.list}>
-          {tasks.map((task) => (
-            <TaskRow
-              key={task._id}
-              task={task}
-              now={now}
-              onComplete={onComplete}
-              onNudge={onNudge}
-            />
-          ))}
-        </div>
-      )}
-    </Section>
-  );
-}
-
-function AddTask({ onAdded }: { onAdded: () => void }) {
+/**
+ * Add form. Repeating obligations are created from the same box as one-off
+ * work: ticking "Repeats" reveals the cadence fields and switches the submit
+ * from a task to a recurrence.
+ */
+function AddRow() {
   const createLifeTask = useMutation(api.lifeTasks.createLifeTask);
+  const upsertRecurrence = useMutation(api.recurrences.upsertRecurrenceForViewer);
   const toast = useToast();
+
   const [title, setTitle] = useState("");
   const [area, setArea] = useState("");
   const [commitment, setCommitment] = useState<"must" | "want">("must");
+  const [repeats, setRepeats] = useState(false);
+  const [presetKey, setPresetKey] = useState<CadencePresetKey>("every-n-days");
+  const [amount, setAmount] = useState("90");
+  const [spawnTask, setSpawnTask] = useState(true);
   const [saving, setSaving] = useState(false);
+
+  const preset = CADENCE_PRESETS.find((entry) => entry.key === presetKey) ?? CADENCE_PRESETS[0];
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -160,13 +183,26 @@ function AddTask({ onAdded }: { onAdded: () => void }) {
 
     setSaving(true);
     try {
-      await createLifeTask({
-        title: trimmed,
-        ...(area ? { area: area as (typeof TASK_AREAS)[number] } : {}),
-        commitment,
-      });
+      if (repeats) {
+        const numeric = Number(amount);
+        await upsertRecurrence({
+          title: trimmed,
+          ...(area ? { area: area as (typeof TASK_AREAS)[number] } : {}),
+          rule: preset.build(Number.isFinite(numeric) ? numeric : 1, new Date()),
+          anchor: preset.anchor,
+          spawnTask,
+          timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        });
+        toast(`Added repeating item "${trimmed}".`, "success");
+      } else {
+        await createLifeTask({
+          title: trimmed,
+          ...(area ? { area: area as (typeof TASK_AREAS)[number] } : {}),
+          commitment,
+        });
+        toast(`Added "${trimmed}".`, "success");
+      }
       setTitle("");
-      onAdded();
     } catch (error) {
       toast(error instanceof Error ? error.message : "Could not add that.", "error");
     } finally {
@@ -179,25 +215,36 @@ function AddTask({ onAdded }: { onAdded: () => void }) {
       <TextInput
         value={title}
         onChange={(event) => setTitle(event.target.value)}
-        placeholder={commitment === "want" ? "Something you'd enjoy…" : "Something you need to do…"}
-        aria-label="New task"
+        placeholder={
+          repeats
+            ? "Something that comes around again…"
+            : commitment === "want"
+              ? "Something you'd enjoy…"
+              : "Something you need to do…"
+        }
+        aria-label="New item"
       />
+
       <div className={styles.addControls}>
-        <div className={styles.commitmentToggle} role="group" aria-label="Commitment">
-          {(["must", "want"] as const).map((value) => (
-            <button
-              key={value}
-              type="button"
-              className={`${styles.commitmentOption} ${
-                commitment === value ? styles.commitmentOptionActive : ""
-              }`}
-              aria-pressed={commitment === value}
-              onClick={() => setCommitment(value)}
-            >
-              {value === "must" ? "Need to" : "Want to"}
-            </button>
-          ))}
-        </div>
+        {/* Wants and repeats are mutually exclusive: a want has no schedule. */}
+        {!repeats ? (
+          <div className={styles.commitmentToggle} role="group" aria-label="Commitment">
+            {(["must", "want"] as const).map((value) => (
+              <button
+                key={value}
+                type="button"
+                className={`${styles.commitmentOption} ${
+                  commitment === value ? styles.commitmentOptionActive : ""
+                }`}
+                aria-pressed={commitment === value}
+                onClick={() => setCommitment(value)}
+              >
+                {value === "must" ? "Need to" : "Want to"}
+              </button>
+            ))}
+          </div>
+        ) : null}
+
         <Select value={area} onChange={(event) => setArea(event.target.value)} aria-label="Area">
           <option value="">Unsorted</option>
           {TASK_AREAS.map((value) => (
@@ -206,64 +253,178 @@ function AddTask({ onAdded }: { onAdded: () => void }) {
             </option>
           ))}
         </Select>
+
+        <Checkbox
+          checked={repeats}
+          onChange={(event) => {
+            setRepeats(event.target.checked);
+            if (event.target.checked) setCommitment("must");
+          }}
+          label="Repeats"
+        />
+
         <Button type="submit" disabled={!title.trim() || saving}>
           {saving ? "Adding…" : "Add"}
         </Button>
       </div>
+
+      {repeats ? (
+        <div className={styles.repeatFields}>
+          {/* The anchor is never exposed as a raw enum — each option describes
+              what will actually happen, and carries its own anchor. */}
+          <Select
+            value={presetKey}
+            onChange={(event) => setPresetKey(event.target.value as CadencePresetKey)}
+            aria-label="How it repeats"
+          >
+            {CADENCE_PRESETS.map((entry) => (
+              <option key={entry.key} value={entry.key}>
+                {entry.label}
+              </option>
+            ))}
+          </Select>
+          <p className={styles.hint}>{preset.hint}</p>
+
+          <div className={styles.addControls}>
+            {preset.needsDays ? (
+              presetKey === "weekly-on-day" ? (
+                <Select
+                  value={amount}
+                  onChange={(event) => setAmount(event.target.value)}
+                  aria-label="Weekday"
+                >
+                  {WEEKDAYS.map((day, index) => (
+                    <option key={day} value={String(index)}>
+                      {day}
+                    </option>
+                  ))}
+                </Select>
+              ) : (
+                <TextInput
+                  type="number"
+                  min={1}
+                  value={amount}
+                  onChange={(event) => setAmount(event.target.value)}
+                  aria-label={presetKey === "monthly-on-day" ? "Day of month" : "Number of days"}
+                  style={{ maxWidth: 110 }}
+                />
+              )
+            ) : null}
+
+            <div className={styles.commitmentToggle} role="group" aria-label="When due">
+              {[
+                { value: true, label: "Add to my list" },
+                { value: false, label: "Just show when due" },
+              ].map((option) => (
+                <button
+                  key={String(option.value)}
+                  type="button"
+                  className={`${styles.commitmentOption} ${
+                    spawnTask === option.value ? styles.commitmentOptionActive : ""
+                  }`}
+                  aria-pressed={spawnTask === option.value}
+                  onClick={() => setSpawnTask(option.value)}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : null}
     </form>
   );
 }
 
 export function LifeTasksContent() {
   const ready = useViewerReady();
+  const now = Date.now();
+
+  // Events are windowed; tasks and recurrences are not, because an undated
+  // obligation has no date to filter on and must always stay visible.
+  const dayBucket = Math.floor(now / DAY_MS);
+  const range = useMemo(
+    () => ({ from: dayBucket * DAY_MS - 7 * DAY_MS, to: dayBucket * DAY_MS + 365 * DAY_MS }),
+    [dayBucket],
+  );
+
   const tasks = useQuery(api.lifeTasks.lifeTasksForViewer, ready ? {} : "skip") as
     | LifeTask[]
     | undefined;
+  const events = useQuery(api.calendar.calendarEventsInRange, ready ? range : "skip") as
+    | CalendarEventRow[]
+    | undefined;
+  const recurrences = useQuery(api.recurrences.recurrencesForViewer, ready ? {} : "skip") as
+    | RecurrenceRowInput[]
+    | undefined;
+
   const setStatus = useMutation(api.lifeTasks.setLifeTaskStatus);
+  const completeRecurrence = useMutation(api.recurrences.completeRecurrenceForViewer);
+  const setRecurrenceStatus = useMutation(api.recurrences.setRecurrenceStatusForViewer);
   const nudge = useMutation(api.waiting.nudgeWaitingTask);
   const toast = useToast();
 
   const [area, setArea] = useState<string | null>(null);
-  // Recomputed per render rather than ticking: overdue is a day-scale concept
-  // and a timer here would rerender the whole list every second.
-  const now = Date.now();
 
-  const lanes = useMemo(() => bucketLifeTasks(tasks), [tasks]);
-  const areas = useMemo(() => areasPresent(tasks), [tasks]);
+  const rows = useMemo(
+    () => buildAgendaRows(tasks, events, recurrences, now),
+    // `now` is bucketed by day: overdue is a day-scale concept, and depending
+    // on the raw clock would rebuild the list on every render.
+    [tasks, events, recurrences, dayBucket],
+  );
+  const areas = useMemo(() => agendaAreas(rows), [rows]);
+  const visible = useMemo(() => filterAgendaRows(rows, area), [rows, area]);
 
-  async function complete(task: LifeTask) {
+  async function onComplete(row: AgendaRow) {
     try {
-      await setStatus({ taskId: task._id as any, status: "done" });
-      toast(`Done: ${task.title}`, "success");
+      if (row.kind === "recurrence") {
+        // Completing a repeat logs the completion and advances its schedule
+        // rather than closing anything permanently.
+        await completeRecurrence({ recurrenceId: row.id as any });
+        toast(`Logged "${row.title}".`, "success");
+      } else {
+        await setStatus({ taskId: row.id as any, status: "done" });
+        toast(`Done: ${row.title}`, "success");
+      }
     } catch (error) {
       toast(error instanceof Error ? error.message : "Could not update that.", "error");
     }
   }
 
-  async function onNudge(task: LifeTask) {
+  async function onNudge(row: AgendaRow) {
     try {
-      await nudge({ taskId: task._id as any });
-      // Nothing is sent from here — the draft waits for the owner to release it.
+      await nudge({ taskId: row.id as any });
       toast("Nudge drafted — review it in Pending actions.", "success");
     } catch (error) {
       toast(error instanceof Error ? error.message : "Could not draft that.", "error");
     }
   }
 
-  if (tasks === undefined) {
-    return <LoadingRow label="Loading tasks…" />;
+  async function onPause(row: AgendaRow) {
+    try {
+      await setRecurrenceStatus({ recurrenceId: row.id as any, status: "paused" });
+      toast(`Paused "${row.title}".`, "success");
+    } catch (error) {
+      toast(error instanceof Error ? error.message : "Could not pause that.", "error");
+    }
   }
 
-  const visible = (list: LifeTask[]) => filterByArea(list, area);
+  if (tasks === undefined) {
+    return <LoadingRow label="Loading agenda…" />;
+  }
 
   return (
     <div className={styles.grid}>
       <Section title="Add" className={styles.fullWidth}>
-        <AddTask onAdded={() => undefined} />
+        <AddRow />
       </Section>
 
-      {areas.length > 1 ? (
-        <div className={styles.fullWidth}>
+      <Section
+        title="Agenda"
+        className={styles.fullWidth}
+        action={<Badge tone="neutral">{visible.length}</Badge>}
+      >
+        {areas.length > 1 ? (
           <div className={styles.filters}>
             <button
               type="button"
@@ -283,81 +444,35 @@ export function LifeTasksContent() {
               </button>
             ))}
           </div>
-        </div>
-      ) : null}
+        ) : null}
 
-      <Lane
-        title="Due"
-        icon={<Clock size={18} />}
-        tasks={visible(lanes.due)}
-        now={now}
-        emptyLabel="Nothing with a deadline."
-        onComplete={complete}
-      />
-
-      <Lane
-        title="Anytime"
-        icon={<ListTodo size={18} />}
-        tasks={visible(lanes.anytime)}
-        now={now}
-        emptyLabel="No open obligations."
-        onComplete={complete}
-      />
-
-      {lanes.waiting.length > 0 ? (
-        <Lane
-          title="Waiting on"
-          icon={<Hourglass size={18} />}
-          tasks={visible(lanes.waiting)}
-          now={now}
-          emptyLabel="Not waiting on anyone."
-          onComplete={complete}
-          onNudge={onNudge}
-          className={styles.fullWidth}
-        />
-      ) : null}
-
-      <Lane
-        title="Wants"
-        icon={<Sparkles size={18} />}
-        tasks={visible(lanes.wants)}
-        now={now}
-        emptyLabel="Nothing on the list yet."
-        note="Things you'd enjoy. No deadlines, nothing overdue — dip in when you have time."
-        onComplete={complete}
-        className={styles.fullWidth}
-      />
+        {visible.length === 0 ? (
+          <EmptyState icon={<Inbox size={18} />} title="Nothing on your plate">
+            Tasks, events, and repeating items all show up here.
+          </EmptyState>
+        ) : (
+          <div className={styles.list}>
+            {visible.map((row) => (
+              <AgendaRowView
+                key={`${row.kind}-${row.id}`}
+                row={row}
+                now={now}
+                onComplete={onComplete}
+                onNudge={onNudge}
+                onPause={onPause}
+              />
+            ))}
+          </div>
+        )}
+      </Section>
     </div>
-  );
-}
-
-/**
- * One-off items and repeating obligations are the same mental mode — "what do
- * I need to do?" — so they share a surface behind a segmented control rather
- * than living in two hubs.
- */
-function LifeTasksTabs() {
-  const [tab, setTab] = useState<"tasks" | "recurring">("tasks");
-
-  return (
-    <>
-      <Tabs
-        items={[
-          { key: "tasks", label: "Tasks" },
-          { key: "recurring", label: "Recurring" },
-        ]}
-        active={tab}
-        onChange={(key) => setTab(key as "tasks" | "recurring")}
-      />
-      {tab === "tasks" ? <LifeTasksContent /> : <RecurrencesContent />}
-    </>
   );
 }
 
 export function LifeTasksPage() {
   return (
     <LiveGate>
-      <LifeTasksTabs />
+      <LifeTasksContent />
     </LiveGate>
   );
 }

@@ -67,6 +67,25 @@
   color: var(--gold);
 }
 
+/* Events get a marker where tasks get a check control, so rows stay aligned
+   without implying an event can be completed. */
+.eventMarker {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  margin-top: 1px;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+}
+
+.rowActions {
+  display: flex;
+  gap: 4px;
+  align-items: flex-start;
+  flex: 0 0 auto;
+}
+
 .rowBody {
   flex: 1 1 auto;
   min-width: 0;
@@ -96,10 +115,33 @@
 
 /* Wants deliberately get no red, no counts, and no aging treatment. The lane
    exists so browsing it never feels like a backlog. */
-.wantsNote {
+.wantsNote,
+.hint {
   font-size: 12px;
   color: var(--muted);
   margin-bottom: 10px;
+}
+
+.metaItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Cadence fields, revealed only once "Repeats" is ticked. */
+.repeatFields {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--gold) 5%, transparent);
+}
+
+.repeatFields .hint {
+  margin: 0;
 }
 
 .addRow {

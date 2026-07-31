@@ -6,7 +6,6 @@ import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEve
 import { useMutation, useQuery } from "convex/react";
 import {
   ArrowRight,
-  Bell,
   Check,
   Copy,
   Download,
@@ -27,7 +26,7 @@ import { api } from "../../lib/skippy-api";
 import { formatRelative } from "../../lib/display";
 import { focusItemKey, parseFocusSummary } from "../focus-summary";
 import { LiveGate } from "../live-auth";
-import { Badge, Button, Card, EmptyState, IconButton, InlineMarkdown, LoadingRow, Section, TextArea, useToast } from "../components";
+import { Badge, Button, Card, IconButton, InlineMarkdown, LoadingRow, Section, TextArea, useToast } from "../components";
 import { AgendaSection } from "./agenda";
 import { useViewerReady } from "./use-viewer";
 import { formatFileSize } from "./project-library-helpers";
@@ -612,12 +611,6 @@ export function TodayContent() {
   const viewerReady = useViewerReady();
   useSharedParamToast();
   const data = useQuery(api.knowledge.dashboardForViewer, viewerReady ? {} : "skip") as AnyRecord | undefined;
-  const ready = useQuery(api.projects.readyTasksForViewer, viewerReady ? { limit: 6 } : "skip") as
-    | AnyRecord[]
-    | undefined;
-  const projectsData = useQuery(api.knowledge.projectsAndTasksForViewer, viewerReady ? {} : "skip") as
-    | AnyRecord
-    | undefined;
 
   const recordFocusItemAction = useMutation(api.knowledge.recordFocusItemActionForViewer);
   const createTaskFromFocusItem = useMutation(api.knowledge.createTaskFromFocusItemForViewer);
@@ -651,9 +644,6 @@ export function TodayContent() {
   const focusStale = Boolean(data?.focusSummaryStale);
   const unclear = data?.triageItems?.length ?? 0;
   const pending = data?.pendingActions?.length ?? 0;
-  const activeProjects = (projectsData?.projects ?? []).filter(
-    (project: AnyRecord) => project.status === "in_progress" || project.status === "planned",
-  );
 
   const recordAction = async (item: { text: string; key: string }, action: "dismissed" | "done") => {
     if (!data?.focusSummary?._id) return;
@@ -775,47 +765,6 @@ export function TodayContent() {
                 one list — the answer to "what does my day look like". */}
             <AgendaSection />
 
-            <Section
-              title={
-                <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-                  <Sparkles size={18} aria-hidden /> Ready to work
-                </span>
-              }
-              action={
-                <Link className="text-button compact" href="/projects">
-                  Projects
-                </Link>
-              }
-            >
-              {ready === undefined ? (
-                <LoadingRow />
-              ) : ready.length === 0 ? (
-                <p className="muted" style={{ margin: 0, fontSize: 14 }}>
-                  No unblocked agent tasks. Plan a project to generate executable task briefs.
-                </p>
-              ) : (
-                <div style={{ display: "grid", gap: 8 }}>
-                  {ready.map((task) => (
-                    <Link
-                      key={task._id}
-                      className="item project-row"
-                      href={task.projectId ? `/projects/${task.projectId}` : "/projects"}
-                      style={{ gridTemplateColumns: "1fr auto" }}
-                    >
-                      <div>
-                        <p className="item-title">{task.title}</p>
-                        <p className="item-meta">{task.projectTitle ?? "Unassigned"}</p>
-                      </div>
-                      <span className="project-row-side">
-                        {task.kind ? <Badge tone="blue">{task.kind}</Badge> : null}
-                        <ArrowRight size={16} aria-hidden />
-                      </span>
-                    </Link>
-                  ))}
-                </div>
-              )}
-            </Section>
-
             <Section title="Needs your review">
               {unclear === 0 && pending === 0 ? (
                 <p className="muted" style={{ margin: 0, fontSize: 14 }}>
@@ -851,40 +800,6 @@ export function TodayContent() {
               )}
             </Section>
 
-            <Section
-              title="Active projects"
-              action={
-                <Link className="text-button compact" href="/projects">
-                  All
-                </Link>
-              }
-            >
-              {projectsData === undefined ? (
-                <LoadingRow />
-              ) : activeProjects.length === 0 ? (
-                <EmptyState icon={<Bell size={20} aria-hidden />} title="No active projects">
-                  Start one from the Projects hub and let Skippy plan it.
-                </EmptyState>
-              ) : (
-                <div style={{ display: "grid", gap: 10 }}>
-                  {activeProjects.slice(0, 5).map((project: AnyRecord) => {
-                    const tasks = (projectsData?.tasks ?? []).filter((task: AnyRecord) => task.projectId === project._id);
-                    const total = tasks.length;
-                    return (
-                      <Link key={project._id} href={`/projects/${project._id}`} className="project-row" style={{ display: "grid", gap: 6, padding: "10px 0", textDecoration: "none" }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
-                          <strong style={{ fontWeight: 720 }}>{project.title}</strong>
-                          <Badge tone="blue">{String(project.status).replace(/_/g, " ")}</Badge>
-                        </div>
-                        <p className="item-meta" style={{ margin: 0 }}>
-                          {total} open task{total === 1 ? "" : "s"}
-                        </p>
-                      </Link>
-                    );
-                  })}
-                </div>
-              )}
-            </Section>
           </div>
         </div>
       )}
