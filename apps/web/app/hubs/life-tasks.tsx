@@ -2,7 +2,7 @@
 
 import { useMemo, useState, type FormEvent } from "react";
 import { useMutation, useQuery } from "convex/react";
-import { BellRing, CalendarDays, Check, Inbox, MapPin, PauseCircle } from "lucide-react";
+import { BellRing, CalendarDays, Check, Inbox, MapPin, PauseCircle, Plus } from "lucide-react";
 import { TASK_AREAS } from "@skippy/shared";
 import { api } from "../../lib/skippy-api";
 import { formatRelative } from "../../lib/display";
@@ -11,6 +11,7 @@ import {
   Badge,
   Button,
   Checkbox,
+  Dialog,
   EmptyState,
   IconButton,
   LoadingRow,
@@ -156,11 +157,11 @@ function AgendaRowView({
 }
 
 /**
- * Add form. Repeating obligations are created from the same box as one-off
- * work: ticking "Repeats" reveals the cadence fields and switches the submit
- * from a task to a recurrence.
+ * Add form, shown inside the Add dialog. Repeating obligations are created
+ * from the same box as one-off work: ticking "Repeats" reveals the cadence
+ * fields and switches the submit from a task to a recurrence.
  */
-function AddRow() {
+function AddRow({ onAdded }: { onAdded: () => void }) {
   const createLifeTask = useMutation(api.lifeTasks.createLifeTask);
   const upsertRecurrence = useMutation(api.recurrences.upsertRecurrenceForViewer);
   const toast = useToast();
@@ -203,6 +204,7 @@ function AddRow() {
         toast(`Added "${trimmed}".`, "success");
       }
       setTitle("");
+      onAdded();
     } catch (error) {
       toast(error instanceof Error ? error.message : "Could not add that.", "error");
     } finally {
@@ -223,6 +225,7 @@ function AddRow() {
               : "Something you need to do…"
         }
         aria-label="New item"
+        autoFocus
       />
 
       <div className={styles.addControls}>
@@ -365,6 +368,7 @@ export function LifeTasksContent() {
   const toast = useToast();
 
   const [area, setArea] = useState<string | null>(null);
+  const [addOpen, setAddOpen] = useState(false);
 
   const rows = useMemo(
     () => buildAgendaRows(tasks, events, recurrences, now),
@@ -415,14 +419,17 @@ export function LifeTasksContent() {
 
   return (
     <div className={styles.grid}>
-      <Section title="Add" className={styles.fullWidth}>
-        <AddRow />
-      </Section>
-
       <Section
         title="Agenda"
         className={styles.fullWidth}
-        action={<Badge tone="neutral">{visible.length}</Badge>}
+        action={
+          <span className={styles.sectionAction}>
+            <Badge tone="neutral">{visible.length}</Badge>
+            <Button variant="primary" small onClick={() => setAddOpen(true)}>
+              <Plus size={15} aria-hidden /> Add
+            </Button>
+          </span>
+        }
       >
         {areas.length > 1 ? (
           <div className={styles.filters}>
@@ -465,6 +472,12 @@ export function LifeTasksContent() {
           </div>
         )}
       </Section>
+
+      {/* The add form starts out of the way: the agenda is read far more often
+          than it is written to, so adding is a deliberate click. */}
+      <Dialog open={addOpen} onClose={() => setAddOpen(false)} title="Add to your agenda">
+        <AddRow onAdded={() => setAddOpen(false)} />
+      </Dialog>
     </div>
   );
 }
