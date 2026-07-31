@@ -93,8 +93,7 @@ export const planContext = internalQueryGeneric({
     // Titles of tasks already linked to this project, to avoid duplicate planning.
     const belongsTo = await db
       .query("relationships")
-      .withIndex("by_brain_type", (q: any) => q.eq("brainInstanceId", args.brainInstanceId))
-      .filter((q: any) => q.eq(q.field("type"), "belongs_to"))
+      .withIndex("by_brain_type", (q: any) => q.eq("brainInstanceId", args.brainInstanceId).eq("type", "belongs_to"))
       .collect();
     const taskIds = belongsTo
       .filter((rel: any) => rel.from.entityType === "task" && rel.to.entityType === "project" && rel.to.entityId === args.projectId)
@@ -136,8 +135,7 @@ export const taskBriefProposalContext = internalQueryGeneric({
 
     const belongsTo = await db
       .query("relationships")
-      .withIndex("by_brain_type", (q: any) => q.eq("brainInstanceId", args.brainInstanceId))
-      .filter((q: any) => q.eq(q.field("type"), "belongs_to"))
+      .withIndex("by_brain_type", (q: any) => q.eq("brainInstanceId", args.brainInstanceId).eq("type", "belongs_to"))
       .filter((q: any) => q.eq(q.field("from.entityType"), "task"))
       .filter((q: any) => q.eq(q.field("from.entityId"), args.taskId))
       .first();
@@ -157,8 +155,7 @@ export const taskBriefProposalContext = internalQueryGeneric({
 
     const siblingRels = await db
       .query("relationships")
-      .withIndex("by_brain_type", (q: any) => q.eq("brainInstanceId", args.brainInstanceId))
-      .filter((q: any) => q.eq(q.field("type"), "belongs_to"))
+      .withIndex("by_brain_type", (q: any) => q.eq("brainInstanceId", args.brainInstanceId).eq("type", "belongs_to"))
       .collect();
     const existingTasks: string[] = [];
     for (const rel of siblingRels) {

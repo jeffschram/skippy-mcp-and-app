@@ -232,13 +232,11 @@ export const reviewSuggestionsForViewer = queryGeneric({
       acceptedEntities(ctx.db, brain._id, "people", 120),
       ctx.db
         .query("relationships")
-        .withIndex("by_brain_type", (q) => q.eq("brainInstanceId", brain._id))
-        .filter((q) => q.eq(q.field("type"), "follow_up_with"))
+        .withIndex("by_brain_type", (q: any) => q.eq("brainInstanceId", brain._id).eq("type", "follow_up_with"))
         .take(80),
       ctx.db
         .query("relationships")
-        .withIndex("by_brain_type", (q) => q.eq("brainInstanceId", brain._id))
-        .filter((q) => q.eq(q.field("type"), "waiting_on"))
+        .withIndex("by_brain_type", (q: any) => q.eq("brainInstanceId", brain._id).eq("type", "waiting_on"))
         .take(80),
     ]);
 

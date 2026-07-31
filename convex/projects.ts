@@ -2,7 +2,11 @@ import { mutationGeneric, queryGeneric } from "convex/server";
 import { v } from "convex/values";
 import { effectiveProjectPaths, normalizeFolderPathInput, orderIndexBetween } from "@skippy/shared";
 import { requireOwnedBrain } from "./auth";
-import { advanceDependentsAfterDone, dependencyTaskIds } from "./taskExecution";
+import {
+  advanceDependentsAfterDone,
+  dependencyTaskIds,
+  dependencyTaskIdsByTask,
+} from "./taskExecution";
 
 /* ------------------------------------------------------------------ */
 /* Helpers                                                            */
@@ -11,8 +15,7 @@ import { advanceDependentsAfterDone, dependencyTaskIds } from "./taskExecution";
 async function projectTaskIds(db: any, brainInstanceId: any, projectId: string): Promise<string[]> {
   const rels = await db
     .query("relationships")
-    .withIndex("by_brain_type", (q: any) => q.eq("brainInstanceId", brainInstanceId))
-    .filter((q: any) => q.eq(q.field("type"), "belongs_to"))
+    .withIndex("by_brain_type", (q: any) => q.eq("brainInstanceId", brainInstanceId).eq("type", "belongs_to"))
     .collect();
   return rels
     .filter(
@@ -62,9 +65,14 @@ async function buildBoard(db: any, brainInstanceId: any, projectId: string) {
     if (task && task.processingState === "accepted") rawTasks.push(task);
   }
 
+  // Dependencies for every task in ONE read. Querying per task is
+  // O(tasks x relationships) and breaches Convex's 32k document-read limit
+  // once a project gets large enough — which is what took this board down.
+  const dependsOnByTask = await dependencyTaskIdsByTask(db, brainInstanceId);
+
   const tasks = [];
   for (const task of rawTasks) {
-    const dependsOn = await dependencyTaskIds(db, brainInstanceId, task._id);
+    const dependsOn = dependsOnByTask.get(task._id as string) ?? [];
     tasks.push({
       _id: task._id,
       title: task.title,
@@ -169,8 +177,7 @@ async function readyTasks(db: any, brainInstanceId: any, limit: number) {
   for (const task of tasks) {
     const belongs = await db
       .query("relationships")
-      .withIndex("by_brain_type", (q: any) => q.eq("brainInstanceId", brainInstanceId))
-      .filter((q: any) => q.eq(q.field("type"), "belongs_to"))
+      .withIndex("by_brain_type", (q: any) => q.eq("brainInstanceId", brainInstanceId).eq("type", "belongs_to"))
       .filter((q: any) => q.eq(q.field("from.entityType"), "task"))
       .filter((q: any) => q.eq(q.field("from.entityId"), task._id))
       .first();
@@ -222,8 +229,7 @@ async function taskBrief(db: any, brainInstanceId: any, taskId: string) {
 
   const belongs = await db
     .query("relationships")
-    .withIndex("by_brain_type", (q: any) => q.eq("brainInstanceId", brainInstanceId))
-    .filter((q: any) => q.eq(q.field("type"), "belongs_to"))
+    .withIndex("by_brain_type", (q: any) => q.eq("brainInstanceId", brainInstanceId).eq("type", "belongs_to"))
     .filter((q: any) => q.eq(q.field("from.entityType"), "task"))
     .filter((q: any) => q.eq(q.field("from.entityId"), taskId))
     .first();
@@ -295,8 +301,7 @@ async function moveTaskToProject(
 
   const existing = await db
     .query("relationships")
-    .withIndex("by_brain_type", (q: any) => q.eq("brainInstanceId", brainInstanceId))
-    .filter((q: any) => q.eq(q.field("type"), "belongs_to"))
+    .withIndex("by_brain_type", (q: any) => q.eq("brainInstanceId", brainInstanceId).eq("type", "belongs_to"))
     .filter((q: any) => q.eq(q.field("from.entityType"), "task"))
     .filter((q: any) => q.eq(q.field("from.entityId"), taskId))
     .collect();

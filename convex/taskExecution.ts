@@ -4,11 +4,53 @@
  * `A` is ready once every `B` it depends on is `done`.
  */
 
+/**
+ * All `depends_on` edges for a brain, in one indexed read.
+ *
+ * `by_brain_type` is (brainInstanceId, type), so `type` belongs in the index
+ * RANGE, not in a `.filter()`. A trailing filter still reads every row the
+ * range matches and discards them in memory — the read budget is spent either
+ * way. Narrowing the range here is what makes the read proportional to the
+ * number of dependency edges rather than to the whole relationship table.
+ */
+async function dependsOnEdges(db: any, brainInstanceId: any) {
+  return db
+    .query("relationships")
+    .withIndex("by_brain_type", (q: any) =>
+      q.eq("brainInstanceId", brainInstanceId).eq("type", "depends_on"),
+    )
+    .collect();
+}
+
+/**
+ * Dependency ids for every task in one pass: taskId -> ids it depends on.
+ *
+ * Callers rendering more than one task MUST use this rather than looping over
+ * dependencyTaskIds. Per-task querying is O(tasks x relationships): on a
+ * 123-task project against 259 relationships that is ~31.8k document reads,
+ * which alone is enough to breach Convex's 32k per-execution limit and fail
+ * the whole query.
+ */
+export async function dependencyTaskIdsByTask(
+  db: any,
+  brainInstanceId: any,
+): Promise<Map<string, string[]>> {
+  const byTask = new Map<string, string[]>();
+  for (const rel of await dependsOnEdges(db, brainInstanceId)) {
+    if (rel.from?.entityType !== "task" || rel.to?.entityType !== "task") continue;
+    const from = rel.from.entityId as string;
+    byTask.set(from, [...(byTask.get(from) ?? []), rel.to.entityId as string]);
+  }
+  return byTask;
+}
+
+/** Single-task lookup. For several tasks use dependencyTaskIdsByTask instead. */
 export async function dependencyTaskIds(db: any, brainInstanceId: any, taskId: string): Promise<string[]> {
   const rels = await db
     .query("relationships")
-    .withIndex("by_brain_type", (q: any) => q.eq("brainInstanceId", brainInstanceId))
-    .filter((q: any) => q.eq(q.field("type"), "depends_on"))
+    .withIndex("by_brain_type", (q: any) =>
+      q.eq("brainInstanceId", brainInstanceId).eq("type", "depends_on"),
+    )
     .filter((q: any) => q.eq(q.field("from.entityType"), "task"))
     .filter((q: any) => q.eq(q.field("from.entityId"), taskId))
     .collect();
@@ -38,8 +80,9 @@ export async function advanceDependentsAfterDone(
 ): Promise<string[]> {
   const dependents = await db
     .query("relationships")
-    .withIndex("by_brain_type", (q: any) => q.eq("brainInstanceId", brainInstanceId))
-    .filter((q: any) => q.eq(q.field("type"), "depends_on"))
+    .withIndex("by_brain_type", (q: any) =>
+      q.eq("brainInstanceId", brainInstanceId).eq("type", "depends_on"),
+    )
     .filter((q: any) => q.eq(q.field("to.entityType"), "task"))
     .filter((q: any) => q.eq(q.field("to.entityId"), completedTaskId))
     .collect();
