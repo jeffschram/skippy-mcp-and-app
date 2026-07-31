@@ -1,6 +1,6 @@
 import { mutationGeneric, queryGeneric } from "convex/server";
 import { v } from "convex/values";
-import { effectiveCommitment } from "@skippy/shared";
+import { effectiveCommitment, repairStaleDueDate } from "@skippy/shared";
 import { requireOwnedBrain } from "./auth";
 
 /* ------------------------------------------------------------------ */
@@ -135,6 +135,62 @@ export const lifeTasksForBrain = queryGeneric({
         waitingOn: task.waitingOn,
         waitingSince: task.waitingSince,
       }));
+  },
+});
+
+/**
+ * Applies the shared whole-year due-date repair to tasks already in the
+ * database.
+ *
+ * The repair runs at ingestion now, but rows written before that landed keep
+ * their wrong year and read as permanently overdue on the agenda. This walks
+ * open tasks and fixes those, using exactly the same helper — it cannot invent
+ * an arbitrary date, only roll a stale one forward by whole years.
+ *
+ * `dryRun` reports what would change without writing, so the effect can be
+ * inspected before it is applied.
+ */
+export const repairStaleTaskDueDatesForBrain = mutationGeneric({
+  args: {
+    brainInstanceId: v.id("brainInstances"),
+    dryRun: v.optional(v.boolean()),
+    now: v.optional(v.number()),
+  },
+  handler: async ({ db }, args) => {
+    const now = args.now ?? Date.now();
+
+    const tasks = await db
+      .query("tasks")
+      .withIndex("by_brain_state", (q: any) => q.eq("brainInstanceId", args.brainInstanceId))
+      .filter((q: any) => q.eq(q.field("processingState"), "accepted"))
+      .collect();
+
+    const changes: Array<{ taskId: string; title: string; from: number; to: number }> = [];
+
+    for (const task of tasks) {
+      if (task.status === "done" || task.status === "cancelled") continue;
+      if (typeof task.dueAt !== "number") continue;
+
+      const repaired = repairStaleDueDate(task.dueAt, now);
+      if (repaired === undefined || repaired === task.dueAt) continue;
+
+      changes.push({ taskId: task._id, title: task.title, from: task.dueAt, to: repaired });
+
+      if (!args.dryRun) {
+        await db.patch(task._id, { dueAt: repaired, updatedAt: now });
+        await db.insert("activityEvents", {
+          brainInstanceId: args.brainInstanceId,
+          entityRef: { entityType: "task", entityId: task._id },
+          activityType: "task_due_date_repaired",
+          actorType: "system",
+          timestamp: now,
+          summary: `Corrected a due date that was ${new Date(task.dueAt).getUTCFullYear()} on "${task.title}".`,
+          metadata: { from: task.dueAt, to: repaired },
+        });
+      }
+    }
+
+    return { dryRun: args.dryRun === true, repaired: changes.length, changes };
   },
 });
 

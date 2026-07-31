@@ -399,6 +399,12 @@ export default defineSchema({
     ),
     anchor: v.union(v.literal("completion"), v.literal("schedule")),
 
+    // IANA zone the wall-clock schedule is anchored to. Load-bearing, not
+    // decoration: the scheduling math adds calendar days in this zone so an
+    // 8am obligation stays 8am across a DST boundary, and month-end rules land
+    // on the right date. Absent falls back to DEFAULT_RECURRENCE_TIME_ZONE.
+    timeZone: v.optional(v.string()),
+
     lastCompletedAt: v.optional(v.number()),
     nextDueAt: v.number(),
     // Surface this many days before nextDueAt, so renewals get a runway.
