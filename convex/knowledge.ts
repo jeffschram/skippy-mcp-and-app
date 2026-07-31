@@ -45,6 +45,20 @@ const taskKind = v.union(
   v.literal("planning"),
 );
 
+// Life-layer axes, mirroring TASK_AREAS / TASK_COMMITMENTS in @skippy/shared
+// and the validators on the tasks table.
+const taskArea = v.union(
+  v.literal("work"),
+  v.literal("personal"),
+  v.literal("household"),
+  v.literal("health"),
+  v.literal("finance"),
+  v.literal("social"),
+  v.literal("errand"),
+);
+
+const taskCommitment = v.union(v.literal("must"), v.literal("want"));
+
 const memoryType = v.union(
   v.literal("thought"),
   v.literal("memory"),
@@ -3879,6 +3893,11 @@ export const createTaskDirect = mutationGeneric({
     priorityReason: v.optional(v.string()),
     projectId: v.optional(v.id("projects")),
     createdBy: v.optional(v.string()),
+    // Life-layer axes. The MCP `create_task` tool advertises these and the
+    // rubric tells harnesses to set them, so omitting them here made every
+    // such call fail argument validation.
+    area: v.optional(taskArea),
+    commitment: v.optional(taskCommitment),
   },
   handler: async ({ db }, args) => {
     const now = Date.now();
@@ -3892,6 +3911,8 @@ export const createTaskDirect = mutationGeneric({
       kind: normalizedKind,
       dueAt: args.dueAt,
       priorityReason: args.priorityReason,
+      area: args.area,
+      commitment: args.commitment,
     });
     const duplicateTask = await findAcceptedEntityDuplicate(
       db,
