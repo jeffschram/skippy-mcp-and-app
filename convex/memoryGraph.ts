@@ -218,8 +218,7 @@ export const contextualMapForViewer = queryGeneric({
       relationshipTypes.map((type) =>
         ctx.db
           .query("relationships")
-          .withIndex("by_brain_type", (q: any) => q.eq("brainInstanceId", brain._id))
-          .filter((q: any) => q.eq(q.field("type"), type))
+          .withIndex("by_brain_type", (q: any) => q.eq("brainInstanceId", brain._id).eq("type", type))
           .take(120),
       ),
     );

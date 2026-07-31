@@ -27,8 +27,7 @@ const taskCommitment = v.union(v.literal("must"), v.literal("want"));
 async function projectLinkedTaskIds(db: any, brainInstanceId: any): Promise<Set<string>> {
   const relationships = await db
     .query("relationships")
-    .withIndex("by_brain_type", (q: any) => q.eq("brainInstanceId", brainInstanceId))
-    .filter((q: any) => q.eq(q.field("type"), "belongs_to"))
+    .withIndex("by_brain_type", (q: any) => q.eq("brainInstanceId", brainInstanceId).eq("type", "belongs_to"))
     .collect();
 
   const ids = new Set<string>();

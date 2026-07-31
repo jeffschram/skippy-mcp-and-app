@@ -243,8 +243,7 @@ function companyLooksDuplicate(left: any, right: any) {
 async function taskProjectIdByTaskId(db: any, brainInstanceId: any): Promise<Map<string, string>> {
   const relationships = await db
     .query("relationships")
-    .withIndex("by_brain_type", (q: any) => q.eq("brainInstanceId", brainInstanceId))
-    .filter((q: any) => q.eq(q.field("type"), "belongs_to"))
+    .withIndex("by_brain_type", (q: any) => q.eq("brainInstanceId", brainInstanceId).eq("type", "belongs_to"))
     .collect();
 
   const byTaskId = new Map<string, string>();
@@ -2157,8 +2156,7 @@ export const projectsAndTasksForViewer = queryGeneric({
     ).filter((task) => task.status !== "done" && task.status !== "cancelled");
     const taskProjectRelationships = await ctx.db
       .query("relationships")
-      .withIndex("by_brain_type", (q) => q.eq("brainInstanceId", brain._id))
-      .filter((q) => q.eq(q.field("type"), "belongs_to"))
+      .withIndex("by_brain_type", (q: any) => q.eq("brainInstanceId", brain._id).eq("type", "belongs_to"))
       .collect();
     const projectIdByTaskId = new Map(
       taskProjectRelationships
@@ -3938,8 +3936,7 @@ export const createTaskDirect = mutationGeneric({
       if (args.projectId) {
         const existingRelationship = await db
           .query("relationships")
-          .withIndex("by_brain_type", (q) => q.eq("brainInstanceId", args.brainInstanceId))
-          .filter((q) => q.eq(q.field("type"), "belongs_to"))
+          .withIndex("by_brain_type", (q: any) => q.eq("brainInstanceId", args.brainInstanceId).eq("type", "belongs_to"))
           .filter((q) => q.eq(q.field("from.entityType"), "task"))
           .filter((q) => q.eq(q.field("from.entityId"), duplicateTask._id))
           .filter((q) => q.eq(q.field("to.entityType"), "project"))
