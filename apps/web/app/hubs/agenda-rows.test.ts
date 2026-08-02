@@ -82,6 +82,19 @@ describe("buildAgendaRows", () => {
     expect(rows.map((r) => r.id)).toEqual(["live"]);
   });
 
+  it("drops events that have ended but keeps an event in progress", () => {
+    const rows = buildAgendaRows(
+      [],
+      [
+        event({ _id: "past", startAt: NOW - 2 * DAY, endAt: NOW - DAY }),
+        event({ _id: "ongoing", startAt: NOW - DAY, endAt: NOW + DAY }),
+      ],
+      [],
+      NOW,
+    );
+    expect(rows.map((r) => r.id)).toEqual(["ongoing"]);
+  });
+
   it("ignores paused and retired recurrences", () => {
     const rows = buildAgendaRows(
       [],
@@ -160,9 +173,14 @@ describe("buildAgendaRows", () => {
     expect(rows.every((r) => r.isOverdue)).toBe(true);
   });
 
-  // An event in the past simply happened; calling it overdue is meaningless.
-  it("never marks an event overdue", () => {
-    const rows = buildAgendaRows([], [event({ startAt: NOW - 5 * DAY })], [], NOW);
+  // An event that is still happening is current, not overdue.
+  it("never marks an ongoing event overdue", () => {
+    const rows = buildAgendaRows(
+      [],
+      [event({ startAt: NOW - DAY, endAt: NOW + DAY })],
+      [],
+      NOW,
+    );
     expect(rows[0]?.isOverdue).toBeUndefined();
   });
 

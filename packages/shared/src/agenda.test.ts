@@ -49,6 +49,22 @@ describe("buildAgenda", () => {
     expect(items).toHaveLength(0);
   });
 
+  it("excludes events that have ended but keeps an event in progress", () => {
+    const items = buildAgenda(
+      {
+        events: [
+          event({ _id: "past", startAt: NOW - 2 * DAY, endAt: NOW - DAY }),
+          event({ _id: "ongoing", startAt: NOW - DAY, endAt: NOW + DAY }),
+        ],
+      },
+      FROM,
+      TO,
+      NOW,
+    );
+
+    expect(items.map((item) => item.id)).toEqual(["ongoing"]);
+  });
+
   it("excludes done and cancelled tasks, and undated ones", () => {
     const items = buildAgenda(
       {
