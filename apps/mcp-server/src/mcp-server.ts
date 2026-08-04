@@ -24,6 +24,7 @@ import {
   type RegisterProjectFileInput,
   type SkippyClient,
   type StartInterviewInput,
+  type TasksByStateInput,
   type UpsertFinancialAccountInput,
   type UpsertRecurrenceInput,
 } from "./tools.js";
@@ -375,6 +376,7 @@ function buildHarnessBootstrapMessage({
     "- `plan_project`: decompose accepted projects.",
     "- `brief_task`: write a repo-grounded execution brief plus acceptance criteria for a proposed task and move it to Briefed.",
     "- `list_ready_tasks` / `list_requested_ready_tasks`: find executable work.",
+    "- `list_tasks_by_state`: see tasks in any one execution state (in_progress, in_review, blocked, briefed, ...).",
     "- `get_task_brief`: get the handoff brief.",
     "- `record_task_result`: report PR/artifact/result for review.",
     "- `get_skill`: load canonical Skippy-hosted skills by slug.",
@@ -1887,6 +1889,42 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
       }),
     },
     async (args) => toolResult(await tools.listRequestedReadyTasks(stripUndefined(args) as { limit?: number })),
+  );
+
+  server.registerTool(
+    "list_tasks_by_state",
+    {
+      title: "List tasks in a given execution state",
+      description:
+        "Read-only. Every accepted task currently sitting in one execution state — 'in_progress' to see what a harness already picked up, 'in_review' for work waiting on the owner, 'blocked' for what is stuck, 'briefed' for what is waiting to be promoted to Ready. Optionally narrow to one project, one owner type, or agent-requested tasks only. Unlike list_ready_tasks this does not re-check dependencies; it reports the stored state, so use list_ready_tasks when picking up new work.",
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: z.object({
+        executionState: z
+          .enum([
+            "proposed",
+            "unplanned",
+            "briefed",
+            "ready",
+            "in_progress",
+            "in_review",
+            "blocked",
+            "done",
+            "cancelled",
+          ])
+          .describe("Execution state to list."),
+        ownerType: z
+          .enum(["owner", "agent"])
+          .optional()
+          .describe("Narrow to tasks owned by the user ('owner') or by an agent."),
+        projectId: z.string().optional().describe("Narrow to a single project."),
+        agentRequestStatus: z
+          .enum(["requested", "cancelled"])
+          .optional()
+          .describe("Narrow to tasks the user explicitly requested an agent run, or cancelled requests."),
+        limit: z.number().int().min(1).max(200).optional().describe("Maximum tasks to return (default 25)."),
+      }),
+    },
+    async (args) => toolResult(await tools.listTasksByState(stripUndefined(args) as TasksByStateInput)),
   );
 
   server.registerTool(

@@ -63,6 +63,7 @@ function createFakeClient(overrides: Partial<SkippyClient> = {}): SkippyClient {
     }),
     listReadyTasks: async () => [],
     listRequestedReadyTasks: async () => [],
+    listTasksByState: async () => [],
     getTaskBrief: async (_brainInstanceId, input) => ({ _id: input.taskId, title: "Task", executionBrief: "do it" }),
     briefTask: async (_brainInstanceId, input) => ({ taskId: input.taskId, executionState: "briefed" }),
     recordTaskResult: async (_brainInstanceId, input) => ({ taskId: input.taskId, executionState: "in_review" }),
@@ -341,6 +342,7 @@ describe("Skippy MCP manifest", () => {
       const getMemoryDetail = tools.find((tool) => tool.name === "get_memory_detail");
       const linkMemory = tools.find((tool) => tool.name === "link_memory");
       const listRequestedReadyTasks = tools.find((tool) => tool.name === "list_requested_ready_tasks");
+      const listTasksByState = tools.find((tool) => tool.name === "list_tasks_by_state");
       const briefTask = tools.find((tool) => tool.name === "brief_task");
       const cancelTaskTool = tools.find((tool) => tool.name === "cancel_task");
       const getTaskBriefTool = tools.find((tool) => tool.name === "get_task_brief");
@@ -378,6 +380,11 @@ describe("Skippy MCP manifest", () => {
       expect(createTask?.inputSchema.properties?.ownerType).toBeDefined();
       expect(createTask?.inputSchema.properties?.kind).toBeDefined();
       expect(listRequestedReadyTasks?.description).toContain("explicitly requested");
+      expect(listTasksByState?.description).toContain("execution state");
+      expect(listTasksByState?.inputSchema.properties?.executionState).toBeDefined();
+      expect(listTasksByState?.inputSchema.required).toContain("executionState");
+      expect(listTasksByState?.inputSchema.properties?.projectId).toBeDefined();
+      expect(listTasksByState?.inputSchema.properties?.ownerType).toBeDefined();
       expect(briefTask?.description).toContain("Ground the brief in the actual repo");
       expect(getTaskBriefTool?.description).toContain("read user-provided inputs from effectiveAssetsPath");
       expect(getTaskBriefTool?.description).toContain(
