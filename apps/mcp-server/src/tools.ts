@@ -46,6 +46,27 @@ export type UpsertRecurrenceInput = {
   spawnTask?: boolean;
   timeZone?: string;
 };
+/** Execution-lifecycle states a task can sit in. */
+export type TaskExecutionState =
+  | "proposed"
+  | "unplanned"
+  | "briefed"
+  | "ready"
+  | "in_progress"
+  | "in_review"
+  | "blocked"
+  | "done"
+  | "cancelled";
+
+/** Args for listing accepted tasks in a single execution state. */
+export type TasksByStateInput = {
+  executionState: TaskExecutionState;
+  ownerType?: "owner" | "agent";
+  projectId?: string;
+  agentRequestStatus?: "requested" | "cancelled";
+  limit?: number;
+};
+
 import webPush from "web-push";
 
 type AiContextRecord = {
@@ -165,6 +186,7 @@ export type SkippyClient = {
   planProject(brainInstanceId: string, input: { projectId: string; maxTasks?: number }): Promise<unknown>;
   listReadyTasks(brainInstanceId: string, input: { limit?: number }): Promise<unknown>;
   listRequestedReadyTasks(brainInstanceId: string, input: { limit?: number }): Promise<unknown>;
+  listTasksByState(brainInstanceId: string, input: TasksByStateInput): Promise<unknown>;
   getTaskBrief(brainInstanceId: string, input: { taskId: string }): Promise<unknown>;
   briefTask(
     brainInstanceId: string,
@@ -1188,6 +1210,10 @@ export function createSkippyToolHandlers(client: SkippyClient, brainInstanceId: 
 
     async listRequestedReadyTasks(input: { limit?: number } = {}) {
       return await client.listRequestedReadyTasks(brainInstanceId, input);
+    },
+
+    async listTasksByState(input: TasksByStateInput) {
+      return await client.listTasksByState(brainInstanceId, input);
     },
 
     async getTaskBrief(input: { taskId: string }) {
