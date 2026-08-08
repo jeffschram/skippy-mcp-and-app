@@ -164,6 +164,7 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
   const updateProject = useMutation(api.projects.updateProjectForViewer);
   const executeTaskRun = useMutation(api.agentWorkbench.executeTaskForViewer);
   const cancelAgentRun = useMutation(api.agentWorkbench.cancelRunForViewer);
+  const decideApproval = useMutation(api.agentWorkbench.decideApprovalForViewer);
   const toast = useToast();
 
   const [planning, setPlanning] = useState(false);
@@ -235,6 +236,9 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
     api.agentWorkbench.runForTaskForViewer,
     viewerReady && selectedId ? { taskId: selectedId as any } : "skip",
   ) as AnyRecord | null | undefined;
+  const allPendingApprovals = useQuery(api.agentWorkbench.pendingApprovalsForViewer, viewerReady ? {} : "skip") as
+    | AnyRecord[]
+    | undefined;
   // "" = follow the resolution default (task request → project preference → claude).
   const [executeHarness, setExecuteHarness] = useState<"" | "codex" | "claude">("");
 
@@ -274,6 +278,21 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
       : (execConfig?.preferredHarness ?? "claude");
   const chosenHarness = executeHarness || defaultHarness;
   const canExecute = Boolean(execConfig?.enabled && execConfig?.host && execConfig.host.status !== "offline");
+  const selectedRunApprovals = selectedRun
+    ? (allPendingApprovals ?? []).filter((approval) => approval.runId === selectedRun._id)
+    : [];
+
+  const decideRunApproval = async (approvalId: string, decision: "accepted" | "declined") => {
+    setBusy(true);
+    try {
+      await decideApproval({ approvalId: approvalId as any, decision });
+      toast(decision === "accepted" ? "Approved." : "Declined.", decision === "accepted" ? "success" : "info");
+    } catch (error) {
+      toast(error instanceof Error ? error.message : "Could not record decision", "error");
+    } finally {
+      setBusy(false);
+    }
+  };
   const ownerName = board?.ownerName ?? "Owner";
   const openSettings = () => {
     if (!project) return;
@@ -1020,6 +1039,58 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                     </Button>
                   ) : null}
                 </div>
+
+                {/* Pending approvals for the selected task's run: the runner is
+                    blocked until each is decided here. */}
+                {selectedRunApprovals.length ? (
+                  <div style={{ display: "grid", gap: 8 }}>
+                    {selectedRunApprovals.map((approval) => (
+                      <div
+                        key={approval._id}
+                        className="card"
+                        style={{ padding: 12, display: "grid", gap: 6, borderLeft: "3px solid var(--gold, #b8860b)" }}
+                      >
+                        <p style={{ margin: 0, fontWeight: 700 }}>
+                          Approval needed · {titleCase(approval.kind)}
+                        </p>
+                        <p style={{ margin: 0, fontSize: 14 }}>{approval.title}</p>
+                        {approval.explanation ? (
+                          <p className="muted" style={{ margin: 0, fontSize: 13, whiteSpace: "pre-wrap" }}>
+                            {approval.explanation}
+                          </p>
+                        ) : null}
+                        {approval.details?.command ? (
+                          <pre className="code" style={{ margin: 0, fontSize: 12, overflowX: "auto" }}>
+                            {approval.details.command}
+                          </pre>
+                        ) : null}
+                        {approval.details?.diffStat ? (
+                          <pre className="code" style={{ margin: 0, fontSize: 12, overflowX: "auto" }}>
+                            {approval.details.diffStat}
+                          </pre>
+                        ) : null}
+                        <div style={{ display: "flex", gap: 8 }}>
+                          <Button
+                            small
+                            variant="primary"
+                            disabled={busy}
+                            onClick={() => void decideRunApproval(approval._id, "accepted")}
+                          >
+                            Approve
+                          </Button>
+                          <Button
+                            small
+                            variant="ghost"
+                            disabled={busy}
+                            onClick={() => void decideRunApproval(approval._id, "declined")}
+                          >
+                            Decline
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
 
                 {/* Move between states (kanban) */}
                 <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14 }}>
