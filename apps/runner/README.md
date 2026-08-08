@@ -23,15 +23,19 @@ pnpm --filter @skippy/runner build
 pnpm --filter @skippy/runner start
 ```
 
-Claude harness auth: log the service account into Claude Code (subscription
-OAuth) or export `ANTHROPIC_API_KEY`. PR creation uses the `gh` CLI when
-available; otherwise the run finishes with the branch pushed and no PR.
+Harness auth: for Claude, log the service account into Claude Code
+(subscription OAuth) or export `ANTHROPIC_API_KEY`; for Codex, install the
+`codex` CLI and run `codex login` (ChatGPT). PR creation uses the `gh` CLI
+when available; otherwise the run finishes with the branch pushed and no PR.
 
 ## Notes
 
 - Work discovery and control state currently poll; switching to Convex
   websocket subscriptions is a latency optimization tracked for phase 3.
-- The Codex adapter is a stub until phase 2; hosts that don't list `codex` in
-  `SKIPPY_RUNNER_HARNESSES` are never offered codex runs.
+- The Codex adapter runs `codex exec --json` with the `workspace-write`
+  sandbox scoped to the worktree (network off by default) — the boundary is
+  sandbox-enforced rather than approval-escalated; the publish gate still
+  goes through the web app. App Server-based interactive approvals are a
+  later refinement.
 - On restart the runner marks previously active runs `interrupted` rather than
   silently resuming into a worktree with unknown state; resume is explicit.
