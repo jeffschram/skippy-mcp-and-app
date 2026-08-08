@@ -196,6 +196,50 @@ const financialTxCategory = v.union(
 
 const financialTxSource = v.union(v.literal("plaid"), v.literal("manual"), v.literal("harness"));
 
+// --- Mac mini agent workbench (docs/mac-mini-agent-workbench.md) ---
+
+// Coding harness that executes a run. A TYPED enum, deliberately distinct from
+// the free-text `tasks.requestedHarness` (which requestAgentForTask defaults to
+// an assistant display name and is kept as display metadata). Hosts advertise
+// which of these they support; claims are matched against that capability.
+const agentHarness = v.union(v.literal("codex"), v.literal("claude"));
+
+// Run state machine. `interrupted` runs are resumable; `failed`/`cancelled`
+// are terminal; `in_review` is the success terminal (PR created, task handed
+// back to the owner). Transitions are enforced in convex/agentWorkbench.ts.
+const agentRunStatus = v.union(
+  v.literal("queued"),
+  v.literal("claimed"),
+  v.literal("preparing"),
+  v.literal("running"),
+  v.literal("waiting_for_approval"),
+  v.literal("verifying"),
+  v.literal("awaiting_publish_approval"),
+  v.literal("publishing"),
+  v.literal("in_review"),
+  v.literal("interrupted"),
+  v.literal("failed"),
+  v.literal("cancelled"),
+);
+
+const agentApprovalKind = v.union(
+  v.literal("command"),
+  v.literal("file_change"),
+  v.literal("network"),
+  v.literal("secret"),
+  v.literal("push"),
+  v.literal("pr"),
+  v.literal("deployment"),
+  v.literal("user_input"),
+);
+
+// Snapshot of the approval policy a run executes under. Minimal for phase 1:
+// the doc's default policy is hardcoded in the runner; only the knobs that can
+// vary per project live here.
+const agentApprovalPolicy = v.object({
+  requirePushApproval: v.optional(v.boolean()),
+});
+
 export default defineSchema({
   users: defineTable({
     authProvider: v.literal("clerk"),
@@ -1191,6 +1235,183 @@ export default defineSchema({
     createdAt: v.number(),
     updatedAt: v.number(),
   }).index("by_brain", ["brainInstanceId"]),
+
+  // --- Mac mini agent workbench (docs/mac-mini-agent-workbench.md) ---
+
+  // Registered execution machines. The first host is the always-on Mac mini.
+  // Online/Busy/Offline is DERIVED from lastHeartbeatAt at read time — there is
+  // deliberately no stored status flag to go stale. Auth follows the mcpTokens
+  // pattern: the plaintext credential is returned once at creation and only its
+  // hash is stored.
+  agentHosts: defineTable({
+    brainInstanceId: v.id("brainInstances"),
+    hostKey: v.string(),
+    displayName: v.string(),
+    kind: v.union(v.literal("mac"), v.literal("cloud")),
+    capabilities: v.object({
+      harnesses: v.array(agentHarness),
+      os: v.optional(v.string()),
+      arch: v.optional(v.string()),
+      maxConcurrency: v.number(),
+    }),
+    tokenHash: v.string(),
+    tokenPrefix: v.string(),
+    revokedAt: v.optional(v.number()),
+    // Set when the host should finish current runs but claim no new ones.
+    draining: v.optional(v.boolean()),
+    lastHeartbeatAt: v.optional(v.number()),
+    lastClaimAt: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_brain", ["brainInstanceId"])
+    .index("by_token_hash", ["tokenHash"]),
+
+  // Host-specific mapping for a project: which machine executes it and where
+  // the allowlisted checkout lives. Product-level config (repoUrl,
+  // defaultBaseBranch, localPath defaults) stays canonical on `projects`.
+  projectExecutionConfigs: defineTable({
+    brainInstanceId: v.id("brainInstances"),
+    projectId: v.id("projects"),
+    hostId: v.id("agentHosts"),
+    // Canonical local repository path on the host. The runner re-validates it
+    // against its own allowed root before every run — project selection is an
+    // authorization boundary, not a UI hint.
+    localPath: v.string(),
+    preferredHarness: v.optional(agentHarness),
+    approvalPolicy: v.optional(agentApprovalPolicy),
+    enabled: v.boolean(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_brain_project", ["brainInstanceId", "projectId"])
+    .index("by_host", ["hostId"]),
+
+  // Chat mapping for the workbench. Conversational turns use a lightweight path
+  // (no run); a chat is bound to ONE harness for its lifetime because
+  // conversation context lives in the harness's own thread/session.
+  // Transcript storage via the Convex Agent component is a later pass — this
+  // row is the Skippy-owned mapping, not the message store.
+  projectChats: defineTable({
+    brainInstanceId: v.id("brainInstances"),
+    projectId: v.id("projects"),
+    taskId: v.optional(v.id("tasks")),
+    title: v.string(),
+    kind: v.union(v.literal("general"), v.literal("task"), v.literal("working")),
+    harness: v.optional(agentHarness),
+    // Harness-native thread/session id (Codex thread, Claude session).
+    externalThreadId: v.optional(v.string()),
+    worktreePath: v.optional(v.string()),
+    branchName: v.optional(v.string()),
+    activeRunId: v.optional(v.id("agentRuns")),
+    state: v.union(
+      v.literal("active"),
+      v.literal("waiting"),
+      v.literal("completed"),
+      v.literal("archived"),
+    ),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_brain_project", ["brainInstanceId", "projectId"])
+    .index("by_brain_task", ["brainInstanceId", "taskId"]),
+
+  // Durable execution attempts. A separate table rather than an evolution of
+  // the task's agent-request fields: agentRequestStatus ("requested" |
+  // "cancelled") cannot represent retries/attempts, and a task accumulates run
+  // history. The task keeps a pointer via projectChats.activeRunId and the
+  // request fields remain the user-intent signal that queues the first run.
+  agentRuns: defineTable({
+    brainInstanceId: v.id("brainInstances"),
+    projectId: v.id("projects"),
+    chatId: v.id("projectChats"),
+    taskId: v.optional(v.id("tasks")),
+    hostId: v.optional(v.id("agentHosts")),
+    attempt: v.number(),
+    status: agentRunStatus,
+    harness: agentHarness,
+    baseBranch: v.string(),
+    workingBranch: v.optional(v.string()),
+    worktreePath: v.optional(v.string()),
+    // Brief snapshot so the claim returns only the authorized payload.
+    executionBrief: v.optional(v.string()),
+    acceptanceCriteria: v.optional(v.array(v.string())),
+    approvalPolicy: v.optional(agentApprovalPolicy),
+    // Lease-based claiming: claim is atomic; the host renews leaseExpiresAt via
+    // heartbeat. An expired lease does NOT auto-start a second harness against
+    // the same worktree — reconciliation inspects state first.
+    claimToken: v.optional(v.string()),
+    claimVersion: v.number(),
+    leaseExpiresAt: v.optional(v.number()),
+    // Control channel: the user sets this; the runner observes it and stops at
+    // a safe boundary. Cancellation of an ACTIVE run is cooperative.
+    cancelRequested: v.optional(v.boolean()),
+    queuedAt: v.number(),
+    claimedAt: v.optional(v.number()),
+    startedAt: v.optional(v.number()),
+    completedAt: v.optional(v.number()),
+    errorCategory: v.optional(v.string()),
+    // Safe (redacted) message only — never raw harness stderr.
+    errorMessage: v.optional(v.string()),
+    verificationSummary: v.optional(v.string()),
+    resultSummary: v.optional(v.string()),
+    resultUrl: v.optional(v.string()),
+    prUrl: v.optional(v.string()),
+    prNumber: v.optional(v.number()),
+    // High-water mark for idempotent event ingestion.
+    lastEventSeq: v.number(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_brain_status", ["brainInstanceId", "status"])
+    .index("by_brain_task", ["brainInstanceId", "taskId"])
+    .index("by_brain_chat", ["brainInstanceId", "chatId"])
+    .index("by_host", ["hostId"]),
+
+  // Structured execution events, separate from conversational messages.
+  // Idempotent by (runId, seq); high-frequency deltas are coalesced by the
+  // runner before storage.
+  agentRunEvents: defineTable({
+    brainInstanceId: v.id("brainInstances"),
+    runId: v.id("agentRuns"),
+    seq: v.number(),
+    type: v.string(),
+    // Safe structured payload — secrets redacted runner-side before transmission.
+    payload: v.optional(v.any()),
+    createdAt: v.number(),
+  }).index("by_run_seq", ["runId", "seq"]),
+
+  // Durable approval requests. Harness-neutral: adapters map Codex
+  // command/file approvals and Claude canUseTool callbacks into these records.
+  // State must survive browser disconnects and runner restarts.
+  agentApprovals: defineTable({
+    brainInstanceId: v.id("brainInstances"),
+    runId: v.id("agentRuns"),
+    // Stable harness-side request id so retried decisions cannot approve a
+    // different command accidentally.
+    harnessRequestId: v.string(),
+    kind: agentApprovalKind,
+    title: v.string(),
+    explanation: v.optional(v.string()),
+    // Redacted structured details (command argv, file path, host, ...).
+    details: v.optional(v.any()),
+    availableDecisions: v.optional(v.array(v.string())),
+    status: v.union(
+      v.literal("pending"),
+      v.literal("accepted"),
+      v.literal("declined"),
+      v.literal("cancelled"),
+      v.literal("expired"),
+    ),
+    scope: v.optional(v.union(v.literal("command"), v.literal("turn"), v.literal("session"))),
+    decidedByUserId: v.optional(v.id("users")),
+    decidedAt: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_run", ["runId"])
+    .index("by_run_request", ["runId", "harnessRequestId"])
+    .index("by_brain_status", ["brainInstanceId", "status"]),
 
   aiProcessingRuns: defineTable({
     brainInstanceId: v.id("brainInstances"),

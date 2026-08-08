@@ -9,6 +9,7 @@
  */
 
 import type * as agenda from "../agenda.js";
+import type * as agentWorkbench from "../agentWorkbench.js";
 import type * as auth from "../auth.js";
 import type * as bootstrap from "../bootstrap.js";
 import type * as calendar from "../calendar.js";
@@ -37,6 +38,7 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   agenda: typeof agenda;
+  agentWorkbench: typeof agentWorkbench;
   auth: typeof auth;
   bootstrap: typeof bootstrap;
   calendar: typeof calendar;
