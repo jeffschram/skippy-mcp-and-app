@@ -8,11 +8,13 @@ import { api } from "../../lib/skippy-api";
 import { LiveGate } from "../live-auth";
 import { Badge, Button, Card, EmptyState, LoadingRow, Tabs, useToast } from "../components";
 import { LiveIngestionLogsContent, LiveSettingsContent } from "../live-pages";
+import { AgentHostsContent } from "./agent-hosts";
 import { projectStatusTone } from "../../lib/display";
 import { useViewerReady } from "./use-viewer";
 
 const TABS = [
   { key: "settings", label: "Settings" },
+  { key: "agent-hosts", label: "Agent hosts" },
   { key: "archived-projects", label: "Archived projects" },
   { key: "logs", label: "Activity logs" },
   { key: "about", label: "About" },
@@ -122,6 +124,7 @@ export function SettingsContent() {
       </div>
 
       {tab === "settings" ? <LiveSettingsContent /> : null}
+      {tab === "agent-hosts" ? <AgentHostsContent /> : null}
       {tab === "archived-projects" ? <ArchivedProjects /> : null}
       {tab === "logs" ? <LiveIngestionLogsContent /> : null}
       {tab === "about" ? <About /> : null}

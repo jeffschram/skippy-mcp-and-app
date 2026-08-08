@@ -253,15 +253,14 @@ export const setProjectExecutionConfigForViewer = mutationGeneric({
     if (!localPath.startsWith("/")) throw new Error("localPath must be absolute");
 
     const now = Date.now();
-    const patch = {
-      hostId: args.hostId,
-      localPath,
-      preferredHarness: args.preferredHarness,
-      approvalPolicy:
-        args.requirePushApproval === undefined ? undefined : { requirePushApproval: args.requirePushApproval },
-      enabled: args.enabled ?? true,
-      updatedAt: now,
-    };
+    // db.patch removes fields set to an explicit undefined, so only include
+    // the optional knobs when the caller actually provided them.
+    const patch: Record<string, unknown> = { hostId: args.hostId, localPath, updatedAt: now };
+    if (args.preferredHarness !== undefined) patch.preferredHarness = args.preferredHarness;
+    if (args.requirePushApproval !== undefined) {
+      patch.approvalPolicy = { requirePushApproval: args.requirePushApproval };
+    }
+    if (args.enabled !== undefined) patch.enabled = args.enabled;
     const existing = await ctx.db
       .query("projectExecutionConfigs")
       .withIndex("by_brain_project", (q: any) => q.eq("brainInstanceId", brain._id).eq("projectId", args.projectId))
@@ -273,10 +272,49 @@ export const setProjectExecutionConfigForViewer = mutationGeneric({
     const configId = await ctx.db.insert("projectExecutionConfigs", {
       brainInstanceId: brain._id,
       projectId: args.projectId,
-      ...patch,
+      hostId: args.hostId,
+      localPath,
+      ...(args.preferredHarness !== undefined ? { preferredHarness: args.preferredHarness } : {}),
+      ...(args.requirePushApproval !== undefined
+        ? { approvalPolicy: { requirePushApproval: args.requirePushApproval } }
+        : {}),
+      enabled: args.enabled ?? true,
       createdAt: now,
+      updatedAt: now,
     });
     return { configId };
+  },
+});
+
+export const listProjectExecutionConfigsForViewer = queryGeneric({
+  args: {},
+  handler: async (ctx) => {
+    const { brain } = await requireOwnedBrain(ctx);
+    const now = Date.now();
+    const configs = await ctx.db
+      .query("projectExecutionConfigs")
+      .withIndex("by_brain_project", (q: any) => q.eq("brainInstanceId", brain._id))
+      .collect();
+    const results = [];
+    for (const config of configs) {
+      const project = await ctx.db.get(config.projectId);
+      const host = await ctx.db.get(config.hostId);
+      results.push({
+        _id: config._id,
+        projectId: config.projectId,
+        projectTitle: project?.title ?? "(deleted project)",
+        hostId: config.hostId,
+        hostDisplayName: host?.displayName ?? "(deleted host)",
+        hostStatus: host ? hostStatusFor(host, now) : "offline",
+        localPath: config.localPath,
+        preferredHarness: config.preferredHarness,
+        requirePushApproval: config.approvalPolicy?.requirePushApproval ?? true,
+        enabled: config.enabled,
+        updatedAt: config.updatedAt,
+      });
+    }
+    results.sort((a, b) => a.projectTitle.localeCompare(b.projectTitle));
+    return results;
   },
 });
 
