@@ -241,6 +241,7 @@ export const setProjectExecutionConfigForViewer = mutationGeneric({
     localPath: v.string(),
     preferredHarness: v.optional(harnessArg),
     requirePushApproval: v.optional(v.boolean()),
+    verifyCommand: v.optional(v.string()),
     enabled: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
@@ -256,6 +257,7 @@ export const setProjectExecutionConfigForViewer = mutationGeneric({
     // db.patch removes fields set to an explicit undefined, so only include
     // the optional knobs when the caller actually provided them.
     const patch: Record<string, unknown> = { hostId: args.hostId, localPath, updatedAt: now };
+    if (args.verifyCommand !== undefined) patch.verifyCommand = args.verifyCommand.trim() || undefined;
     if (args.preferredHarness !== undefined) patch.preferredHarness = args.preferredHarness;
     if (args.requirePushApproval !== undefined) {
       patch.approvalPolicy = { requirePushApproval: args.requirePushApproval };
@@ -274,6 +276,7 @@ export const setProjectExecutionConfigForViewer = mutationGeneric({
       projectId: args.projectId,
       hostId: args.hostId,
       localPath,
+      ...(args.verifyCommand?.trim() ? { verifyCommand: args.verifyCommand.trim() } : {}),
       ...(args.preferredHarness !== undefined ? { preferredHarness: args.preferredHarness } : {}),
       ...(args.requirePushApproval !== undefined
         ? { approvalPolicy: { requirePushApproval: args.requirePushApproval } }
@@ -308,6 +311,7 @@ export const listProjectExecutionConfigsForViewer = queryGeneric({
         hostStatus: host ? hostStatusFor(host, now) : "offline",
         localPath: config.localPath,
         preferredHarness: config.preferredHarness,
+        verifyCommand: config.verifyCommand,
         requirePushApproval: config.approvalPolicy?.requirePushApproval ?? true,
         enabled: config.enabled,
         updatedAt: config.updatedAt,
@@ -364,14 +368,33 @@ export const executeTaskForViewer = mutationGeneric({
     if (!task || task.brainInstanceId !== brain._id) throw new Error("task not found");
     if (task.processingState !== "accepted") throw new Error("only accepted tasks can be executed");
     if (task.ownerType !== "agent") throw new Error("only agent-owned tasks can be executed");
-    const executionState = task.executionState ?? (task.status === "done" ? "done" : "ready");
-    if (executionState !== "ready") throw new Error("only ready tasks can be executed");
 
     // Duplicate execution request: return the existing active run and its chat
     // rather than creating a competing run.
     const existing = await activeRunForTask(ctx.db, brain._id, args.taskId);
     if (existing) {
       return { runId: existing._id, chatId: existing.chatId, status: existing.status, existing: true };
+    }
+
+    const executionState = task.executionState ?? (task.status === "done" ? "done" : "ready");
+    if (executionState !== "ready") {
+      // Resume path (doc → Task action states: Interrupted or failed → Resume).
+      // A prior attempt moved the task to in_progress/in_review before dying;
+      // with no run active, a new attempt is legal.
+      const taskRuns = await ctx.db
+        .query("agentRuns")
+        .withIndex("by_brain_task", (q: any) => q.eq("brainInstanceId", brain._id).eq("taskId", args.taskId))
+        .collect();
+      taskRuns.sort((a: any, b: any) => b.createdAt - a.createdAt);
+      const latest = taskRuns[0];
+      const resumable =
+        (executionState === "in_progress" || executionState === "in_review") &&
+        latest &&
+        (["failed", "interrupted", "cancelled"].includes(latest.status) ||
+          // Publish-failed runs finish in_review with the work preserved on
+          // the branch; re-executing retries the push.
+          (latest.status === "in_review" && latest.errorCategory === "publish"));
+      if (!resumable) throw new Error("only ready tasks (or failed/interrupted attempts) can be executed");
     }
 
     const projectId = await projectIdForTask(ctx.db, brain._id, args.taskId);
@@ -722,6 +745,7 @@ export const claimNextRun = mutationGeneric({
         executionBrief: run.executionBrief,
         acceptanceCriteria: run.acceptanceCriteria,
         approvalPolicy: run.approvalPolicy,
+        verifyCommand: config.verifyCommand,
         project: {
           _id: run.projectId,
           title: project?.title,

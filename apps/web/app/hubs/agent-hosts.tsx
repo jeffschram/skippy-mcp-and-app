@@ -201,6 +201,7 @@ function ExecutionMappingsSection() {
   const [hostId, setHostId] = useState("");
   const [localPath, setLocalPath] = useState("");
   const [preferredHarness, setPreferredHarness] = useState<"claude" | "codex">("claude");
+  const [verifyCommand, setVerifyCommand] = useState("");
   const [saving, setSaving] = useState(false);
 
   const activeHosts = (hosts ?? []).filter((host) => !host.revokedAt);
@@ -219,11 +220,13 @@ function ExecutionMappingsSection() {
         hostId: hostId as any,
         localPath: localPath.trim(),
         preferredHarness,
+        verifyCommand: verifyCommand.trim(),
         enabled: true,
       });
       toast("Execution mapping saved.", "success");
       setProjectId("");
       setLocalPath("");
+      setVerifyCommand("");
     } catch (error) {
       toast(error instanceof Error ? error.message : "Could not save mapping", "error");
     } finally {
@@ -293,6 +296,14 @@ function ExecutionMappingsSection() {
               <option value="codex">Codex</option>
             </Select>
           </Field>
+          <Field label="Verify command (optional)">
+            <TextInput
+              value={verifyCommand}
+              onChange={(event) => setVerifyCommand(event.target.value)}
+              placeholder="pnpm typecheck && pnpm test"
+              style={{ minWidth: 220 }}
+            />
+          </Field>
           <Button variant="primary" disabled={saving} onClick={() => void save()}>
             Save mapping
           </Button>
@@ -315,6 +326,7 @@ function ExecutionMappingsSection() {
                   <p className="item-meta">
                     {config.hostDisplayName} ({config.hostStatus}) · <span className="code">{config.localPath}</span>
                     {config.preferredHarness ? ` · prefers ${config.preferredHarness}` : ""}
+                    {config.verifyCommand ? ` · verify: ${config.verifyCommand}` : ""}
                     {config.requirePushApproval ? " · push requires approval" : ""}
                   </p>
                 </div>

@@ -1280,6 +1280,9 @@ export default defineSchema({
     localPath: v.string(),
     preferredHarness: v.optional(agentHarness),
     approvalPolicy: v.optional(agentApprovalPolicy),
+    // Shell command the runner executes in the worktree during the verifying
+    // phase (e.g. "pnpm typecheck && pnpm test"). Absent = diff-stat only.
+    verifyCommand: v.optional(v.string()),
     enabled: v.boolean(),
     createdAt: v.number(),
     updatedAt: v.number(),

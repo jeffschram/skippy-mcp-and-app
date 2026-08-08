@@ -139,12 +139,31 @@ export class RunExecutor {
         return;
       }
 
-      // Verification: phase 1 records the diff surface; wiring the project's
-      // real test/typecheck commands in is the next slice.
       await plane.updateRunStatus(run.runId, run.claimToken, "verifying");
       await commitAll(worktree.worktreePath, `Agent work for ${run.project.title ?? "task"}`);
       const summary = await diffSummary(worktree.worktreePath, run.baseBranch);
-      this.emit({ type: "status", payload: { phase: "verified", diffStat: summary.slice(0, 2000) } });
+
+      // Project-configured verification (e.g. "pnpm typecheck && pnpm test"),
+      // run inside the worktree. A failure does not kill the run — the result
+      // goes to the user on the publish approval, and they decide.
+      let verifyLine = "no verify command configured";
+      if (run.verifyCommand) {
+        const verify = await runVerifyCommand(run.verifyCommand, worktree.worktreePath);
+        verifyLine = verify.passed
+          ? `verify PASSED: ${run.verifyCommand}`
+          : `verify FAILED (exit ${verify.exitCode}): ${run.verifyCommand}\n${verify.outputTail}`;
+        this.emit({
+          type: "command_result",
+          payload: {
+            command: run.verifyCommand,
+            exitCode: verify.exitCode,
+            durationMs: verify.durationMs,
+            outputTail: verify.outputTail,
+            phase: "verify",
+          },
+        });
+      }
+      this.emit({ type: "status", payload: { phase: "verified", diffStat: summary.slice(0, 2000), verifyLine } });
 
       const dirty = await hasUncommittedChanges(worktree.worktreePath);
       if (!summary && !dirty) {
@@ -152,7 +171,7 @@ export class RunExecutor {
         await this.flushEvents();
         await plane.updateRunStatus(run.runId, run.claimToken, "in_review", {
           resultSummary: turn.resultText?.slice(0, 4000) ?? "Run completed with no code changes.",
-          verificationSummary: "no changes",
+          verificationSummary: `no changes · ${verifyLine}`.slice(0, 2000),
         });
         return;
       }
@@ -165,7 +184,11 @@ export class RunExecutor {
         kind: "push",
         title: `Push ${worktree.branchName} and open a PR`,
         explanation: turn.resultText?.slice(0, 1000),
-        details: { branch: worktree.branchName, diffStat: summary.slice(0, 2000) },
+        details: {
+          branch: worktree.branchName,
+          diffStat: summary.slice(0, 2000),
+          verification: verifyLine.slice(0, 2000),
+        },
       });
       const publishDecision = await plane.awaitApproval(run.runId, publishRequestId, {
         signal: this.abort.signal,
@@ -181,26 +204,39 @@ export class RunExecutor {
               publishDecision === "declined"
                 ? "Work complete on the local branch; publish was declined."
                 : (turn.resultText?.slice(0, 4000) ?? "Run cancelled."),
-            verificationSummary: summary.slice(0, 2000),
+            verificationSummary: `${verifyLine}\n${summary}`.slice(0, 2000),
           },
         );
         return;
       }
 
       await plane.updateRunStatus(run.runId, run.claimToken, "publishing");
-      await pushBranch(worktree.worktreePath, worktree.branchName);
-      const prUrl = await createOrUpdatePr({
-        worktreePath: worktree.worktreePath,
-        baseBranch: run.baseBranch,
-        title: run.project.title ? `Agent: ${run.project.title}` : `Agent work on ${worktree.branchName}`,
-        body: `${turn.resultText ?? "Automated agent work."}\n\n---\nRun ${run.runId} (attempt ${run.attempt}) via Skippy agent workbench.`,
-      });
+      // A publish failure must not fail the run: the work is committed on the
+      // branch, so preserve it, finish In Review, and record the error so the
+      // user can fix the remote and retry.
+      let prUrl: string | null = null;
+      let publishError: string | null = null;
+      try {
+        await pushBranch(worktree.worktreePath, worktree.branchName);
+        prUrl = await createOrUpdatePr({
+          worktreePath: worktree.worktreePath,
+          baseBranch: run.baseBranch,
+          title: run.project.title ? `Agent: ${run.project.title}` : `Agent work on ${worktree.branchName}`,
+          body: `${turn.resultText ?? "Automated agent work."}\n\n---\nRun ${run.runId} (attempt ${run.attempt}) via Skippy agent workbench.`,
+        });
+      } catch (error: unknown) {
+        publishError = (error instanceof Error ? error.message : String(error)).slice(0, 400);
+        this.emit({ type: "error", payload: { phase: "publish", message: publishError } });
+      }
 
       await this.flushEvents();
       await plane.updateRunStatus(run.runId, run.claimToken, "in_review", {
-        resultSummary: turn.resultText?.slice(0, 4000) ?? "Branch pushed.",
-        verificationSummary: summary.slice(0, 2000),
+        resultSummary: publishError
+          ? `Work is committed on ${worktree.branchName}, but publishing failed. Fix the remote and re-execute to retry the push.`
+          : (turn.resultText?.slice(0, 4000) ?? "Branch pushed."),
+        verificationSummary: `${verifyLine}\n${summary}`.slice(0, 2000),
         ...(prUrl ? { prUrl, resultUrl: prUrl } : {}),
+        ...(publishError ? { errorCategory: "publish", errorMessage: publishError } : {}),
       });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
@@ -219,6 +255,36 @@ export class RunExecutor {
       await this.flushEvents();
     }
   }
+}
+
+const VERIFY_TIMEOUT_MS = 10 * 60 * 1000;
+const VERIFY_OUTPUT_TAIL_CHARS = 1500;
+
+async function runVerifyCommand(
+  command: string,
+  cwd: string,
+): Promise<{ passed: boolean; exitCode: number; durationMs: number; outputTail: string }> {
+  const { execFile } = await import("node:child_process");
+  const startedAt = Date.now();
+  return new Promise((resolve) => {
+    execFile(
+      "bash",
+      ["-lc", command],
+      { cwd, timeout: VERIFY_TIMEOUT_MS, maxBuffer: 20 * 1024 * 1024 },
+      (error, stdout, stderr) => {
+        const combined = `${stdout}\n${stderr}`.trim();
+        // error.code is a number for non-zero exits, a string (e.g. ETIMEDOUT)
+        // for spawn/timeout failures.
+        const rawCode = (error as { code?: number | string } | null)?.code;
+        resolve({
+          passed: !error,
+          exitCode: error ? (typeof rawCode === "number" ? rawCode : 1) : 0,
+          durationMs: Date.now() - startedAt,
+          outputTail: combined.slice(-VERIFY_OUTPUT_TAIL_CHARS),
+        });
+      },
+    );
+  });
 }
 
 function buildPrompt(run: ClaimedRun): string {

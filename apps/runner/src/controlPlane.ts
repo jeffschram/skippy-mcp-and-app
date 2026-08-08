@@ -25,6 +25,7 @@ export interface ClaimedRun {
   executionBrief?: string;
   acceptanceCriteria?: string[];
   approvalPolicy?: { requirePushApproval?: boolean };
+  verifyCommand?: string;
   project: { _id: string; title?: string; repoUrl?: string; localPath: string };
 }
 
