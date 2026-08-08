@@ -124,6 +124,10 @@ export function buildAgendaRows(
 
   for (const event of events ?? []) {
     if (event.status === "cancelled") continue;
+    // Keep an event while it is happening, but remove it once its scheduled
+    // end has passed. Older rows remain in the calendar mirror for history;
+    // the Agenda is only the owner's current and upcoming plate.
+    if ((event.endAt ?? event.startAt) < now) continue;
     rows.push({
       kind: "event",
       id: event._id,

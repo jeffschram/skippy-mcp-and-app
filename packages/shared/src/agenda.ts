@@ -71,6 +71,10 @@ export function buildAgenda(
   for (const event of inputs.events ?? []) {
     if (event.status === "cancelled") continue;
     if (!inRange(event.startAt, from, to)) continue;
+    // An event belongs on the Agenda until it finishes, not forever after its
+    // start time. Falling back to startAt keeps older/malformed mirror rows
+    // from lingering when they do not carry an explicit end.
+    if ((typeof event.endAt === "number" ? event.endAt : event.startAt) < now) continue;
 
     items.push({
       source: "event",
