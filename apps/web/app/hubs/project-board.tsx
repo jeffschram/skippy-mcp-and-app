@@ -129,6 +129,58 @@ function FolderOverrideField({
   );
 }
 
+/** One line of the run execution log, keyed by runner event type. */
+function RunEventLine({ event }: { event: AnyRecord }) {
+  const payload = event.payload ?? {};
+  const mono: React.CSSProperties = { margin: 0, fontSize: 12, fontFamily: "monospace", whiteSpace: "pre-wrap" };
+  switch (event.type) {
+    case "assistant_message":
+      return <p style={{ margin: 0, fontSize: 13, whiteSpace: "pre-wrap" }}>{payload.text}</p>;
+    case "plan_update":
+      return (
+        <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12 }}>
+          {(payload.todos ?? []).map((todo: AnyRecord, index: number) => (
+            <li key={index} className={todo.status === "completed" ? "muted" : undefined}>
+              {todo.status === "completed" ? "✓ " : ""}
+              {todo.content ?? todo.title ?? JSON.stringify(todo)}
+            </li>
+          ))}
+        </ul>
+      );
+    case "command":
+      return <p style={mono}>$ {payload.command}</p>;
+    case "command_result":
+      return (
+        <p style={mono} className={payload.exitCode ? undefined : "muted"}>
+          {payload.phase === "verify" ? "verify " : ""}exit {payload.exitCode}
+          {payload.outputTail ? `\n${payload.outputTail}` : ""}
+        </p>
+      );
+    case "file_change":
+      return (
+        <p className="muted" style={mono}>
+          {payload.tool ?? "edit"}: {payload.filePath}
+        </p>
+      );
+    case "status":
+      return (
+        <p className="muted" style={{ margin: 0, fontSize: 12 }}>
+          — {payload.phase}
+          {payload.verifyLine ? ` · ${payload.verifyLine}` : ""}
+        </p>
+      );
+    case "error":
+      return (
+        <p style={{ ...mono, color: "var(--red, #b04040)" }}>
+          {payload.phase ? `[${payload.phase}] ` : ""}
+          {payload.message}
+        </p>
+      );
+    default:
+      return null;
+  }
+}
+
 function buildBriefText(task: AnyRecord, project?: AnyRecord): string {
   const lines = [`# ${task.title}`];
   if (project?.title) lines.push(`Project: ${project.title}`);
@@ -239,6 +291,10 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
   const allPendingApprovals = useQuery(api.agentWorkbench.pendingApprovalsForViewer, viewerReady ? {} : "skip") as
     | AnyRecord[]
     | undefined;
+  const selectedRunEvents = useQuery(
+    api.agentWorkbench.runEventsForViewer,
+    viewerReady && selectedRunInfo?.run ? { runId: selectedRunInfo.run._id as any, limit: 500 } : "skip",
+  ) as AnyRecord | undefined;
   // "" = follow the resolution default (task request → project preference → claude).
   const [executeHarness, setExecuteHarness] = useState<"" | "codex" | "claude">("");
 
@@ -281,6 +337,15 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
   const selectedRunApprovals = selectedRun
     ? (allPendingApprovals ?? []).filter((approval) => approval.runId === selectedRun._id)
     : [];
+  // Resume path: a dead attempt (or a publish failure that preserved the work)
+  // can be retried even though the task has moved past Ready.
+  const selectedRunResumable = Boolean(
+    selectedRun &&
+      !selectedRunActive &&
+      (["failed", "interrupted", "cancelled"].includes(selectedRun.status) ||
+        (selectedRun.status === "in_review" && selectedRun.errorCategory === "publish")) &&
+      ["in_progress", "in_review"].includes(selected?.executionState),
+  );
 
   const decideRunApproval = async (approvalId: string, decision: "accepted" | "declined") => {
     setBusy(true);
@@ -975,6 +1040,11 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                     <Button variant="primary" disabled={busy} onClick={() => void moveTo(selected._id, "in_progress")}>
                       <Play size={16} aria-hidden /> Mark in progress
                     </Button>
+                  ) : selectedRunResumable && selected.ownerType === "agent" && canExecute ? (
+                    <Button variant="primary" disabled={busy} onClick={() => void executeSelectedTask(selected)}>
+                      <RotateCcw size={16} aria-hidden />
+                      {selectedRun.errorCategory === "publish" ? "Retry publish" : "Retry run"}
+                    </Button>
                   ) : null}
                   {ABANDONABLE_STATES.has(selected.executionState) ? (
                     abandonConfirming ? (
@@ -1046,6 +1116,32 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                   </p>
                 ) : null}
 
+                {/* Execution log: the run's durable event stream, live. */}
+                {selectedRun && selectedRunEvents?.events?.length ? (
+                  <details open={selectedRunActive}>
+                    <summary style={{ cursor: "pointer", fontWeight: 700, fontSize: 14 }}>
+                      Execution log ({selectedRunEvents.events.length} events
+                      {selectedRunEvents.events.length >= 500 ? ", truncated" : ""})
+                    </summary>
+                    <div
+                      style={{
+                        display: "grid",
+                        gap: 6,
+                        marginTop: 8,
+                        maxHeight: 320,
+                        overflowY: "auto",
+                        padding: "8px 10px",
+                        border: "1px solid var(--border, #333)",
+                        borderRadius: 8,
+                      }}
+                    >
+                      {selectedRunEvents.events.map((event: AnyRecord) => (
+                        <RunEventLine key={event.seq} event={event} />
+                      ))}
+                    </div>
+                  </details>
+                ) : null}
+
                 {/* Pending approvals for the selected task's run: the runner is
                     blocked until each is decided here. */}
                 {selectedRunApprovals.length ? (
@@ -1069,6 +1165,14 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                           <pre className="code" style={{ margin: 0, fontSize: 12, overflowX: "auto" }}>
                             {approval.details.command}
                           </pre>
+                        ) : null}
+                        {approval.details?.verification ? (
+                          <p
+                            className="muted"
+                            style={{ margin: 0, fontSize: 12, whiteSpace: "pre-wrap", fontFamily: "monospace" }}
+                          >
+                            {approval.details.verification}
+                          </p>
                         ) : null}
                         {approval.details?.diffStat ? (
                           <pre className="code" style={{ margin: 0, fontSize: 12, overflowX: "auto" }}>
