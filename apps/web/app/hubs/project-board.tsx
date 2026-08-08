@@ -57,6 +57,31 @@ const PRE_EXECUTION = new Set(["unplanned", "briefed", "ready", "blocked"]);
 const RESULT_STATES = new Set(["in_progress", "in_review"]);
 // States the owner can abandon — running or completed work records its result instead.
 const ABANDONABLE_STATES = new Set(["proposed", "unplanned", "briefed", "ready", "blocked"]);
+// Agent-run states that count as "still going" for board affordances.
+const ACTIVE_RUN_STATES = new Set([
+  "queued",
+  "claimed",
+  "preparing",
+  "running",
+  "waiting_for_approval",
+  "verifying",
+  "awaiting_publish_approval",
+  "publishing",
+]);
+const RUN_STATE_LABELS: Record<string, string> = {
+  queued: "Queued",
+  claimed: "Claimed",
+  preparing: "Preparing",
+  running: "Running",
+  waiting_for_approval: "Waiting for approval",
+  verifying: "Verifying",
+  awaiting_publish_approval: "Awaiting publish approval",
+  publishing: "Publishing",
+  in_review: "In review",
+  interrupted: "Interrupted",
+  failed: "Failed",
+  cancelled: "Cancelled",
+};
 
 /**
  * Text input for an assets/output folder override. Unset means "derived from
@@ -137,6 +162,9 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
   const restoreTask = useMutation(api.projects.restoreTaskForViewer);
   const updateBrief = useMutation(api.projects.updateTaskBriefForViewer);
   const updateProject = useMutation(api.projects.updateProjectForViewer);
+  const executeTaskRun = useMutation(api.agentWorkbench.executeTaskForViewer);
+  const cancelAgentRun = useMutation(api.agentWorkbench.cancelRunForViewer);
+  const decideApproval = useMutation(api.agentWorkbench.decideApprovalForViewer);
   const toast = useToast();
 
   const [planning, setPlanning] = useState(false);
@@ -198,6 +226,22 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
     viewerReady && selectedId ? { taskId: selectedId as any } : "skip",
   ) as AnyRecord | null | undefined;
 
+  // Mac mini agent workbench: execution host mapping for this project and the
+  // selected task's latest run (docs/mac-mini-agent-workbench.md).
+  const execConfig = useQuery(
+    api.agentWorkbench.projectExecutionConfigForViewer,
+    viewerReady ? { projectId: projectId as any } : "skip",
+  ) as AnyRecord | null | undefined;
+  const selectedRunInfo = useQuery(
+    api.agentWorkbench.runForTaskForViewer,
+    viewerReady && selectedId ? { taskId: selectedId as any } : "skip",
+  ) as AnyRecord | null | undefined;
+  const allPendingApprovals = useQuery(api.agentWorkbench.pendingApprovalsForViewer, viewerReady ? {} : "skip") as
+    | AnyRecord[]
+    | undefined;
+  // "" = follow the resolution default (task request → project preference → claude).
+  const [executeHarness, setExecuteHarness] = useState<"" | "codex" | "claude">("");
+
   // The 'Confirm?' abandon state resets on its own after a moment.
   useEffect(() => {
     if (!abandonConfirming) return;
@@ -210,6 +254,7 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
     setEditingBrief(false);
     setEditingProposal(false);
     setAbandonConfirming(false);
+    setExecuteHarness("");
     if (selected) {
       setBriefDraft(selected.executionBrief ?? "");
       setCriteriaDraft((selected.acceptanceCriteria ?? []).join("\n"));
@@ -222,6 +267,32 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
   const cancelledTasks: AnyRecord[] =
     board?.tasks?.filter((task: AnyRecord) => task.executionState === "cancelled") ?? [];
   const agentName = board?.agentName ?? "Agent";
+
+  const selectedRun = selectedRunInfo?.run ?? null;
+  const selectedRunActive = selectedRun ? ACTIVE_RUN_STATES.has(selectedRun.status) : false;
+  // Harness resolution order: explicit pick → task request (when a valid enum
+  // value) → project preference → claude.
+  const defaultHarness: "codex" | "claude" =
+    selected?.requestedHarness === "codex" || selected?.requestedHarness === "claude"
+      ? selected.requestedHarness
+      : (execConfig?.preferredHarness ?? "claude");
+  const chosenHarness = executeHarness || defaultHarness;
+  const canExecute = Boolean(execConfig?.enabled && execConfig?.host && execConfig.host.status !== "offline");
+  const selectedRunApprovals = selectedRun
+    ? (allPendingApprovals ?? []).filter((approval) => approval.runId === selectedRun._id)
+    : [];
+
+  const decideRunApproval = async (approvalId: string, decision: "accepted" | "declined") => {
+    setBusy(true);
+    try {
+      await decideApproval({ approvalId: approvalId as any, decision });
+      toast(decision === "accepted" ? "Approved." : "Declined.", decision === "accepted" ? "success" : "info");
+    } catch (error) {
+      toast(error instanceof Error ? error.message : "Could not record decision", "error");
+    } finally {
+      setBusy(false);
+    }
+  };
   const ownerName = board?.ownerName ?? "Owner";
   const openSettings = () => {
     if (!project) return;
@@ -348,6 +419,35 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
       toast(`${agentName} requested.`, "success");
     } catch (error) {
       toast(error instanceof Error ? error.message : `Could not request ${agentName}`, "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const executeSelectedTask = async (task: AnyRecord) => {
+    setBusy(true);
+    try {
+      const result = await executeTaskRun({ taskId: task._id as any, harness: chosenHarness as any });
+      toast(
+        result.existing
+          ? "A run is already active for this task."
+          : `Execution queued on ${chosenHarness === "claude" ? "Claude" : "Codex"}.`,
+        result.existing ? "info" : "success",
+      );
+    } catch (error) {
+      toast(error instanceof Error ? error.message : "Could not queue execution", "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const cancelSelectedRun = async (runId: string) => {
+    setBusy(true);
+    try {
+      await cancelAgentRun({ runId: runId as any });
+      toast("Cancellation requested.", "info");
+    } catch (error) {
+      toast(error instanceof Error ? error.message : "Could not cancel run", "error");
     } finally {
       setBusy(false);
     }
@@ -835,14 +935,42 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                       Mark Ready
                     </Button>
                   ) : selected.executionState === "ready" && selected.ownerType === "agent" ? (
-                    <Button
-                      variant="primary"
-                      disabled={busy || selected.agentRequestStatus === "requested"}
-                      onClick={() => void requestAgentForTask(selected)}
-                    >
-                      <Play size={16} aria-hidden />
-                      {selected.agentRequestStatus === "requested" ? `${agentName} requested` : `Request ${agentName}`}
-                    </Button>
+                    canExecute ? (
+                      <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                        <Select
+                          value={chosenHarness}
+                          disabled={busy || selectedRunActive}
+                          onChange={(event) => setExecuteHarness(event.target.value as "codex" | "claude")}
+                          aria-label="Harness"
+                          style={{ maxWidth: 110 }}
+                        >
+                          <option value="claude">Claude</option>
+                          <option value="codex">Codex</option>
+                        </Select>
+                        <Button
+                          variant="primary"
+                          disabled={busy || selectedRunActive}
+                          onClick={() => void executeSelectedTask(selected)}
+                        >
+                          <Play size={16} aria-hidden />
+                          {selectedRunActive ? RUN_STATE_LABELS[selectedRun.status] : "Execute"}
+                        </Button>
+                      </span>
+                    ) : (
+                      <Button
+                        variant="primary"
+                        disabled={busy || selected.agentRequestStatus === "requested"}
+                        onClick={() => void requestAgentForTask(selected)}
+                        title={
+                          execConfig === null
+                            ? "No execution host mapped to this project — falls back to the heartbeat queue."
+                            : undefined
+                        }
+                      >
+                        <Play size={16} aria-hidden />
+                        {selected.agentRequestStatus === "requested" ? `${agentName} requested` : `Request ${agentName}`}
+                      </Button>
+                    )
                   ) : selected.executionState === "ready" ? (
                     <Button variant="primary" disabled={busy} onClick={() => void moveTo(selected._id, "in_progress")}>
                       <Play size={16} aria-hidden /> Mark in progress
@@ -886,10 +1014,89 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                     <Badge tone={taskStatusTone(selected.status)}>Status: {titleCase(selected.status)}</Badge>
                   ) : null}
                   {selected.kind ? <Badge tone="neutral">{selected.kind}</Badge> : null}
-                  {selected.agentRequestStatus === "requested" ? (
+                  {selected.agentRequestStatus === "requested" && !selectedRun ? (
                     <Badge tone="blue">Queued for {selected.requestedHarness ?? agentName}</Badge>
                   ) : null}
+                  {selectedRun ? (
+                    <Badge tone={selectedRunActive ? "blue" : selectedRun.status === "in_review" ? "green" : "neutral"} dot={selectedRunActive}>
+                      Run {selectedRun.attempt}: {RUN_STATE_LABELS[selectedRun.status] ?? selectedRun.status} ({selectedRun.harness})
+                    </Badge>
+                  ) : null}
+                  {selectedRunInfo?.pendingApprovals ? (
+                    <Badge tone="gold">
+                      {selectedRunInfo.pendingApprovals} approval{selectedRunInfo.pendingApprovals > 1 ? "s" : ""} pending
+                    </Badge>
+                  ) : null}
+                  {selectedRunActive ? (
+                    <Button
+                      variant="ghost"
+                      disabled={busy || selectedRun.cancelRequested}
+                      onClick={() => void cancelSelectedRun(selectedRun._id)}
+                      style={{ marginLeft: "auto" }}
+                    >
+                      <Ban size={14} aria-hidden />
+                      {selectedRun.cancelRequested ? "Cancelling…" : "Cancel run"}
+                    </Button>
+                  ) : null}
                 </div>
+
+                {selectedRun?.errorMessage ? (
+                  <p className="muted" style={{ margin: 0, fontSize: 13, color: "var(--red, #b04040)" }}>
+                    Run error ({selectedRun.errorCategory ?? "unknown"}): {selectedRun.errorMessage}
+                  </p>
+                ) : null}
+
+                {/* Pending approvals for the selected task's run: the runner is
+                    blocked until each is decided here. */}
+                {selectedRunApprovals.length ? (
+                  <div style={{ display: "grid", gap: 8 }}>
+                    {selectedRunApprovals.map((approval) => (
+                      <div
+                        key={approval._id}
+                        className="card"
+                        style={{ padding: 12, display: "grid", gap: 6, borderLeft: "3px solid var(--gold, #b8860b)" }}
+                      >
+                        <p style={{ margin: 0, fontWeight: 700 }}>
+                          Approval needed · {titleCase(approval.kind)}
+                        </p>
+                        <p style={{ margin: 0, fontSize: 14 }}>{approval.title}</p>
+                        {approval.explanation ? (
+                          <p className="muted" style={{ margin: 0, fontSize: 13, whiteSpace: "pre-wrap" }}>
+                            {approval.explanation}
+                          </p>
+                        ) : null}
+                        {approval.details?.command ? (
+                          <pre className="code" style={{ margin: 0, fontSize: 12, overflowX: "auto" }}>
+                            {approval.details.command}
+                          </pre>
+                        ) : null}
+                        {approval.details?.diffStat ? (
+                          <pre className="code" style={{ margin: 0, fontSize: 12, overflowX: "auto" }}>
+                            {approval.details.diffStat}
+                          </pre>
+                        ) : null}
+                        <div style={{ display: "flex", gap: 8 }}>
+                          <Button
+                            small
+                            variant="primary"
+                            disabled={busy}
+                            onClick={() => void decideRunApproval(approval._id, "accepted")}
+                          >
+                            Approve
+                          </Button>
+                          <Button
+                            small
+                            variant="ghost"
+                            disabled={busy}
+                            onClick={() => void decideRunApproval(approval._id, "declined")}
+                          >
+                            Decline
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
 
                 {/* Move between states (kanban) */}
                 <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14 }}>

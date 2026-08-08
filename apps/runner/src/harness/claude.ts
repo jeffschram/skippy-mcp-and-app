@@ -1,0 +1,192 @@
+/**
+ * Claude adapter: Claude Code via the Claude Agent SDK
+ * (@anthropic-ai/claude-agent-sdk — the Claude Code harness as a library).
+ *
+ * Approval mapping (docs/mac-mini-agent-workbench.md → Harness adapter):
+ * sessions run in `acceptEdits` scoped to the worktree, and `canUseTool`
+ * intercepts everything outside the auto-allow policy, converting it into a
+ * durable Skippy approval. `bypassPermissions` is never used.
+ *
+ * The SDK is imported dynamically and typed loosely on purpose: its message
+ * type surface is still moving, and the adapter only relies on the stable
+ * envelope fields (type / subtype / session_id / message.content).
+ */
+import path from "node:path";
+import type {
+  ApprovalRequest,
+  HarnessAdapter,
+  HarnessTurnRequest,
+  HarnessTurnResult,
+} from "./types.js";
+
+/** Commands safe to run without approval inside the worktree. */
+const AUTO_ALLOWED_COMMAND_PREFIXES = [
+  "git status",
+  "git diff",
+  "git log",
+  "git add",
+  "git commit",
+  "ls",
+  "cat",
+  "grep",
+  "rg",
+  "find",
+  "node",
+  "npm test",
+  "npm run",
+  "pnpm test",
+  "pnpm run",
+  "pnpm typecheck",
+  "pnpm build",
+  "npx tsc",
+  "npx vitest",
+];
+
+const DESTRUCTIVE_PATTERNS = [/\brm\s+-rf?\b/, /\bgit\s+push\b/, /\bgit\s+reset\s+--hard\b/, /\bsudo\b/];
+
+function classifyCommand(command: string): "allow" | "ask" {
+  const trimmed = command.trim();
+  if (DESTRUCTIVE_PATTERNS.some((re) => re.test(trimmed))) return "ask";
+  if (AUTO_ALLOWED_COMMAND_PREFIXES.some((prefix) => trimmed.startsWith(prefix))) return "allow";
+  return "ask";
+}
+
+function pathInside(candidate: string, root: string): boolean {
+  const relative = path.relative(root, path.resolve(root, candidate));
+  return !relative.startsWith("..") && !path.isAbsolute(relative);
+}
+
+function extractText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .filter((block: any) => block?.type === "text" && typeof block.text === "string")
+    .map((block: any) => block.text)
+    .join("\n");
+}
+
+export class ClaudeAdapter implements HarnessAdapter {
+  readonly harness = "claude" as const;
+
+  async runTurn(request: HarnessTurnRequest): Promise<HarnessTurnResult> {
+    // Dynamic import so type drift in the SDK never breaks the runner build.
+    const sdk: any = await import("@anthropic-ai/claude-agent-sdk");
+    const { prompt, worktreePath, onEvent, signal } = request;
+    let approvalCounter = 0;
+    let sessionId: string | undefined = request.externalThreadId;
+    let resultText: string | undefined;
+
+    const canUseTool = async (toolName: string, input: any) => {
+      const deny = (message: string) => ({ behavior: "deny", message });
+      const allow = () => ({ behavior: "allow", updatedInput: input });
+      const gate = async (approval: Omit<ApprovalRequest, "harnessRequestId">) => {
+        approvalCounter += 1;
+        const decision = await request.requestApproval({
+          harnessRequestId: `claude-${sessionId ?? "new"}-${approvalCounter}`,
+          ...approval,
+        });
+        if (decision === "accepted") return allow();
+        if (decision === "cancelled") return deny("Run cancelled by the user.");
+        return deny("The user declined this action. Adjust your approach or finish without it.");
+      };
+
+      if (toolName === "Bash") {
+        const command = String(input?.command ?? "");
+        if (classifyCommand(command) === "allow") return allow();
+        return gate({
+          kind: "command",
+          title: `Run command: ${command.slice(0, 120)}`,
+          details: { command: command.slice(0, 2000) },
+        });
+      }
+      if (toolName === "Write" || toolName === "Edit" || toolName === "NotebookEdit") {
+        const filePath = String(input?.file_path ?? input?.path ?? "");
+        if (filePath && pathInside(filePath, worktreePath)) return allow();
+        return gate({
+          kind: "file_change",
+          title: `Edit outside worktree: ${filePath || "(unknown path)"}`,
+          details: { filePath },
+        });
+      }
+      if (toolName === "WebFetch" || toolName === "WebSearch") {
+        return gate({
+          kind: "network",
+          title: `Network access via ${toolName}`,
+          details: { input: JSON.stringify(input).slice(0, 500) },
+        });
+      }
+      // Read-only and unknown tools: reads inside the repo are policy-allowed;
+      // anything else unknown is asked.
+      if (toolName === "Read" || toolName === "Glob" || toolName === "Grep" || toolName === "TodoWrite") {
+        return allow();
+      }
+      return gate({ kind: "user_input", title: `Allow tool ${toolName}?`, details: { toolName } });
+    };
+
+    const options: Record<string, unknown> = {
+      cwd: worktreePath,
+      permissionMode: "acceptEdits",
+      canUseTool,
+      abortController: undefined,
+    };
+    if (sessionId) options.resume = sessionId;
+
+    try {
+      const stream = sdk.query({ prompt, options });
+      for await (const message of stream as AsyncIterable<any>) {
+        if (signal.aborted) return { externalThreadId: sessionId, outcome: "interrupted" };
+        switch (message?.type) {
+          case "system":
+            if (message.subtype === "init" && message.session_id) {
+              sessionId = message.session_id;
+              onEvent({ type: "status", payload: { phase: "session_started", sessionId } });
+            }
+            break;
+          case "assistant": {
+            const text = extractText(message.message?.content);
+            if (text) onEvent({ type: "assistant_message", payload: { text } });
+            const toolUses = Array.isArray(message.message?.content)
+              ? message.message.content.filter((b: any) => b?.type === "tool_use")
+              : [];
+            for (const toolUse of toolUses) {
+              if (toolUse.name === "Bash") {
+                onEvent({
+                  type: "command",
+                  payload: { command: String(toolUse.input?.command ?? "").slice(0, 2000) },
+                });
+              } else if (toolUse.name === "Write" || toolUse.name === "Edit") {
+                onEvent({
+                  type: "file_change",
+                  payload: { filePath: String(toolUse.input?.file_path ?? ""), tool: toolUse.name },
+                });
+              } else if (toolUse.name === "TodoWrite") {
+                onEvent({ type: "plan_update", payload: { todos: toolUse.input?.todos ?? [] } });
+              }
+            }
+            break;
+          }
+          case "result":
+            if (message.session_id) sessionId = message.session_id;
+            if (typeof message.result === "string") resultText = message.result;
+            if (message.usage) onEvent({ type: "usage", payload: { usage: message.usage } });
+            if (message.subtype && message.subtype !== "success") {
+              return {
+                externalThreadId: sessionId,
+                outcome: "failed",
+                errorMessage: `harness ended with ${message.subtype}`,
+              };
+            }
+            break;
+          default:
+            break;
+        }
+      }
+      return { externalThreadId: sessionId, outcome: "completed", resultText };
+    } catch (error: unknown) {
+      if (signal.aborted) return { externalThreadId: sessionId, outcome: "interrupted" };
+      const messageText = error instanceof Error ? error.message : String(error);
+      onEvent({ type: "error", payload: { message: messageText.slice(0, 500) } });
+      return { externalThreadId: sessionId, outcome: "failed", errorMessage: messageText.slice(0, 500) };
+    }
+  }
+}
