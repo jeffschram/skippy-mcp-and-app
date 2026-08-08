@@ -770,7 +770,9 @@ export const updateRunStatus = mutationGeneric({
     const host = await requireHost(ctx, args.hostToken);
     const run = await requireClaimedRun(ctx, host, args.runId, args.claimToken);
     const allowedFrom = HOST_REPORTABLE_TRANSITIONS[args.status];
-    if (!allowedFrom || !allowedFrom.includes(run.status)) {
+    // Self-transitions are legal metadata updates (session id after a turn,
+    // resuming `running` after an approval settles, lease refreshes).
+    if (!allowedFrom || (run.status !== args.status && !allowedFrom.includes(run.status))) {
       throw new Error(`illegal run transition ${run.status} -> ${args.status}`);
     }
     const now = Date.now();

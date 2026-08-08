@@ -204,6 +204,7 @@ export class RunExecutor {
       });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
+      console.error(`[skippy-runner] run ${run.runId} failed:`, error);
       this.emit({ type: "error", payload: { message: message.slice(0, 500) } });
       await this.flushEvents();
       await plane

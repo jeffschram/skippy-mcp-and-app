@@ -1040,6 +1040,12 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                   ) : null}
                 </div>
 
+                {selectedRun?.errorMessage ? (
+                  <p className="muted" style={{ margin: 0, fontSize: 13, color: "var(--red, #b04040)" }}>
+                    Run error ({selectedRun.errorCategory ?? "unknown"}): {selectedRun.errorMessage}
+                  </p>
+                ) : null}
+
                 {/* Pending approvals for the selected task's run: the runner is
                     blocked until each is decided here. */}
                 {selectedRunApprovals.length ? (
