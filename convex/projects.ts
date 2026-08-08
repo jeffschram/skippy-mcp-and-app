@@ -157,6 +157,61 @@ async function buildBoard(db: any, brainInstanceId: any, projectId: string) {
   };
 }
 
+/**
+ * Owning project for every task in ONE indexed read, plus one db.get per
+ * distinct project. Looking the edge up per task is O(tasks x relationships)
+ * and is exactly the shape that breached Convex's 32k document-read limit on
+ * the board — see dependencyTaskIdsByTask for the same fix.
+ */
+async function projectByTaskId(
+  db: any,
+  brainInstanceId: any,
+): Promise<Map<string, { projectId: string; projectTitle: string | undefined }>> {
+  const rels = await db
+    .query("relationships")
+    .withIndex("by_brain_type", (q: any) => q.eq("brainInstanceId", brainInstanceId).eq("type", "belongs_to"))
+    .collect();
+
+  const titles = new Map<string, string | undefined>();
+  const byTask = new Map<string, { projectId: string; projectTitle: string | undefined }>();
+  for (const rel of rels) {
+    if (rel.from.entityType !== "task" || rel.to.entityType !== "project") continue;
+    const taskId = rel.from.entityId as string;
+    if (byTask.has(taskId)) continue;
+    const projectId = rel.to.entityId as string;
+    if (!titles.has(projectId)) {
+      const project = await db.get(projectId);
+      titles.set(projectId, project?.title);
+    }
+    byTask.set(taskId, { projectId, projectTitle: titles.get(projectId) });
+  }
+  return byTask;
+}
+
+function queueEntryFor(
+  task: any,
+  owner: { projectId: string; projectTitle: string | undefined } | undefined,
+) {
+  return {
+    _id: task._id,
+    title: task.title,
+    description: task.description,
+    kind: task.kind,
+    ownerType: task.ownerType,
+    executionState: executionStateFor(task),
+    agentRequestStatus: task.agentRequestStatus,
+    requestedHarness: task.requestedHarness,
+    agentRequestedAt: task.agentRequestedAt,
+    agentRequestedBy: task.agentRequestedBy,
+    agentRequestMessage: task.agentRequestMessage,
+    executionBrief: task.executionBrief,
+    acceptanceCriteria: task.acceptanceCriteria,
+    orderIndex: task.orderIndex ?? 0,
+    projectId: owner?.projectId,
+    projectTitle: owner?.projectTitle,
+  };
+}
+
 async function readyTasks(db: any, brainInstanceId: any, limit: number) {
   const tasks = (
     await db
@@ -173,47 +228,57 @@ async function readyTasks(db: any, brainInstanceId: any, limit: number) {
   );
 
   // Attach the owning project title for context.
-  const result = [];
-  for (const task of tasks) {
-    const belongs = await db
-      .query("relationships")
-      .withIndex("by_brain_type", (q: any) => q.eq("brainInstanceId", brainInstanceId).eq("type", "belongs_to"))
-      .filter((q: any) => q.eq(q.field("from.entityType"), "task"))
-      .filter((q: any) => q.eq(q.field("from.entityId"), task._id))
-      .first();
-    let projectTitle: string | undefined;
-    let projectId: string | undefined;
-    if (belongs && belongs.to.entityType === "project") {
-      const project = await db.get(belongs.to.entityId);
-      projectTitle = project?.title;
-      projectId = belongs.to.entityId;
-    }
-    result.push({
-      _id: task._id,
-      title: task.title,
-      description: task.description,
-      kind: task.kind,
-      ownerType: task.ownerType,
-      executionState: executionStateFor(task),
-      agentRequestStatus: task.agentRequestStatus,
-      requestedHarness: task.requestedHarness,
-      agentRequestedAt: task.agentRequestedAt,
-      agentRequestedBy: task.agentRequestedBy,
-      agentRequestMessage: task.agentRequestMessage,
-      executionBrief: task.executionBrief,
-      acceptanceCriteria: task.acceptanceCriteria,
-      orderIndex: task.orderIndex ?? 0,
-      projectId,
-      projectTitle,
-    });
-  }
-  result.sort((a, b) => a.orderIndex - b.orderIndex);
+  const owners = await projectByTaskId(db, brainInstanceId);
+  const result = tasks.map((task: any) => queueEntryFor(task, owners.get(task._id as string)));
+  result.sort((a: any, b: any) => a.orderIndex - b.orderIndex);
   return result.slice(0, limit);
 }
 
 async function requestedReadyTasks(db: any, brainInstanceId: any, limit: number) {
   const tasks = await readyTasks(db, brainInstanceId, Math.max(limit * 4, 50));
-  return tasks.filter((task) => task.agentRequestStatus === "requested").slice(0, limit);
+  return tasks.filter((task: any) => task.agentRequestStatus === "requested").slice(0, limit);
+}
+
+/**
+ * Every accepted task in a given execution state — the general form of
+ * readyTasks, so a harness can see what is in_progress, in_review, blocked, or
+ * done without holding a private copy of the lifecycle. Unlike readyTasks this
+ * does NOT assume agent ownership: pass ownerType to narrow.
+ *
+ * Dependency readiness is not re-derived here; executionState is read as
+ * stored (with the legacy fallback in executionStateFor), which is what makes
+ * "show me everything sitting in in_review" answerable.
+ */
+async function tasksByState(
+  db: any,
+  brainInstanceId: any,
+  input: {
+    executionState: string;
+    ownerType?: string;
+    projectId?: string;
+    agentRequestStatus?: string;
+    limit: number;
+  },
+) {
+  const tasks = (
+    await db
+      .query("tasks")
+      .withIndex("by_brain_state", (q: any) => q.eq("brainInstanceId", brainInstanceId))
+      .filter((q: any) => q.eq(q.field("processingState"), "accepted"))
+      .collect()
+  ).filter(
+    (task: any) =>
+      executionStateFor(task) === input.executionState &&
+      (!input.ownerType || task.ownerType === input.ownerType) &&
+      (!input.agentRequestStatus || task.agentRequestStatus === input.agentRequestStatus),
+  );
+
+  const owners = await projectByTaskId(db, brainInstanceId);
+  const result = tasks
+    .map((task: any) => queueEntryFor(task, owners.get(task._id as string)))
+    .filter((task: any) => !input.projectId || task.projectId === input.projectId);
+  result.sort((a: any, b: any) => a.orderIndex - b.orderIndex);
+  return result.slice(0, input.limit);
 }
 
 async function taskBrief(db: any, brainInstanceId: any, taskId: string) {
@@ -1123,6 +1188,31 @@ export const requestedReadyTasksForBrain = queryGeneric({
   args: { brainInstanceId: v.id("brainInstances"), limit: v.optional(v.number()) },
   handler: async ({ db }, args) => {
     return requestedReadyTasks(db, args.brainInstanceId, args.limit ?? 12);
+  },
+});
+
+export const tasksByStateForBrain = queryGeneric({
+  args: {
+    brainInstanceId: v.id("brainInstances"),
+    executionState: v.union(
+      v.literal("proposed"),
+      v.literal("unplanned"),
+      v.literal("briefed"),
+      v.literal("ready"),
+      v.literal("in_progress"),
+      v.literal("in_review"),
+      v.literal("blocked"),
+      v.literal("done"),
+      v.literal("cancelled"),
+    ),
+    ownerType: v.optional(v.union(v.literal("owner"), v.literal("agent"))),
+    projectId: v.optional(v.id("projects")),
+    agentRequestStatus: v.optional(v.union(v.literal("requested"), v.literal("cancelled"))),
+    limit: v.optional(v.number()),
+  },
+  handler: async ({ db }, args) => {
+    const { brainInstanceId, limit, ...rest } = args;
+    return tasksByState(db, brainInstanceId, { ...rest, limit: limit ?? 25 });
   },
 });
 

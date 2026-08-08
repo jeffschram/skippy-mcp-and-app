@@ -47,6 +47,7 @@ function createFakeClient(): { client: SkippyClient; calls: Array<{ name: string
       planProject: (brainInstanceId, input) => record("planProject", brainInstanceId, input),
       listReadyTasks: (brainInstanceId, input) => record("listReadyTasks", brainInstanceId, input),
       listRequestedReadyTasks: (brainInstanceId, input) => record("listRequestedReadyTasks", brainInstanceId, input),
+      listTasksByState: (brainInstanceId, input) => record("listTasksByState", brainInstanceId, input),
       getTaskBrief: (brainInstanceId, input) => record("getTaskBrief", brainInstanceId, input),
       briefTask: (brainInstanceId, input) => record("briefTask", brainInstanceId, input),
       recordTaskResult: (brainInstanceId, input) => record("recordTaskResult", brainInstanceId, input),
@@ -1001,6 +1002,18 @@ describe("Skippy MCP tool handlers", () => {
     expect(calls[0]).toMatchObject({
       name: "listProjectFiles",
       args: ["brain_123", { projectId: "project_123", taskId: "task_123" }],
+    });
+  });
+
+  it("lists tasks in a single execution state with optional filters", async () => {
+    const { client, calls } = createFakeClient();
+    const tools = createSkippyToolHandlers(client, "brain_123");
+
+    await tools.listTasksByState({ executionState: "in_review", projectId: "project_123", limit: 5 });
+
+    expect(calls[0]).toMatchObject({
+      name: "listTasksByState",
+      args: ["brain_123", { executionState: "in_review", projectId: "project_123", limit: 5 }],
     });
   });
 
