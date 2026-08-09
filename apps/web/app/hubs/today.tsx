@@ -31,7 +31,7 @@ import { AgendaSection } from "./agenda";
 import { useViewerReady } from "./use-viewer";
 import { formatFileSize } from "./project-library-helpers";
 import { QUICK_CAPTURE_INTENT_STORAGE_KEY, checkQuickCaptureFile, parseStoredIntent } from "./quick-capture-helpers";
-import todayStyles from "./today.module.css";
+import { cn } from "@/lib/utils";
 
 type AnyRecord = Record<string, any>;
 
@@ -45,6 +45,23 @@ type AnyRecord = Record<string, any>;
 
 
 const CAPTURE_LIST_LIMIT = 6;
+
+/* Shared row classes for the capture lists — an aligned grid table so
+   type-indicator / label / meta / actions line up across rows. */
+const captureListHeadingClass =
+  "mx-0 mb-0 mt-1 text-xs font-semibold uppercase tracking-[0.04em] text-muted-foreground";
+const captureListClass = "grid overflow-x-auto border-t";
+const captureRowClass =
+  "grid min-w-0 grid-cols-[36px_minmax(0,1fr)_auto_auto] items-center gap-2.5 border-b py-2";
+/* 36px square holding either a thumbnail or an icon, so icon rows line up
+   with image rows; overflow-hidden clips the thumb to the rounded square. */
+const captureTypeClass =
+  "inline-flex h-9 w-9 items-center justify-center overflow-hidden rounded-lg border text-muted-foreground";
+const captureMetaClass = "inline-flex items-center justify-end gap-2";
+const captureRowActionsClass = "inline-flex shrink-0 items-center justify-end gap-0.5";
+/* Remember | Hold segmented control buttons — compact, gold when checked. */
+const intentButtonClass =
+  "cursor-pointer rounded-full border-0 bg-transparent px-2.5 py-0.5 [font-family:inherit] text-xs font-[620] text-muted-foreground aria-checked:bg-gold/[0.14] aria-checked:text-gold disabled:cursor-default disabled:opacity-60";
 
 function captureLabel(capture: AnyRecord): string {
   return capture.text ?? capture.fileName ?? capture.url ?? "File";
@@ -312,10 +329,11 @@ function QuickCaptureBox({ captures }: { captures: AnyRecord[] | undefined }) {
         </span>
       }
       action={
-        <div className={todayStyles.intentToggle} role="radiogroup" aria-label="Capture intent">
+        <div className="inline-flex items-center gap-0.5 rounded-full border p-0.5" role="radiogroup" aria-label="Capture intent">
           <button
             type="button"
             role="radio"
+            className={intentButtonClass}
             aria-checked={intent === "remember"}
             disabled={submitting}
             onClick={() => chooseIntent("remember")}
@@ -325,6 +343,7 @@ function QuickCaptureBox({ captures }: { captures: AnyRecord[] | undefined }) {
           <button
             type="button"
             role="radio"
+            className={intentButtonClass}
             aria-checked={intent === "hold"}
             disabled={submitting}
             onClick={() => chooseIntent("hold")}
@@ -335,7 +354,10 @@ function QuickCaptureBox({ captures }: { captures: AnyRecord[] | undefined }) {
       }
     >
       <div
-        className={`${todayStyles.captureDropzone}${dragActive ? ` ${todayStyles.captureDropzoneActive}` : ""}`}
+        className={cn(
+          "grid gap-2 rounded-[10px]",
+          dragActive && "bg-gold/[0.07] outline-dashed outline-2 outline-offset-[6px] outline-gold",
+        )}
         onDragEnter={onDragEnter}
         onDragOver={onDragOver}
         onDragLeave={onDragLeave}
@@ -351,7 +373,7 @@ function QuickCaptureBox({ captures }: { captures: AnyRecord[] | undefined }) {
             if (event.target) event.target.value = "";
           }}
         />
-        <div className={todayStyles.captureField}>
+        <div className="relative [&_textarea]:pr-[52px]">
           <TextArea
             rows={2}
             placeholder="Drop a thought, note, URL, or file…"
@@ -363,7 +385,7 @@ function QuickCaptureBox({ captures }: { captures: AnyRecord[] | undefined }) {
           />
           <IconButton
             small
-            className={todayStyles.captureAttach}
+            className="absolute bottom-3 right-3"
             title="Attach file"
             aria-label="Attach file"
             disabled={submitting}
@@ -373,24 +395,24 @@ function QuickCaptureBox({ captures }: { captures: AnyRecord[] | undefined }) {
           </IconButton>
         </div>
         {file ? (
-          <span className={todayStyles.captureFile}>
+          <span className="inline-flex min-w-0 max-w-full items-center gap-1.5 self-start rounded-full border py-1 pl-2 pr-1.5 text-[13px]">
             <Paperclip size={13} aria-hidden />
-            <span className={todayStyles.captureFileName}>{file.name}</span>
+            <span className="max-w-40 truncate">{file.name}</span>
             <span className="item-meta">{formatFileSize(file.size)}</span>
             <IconButton small aria-label={`Remove ${file.name}`} disabled={submitting} onClick={clearFile}>
               <X size={13} aria-hidden />
             </IconButton>
           </span>
         ) : null}
-        <div className={todayStyles.captureSubmitRow}>
+        <div className="flex justify-end max-[560px]:[&_button]:w-full">
           <Button disabled={!canSubmit} onClick={() => void submit()}>
             {submitting ? "Capturing…" : "Capture"}
           </Button>
         </div>
         {recent.length ? (
           <>
-          <h3 className={todayStyles.captureListHeading}>Captures</h3>
-          <div className={todayStyles.captureList}>
+          <h3 className={captureListHeadingClass}>Captures</h3>
+          <div className={captureListClass}>
             {recent.map((capture) => {
               const label = captureLabel(capture);
               const busy = busyCaptureId === capture._id;
@@ -401,15 +423,15 @@ function QuickCaptureBox({ captures }: { captures: AnyRecord[] | undefined }) {
               const isFile = Boolean(capture.fileName) && !isImage;
               const pending = capture.intent !== "hold" && capture.status === "pending";
               return (
-                <div key={capture._id} className={todayStyles.captureRow}>
+                <div key={capture._id} className={captureRowClass}>
                   <span
-                    className={`${todayStyles.captureType}${pending ? ` ${todayStyles.captureTypePending}` : ""}`}
+                    className={cn(captureTypeClass, pending && "border-gold shadow-[0_0_0_1px_var(--gold)]")}
                     title={pending ? "Pending — awaiting the next ingestion run" : undefined}
                     aria-hidden
                   >
                     {isImage ? (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img src={capture.fileUrl} alt="" className={todayStyles.captureThumb} />
+                      <img src={capture.fileUrl} alt="" className="block h-full w-full object-cover" />
                     ) : isFile ? (
                       <FileIcon size={18} />
                     ) : capture.url ? (
@@ -418,16 +440,16 @@ function QuickCaptureBox({ captures }: { captures: AnyRecord[] | undefined }) {
                       <FileText size={18} />
                     )}
                   </span>
-                  <span className={todayStyles.captureText} title={label}>
+                  <span className="min-w-0 truncate text-[13px] text-muted-foreground" title={label}>
                     {label}
                   </span>
-                  <span className={todayStyles.captureMeta}>
+                  <span className={captureMetaClass}>
                     {!isImage && typeof capture.sizeBytes === "number" ? (
                       <span className="item-meta">{formatFileSize(capture.sizeBytes)}</span>
                     ) : null}
                     {capture.intent === "hold" ? <Badge tone="neutral">hold</Badge> : null}
                   </span>
-                  <span className={todayStyles.captureRowActions}>
+                  <span className={captureRowActionsClass}>
                     {isImage ? (
                       <>
                         <IconButton
@@ -502,8 +524,8 @@ function QuickCaptureBox({ captures }: { captures: AnyRecord[] | undefined }) {
         ) : null}
         {recentActions.length ? (
           <>
-          <h3 className={todayStyles.captureListHeading}>Actions taken</h3>
-          <div className={todayStyles.captureList}>
+          <h3 className={captureListHeadingClass}>Actions taken</h3>
+          <div className={captureListClass}>
             {recentActions.map((capture) => {
               const label = captureLabel(capture);
               const note = capture.processingNote || "Filed";
@@ -520,39 +542,39 @@ function QuickCaptureBox({ captures }: { captures: AnyRecord[] | undefined }) {
                 }))
                 .filter((entity) => entity.href);
               return (
-                <div key={capture._id} className={todayStyles.captureRow}>
-                  <span className={todayStyles.captureType} aria-hidden>
+                <div key={capture._id} className={captureRowClass}>
+                  <span className={captureTypeClass} aria-hidden>
                     <Sparkles size={18} />
                   </span>
-                  <span className={todayStyles.captureAction}>
-                    <span className={todayStyles.captureActionNote} title={note}>
+                  <span className="flex min-w-0 flex-col gap-0.5">
+                    <span className="min-w-0 truncate text-[13px]" title={note}>
                       {note}
                     </span>
-                    <span className={todayStyles.captureActionSource} title={label}>
+                    <span className="min-w-0 truncate text-xs text-muted-foreground" title={label}>
                       {label}
                     </span>
                     {links.length ? (
-                      <span className={todayStyles.captureActionLinks}>
+                      <span className="mt-0.5 flex min-w-0 flex-wrap gap-x-2.5 gap-y-1">
                         {links.map((entity) => (
                           <Link
                             key={`${entity.entityType}:${entity.entityId}`}
                             href={entity.href as string}
-                            className={todayStyles.captureActionLink}
+                            className="inline-flex min-w-0 max-w-full items-center gap-[3px] text-xs text-gold no-underline hover:underline"
                             title={`Open ${entity.label}`}
                           >
                             <ArrowRight size={12} aria-hidden />
-                            <span className={todayStyles.captureActionLinkLabel}>{entity.label}</span>
+                            <span className="truncate">{entity.label}</span>
                           </Link>
                         ))}
                       </span>
                     ) : null}
                   </span>
-                  <span className={todayStyles.captureMeta}>
+                  <span className={captureMetaClass}>
                     {capture.processedAt ? (
                       <span className="item-meta">{formatRelative(capture.processedAt)}</span>
                     ) : null}
                   </span>
-                  <span className={todayStyles.captureRowActions}>
+                  <span className={captureRowActionsClass}>
                     <IconButton
                       small
                       title="Dismiss"
@@ -680,7 +702,7 @@ export function TodayContent() {
           <LoadingRow label="Loading your focus…" />
         </Card>
       ) : (
-        <div className={todayStyles.grid}>
+        <div className="grid gap-4">
           {/* Focus hero */}
           <section className="card section focus-summary" style={{ minHeight: 0 }}>
             <div>
@@ -758,7 +780,7 @@ export function TodayContent() {
           </section>
 
           {/* Right rail */}
-          <div className={todayStyles.rail}>
+          <div className="grid content-start gap-4">
             <QuickCaptureBox captures={data?.quickCaptures} />
 
             {/* Calendar events, due tasks, and firing recurrences merged into

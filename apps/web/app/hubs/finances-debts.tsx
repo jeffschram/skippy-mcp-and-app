@@ -31,11 +31,8 @@ import {
   projectFixedCostsAfterRetirements,
   visibleScheduleMonths,
 } from "./finances-debts-helpers";
-import styles from "./finances.module.css";
-
-function cx(...parts: Array<string | false | null | undefined>) {
-  return parts.filter(Boolean).join(" ");
-}
+import * as styles from "./finances-classes";
+import { cn } from "@/lib/utils";
 
 /* ------------------------------------------------------------------ */
 /* Shapes (mirror convex/finances.ts payoffPlanForViewer)              */
@@ -385,7 +382,7 @@ function ScheduleTable({ plan }: { plan: PayoffPlan }) {
     <Card>
       <p className={styles.cardTitle}>
         Payoff schedule
-        <span className={cx("muted", styles.cardTitleNote)}>ending balance per month</span>
+        <span className={cn("muted", styles.cardTitleNote)}>ending balance per month</span>
       </p>
       <div className={styles.statsTableWrap}>
         <table className={styles.statsTable} aria-label="Debt payoff schedule">
@@ -395,7 +392,7 @@ function ScheduleTable({ plan }: { plan: PayoffPlan }) {
                 Month
               </th>
               {plan.debts.map((debt) => (
-                <th key={debt.id} scope="col" className={cx(styles.statsHead, styles.statsValueCol)}>
+                <th key={debt.id} scope="col" className={cn(styles.statsHead, styles.statsValueCol)}>
                   {debt.name}
                 </th>
               ))}
@@ -412,7 +409,7 @@ function ScheduleTable({ plan }: { plan: PayoffPlan }) {
                   const paidOff = balance === 0;
                   return (
                     <td key={debt.id} className={styles.statsValueCol}>
-                      <span className={cx(styles.statValue, paidOff && styles.comparisonUnder)}>
+                      <span className={cn(styles.statValue, paidOff && styles.comparisonUnder)}>
                         {balance === undefined ? "—" : paidOff ? "Paid off" : formatCents(balance)}
                       </span>
                     </td>
@@ -468,7 +465,7 @@ function FixedCostProjectionCard({
     <Card>
       <p className={styles.cardTitle}>
         Fixed costs after each payoff
-        <span className={cx("muted", styles.cardTitleNote)}>
+        <span className={cn("muted", styles.cardTitleNote)}>
           Ramit&apos;s target band: {RAMIT_FIXED_COSTS_BAND.minPercent}-{RAMIT_FIXED_COSTS_BAND.maxPercent}%
           of income
         </span>
@@ -613,7 +610,7 @@ export function FinancesDebtsView() {
           </div>
 
           {nonAmortizingNames.length > 0 ? (
-            <p className={cx(styles.insightsNote, styles.debtWarning)}>
+            <p className={cn(styles.insightsNote, styles.debtWarning)}>
               {nonAmortizingNames.join(", ")}: the minimum payment doesn&apos;t cover the monthly interest,
               so minimums alone can never pay {nonAmortizingNames.length === 1 ? "it" : "them"} off. Raise
               the minimum or add an extra payment.

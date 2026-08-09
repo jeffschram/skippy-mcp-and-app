@@ -49,11 +49,8 @@ import {
   type DailyBalance,
   type GridTransaction,
 } from "./finances-helpers";
-import styles from "./finances.module.css";
-
-function cx(...parts: Array<string | false | null | undefined>) {
-  return parts.filter(Boolean).join(" ");
-}
+import * as styles from "./finances-classes";
+import { cn } from "@/lib/utils";
 
 /* ------------------------------------------------------------------ */
 /* Report shapes (mirrors convex/finances.ts monthlyReportForViewer)   */
@@ -209,7 +206,7 @@ function DeltaLine({
         : `Target: ${formatCents(target.targetCents)}`
       : undefined;
   return (
-    <span className={cx(styles.comparison, tone)} title={title}>
+    <span className={cn(styles.comparison, tone)} title={title}>
       {label}
       {percent !== undefined ? ` (${percent}%)` : ""}: {formatSignedCents(deltaCents)}
     </span>
@@ -465,7 +462,7 @@ function PercentPreview({ raw, recentIncome }: { raw: string; recentIncome: Rece
   const percent = parsePercentInput(raw);
   if (percent === null) return null;
   const preview = percentPreviewLabel(percent, recentIncome.incomeCents, recentIncome.monthLabel);
-  return preview ? <span className={cx("muted", styles.budgetPercentPreview)}>{preview}</span> : null;
+  return preview ? <span className={cn("muted", styles.budgetPercentPreview)}>{preview}</span> : null;
 }
 
 function BudgetDrawer({
@@ -633,7 +630,7 @@ function BudgetDrawer({
         {BUDGET_CATEGORIES.map(({ category, type }) => (
           <div key={category} className={styles.budgetRow}>
             <span className={styles.budgetRowLabel}>
-              <span className={cx(styles.budgetTypeTag, BAND_CLASS[type])}>{type}</span>
+              <span className={cn(styles.budgetTypeTag, BAND_CLASS[type])}>{type}</span>
               {category}
             </span>
             <TextInput
@@ -664,7 +661,7 @@ function BudgetDrawer({
         {BUDGET_TX_TYPES.map((type) => (
           <div key={type} className={styles.budgetRow}>
             <span className={styles.budgetRowLabel}>
-              <span className={cx(styles.budgetTypeTag, BAND_CLASS[type])}>{BAND_LABEL[type]}</span>
+              <span className={cn(styles.budgetTypeTag, BAND_CLASS[type])}>{BAND_LABEL[type]}</span>
             </span>
             <TextInput
               inputMode="decimal"
@@ -830,14 +827,14 @@ function MonthlyGrid({ report, onEditTransaction }: { report: MonthlyReport; onE
         <thead>
           {/* Type band headers */}
           <tr>
-            <td className={cx(styles.cell, styles.dayCell, styles.cornerCell, styles.bandHead)} />
-            <td className={cx(styles.cell, styles.balanceCell, styles.cornerCell, styles.bandHead)} />
+            <td className={cn(styles.cell, styles.dayCell, styles.cornerCell, styles.bandHead)} />
+            <td className={cn(styles.cell, styles.cornerCell, styles.bandHead, styles.balanceCell)} />
             {TX_TYPES.map((type) => (
               <th
                 key={type}
                 scope="colgroup"
                 colSpan={TX_TYPE_CATEGORIES[type].length}
-                className={cx(styles.bandHead, BAND_CLASS[type], styles.bandStrong)}
+                className={cn(styles.bandHead, BAND_CLASS[type], styles.bandStrong)}
               >
                 {BAND_LABEL[type]}
               </th>
@@ -846,15 +843,15 @@ function MonthlyGrid({ report, onEditTransaction }: { report: MonthlyReport; onE
 
           {/* Category sub-headers */}
           <tr>
-            <td className={cx(styles.cell, styles.dayCell, styles.cornerCell)} />
-            <th scope="col" className={cx(styles.cell, styles.categoryHead, styles.balanceCell, styles.cornerCell)}>
+            <td className={cn(styles.cell, styles.dayCell, styles.cornerCell)} />
+            <th scope="col" className={cn(styles.cell, styles.cornerCell, styles.categoryHead, styles.balanceCell)}>
               Balance
             </th>
             {GRID_CATEGORIES.map(({ category, type }) => (
               <th
                 key={category}
                 scope="col"
-                className={cx(styles.cell, styles.categoryHead, BAND_CLASS[type], styles.bandSoft)}
+                className={cn(styles.cell, styles.categoryHead, BAND_CLASS[type], styles.bandSoft)}
               >
                 {category}
               </th>
@@ -867,11 +864,11 @@ function MonthlyGrid({ report, onEditTransaction }: { report: MonthlyReport; onE
           {/* Balance entering the month (previous month's latest snapshot) */}
           {report.startingBalanceCents !== null ? (
             <tr>
-              <th scope="row" className={cx(styles.cell, styles.dayCell)}>
+              <th scope="row" className={cn(styles.cell, styles.dayCell)}>
                 Start
               </th>
               <td
-                className={cx(
+                className={cn(
                   styles.cell,
                   styles.balanceCell,
                   report.startingBalanceCents < 0 && styles.netNegative,
@@ -880,7 +877,7 @@ function MonthlyGrid({ report, onEditTransaction }: { report: MonthlyReport; onE
                 {formatCents(report.startingBalanceCents)}
               </td>
               {GRID_CATEGORIES.map(({ category, type }) => (
-                <td key={category} className={cx(styles.cell, BAND_CLASS[type], styles.bandFaint)} />
+                <td key={category} className={cn(styles.cell, BAND_CLASS[type], styles.bandFaint)} />
               ))}
             </tr>
           ) : null}
@@ -888,11 +885,11 @@ function MonthlyGrid({ report, onEditTransaction }: { report: MonthlyReport; onE
             const balance = dayBalances.get(row.day);
             return (
               <tr key={row.day}>
-                <th scope="row" className={cx(styles.cell, styles.dayCell)}>
+                <th scope="row" className={cn(styles.cell, styles.dayCell)}>
                   {row.label}
                 </th>
                 <td
-                  className={cx(
+                  className={cn(
                     styles.cell,
                     styles.balanceCell,
                     balance !== undefined && balance < 0 && styles.netNegative,
@@ -903,14 +900,14 @@ function MonthlyGrid({ report, onEditTransaction }: { report: MonthlyReport; onE
                 {GRID_CATEGORIES.map(({ category, type }) => {
                   const entries = row.cells[category];
                   return (
-                    <td key={category} className={cx(styles.cell, BAND_CLASS[type], styles.bandFaint)}>
+                    <td key={category} className={cn(styles.cell, BAND_CLASS[type], styles.bandFaint)}>
                       {entries.length > 0 ? (
                         <div className={styles.cellStack}>
                           {entries.map((entry) => (
                             <button
                               key={entry._id}
                               type="button"
-                              className={cx(styles.entry, entry.offLedger && styles.entryOffLedger)}
+                              className={cn(styles.entry, entry.offLedger && styles.entryOffLedger)}
                               onClick={() => onEditTransaction(entry)}
                               title={
                                 entry.offLedger
@@ -918,7 +915,7 @@ function MonthlyGrid({ report, onEditTransaction }: { report: MonthlyReport; onE
                                   : `${entry.description} — ${formatCents(entry.amountCents)} (click to edit)`
                               }
                             >
-                              <span className={styles.entryDesc}>
+                              <span className={cn(styles.entryDesc, entry.offLedger && "italic")}>
                                 {entry.description}
                                 {entry.offLedger ? (
                                   <span className={styles.entryAutoTag} aria-label="off-ledger contribution">
@@ -942,15 +939,15 @@ function MonthlyGrid({ report, onEditTransaction }: { report: MonthlyReport; onE
         <tfoot>
           {/* Per-category totals */}
           <tr>
-            <th scope="row" className={cx(styles.cell, styles.dayCell, styles.totalCell, styles.totalLabel)}>
+            <th scope="row" className={cn(styles.cell, styles.dayCell, styles.totalCell, styles.totalLabel)}>
               Totals
             </th>
-            <td className={cx(styles.cell, styles.balanceCell, styles.totalCell)} />
+            <td className={cn(styles.cell, styles.balanceCell, styles.totalCell)} />
             {GRID_CATEGORIES.map(({ category, type }) => {
               const budgetDelta = budget?.comparison.categoryDeltas[category];
               const isIncome = type === "Income";
               return (
-                <td key={category} className={cx(styles.cell, styles.totalCell, BAND_CLASS[type], styles.bandFaint)}>
+                <td key={category} className={cn(styles.cell, styles.totalCell, BAND_CLASS[type], styles.bandFaint)}>
                   <span className={styles.totalAmount}>{formatCents(report.current.categoryTotalsCents[category] ?? 0)}</span>
                   {(budgetDelta || hasPrev) && (
                     <span className={styles.comparisons}>
@@ -978,8 +975,8 @@ function MonthlyGrid({ report, onEditTransaction }: { report: MonthlyReport; onE
 
           {/* Per-type totals (banded) */}
           <tr>
-            <td className={cx(styles.cell, styles.dayCell, styles.totalCell)} />
-            <td className={cx(styles.cell, styles.balanceCell, styles.totalCell)} />
+            <td className={cn(styles.cell, styles.dayCell, styles.totalCell)} />
+            <td className={cn(styles.cell, styles.balanceCell, styles.totalCell)} />
             {TX_TYPES.map((type) => {
               const budgetDelta = budget?.comparison.typeDeltas[type];
               const isIncome = type === "Income";
@@ -989,7 +986,7 @@ function MonthlyGrid({ report, onEditTransaction }: { report: MonthlyReport; onE
                 <td
                   key={type}
                   colSpan={TX_TYPE_CATEGORIES[type].length}
-                  className={cx(styles.cell, styles.totalCell, BAND_CLASS[type], styles.bandSoft)}
+                  className={cn(styles.cell, styles.totalCell, BAND_CLASS[type], styles.bandSoft)}
                 >
                   <span className={styles.totalAmount}>
                     {BAND_LABEL[type]} {formatCents(report.current.typeTotalsCents[type] ?? 0)}
@@ -997,7 +994,7 @@ function MonthlyGrid({ report, onEditTransaction }: { report: MonthlyReport; onE
                       // Transfers are excluded from outgoing, so show their net
                       // movement instead of a share of outgoing.
                       <span
-                        className={cx(
+                        className={cn(
                           styles.totalPercent,
                           report.current.transferNetCents < 0 && styles.netNegative,
                         )}
@@ -1034,9 +1031,9 @@ function MonthlyGrid({ report, onEditTransaction }: { report: MonthlyReport; onE
 
           {/* Account summary rows: label + value pinned to the visible left edge */}
           <tr>
-            <th scope="row" colSpan={GRID_COLUMN_COUNT} className={cx(styles.cell, styles.totalCell, styles.summaryRow)}>
+            <th scope="row" colSpan={GRID_COLUMN_COUNT} className={cn(styles.cell, styles.totalCell, styles.summaryRow)}>
               <div className={styles.summaryStick}>
-                <span className={cx(styles.totalLabel, styles.summaryRowLabel)}>Account total (outgoing)</span>
+                <span className={cn(styles.totalLabel, styles.summaryRowLabel)}>Account total (outgoing)</span>
                 <span className={styles.summaryValue}>{formatCents(report.current.totalOutgoingCents)}</span>
                 {budget?.comparison.outgoing ? (
                   <DeltaLine
@@ -1057,7 +1054,7 @@ function MonthlyGrid({ report, onEditTransaction }: { report: MonthlyReport; onE
               and the balance column. */}
           {(report.current.offLedgerInvestmentsCents?.totalCents ?? 0) > 0 ? (
             <tr>
-              <th scope="row" colSpan={GRID_COLUMN_COUNT} className={cx(styles.cell, styles.totalCell, styles.summaryRow)}>
+              <th scope="row" colSpan={GRID_COLUMN_COUNT} className={cn(styles.cell, styles.totalCell, styles.summaryRow)}>
                 <div className={styles.summaryStick}>
                   <span
                     className={styles.offLedgerNote}
@@ -1074,9 +1071,9 @@ function MonthlyGrid({ report, onEditTransaction }: { report: MonthlyReport; onE
           ) : null}
 
           <tr>
-            <th scope="row" colSpan={GRID_COLUMN_COUNT} className={cx(styles.cell, styles.totalCell, styles.summaryRow)}>
+            <th scope="row" colSpan={GRID_COLUMN_COUNT} className={cn(styles.cell, styles.totalCell, styles.summaryRow)}>
               <div className={styles.summaryStick}>
-                <span className={cx(styles.totalLabel, styles.summaryRowLabel)}>Account total (income)</span>
+                <span className={cn(styles.totalLabel, styles.summaryRowLabel)}>Account total (income)</span>
                 <span className={styles.summaryValue}>{formatCents(report.current.totalIncomingCents)}</span>
                 {budget?.comparison.incoming ? (
                   <DeltaLine
@@ -1098,10 +1095,10 @@ function MonthlyGrid({ report, onEditTransaction }: { report: MonthlyReport; onE
           </tr>
 
           <tr>
-            <th scope="row" colSpan={GRID_COLUMN_COUNT} className={cx(styles.cell, styles.totalCell, styles.summaryRow)}>
+            <th scope="row" colSpan={GRID_COLUMN_COUNT} className={cn(styles.cell, styles.totalCell, styles.summaryRow)}>
               <div className={styles.summaryStick}>
-                <span className={cx(styles.totalLabel, styles.summaryRowLabel)}>After income</span>
-                <span className={cx(styles.summaryValue, report.current.netCents >= 0 ? styles.netPositive : styles.netNegative)}>
+                <span className={cn(styles.totalLabel, styles.summaryRowLabel)}>After income</span>
+                <span className={cn(styles.summaryValue, report.current.netCents >= 0 ? styles.netPositive : styles.netNegative)}>
                   {formatCents(report.current.netCents)}
                 </span>
                 {budget?.comparison.net ? (
@@ -1121,11 +1118,11 @@ function MonthlyGrid({ report, onEditTransaction }: { report: MonthlyReport; onE
 
           {report.endingBalanceCents !== null ? (
             <tr>
-              <th scope="row" colSpan={GRID_COLUMN_COUNT} className={cx(styles.cell, styles.totalCell, styles.summaryRow)}>
+              <th scope="row" colSpan={GRID_COLUMN_COUNT} className={cn(styles.cell, styles.totalCell, styles.summaryRow)}>
                 <div className={styles.summaryStick}>
-                  <span className={cx(styles.totalLabel, styles.summaryRowLabel)}>Ending balance</span>
+                  <span className={cn(styles.totalLabel, styles.summaryRowLabel)}>Ending balance</span>
                   <span
-                    className={cx(styles.summaryValue, report.endingBalanceCents < 0 && styles.netNegative)}
+                    className={cn(styles.summaryValue, report.endingBalanceCents < 0 && styles.netNegative)}
                   >
                     {formatCents(report.endingBalanceCents)}
                   </span>

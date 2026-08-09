@@ -47,7 +47,7 @@ import { EXECUTION_COLUMNS, executionStateTone, taskStatusTone, titleCase } from
 import { useViewerReady } from "./use-viewer";
 import { ProjectLibrarySection, TaskAttachments, useProjectFileUploader } from "./project-library";
 import { checkProjectFile, formatFileSize, PROJECT_FILE_ACCEPT } from "./project-library-helpers";
-import boardStyles from "./board.module.css";
+import { cn } from "@/lib/utils";
 
 type AnyRecord = Record<string, any>;
 
@@ -773,7 +773,7 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
             <Link href="/projects" className="text-button compact" style={{ marginBottom: 14 }}>
               <ArrowLeft size={15} aria-hidden /> Projects
             </Link>
-            <div className={boardStyles.projectHeader}>
+            <div className="flex flex-wrap items-end justify-between gap-4">
               <div>
                 <p className="eyebrow">{project.kind === "code" ? "Code project" : "Project"}</p>
                 <h1>{project.title}</h1>
@@ -798,7 +798,7 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                   </div>
                 ) : null}
               </div>
-              <div className={boardStyles.projectActions}>
+              <div className="ml-auto flex flex-[1_1_320px] flex-wrap justify-end gap-2">
                 <Button onClick={openSettings} title="Project settings">
                   <Settings2 size={16} aria-hidden /> Settings
                 </Button>
@@ -831,9 +831,9 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
           ) : (
             <>
           {/* Progress */}
-          <Card className={boardStyles.progressCard}>
-            <div className={boardStyles.progressHead}>
-              <strong>{board.progress.percent}% complete</strong>
+          <Card className="mb-4">
+            <div className="mb-2.5 flex flex-wrap items-baseline justify-between gap-3">
+              <strong className="text-[17px] font-bold">{board.progress.percent}% complete</strong>
               <span className="muted">
                 {board.progress.done}/{board.progress.total} tasks · {board.progress.ready} ready · {board.progress.inReview} in
                 review · {board.progress.blocked} blocked
@@ -855,14 +855,18 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
               </EmptyState>
             </Card>
           ) : (
-            <div className={boardStyles.board}>
+            <div className="grid grid-cols-[minmax(0,1fr)] gap-3 desk:auto-cols-[minmax(232px,1fr)] desk:grid-flow-col desk:grid-cols-none desk:overflow-x-auto desk:pb-2">
               {EXECUTION_COLUMNS.map((column) => {
                 const tasks = board.tasks.filter((task: AnyRecord) => task.executionState === column.key);
                 return (
                   <div
                     key={column.key}
                     data-bucket-state={column.key}
-                    className={`${boardStyles.column} ${dragOverState === column.key || touchDropTarget?.state === column.key ? boardStyles.columnDropTarget : ""}`}
+                    className={cn(
+                      "flex min-h-[120px] flex-col rounded-xl border border-border bg-card transition-[border-color,background-color,box-shadow]",
+                      (dragOverState === column.key || touchDropTarget?.state === column.key) &&
+                        "border-primary bg-[light-dark(#eef6ff,#18293a)] shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--blue)_42%,transparent)]",
+                    )}
                     onDragOver={(event) => {
                       event.preventDefault();
                       event.dataTransfer.dropEffect = "move";
@@ -878,16 +882,31 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                       void dropTaskInState(column.key);
                     }}
                   >
-                    <div className={boardStyles.columnHead}>
+                    <div className="flex items-center justify-between border-b border-border px-3.5 py-3 text-sm font-bold">
                       <span>{column.label}</span>
-                      <span className={boardStyles.columnCount}>{tasks.length}</span>
+                      <span className="inline-grid h-[22px] min-w-[22px] place-items-center rounded-full bg-muted px-1.5 text-xs text-muted-foreground">
+                        {tasks.length}
+                      </span>
                     </div>
-                    <div className={boardStyles.columnBody}>
+                    <div className="grid content-start gap-1.5 overscroll-contain p-2.5 desk:max-h-[min(70vh,720px)] desk:gap-2 desk:overflow-y-auto">
                       {tasks.map((task: AnyRecord, index: number) => (
                         <button
                           key={task._id}
                           data-task-id={task._id}
-                          className={`${boardStyles.taskCard} ${task.ownerType === "owner" ? boardStyles.ownerTaskCard : ""} ${draggedTaskId === task._id || touchDrag?.taskId === task._id ? boardStyles.taskCardDragging : ""} ${touchDropTarget?.state === column.key && touchDropTarget.index === index ? boardStyles.dropBefore : ""} ${touchDropTarget?.state === column.key && touchDropTarget.index === tasks.length && index === tasks.length - 1 ? boardStyles.dropAfter : ""}`}
+                          className={cn(
+                            "relative grid min-h-[52px] w-full cursor-pointer content-center gap-[5px] rounded-[10px] border border-border bg-secondary py-[9px] pl-3 pr-12 text-left transition-[border-color,box-shadow,opacity,transform] hover:border-primary hover:shadow-md focus-visible:border-primary focus-visible:shadow-md focus-visible:outline-none desk:static desk:min-h-[auto] desk:content-normal desk:gap-2 desk:px-3 desk:py-[11px]",
+                            task.ownerType === "owner" &&
+                              "border-[color:color-mix(in_srgb,var(--gold)_58%,var(--border))] shadow-[inset_3px_0_0_color-mix(in_srgb,var(--gold)_78%,transparent)] hover:border-gold focus-visible:border-gold",
+                            (draggedTaskId === task._id || touchDrag?.taskId === task._id) &&
+                              "scale-[0.99] opacity-55",
+                            touchDropTarget?.state === column.key &&
+                              touchDropTarget.index === index &&
+                              "shadow-[0_-3px_0_0_var(--blue)]",
+                            touchDropTarget?.state === column.key &&
+                              touchDropTarget.index === tasks.length &&
+                              index === tasks.length - 1 &&
+                              "shadow-[0_3px_0_0_var(--blue)]",
+                          )}
                           draggable
                           aria-grabbed={draggedTaskId === task._id}
                           aria-label={`${task.title}. ${task.ownerType === "owner" ? `${ownerName} owned task` : `${agentName} owned task`}.`}
@@ -903,11 +922,11 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                           onClick={() => setSelectedId(task._id)}
                           type="button"
                         >
-                          <span className={boardStyles.taskTitle}>{task.title}</span>
-                          <span className={boardStyles.taskMeta}>
+                          <span className="text-sm font-bold leading-[1.35]">{task.title}</span>
+                          <span className="flex flex-wrap gap-[5px]">
                             {task.ownerType === "owner" ? <Badge tone="gold">{ownerName}</Badge> : null}
                             {task.kind ? (
-                              <span className={boardStyles.metaSecondary}>
+                              <span className="hidden desk:contents">
                                 <Badge tone="neutral">{task.kind}</Badge>
                               </span>
                             ) : null}
@@ -915,7 +934,7 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                               <Badge tone="blue">Queued for {task.requestedHarness ?? agentName}</Badge>
                             ) : null}
                             {task.dependsOn?.length ? (
-                              <span className={boardStyles.metaSecondary}>
+                              <span className="hidden desk:contents">
                                 <Badge tone="gold">{task.dependsOn.length} dep</Badge>
                               </span>
                             ) : null}
@@ -923,7 +942,7 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                           </span>
                           {isTaskActive(task) ? <ActivityBar label={activityLabel(task)} /> : null}
                           <span
-                            className={boardStyles.dragHandle}
+                            className="absolute right-[3px] top-1/2 grid h-[42px] w-[42px] -translate-y-1/2 cursor-grab touch-none place-items-center text-muted-foreground desk:hidden"
                             aria-hidden
                             onClick={(event) => event.stopPropagation()}
                             onPointerDown={(event) => startTouchDrag(event, task)}
@@ -935,7 +954,9 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                           </span>
                         </button>
                       ))}
-                      {tasks.length === 0 ? <p className={boardStyles.columnEmpty}>—</p> : null}
+                      {tasks.length === 0 ? (
+                        <p className="m-0 p-1.5 text-center text-[13px] text-muted-foreground">—</p>
+                      ) : null}
                     </div>
                   </div>
                 );
@@ -944,10 +965,10 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
           )}
 
           {cancelledTasks.length > 0 ? (
-            <div className={boardStyles.abandonedSection}>
+            <div className="mt-3.5">
               <button
                 type="button"
-                className={boardStyles.abandonedToggle}
+                className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border-none bg-transparent px-2 py-1.5 text-[13px] font-bold text-muted-foreground hover:bg-card hover:text-foreground focus-visible:bg-card focus-visible:text-foreground focus-visible:outline-none"
                 aria-expanded={abandonedOpen}
                 onClick={() => setAbandonedOpen((open) => !open)}
               >
@@ -955,10 +976,15 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                 Abandoned ({cancelledTasks.length})
               </button>
               {abandonedOpen ? (
-                <div className={boardStyles.abandonedList}>
+                <div className="mt-2 grid gap-1.5">
                   {cancelledTasks.map((task: AnyRecord) => (
-                    <div key={task._id} className={boardStyles.abandonedRow}>
-                      <span className={boardStyles.abandonedTitle}>{task.title}</span>
+                    <div
+                      key={task._id}
+                      className="flex items-center gap-2.5 rounded-[10px] border border-dashed border-border bg-card px-3 py-2 text-sm text-muted-foreground"
+                    >
+                      <span className="truncate line-through decoration-[color-mix(in_srgb,var(--muted-foreground)_55%,transparent)]">
+                        {task.title}
+                      </span>
                       {task.kind ? <Badge tone="neutral">{task.kind}</Badge> : null}
                       <Button
                         small
@@ -1272,7 +1298,9 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                       </div>
                     ) : (
                       <>
-                        <p className={boardStyles.brief}>{selected.description ?? selected.title}</p>
+                        <p className="m-0 whitespace-pre-wrap rounded-[10px] border border-border bg-secondary px-3.5 py-3 text-sm leading-normal">
+                          {selected.description ?? selected.title}
+                        </p>
                         <p className="muted" style={{ fontSize: 14 }}>
                           Create a brief to turn this proposal into an editable, hand-off-ready task.
                         </p>
@@ -1319,7 +1347,9 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                   ) : (
                     <>
                       {selected.executionBrief ? (
-                        <p className={boardStyles.brief}>{selected.executionBrief}</p>
+                        <p className="m-0 whitespace-pre-wrap rounded-[10px] border border-border bg-secondary px-3.5 py-3 text-sm leading-normal">
+                          {selected.executionBrief}
+                        </p>
                       ) : (
                         <p className="muted" style={{ fontSize: 14 }}>No brief yet.</p>
                       )}
