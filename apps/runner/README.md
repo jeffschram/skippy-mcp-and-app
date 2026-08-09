@@ -28,6 +28,21 @@ Harness auth: for Claude, log the service account into Claude Code
 `codex` CLI and run `codex login` (ChatGPT). PR creation uses the `gh` CLI
 when available; otherwise the run finishes with the branch pushed and no PR.
 
+## Always-on (launchd)
+
+Install the runner as a LaunchAgent so it restarts on crash and login:
+
+```sh
+export SKIPPY_CONVEX_URL=... SKIPPY_RUNNER_HOST_TOKEN=... SKIPPY_RUNNER_ALLOWED_ROOT=... SKIPPY_RUNNER_HARNESSES=claude,codex
+pnpm --filter @skippy/runner build
+bash apps/runner/scripts/install-launchd.sh
+```
+
+Logs land in `~/Library/Logs/skippy-runner.log`. Re-run the script after a
+rebuild to pick up new code (`launchctl kickstart -k gui/$UID/com.skippy.runner`
+also restarts it in place). This runs as the current user; migrating to the
+spec's dedicated `skippy-runner` service account is a separate hardening step.
+
 ## Notes
 
 - Work discovery and control state currently poll; switching to Convex
