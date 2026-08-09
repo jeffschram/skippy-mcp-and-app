@@ -5,10 +5,11 @@
  *
  * The scope follows the route: project pages bind to that project's General
  * chat; every other page binds to a per-page chat (home, agenda, finances, ...).
- * Replies come from the brain's configured LLM provider via convex/chats.ts —
- * the lightweight conversational path, deliberately separate from the run
- * machinery. Hidden behind a floating toggle; on small screens the panel opens
- * as a near-fullscreen sheet.
+ * Replies are executed by the Mac mini runner's LOCAL harness (Claude Code or
+ * Codex CLI under the user's own subscription auth — never a metered API
+ * call), with the same capabilities as a terminal session. Gated actions
+ * surface here as inline approval cards. Hidden behind a floating toggle; on
+ * small screens the panel opens as a near-fullscreen sheet.
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -59,6 +60,7 @@ export function ChatPanel() {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
+  const [pickedHarness, setPickedHarness] = useState<"claude" | "codex">("claude");
   const messagesRef = useRef<HTMLDivElement | null>(null);
 
   const queryArgs =
@@ -67,8 +69,12 @@ export function ChatPanel() {
     | AnyRecord
     | undefined;
   const sendMessage = useMutation(api.chats.sendChatMessageForViewer);
+  const decideApproval = useMutation(api.agentWorkbench.decideApprovalForViewer);
 
   const messages: AnyRecord[] = data?.messages ?? [];
+  const pendingApprovals: AnyRecord[] = data?.pendingApprovals ?? [];
+  // The chat binds to one harness on its first message; after that it's fixed.
+  const boundHarness: string | undefined = data?.chat?.harness;
 
   // Keep the transcript pinned to the newest message.
   useEffect(() => {
@@ -84,7 +90,7 @@ export function ChatPanel() {
     setSending(true);
     setDraft("");
     try {
-      await sendMessage({ ...queryArgs, content } as any);
+      await sendMessage({ ...queryArgs, content, harness: boundHarness ?? pickedHarness } as any);
     } catch (error) {
       // Restore the draft so a transient failure doesn't eat the message.
       setDraft(content);
@@ -112,8 +118,23 @@ export function ChatPanel() {
         <MessageCircle size={16} aria-hidden />
         <span className={styles.headerTitle}>
           Chat
-          <span className={styles.headerContext}>{contextLine}</span>
+          <span className={styles.headerContext}>
+            {contextLine}
+            {boundHarness ? ` · ${boundHarness}` : ""}
+          </span>
         </span>
+        {!boundHarness ? (
+          <select
+            className={styles.harnessSelect}
+            value={pickedHarness}
+            onChange={(event) => setPickedHarness(event.target.value as "claude" | "codex")}
+            aria-label="Harness for this chat"
+            title="Which local harness answers this chat (fixed after the first message)"
+          >
+            <option value="claude">Claude</option>
+            <option value="codex">Codex</option>
+          </select>
+        ) : null}
         <button type="button" className={styles.iconButton} onClick={() => setOpen(false)} aria-label="Close chat">
           <X size={16} aria-hidden />
         </button>
@@ -123,8 +144,8 @@ export function ChatPanel() {
         {messages.length === 0 ? (
           <p className={styles.empty}>
             {scope.kind === "project"
-              ? "Ask about this project — plans, tasks, status. Code changes go through a task's Execute action."
-              : `Ask about ${scope.label.toLowerCase()} — this chat sees which page you're on.`}
+              ? "Chat with your local harness about this project — it runs in the project checkout with your normal tools."
+              : `Chat with your local harness from the ${scope.label} page — same capabilities as a terminal session.`}
           </p>
         ) : (
           messages.map((message) => {
@@ -153,6 +174,35 @@ export function ChatPanel() {
           })
         )}
       </div>
+
+      {pendingApprovals.length ? (
+        <div className={styles.approvals}>
+          {pendingApprovals.map((approval) => (
+            <div key={approval._id} className={styles.approvalCard}>
+              <p className={styles.approvalTitle}>{approval.title}</p>
+              {approval.details?.command ? (
+                <pre className={styles.approvalDetail}>{approval.details.command}</pre>
+              ) : null}
+              <div className={styles.approvalActions}>
+                <button
+                  type="button"
+                  className={styles.approve}
+                  onClick={() => void decideApproval({ approvalId: approval._id, decision: "accepted" } as any)}
+                >
+                  Approve
+                </button>
+                <button
+                  type="button"
+                  className={styles.decline}
+                  onClick={() => void decideApproval({ approvalId: approval._id, decision: "declined" } as any)}
+                >
+                  Decline
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
 
       <div className={styles.composer}>
         <textarea

@@ -51,6 +51,20 @@ export type ReportableStatus =
 // noUncheckedIndexedAccess.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const fns = (anyApi as any).agentWorkbench as Record<string, any>;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const chatFns = (anyApi as any).chats as Record<string, any>;
+
+export interface ClaimedChatTurn {
+  turnId: string;
+  claimToken: string;
+  chatId: string;
+  harness: Harness;
+  externalThreadId?: string;
+  scopeContext: string;
+  cwd?: string;
+  history: Array<{ role: "user" | "assistant"; content: string }>;
+  userContent: string;
+}
 
 export class ControlPlane {
   private client: ConvexHttpClient;
@@ -65,8 +79,12 @@ export class ControlPlane {
     return this.client.mutation(fns.registerHost, { hostToken: this.hostToken, ...args });
   }
 
-  heartbeat(activeRunIds: string[]): Promise<{ draining: boolean }> {
-    return this.client.mutation(fns.hostHeartbeat, { hostToken: this.hostToken, activeRunIds });
+  heartbeat(activeRunIds: string[], activeChatTurnIds: string[] = []): Promise<{ draining: boolean }> {
+    return this.client.mutation(fns.hostHeartbeat, {
+      hostToken: this.hostToken,
+      activeRunIds,
+      activeChatTurnIds,
+    });
   }
 
   claimableRuns(): Promise<string[]> {
@@ -131,6 +149,72 @@ export class ControlPlane {
 
   controlState(runId: string): Promise<ControlState> {
     return this.client.query(fns.runControlState, { hostToken: this.hostToken, runId });
+  }
+
+  /* ---- Conversational chat turns (local-harness chat) ---- */
+
+  claimNextChatTurn(): Promise<ClaimedChatTurn | null> {
+    return this.client.mutation(chatFns.claimNextChatTurn, { hostToken: this.hostToken });
+  }
+
+  markChatTurnRunning(turnId: string, claimToken: string) {
+    return this.client.mutation(chatFns.markChatTurnRunning, { hostToken: this.hostToken, turnId, claimToken });
+  }
+
+  requestChatApproval(
+    turnId: string,
+    claimToken: string,
+    approval: {
+      harnessRequestId: string;
+      kind: "command" | "file_change" | "network" | "secret" | "push" | "pr" | "deployment" | "user_input";
+      title: string;
+      explanation?: string | undefined;
+      details?: unknown;
+    },
+  ): Promise<{ approvalId: string; status: string }> {
+    return this.client.mutation(chatFns.requestChatApproval, {
+      hostToken: this.hostToken,
+      turnId,
+      claimToken,
+      ...approval,
+    });
+  }
+
+  chatTurnControlState(turnId: string): Promise<{
+    status: string;
+    cancelRequested: boolean;
+    approvals: Array<{ harnessRequestId: string; status: string }>;
+  }> {
+    return this.client.query(chatFns.chatTurnControlState, { hostToken: this.hostToken, turnId });
+  }
+
+  completeChatTurn(
+    turnId: string,
+    claimToken: string,
+    result: { resultText?: string; errorMessage?: string; externalThreadId?: string },
+  ) {
+    const payload: Record<string, unknown> = { hostToken: this.hostToken, turnId, claimToken };
+    if (result.resultText !== undefined) payload.resultText = result.resultText;
+    if (result.errorMessage !== undefined) payload.errorMessage = result.errorMessage;
+    if (result.externalThreadId !== undefined) payload.externalThreadId = result.externalThreadId;
+    return this.client.mutation(chatFns.completeChatTurn, payload);
+  }
+
+  async awaitChatApproval(
+    turnId: string,
+    harnessRequestId: string,
+    { pollMs = 2_000, signal }: { pollMs?: number; signal?: AbortSignal } = {},
+  ): Promise<"accepted" | "declined" | "cancelled"> {
+    for (;;) {
+      if (signal?.aborted) return "cancelled";
+      const state = await this.chatTurnControlState(turnId);
+      if (state.cancelRequested) return "cancelled";
+      const approval = state.approvals.find((a) => a.harnessRequestId === harnessRequestId);
+      if (approval && approval.status !== "pending") {
+        return approval.status === "accepted" ? "accepted" : "declined";
+      }
+      await new Promise((resolve) => setTimeout(resolve, pollMs));
+    }
   }
 
   /**

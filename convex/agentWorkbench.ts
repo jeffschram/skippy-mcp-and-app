@@ -86,7 +86,7 @@ function hostStatusFor(host: any, now: number): "online" | "draining" | "offline
   return host.draining ? "draining" : "online";
 }
 
-async function requireHost(ctx: any, hostToken: string) {
+export async function requireHost(ctx: any, hostToken: string) {
   const tokenHash = await sha256Hex(hostToken);
   const host = await ctx.db
     .query("agentHosts")
@@ -552,6 +552,7 @@ export const pendingApprovalsForViewer = queryGeneric({
     return approvals.map((a: any) => ({
       _id: a._id,
       runId: a.runId,
+      chatTurnId: a.chatTurnId,
       kind: a.kind,
       title: a.title,
       explanation: a.explanation,
@@ -636,16 +637,23 @@ export const hostHeartbeat = mutationGeneric({
   args: {
     hostToken: v.string(),
     activeRunIds: v.optional(v.array(v.id("agentRuns"))),
+    activeChatTurnIds: v.optional(v.array(v.id("chatTurns"))),
   },
   handler: async (ctx, args) => {
     const host = await requireHost(ctx, args.hostToken);
     const now = Date.now();
     await ctx.db.patch(host._id, { lastHeartbeatAt: now, updatedAt: now });
-    // Renew leases only for runs this host still claims to be working.
+    // Renew leases only for work this host still claims to be doing.
     for (const runId of args.activeRunIds ?? []) {
       const run = await ctx.db.get(runId);
       if (run && run.hostId === host._id && (ACTIVE_RUN_STATUSES as readonly string[]).includes(run.status)) {
         await ctx.db.patch(runId, { leaseExpiresAt: now + RUN_LEASE_MS, updatedAt: now });
+      }
+    }
+    for (const turnId of args.activeChatTurnIds ?? []) {
+      const turn = await ctx.db.get(turnId);
+      if (turn && turn.hostId === host._id && (turn.status === "claimed" || turn.status === "running")) {
+        await ctx.db.patch(turnId, { leaseExpiresAt: now + RUN_LEASE_MS, updatedAt: now });
       }
     }
     return { draining: host.draining ?? false };

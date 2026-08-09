@@ -9,11 +9,12 @@
  */
 import os from "node:os";
 import { loadConfig } from "./config.js";
-import { ControlPlane, type ClaimedRun } from "./controlPlane.js";
+import { ControlPlane, type ClaimedChatTurn, type ClaimedRun } from "./controlPlane.js";
 import { ClaudeAdapter } from "./harness/claude.js";
 import { CodexAdapter } from "./harness/codex.js";
 import type { HarnessAdapter } from "./harness/types.js";
 import { RunExecutor } from "./runExecutor.js";
+import { executeChatTurn } from "./chatExecutor.js";
 
 function log(message: string, extra?: unknown) {
   const suffix = extra === undefined ? "" : ` ${JSON.stringify(extra)}`;
@@ -37,12 +38,13 @@ async function main() {
   log("registered host", { hostId: registration.hostId, harnesses: config.harnesses });
 
   const activeRuns = new Map<string, Promise<void>>();
+  const activeChatTurns = new Map<string, Promise<void>>();
   let draining = false;
   let stopping = false;
 
   const heartbeatTimer = setInterval(() => {
     void plane
-      .heartbeat([...activeRuns.keys()])
+      .heartbeat([...activeRuns.keys()], [...activeChatTurns.keys()])
       .then((res) => {
         draining = res.draining;
       })
@@ -99,12 +101,36 @@ async function main() {
       .catch((error) => log("claim attempt failed", { error: String(error) }));
   }, config.claimPollIntervalMs);
 
+  // Conversational chat turns: independent of run concurrency (a long code
+  // run must not block chat replies), one turn at a time, faster poll so the
+  // chat feels responsive.
+  const startChatTurn = (turn: ClaimedChatTurn) => {
+    const adapter = adapters.get(turn.harness);
+    if (!adapter) return;
+    log("claimed chat turn", { turnId: turn.turnId, harness: turn.harness });
+    const promise = executeChatTurn(config, plane, turn, adapter)
+      .catch((error) => log("chat turn crashed", { turnId: turn.turnId, error: String(error) }))
+      .finally(() => activeChatTurns.delete(turn.turnId));
+    activeChatTurns.set(turn.turnId, promise);
+  };
+  const chatClaimTimer = setInterval(() => {
+    if (stopping || draining) return;
+    if (activeChatTurns.size >= 1) return;
+    void plane
+      .claimNextChatTurn()
+      .then((turn) => {
+        if (turn) startChatTurn(turn);
+      })
+      .catch((error) => log("chat claim failed", { error: String(error) }));
+  }, 2_000);
+
   const shutdown = async (signalName: string) => {
     if (stopping) return;
     stopping = true;
-    log(`received ${signalName}; waiting for ${activeRuns.size} active run(s)`);
+    log(`received ${signalName}; waiting for ${activeRuns.size} run(s) + ${activeChatTurns.size} chat turn(s)`);
     clearInterval(claimTimer);
-    await Promise.allSettled([...activeRuns.values()]);
+    clearInterval(chatClaimTimer);
+    await Promise.allSettled([...activeRuns.values(), ...activeChatTurns.values()]);
     clearInterval(heartbeatTimer);
     process.exit(0);
   };
