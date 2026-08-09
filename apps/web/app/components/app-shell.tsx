@@ -18,6 +18,7 @@ import { api } from "../../lib/skippy-api";
 import { AuthStatus } from "../live-auth";
 import { ToastProvider } from "./widgets";
 import { ViewerContextTracker } from "./viewer-context-tracker";
+import { ChatPanel } from "./chat-panel";
 import styles from "./app-shell.module.css";
 
 type NavProject = {
@@ -192,6 +193,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <main className={styles.page}>{children}</main>
         </div>
       </div>
+      <ChatPanel />
     </ToastProvider>
   );
 }

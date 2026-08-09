@@ -1293,14 +1293,18 @@ export default defineSchema({
   // Chat mapping for the workbench. Conversational turns use a lightweight path
   // (no run); a chat is bound to ONE harness for its lifetime because
   // conversation context lives in the harness's own thread/session.
+  // Page-aware: a chat belongs to a project (projectId) OR to an app page
+  // (pageKey: "home", "agenda", "finances", ...) — exactly one of the two.
   // Transcript storage via the Convex Agent component is a later pass — this
-  // row is the Skippy-owned mapping, not the message store.
+  // row is the Skippy-owned mapping; conversational messages live in
+  // chatMessages below.
   projectChats: defineTable({
     brainInstanceId: v.id("brainInstances"),
-    projectId: v.id("projects"),
+    projectId: v.optional(v.id("projects")),
+    pageKey: v.optional(v.string()),
     taskId: v.optional(v.id("tasks")),
     title: v.string(),
-    kind: v.union(v.literal("general"), v.literal("task"), v.literal("working")),
+    kind: v.union(v.literal("general"), v.literal("task"), v.literal("working"), v.literal("page")),
     harness: v.optional(agentHarness),
     // Harness-native thread/session id (Codex thread, Claude session).
     externalThreadId: v.optional(v.string()),
@@ -1317,7 +1321,52 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_brain_project", ["brainInstanceId", "projectId"])
-    .index("by_brain_task", ["brainInstanceId", "taskId"]),
+    .index("by_brain_task", ["brainInstanceId", "taskId"])
+    .index("by_brain_page", ["brainInstanceId", "pageKey"]),
+
+  // Conversational chat transcript. Assistant replies are produced by the Mac
+  // mini runner's LOCAL harness (subscription auth — deliberately never a
+  // metered LLM API call); the pending row is patched in place when the reply
+  // lands, so the UI renders "thinking" state reactively.
+  chatMessages: defineTable({
+    brainInstanceId: v.id("brainInstances"),
+    chatId: v.id("projectChats"),
+    role: v.union(v.literal("user"), v.literal("assistant")),
+    content: v.string(),
+    status: v.union(v.literal("complete"), v.literal("pending"), v.literal("error")),
+    error: v.optional(v.string()),
+    createdAt: v.number(),
+  }).index("by_chat", ["chatId", "createdAt"]),
+
+  // Work queue for conversational turns: lighter siblings of agentRuns — same
+  // host-token claiming and lease model, no worktree/verify/publish machinery.
+  // The runner executes the turn with the chat's harness (Claude Code / Codex
+  // CLI under the user's own auth) and patches the assistant message.
+  chatTurns: defineTable({
+    brainInstanceId: v.id("brainInstances"),
+    chatId: v.id("projectChats"),
+    userMessageId: v.id("chatMessages"),
+    assistantMessageId: v.id("chatMessages"),
+    harness: agentHarness,
+    status: v.union(
+      v.literal("queued"),
+      v.literal("claimed"),
+      v.literal("running"),
+      v.literal("completed"),
+      v.literal("failed"),
+      v.literal("cancelled"),
+    ),
+    hostId: v.optional(v.id("agentHosts")),
+    claimToken: v.optional(v.string()),
+    leaseExpiresAt: v.optional(v.number()),
+    cancelRequested: v.optional(v.boolean()),
+    errorMessage: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_brain_status", ["brainInstanceId", "status"])
+    .index("by_chat", ["chatId"])
+    .index("by_host", ["hostId"]),
 
   // Durable execution attempts. A separate table rather than an evolution of
   // the task's agent-request fields: agentRequestStatus ("requested" |
@@ -1389,7 +1438,10 @@ export default defineSchema({
   // State must survive browser disconnects and runner restarts.
   agentApprovals: defineTable({
     brainInstanceId: v.id("brainInstances"),
-    runId: v.id("agentRuns"),
+    // Exactly one of runId / chatTurnId: an approval belongs to a code run or
+    // to a conversational chat turn.
+    runId: v.optional(v.id("agentRuns")),
+    chatTurnId: v.optional(v.id("chatTurns")),
     // Stable harness-side request id so retried decisions cannot approve a
     // different command accidentally.
     harnessRequestId: v.string(),
@@ -1414,6 +1466,8 @@ export default defineSchema({
   })
     .index("by_run", ["runId"])
     .index("by_run_request", ["runId", "harnessRequestId"])
+    .index("by_chat_turn", ["chatTurnId"])
+    .index("by_chat_turn_request", ["chatTurnId", "harnessRequestId"])
     .index("by_brain_status", ["brainInstanceId", "status"]),
 
   aiProcessingRuns: defineTable({

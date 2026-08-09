@@ -120,13 +120,26 @@ export class ClaudeAdapter implements HarnessAdapter {
       if (toolName === "Read" || toolName === "Glob" || toolName === "Grep" || toolName === "TodoWrite") {
         return allow();
       }
+      // The user's own Skippy MCP tools are the point of the assistant —
+      // capture/recall/task tools run without approval friction. Other MCP
+      // servers still gate.
+      if (toolName.startsWith("mcp__skippy")) {
+        return allow();
+      }
       return gate({ kind: "user_input", title: `Allow tool ${toolName}?`, details: { toolName } });
     };
 
     const options: Record<string, unknown> = {
       cwd: worktreePath,
-      permissionMode: "acceptEdits",
+      // bypassPermissions = --dangerously-skip-permissions: canUseTool is
+      // never consulted, so no approvals surface. Chat-only, opt-in.
+      permissionMode: request.bypassPermissions ? "bypassPermissions" : "acceptEdits",
       canUseTool,
+      // The Agent SDK is isolated by default — it does NOT load the user's
+      // Claude Code settings, which is where user-scope MCP servers (the
+      // Skippy MCP) live. Loading them is the "same capabilities as a local
+      // session" contract this runner exists to provide.
+      settingSources: ["user", "project", "local"],
       abortController: undefined,
     };
     if (sessionId) options.resume = sessionId;

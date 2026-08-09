@@ -39,6 +39,11 @@ export interface HarnessTurnRequest {
   externalThreadId?: string;
   /** Absolute path of the dedicated worktree the harness must stay inside. */
   worktreePath: string;
+  /**
+   * Run with harness permissions bypassed — no approval callbacks, no
+   * sandbox. Only ever set for chat turns, by explicit runner config.
+   */
+  bypassPermissions?: boolean | undefined;
   signal: AbortSignal;
   /** Adapter emits translated events here as the turn streams. */
   onEvent: (event: HarnessEvent) => void;

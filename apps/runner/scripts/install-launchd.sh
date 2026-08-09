@@ -29,6 +29,13 @@ NODE_BIN="$(command -v node)"
 : "${SKIPPY_RUNNER_ALLOWED_ROOT:?SKIPPY_RUNNER_ALLOWED_ROOT is required}"
 SKIPPY_RUNNER_HARNESSES="${SKIPPY_RUNNER_HARNESSES:-claude}"
 SKIPPY_RUNNER_MAX_CONCURRENCY="${SKIPPY_RUNNER_MAX_CONCURRENCY:-1}"
+# Optional, chat-only: bypass harness permissions (no approvals, no sandbox).
+SKIPPY_CHAT_BYPASS_PERMISSIONS="${SKIPPY_CHAT_BYPASS_PERMISSIONS:-}"
+
+BYPASS_FRAGMENT=""
+if [ -n "$SKIPPY_CHAT_BYPASS_PERMISSIONS" ]; then
+  BYPASS_FRAGMENT="    <key>SKIPPY_CHAT_BYPASS_PERMISSIONS</key><string>$SKIPPY_CHAT_BYPASS_PERMISSIONS</string>"
+fi
 
 if [ ! -f "$RUNNER_MAIN" ]; then
   echo "error: $RUNNER_MAIN not found — run 'pnpm --filter @skippy/runner build' first" >&2
@@ -58,6 +65,7 @@ cat > "$PLIST" <<PLIST_EOF
     <key>SKIPPY_RUNNER_ALLOWED_ROOT</key><string>$SKIPPY_RUNNER_ALLOWED_ROOT</string>
     <key>SKIPPY_RUNNER_HARNESSES</key><string>$SKIPPY_RUNNER_HARNESSES</string>
     <key>SKIPPY_RUNNER_MAX_CONCURRENCY</key><string>$SKIPPY_RUNNER_MAX_CONCURRENCY</string>
+$BYPASS_FRAGMENT
   </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>

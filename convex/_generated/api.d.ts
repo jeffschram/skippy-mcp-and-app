@@ -13,6 +13,7 @@ import type * as agentWorkbench from "../agentWorkbench.js";
 import type * as auth from "../auth.js";
 import type * as bootstrap from "../bootstrap.js";
 import type * as calendar from "../calendar.js";
+import type * as chats from "../chats.js";
 import type * as finances from "../finances.js";
 import type * as http from "../http.js";
 import type * as interviews from "../interviews.js";
@@ -42,6 +43,7 @@ declare const fullApi: ApiFromModules<{
   auth: typeof auth;
   bootstrap: typeof bootstrap;
   calendar: typeof calendar;
+  chats: typeof chats;
   finances: typeof finances;
   http: typeof http;
   interviews: typeof interviews;
