@@ -48,6 +48,18 @@ import { useViewerReady } from "./use-viewer";
 import { ProjectLibrarySection, TaskAttachments, useProjectFileUploader } from "./project-library";
 import { checkProjectFile, formatFileSize, PROJECT_FILE_ACCEPT } from "./project-library-helpers";
 import { cn } from "@/lib/utils";
+import {
+  badgeBlueClass,
+  badgeClass,
+  cardClass,
+  codeClass,
+  eyebrowClass,
+  inputClass,
+  mutedClass,
+  textareaClass,
+  textButtonClass,
+  textButtonCompactClass,
+} from "../page-classes";
 
 type AnyRecord = Record<string, any>;
 
@@ -109,12 +121,12 @@ function FolderOverrideField({
         placeholder={derivedDefault ?? ""}
         disabled={disabled}
       />
-      <span className="muted" style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 12 }}>
+      <span className={mutedClass} style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 12 }}>
         <span>{disabled ? "set the project local folder first" : `default: ${derivedDefault}`}</span>
         {!disabled && value ? (
           <button
             type="button"
-            className="text-button"
+            className={textButtonClass}
             style={{ fontSize: 12 }}
             onClick={(event) => {
               event.preventDefault();
@@ -140,7 +152,7 @@ function RunEventLine({ event }: { event: AnyRecord }) {
       return (
         <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12 }}>
           {(payload.todos ?? []).map((todo: AnyRecord, index: number) => (
-            <li key={index} className={todo.status === "completed" ? "muted" : undefined}>
+            <li key={index} className={todo.status === "completed" ? mutedClass : undefined}>
               {todo.status === "completed" ? "✓ " : ""}
               {todo.content ?? todo.title ?? JSON.stringify(todo)}
             </li>
@@ -151,20 +163,20 @@ function RunEventLine({ event }: { event: AnyRecord }) {
       return <p style={mono}>$ {payload.command}</p>;
     case "command_result":
       return (
-        <p style={mono} className={payload.exitCode ? undefined : "muted"}>
+        <p style={mono} className={payload.exitCode ? undefined : mutedClass}>
           {payload.phase === "verify" ? "verify " : ""}exit {payload.exitCode}
           {payload.outputTail ? `\n${payload.outputTail}` : ""}
         </p>
       );
     case "file_change":
       return (
-        <p className="muted" style={mono}>
+        <p className={mutedClass} style={mono}>
           {payload.tool ?? "edit"}: {payload.filePath}
         </p>
       );
     case "status":
       return (
-        <p className="muted" style={{ margin: 0, fontSize: 12 }}>
+        <p className={mutedClass} style={{ margin: 0, fontSize: 12 }}>
           — {payload.phase}
           {payload.verifyLine ? ` · ${payload.verifyLine}` : ""}
         </p>
@@ -762,7 +774,7 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
       ) : board === null ? (
         <Card>
           <EmptyState title="Project not found">
-            <Link className="text-button" href="/projects">
+            <Link className={textButtonClass} href="/projects">
               Back to projects
             </Link>
           </EmptyState>
@@ -770,28 +782,28 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
       ) : (
         <>
           <div style={{ marginBottom: 18 }}>
-            <Link href="/projects" className="text-button compact" style={{ marginBottom: 14 }}>
+            <Link href="/projects" className={cn(textButtonClass, textButtonCompactClass)} style={{ marginBottom: 14 }}>
               <ArrowLeft size={15} aria-hidden /> Projects
             </Link>
             <div className="flex flex-wrap items-end justify-between gap-4">
               <div>
-                <p className="eyebrow">{project.kind === "code" ? "Code project" : "Project"}</p>
+                <p className={eyebrowClass}>{project.kind === "code" ? "Code project" : "Project"}</p>
                 <h1>{project.title}</h1>
                 {project.status === "archived" ? (
-                  <p className="muted" style={{ maxWidth: 640 }}>
+                  <p className={mutedClass} style={{ maxWidth: 640 }}>
                     This project is archived. It is hidden from primary project lists until restored.
                   </p>
                 ) : null}
-                {project.summary ? <p className="muted" style={{ maxWidth: 640 }}>{project.summary}</p> : null}
+                {project.summary ? <p className={mutedClass} style={{ maxWidth: 640 }}>{project.summary}</p> : null}
                 {project.repoUrl || project.localPath ? (
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
                     {project.repoUrl ? (
-                      <a className="badge blue" href={project.repoUrl} target="_blank" rel="noreferrer" style={{ gap: 6 }}>
+                      <a className={cn(badgeClass, badgeBlueClass)} href={project.repoUrl} target="_blank" rel="noreferrer" style={{ gap: 6 }}>
                         <GitBranch size={13} aria-hidden /> Repo
                       </a>
                     ) : null}
                     {project.localPath ? (
-                      <span className="badge" style={{ gap: 6 }} title={project.localPath}>
+                      <span className={badgeClass} style={{ gap: 6 }} title={project.localPath}>
                         <Folder size={13} aria-hidden /> {project.localPath}
                       </span>
                     ) : null}
@@ -834,14 +846,14 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
           <Card className="mb-4">
             <div className="mb-2.5 flex flex-wrap items-baseline justify-between gap-3">
               <strong className="text-[17px] font-bold">{board.progress.percent}% complete</strong>
-              <span className="muted">
+              <span className={mutedClass}>
                 {board.progress.done}/{board.progress.total} tasks · {board.progress.ready} ready · {board.progress.inReview} in
                 review · {board.progress.blocked} blocked
               </span>
             </div>
             <ProgressBar value={board.progress.percent} tone={board.progress.percent === 100 ? "green" : "blue"} />
             {board.latestPlan?.summary ? (
-              <p className="muted" style={{ margin: "12px 0 0", fontSize: 14 }}>
+              <p className={mutedClass} style={{ margin: "12px 0 0", fontSize: 14 }}>
                 <Sparkles size={13} aria-hidden style={{ verticalAlign: "-1px" }} /> {board.latestPlan.summary}
               </p>
             ) : null}
@@ -1137,7 +1149,7 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                 </div>
 
                 {selectedRun?.errorMessage ? (
-                  <p className="muted" style={{ margin: 0, fontSize: 13, color: "var(--red, #b04040)" }}>
+                  <p className={mutedClass} style={{ margin: 0, fontSize: 13, color: "var(--red, #b04040)" }}>
                     Run error ({selectedRun.errorCategory ?? "unknown"}): {selectedRun.errorMessage}
                   </p>
                 ) : null}
@@ -1175,7 +1187,7 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                     {selectedRunApprovals.map((approval) => (
                       <div
                         key={approval._id}
-                        className="card"
+                        className={cardClass}
                         style={{ padding: 12, display: "grid", gap: 6, borderLeft: "3px solid var(--gold, #b8860b)" }}
                       >
                         <p style={{ margin: 0, fontWeight: 700 }}>
@@ -1183,25 +1195,25 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                         </p>
                         <p style={{ margin: 0, fontSize: 14 }}>{approval.title}</p>
                         {approval.explanation ? (
-                          <p className="muted" style={{ margin: 0, fontSize: 13, whiteSpace: "pre-wrap" }}>
+                          <p className={mutedClass} style={{ margin: 0, fontSize: 13, whiteSpace: "pre-wrap" }}>
                             {approval.explanation}
                           </p>
                         ) : null}
                         {approval.details?.command ? (
-                          <pre className="code" style={{ margin: 0, fontSize: 12, overflowX: "auto" }}>
+                          <pre className={codeClass} style={{ margin: 0, fontSize: 12, overflowX: "auto" }}>
                             {approval.details.command}
                           </pre>
                         ) : null}
                         {approval.details?.verification ? (
                           <p
-                            className="muted"
+                            className={mutedClass}
                             style={{ margin: 0, fontSize: 12, whiteSpace: "pre-wrap", fontFamily: "monospace" }}
                           >
                             {approval.details.verification}
                           </p>
                         ) : null}
                         {approval.details?.diffStat ? (
-                          <pre className="code" style={{ margin: 0, fontSize: 12, overflowX: "auto" }}>
+                          <pre className={codeClass} style={{ margin: 0, fontSize: 12, overflowX: "auto" }}>
                             {approval.details.diffStat}
                           </pre>
                         ) : null}
@@ -1230,7 +1242,7 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
 
                 {/* Move between states (kanban) */}
                 <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14 }}>
-                  <span className="muted" style={{ fontWeight: 700 }}>Move to</span>
+                  <span className={mutedClass} style={{ fontWeight: 700 }}>Move to</span>
                   <Select
                     value={selected.executionState}
                     disabled={busy}
@@ -1301,7 +1313,7 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                         <p className="m-0 whitespace-pre-wrap rounded-[10px] border border-border bg-secondary px-3.5 py-3 text-sm leading-normal">
                           {selected.description ?? selected.title}
                         </p>
-                        <p className="muted" style={{ fontSize: 14 }}>
+                        <p className={mutedClass} style={{ fontSize: 14 }}>
                           Create a brief to turn this proposal into an editable, hand-off-ready task.
                         </p>
                       </>
@@ -1351,7 +1363,7 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                           {selected.executionBrief}
                         </p>
                       ) : (
-                        <p className="muted" style={{ fontSize: 14 }}>No brief yet.</p>
+                        <p className={mutedClass} style={{ fontSize: 14 }}>No brief yet.</p>
                       )}
                       {selected.acceptanceCriteria?.length ? (
                         <>
@@ -1388,7 +1400,7 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                     <h3>Result</h3>
                     {selected.resultSummary ? <p style={{ margin: "0 0 6px" }}>{selected.resultSummary}</p> : null}
                     {selected.resultUrl ? (
-                      <a className="code" href={selected.resultUrl} target="_blank" rel="noreferrer">
+                      <a className={codeClass} href={selected.resultUrl} target="_blank" rel="noreferrer">
                         {selected.resultUrl}
                       </a>
                     ) : null}
@@ -1400,20 +1412,20 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                     <h3>Pull Request</h3>
                     {selected.prUrl ? (
                       <p style={{ margin: 0 }}>
-                        <a className="text-button" href={selected.prUrl} target="_blank" rel="noreferrer">
+                        <a className={textButtonClass} href={selected.prUrl} target="_blank" rel="noreferrer">
                           <GitPullRequest size={16} aria-hidden />
                           {selected.prNumber ? `PR #${selected.prNumber}` : "Open pull request"}
                           <ExternalLink size={14} aria-hidden />
                         </a>
                       </p>
                     ) : selected.executionState === "in_review" ? (
-                      <p className="muted" style={{ margin: 0, fontSize: 14 }}>
+                      <p className={mutedClass} style={{ margin: 0, fontSize: 14 }}>
                         PR pending or not recorded yet.
                       </p>
                     ) : null}
                     {selected.gitBranchName ? (
-                      <p className="muted" style={{ margin: "6px 0 0", fontSize: 13 }}>
-                        Branch: <span className="code">{selected.gitBranchName}</span>
+                      <p className={mutedClass} style={{ margin: "6px 0 0", fontSize: 13 }}>
+                        Branch: <span className={codeClass}>{selected.gitBranchName}</span>
                         {selected.prStatus ? ` · ${selected.prStatus}` : ""}
                       </p>
                     ) : null}
@@ -1425,13 +1437,13 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                   <section style={{ borderTop: "1px solid var(--line)", paddingTop: 14, display: "grid", gap: 10 }}>
                     <h3 style={{ margin: 0 }}>Record result (supervise)</h3>
                     <input
-                      className="input"
+                      className={inputClass}
                       placeholder="PR or commit URL (optional)"
                       value={resultUrl}
                       onChange={(event) => setResultUrl(event.target.value)}
                     />
                     <textarea
-                      className="textarea"
+                      className={textareaClass}
                       placeholder="What was done? (optional)"
                       value={resultSummary}
                       onChange={(event) => setResultSummary(event.target.value)}
@@ -1539,12 +1551,12 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                       <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {file.name}
                       </span>
-                      <span className="muted" style={{ flexShrink: 0 }}>
+                      <span className={mutedClass} style={{ flexShrink: 0 }}>
                         {formatFileSize(file.size)}
                       </span>
                       <button
                         type="button"
-                        className="text-button compact"
+                        className={cn(textButtonClass, textButtonCompactClass)}
                         style={{ marginLeft: "auto", flexShrink: 0 }}
                         onClick={() => setProposalFiles((current) => current.filter((_, i) => i !== index))}
                         disabled={proposalBusy}
@@ -1553,7 +1565,7 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                       </button>
                     </div>
                   ))}
-                  <label className="text-button compact" style={{ cursor: "pointer", width: "fit-content" }}>
+                  <label className={cn(textButtonClass, textButtonCompactClass)} style={{ cursor: "pointer", width: "fit-content" }}>
                     <Plus size={14} aria-hidden /> Add files
                     <input
                       type="file"
@@ -1578,7 +1590,7 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                       }}
                     />
                   </label>
-                  <p className="muted" style={{ margin: 0, fontSize: 12 }}>
+                  <p className={mutedClass} style={{ margin: 0, fontSize: 12 }}>
                     Files upload to the project Library, attached to the new task.
                   </p>
                 </div>

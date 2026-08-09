@@ -12,6 +12,7 @@ import {
 import { LiveContextMapContent } from "../context-map/context-map-content";
 import { LiveInterviewsIndex } from "../interviews/ui";
 import { LiveLinksAndNotesContent } from "../links-notes";
+import { eyebrowClass, mutedClass, pageHeaderClass } from "../page-classes";
 
 const TABS = [
   { key: "memory", label: "Memory" },
@@ -44,17 +45,17 @@ export function BrainContent({ section }: { section?: string | undefined }) {
 
   return (
     <LiveGate>
-      <div className="page-header">
+      <div className={pageHeaderClass}>
         <div>
-          <p className="eyebrow">Second brain</p>
+          <p className={eyebrowClass}>Second brain</p>
           <h1>Everything Skippy knows.</h1>
-          <p className="muted" style={{ maxWidth: 560 }}>
+          <p className={`${mutedClass} max-w-[560px]`}>
             Accepted knowledge, contacts, goals, guided check-ins, and the relationship map — all connected.
           </p>
         </div>
       </div>
 
-      <div style={{ marginBottom: 18 }}>
+      <div className="mb-[18px]">
         <Tabs items={TABS} active={tab} onChange={goToTab} />
       </div>
 

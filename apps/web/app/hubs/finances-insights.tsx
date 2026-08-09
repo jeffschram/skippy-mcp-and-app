@@ -17,6 +17,7 @@ import { formatCents, formatSignedCents, monthKeyLabel, monthKeyShortLabel } fro
 import { windowLabel } from "./finances-insights-helpers";
 import * as styles from "./finances-classes";
 import { cn } from "@/lib/utils";
+import { mutedClass } from "../page-classes";
 
 /* ------------------------------------------------------------------ */
 /* Shapes (mirror convex/finances.ts insightsForViewer)                */
@@ -100,7 +101,7 @@ function MonthMatrix({ months, currentMonthKey }: { months: InsightsMonth[]; cur
     <Card>
       <p className={styles.cardTitle}>
         Type by month
-        <span className={cn("muted", styles.cardTitleNote)}>
+        <span className={cn(mutedClass, styles.cardTitleNote)}>
           green = better than the previous month
         </span>
       </p>
@@ -172,7 +173,7 @@ function BalanceMatrix({ months, currentMonthKey }: { months: InsightsMonth[]; c
     <Card>
       <p className={styles.cardTitle}>
         Ending balance by month
-        <span className={cn("muted", styles.cardTitleNote)}>
+        <span className={cn(mutedClass, styles.cardTitleNote)}>
           latest snapshot per month, summed across accounts
         </span>
       </p>
@@ -306,7 +307,7 @@ function MoversCard({ insights }: { insights: FinancialInsights }) {
     <Card>
       <p className={styles.cardTitle}>
         Biggest movers
-        <span className={cn("muted", styles.cardTitleNote)}>
+        <span className={cn(mutedClass, styles.cardTitleNote)}>
           {shortMonths}-mo pace vs {longMonths}-mo baseline
         </span>
       </p>
@@ -367,7 +368,7 @@ function MonthToDateCard({ month }: { month: InsightsMonth }) {
     <Card>
       <p className={styles.cardTitle}>
         This month so far
-        <span className={cn("muted", styles.cardTitleNote)}>
+        <span className={cn(mutedClass, styles.cardTitleNote)}>
           {monthKeyLabel(month.monthKey)} · month-to-date, excluded from all averages
         </span>
       </p>

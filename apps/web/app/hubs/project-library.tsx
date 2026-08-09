@@ -20,6 +20,7 @@ import { api } from "../../lib/skippy-api";
 import { Button, IconButton, Card, LoadingRow, Spinner, useToast } from "../components";
 import { cn } from "@/lib/utils";
 import { useViewerReady } from "./use-viewer";
+import { textButtonClass, textButtonCompactClass } from "../page-classes";
 import {
   PROJECT_FILE_ACCEPT,
   checkProjectFile,
@@ -214,7 +215,7 @@ function UploadZone({ onFiles, compact }: { onFiles: (files: File[]) => void; co
   if (compact) {
     return (
       <span onDrop={handleDrop} onDragOver={handleDragOver} onDragLeave={() => setDragOver(false)}>
-        <button type="button" className="text-button compact" onClick={openPicker}>
+        <button type="button" className={cn(textButtonClass, textButtonCompactClass)} onClick={openPicker}>
           <Paperclip size={14} aria-hidden /> Attach file
         </button>
         {input}

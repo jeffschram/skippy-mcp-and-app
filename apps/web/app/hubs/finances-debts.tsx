@@ -33,6 +33,7 @@ import {
 } from "./finances-debts-helpers";
 import * as styles from "./finances-classes";
 import { cn } from "@/lib/utils";
+import { mutedClass } from "../page-classes";
 
 /* ------------------------------------------------------------------ */
 /* Shapes (mirror convex/finances.ts payoffPlanForViewer)              */
@@ -237,7 +238,7 @@ function DebtDialog({
             />
           </Field>
         </div>
-        <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+        <p className={cn(mutedClass, "m-0 text-[13px]")}>
           The match pattern finds this debt&apos;s payments in recorded transactions (case-insensitive text
           or regex against descriptions) so the balance auto-decreases as payments land. Entering a new
           balance resets matching to start from today.
@@ -382,7 +383,7 @@ function ScheduleTable({ plan }: { plan: PayoffPlan }) {
     <Card>
       <p className={styles.cardTitle}>
         Payoff schedule
-        <span className={cn("muted", styles.cardTitleNote)}>ending balance per month</span>
+        <span className={cn(mutedClass, styles.cardTitleNote)}>ending balance per month</span>
       </p>
       <div className={styles.statsTableWrap}>
         <table className={styles.statsTable} aria-label="Debt payoff schedule">
@@ -465,7 +466,7 @@ function FixedCostProjectionCard({
     <Card>
       <p className={styles.cardTitle}>
         Fixed costs after each payoff
-        <span className={cn("muted", styles.cardTitleNote)}>
+        <span className={cn(mutedClass, styles.cardTitleNote)}>
           Ramit&apos;s target band: {RAMIT_FIXED_COSTS_BAND.minPercent}-{RAMIT_FIXED_COSTS_BAND.maxPercent}%
           of income
         </span>

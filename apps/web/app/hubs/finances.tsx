@@ -51,6 +51,7 @@ import {
 } from "./finances-helpers";
 import * as styles from "./finances-classes";
 import { cn } from "@/lib/utils";
+import { eyebrowClass, mutedClass, pageHeaderClass } from "../page-classes";
 
 /* ------------------------------------------------------------------ */
 /* Report shapes (mirrors convex/finances.ts monthlyReportForViewer)   */
@@ -462,7 +463,7 @@ function PercentPreview({ raw, recentIncome }: { raw: string; recentIncome: Rece
   const percent = parsePercentInput(raw);
   if (percent === null) return null;
   const preview = percentPreviewLabel(percent, recentIncome.incomeCents, recentIncome.monthLabel);
-  return preview ? <span className={cn("muted", styles.budgetPercentPreview)}>{preview}</span> : null;
+  return preview ? <span className={cn(mutedClass, styles.budgetPercentPreview)}>{preview}</span> : null;
 }
 
 function BudgetDrawer({
@@ -618,7 +619,7 @@ function BudgetDrawer({
           <option value="default">Every month (default budget)</option>
           <option value="month">{monthKeyLabel(monthKey)} only</option>
         </Select>
-        <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+        <p className={cn(mutedClass, "m-0 text-[13px]")}>
           Leave a field blank to skip that target. Saving replaces the previous targets for this scope. A %
           target overrides the $ target for the same row and is computed from each month&apos;s actual income
           — so a percent plan tracks variable income automatically.
@@ -1196,9 +1197,9 @@ export function FinancesContent() {
 
   return (
     <>
-      <div className="page-header">
+      <div className={pageHeaderClass}>
         <div>
-          <p className="eyebrow">Family budget</p>
+          <p className={eyebrowClass}>Family budget</p>
           <h1>Finances.</h1>
         </div>
       </div>
@@ -1303,13 +1304,13 @@ export function FinancesContent() {
               ) : (
                 <>
                   {report.current.transactionCount === 0 ? (
-                    <p className="muted" style={{ margin: "0 0 10px", fontSize: 13 }}>
+                    <p className={cn(mutedClass, "mb-2.5 mt-0 text-[13px]")}>
                       No transactions recorded for {monthKeyLabel(monthKey)} yet.
                     </p>
                   ) : null}
                   <MonthlyGrid report={report} onEditTransaction={openEdit} />
                   {report.budget?.isDefault ? (
-                    <p className="muted" style={{ margin: "10px 0 0", fontSize: 13 }}>
+                    <p className={cn(mutedClass, "mb-0 mt-2.5 text-[13px]")}>
                       Budget comparisons use the account's default (recurring) budget.
                     </p>
                   ) : null}

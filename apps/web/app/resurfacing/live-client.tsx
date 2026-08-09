@@ -1,8 +1,26 @@
 "use client";
 
 import { useQuery } from "convex/react";
+import { cn } from "@/lib/utils";
 import { api } from "../../lib/skippy-api";
 import { LiveGate } from "../live-auth";
+import {
+  badgeBlueClass,
+  badgeClass,
+  badgeGoldClass,
+  cardClass,
+  eyebrowClass,
+  itemClass,
+  itemIconActiveClass,
+  itemIconClass,
+  itemListClass,
+  itemMetaClass,
+  itemTitleClass,
+  mutedClass,
+  pageHeaderClass,
+  sectionClass,
+  toolbarClass,
+} from "../page-classes";
 import { icons } from "../ui";
 
 type AnyRecord = Record<string, any>;
@@ -43,30 +61,30 @@ function SuggestionItem({ suggestion }: { suggestion: AnyRecord }) {
   const relatedRefs = (suggestion.relatedRefs ?? []) as AnyRecord[];
 
   return (
-    <article className="item">
-      <span className={suggestion.type === "follow_up" ? "item-icon is-active" : "item-icon"}>
+    <article className={itemClass}>
+      <span className={cn(itemIconClass, suggestion.type === "follow_up" && itemIconActiveClass)}>
         <Icon size={17} aria-hidden />
       </span>
       <div>
-        <p className="item-title">{suggestion.title}</p>
-        <p className="item-meta">{suggestion.reason}</p>
-        <p className="item-meta">
+        <p className={itemTitleClass}>{suggestion.title}</p>
+        <p className={itemMetaClass}>{suggestion.reason}</p>
+        <p className={itemMetaClass}>
           <strong>Recommended:</strong> {suggestion.recommendedAction}
         </p>
         {contextSnippets.length ? (
-          <div className="item-list" style={{ marginTop: 10 }}>
+          <div className={itemListClass} style={{ marginTop: 10 }}>
             {contextSnippets.slice(0, 3).map((context, index) => (
               <div key={`${suggestion.id}-context-${index}`} style={{ borderLeft: "3px solid var(--line)", paddingLeft: 10 }}>
-                <p className="item-title">{context.label}</p>
-                <p className="item-meta">{context.text}</p>
+                <p className={itemTitleClass}>{context.label}</p>
+                <p className={itemMetaClass}>{context.text}</p>
               </div>
             ))}
           </div>
         ) : null}
         {relatedRefs.length ? (
-          <div className="toolbar" aria-label="Related references" style={{ marginTop: 10 }}>
+          <div className={toolbarClass} aria-label="Related references" style={{ marginTop: 10 }}>
             {relatedRefs.slice(0, 5).map((ref, index) => (
-              <span className="badge" key={`${suggestion.id}-ref-${index}`}>
+              <span className={badgeClass} key={`${suggestion.id}-ref-${index}`}>
                 {refLabel(ref)}
               </span>
             ))}
@@ -74,9 +92,9 @@ function SuggestionItem({ suggestion }: { suggestion: AnyRecord }) {
         ) : null}
       </div>
       {typeof suggestion.ageDays === "number" ? (
-        <span className="badge gold">{suggestion.ageDays}d</span>
+        <span className={cn(badgeClass, badgeGoldClass)}>{suggestion.ageDays}d</span>
       ) : (
-        <span className="badge blue">{suggestion.type.replace(/_/g, " ")}</span>
+        <span className={cn(badgeClass, badgeBlueClass)}>{suggestion.type.replace(/_/g, " ")}</span>
       )}
     </article>
   );
@@ -86,22 +104,22 @@ function SuggestionGroup({ group }: { group: AnyRecord }) {
   const suggestions = (group.suggestions ?? []) as AnyRecord[];
 
   return (
-    <section className="card section">
-      <div className="page-header" style={{ marginBottom: 14 }}>
+    <section className={cn(cardClass, sectionClass)}>
+      <div className={pageHeaderClass} style={{ marginBottom: 14 }}>
         <div>
-          <p className="eyebrow">{group.type?.replace(/_/g, " ")}</p>
+          <p className={eyebrowClass}>{group.type?.replace(/_/g, " ")}</p>
           <h2>{group.label}</h2>
         </div>
-        <span className="badge">{suggestions.length}</span>
+        <span className={badgeClass}>{suggestions.length}</span>
       </div>
       {suggestions.length ? (
-        <div className="item-list">
+        <div className={itemListClass}>
           {suggestions.map((suggestion) => (
             <SuggestionItem key={suggestion.id} suggestion={suggestion} />
           ))}
         </div>
       ) : (
-        <p className="muted">No suggestions for this routine right now.</p>
+        <p className={mutedClass}>No suggestions for this routine right now.</p>
       )}
     </section>
   );
@@ -115,26 +133,26 @@ export function LiveResurfacingContent() {
   return (
     <LiveGate>
       {data === undefined ? (
-        <section className="card section">
+        <section className={cn(cardClass, sectionClass)}>
           <h2>Loading routines</h2>
-          <p className="muted">Checking accepted memories, tasks, projects, people, questions, source refs, and settings.</p>
+          <p className={mutedClass}>Checking accepted memories, tasks, projects, people, questions, source refs, and settings.</p>
         </section>
       ) : data.empty ? (
-        <section className="card section">
+        <section className={cn(cardClass, sectionClass)}>
           <h2>No resurfacing suggestions</h2>
-          <p className="muted">The bounded first-pass routines did not find stale assumptions, open loops, follow-ups, or context gaps.</p>
+          <p className={mutedClass}>The bounded first-pass routines did not find stale assumptions, open loops, follow-ups, or context gaps.</p>
         </section>
       ) : (
         <>
-          <section className="card section">
-            <p className="eyebrow">Read-only routine pass</p>
+          <section className={cn(cardClass, sectionClass)}>
+            <p className={eyebrowClass}>Read-only routine pass</p>
             <h2>{data.suggestions?.length ?? 0} suggestions</h2>
-            <p className="muted">
+            <p className={mutedClass}>
               Generated {formatGeneratedAt(data.generatedAt)} using recall cadence{" "}
-              <span className="badge blue">{data.recallCadence}</span>. Nothing is created automatically.
+              <span className={cn(badgeClass, badgeBlueClass)}>{data.recallCadence}</span>. Nothing is created automatically.
             </p>
           </section>
-          <div className="item-list">
+          <div className={itemListClass}>
             {(data.groups ?? []).map((group: AnyRecord) => (
               <SuggestionGroup key={group.type} group={group} />
             ))}

@@ -8,6 +8,7 @@ import { groupAgendaByDay, type AgendaItem } from "@skippy/shared";
 import { api } from "../../lib/skippy-api";
 import { Badge, EmptyState, LoadingRow, Section } from "../components";
 import { useViewerReady } from "./use-viewer";
+import { textButtonClass, textButtonCompactClass } from "../page-classes";
 
 /* ------------------------------------------------------------------ */
 /* Agenda: an ordered list of what is happening and what is due.       */
@@ -138,7 +139,7 @@ export function AgendaSection({ days = 7 }: { days?: number }) {
         </span>
       }
       action={
-        <Link className="text-button compact" href="/tasks">
+        <Link className={`${textButtonClass} ${textButtonCompactClass}`} href="/tasks">
           Tasks
         </Link>
       }

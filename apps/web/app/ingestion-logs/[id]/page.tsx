@@ -3,6 +3,7 @@ import { isLiveConfigured } from "../../../lib/skippy-api";
 import { AppShell, PageHeader } from "../../components";
 import { LiveIngestionLogDetailContent } from "../../live-pages";
 import { NotConfigured } from "../../hubs/not-configured";
+import { textButtonClass } from "../../page-classes";
 
 export default async function IngestionLogDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -14,7 +15,7 @@ export default async function IngestionLogDetailPage({ params }: { params: Promi
         eyebrow="Activity"
         title="Ingestion run detail"
         action={
-          <Link className="text-button" href="/settings">
+          <Link className={textButtonClass} href="/settings">
             Back to Settings
           </Link>
         }

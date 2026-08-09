@@ -17,7 +17,7 @@ export function InlineMarkdown({ children }: { children: string }): ReactNode {
             return <em key={index}>{token.value}</em>;
           case "code":
             return (
-              <code key={index} className="code">
+              <code key={index} className="font-mono text-[13px] [overflow-wrap:anywhere]">
                 {token.value}
               </code>
             );

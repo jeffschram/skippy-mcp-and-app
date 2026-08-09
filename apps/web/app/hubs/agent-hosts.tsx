@@ -24,6 +24,17 @@ import {
   useToast,
   type BadgeTone,
 } from "../components";
+import {
+  cardClass,
+  codeClass,
+  formGridClass,
+  iconButtonClass,
+  itemClass,
+  itemListClass,
+  itemMetaClass,
+  itemTitleClass,
+  mutedClass,
+} from "../page-classes";
 import { useViewerReady } from "./use-viewer";
 
 type AnyRecord = Record<string, any>;
@@ -97,13 +108,13 @@ function HostsSection() {
   return (
     <Card>
       <h2>Execution hosts</h2>
-      <p className="muted" style={{ maxWidth: 640 }}>
+      <p className={mutedClass} style={{ maxWidth: 640 }}>
         Machines that run agent work (the always-on Mac mini). A host connects outbound-only with the token minted
         here, advertises which harnesses it supports, and claims queued runs. Revoking a token takes the host offline
         immediately.
       </p>
 
-      <div className="form-grid" style={{ marginTop: 12 }}>
+      <div className={formGridClass} style={{ marginTop: 12 }}>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "end" }}>
           <Field label="Display name">
             <TextInput value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
@@ -121,13 +132,13 @@ function HostsSection() {
         </div>
 
         {createdToken ? (
-          <div className="card" style={{ padding: 12, display: "grid", gap: 8 }}>
+          <div className={cardClass} style={{ padding: 12, display: "grid", gap: 8 }}>
             <p style={{ margin: 0, fontWeight: 700 }}>One-time host token</p>
-            <p className="code" style={{ margin: 0, wordBreak: "break-all" }}>
+            <p className={codeClass} style={{ margin: 0, wordBreak: "break-all" }}>
               {createdToken}
             </p>
-            <p className="muted" style={{ margin: 0, fontSize: 13 }}>
-              Store it as <span className="code">SKIPPY_RUNNER_HOST_TOKEN</span> on the runner machine. This full value
+            <p className={mutedClass} style={{ margin: 0, fontSize: 13 }}>
+              Store it as <span className={codeClass}>SKIPPY_RUNNER_HOST_TOKEN</span> on the runner machine. This full value
               is only returned once.
             </p>
             <div style={{ display: "flex", gap: 8 }}>
@@ -148,14 +159,14 @@ function HostsSection() {
             Create a host token, then start the runner on the Mac mini with it (see apps/runner/README.md).
           </EmptyState>
         ) : (
-          <div className="item-list">
+          <div className={itemListClass}>
             {hosts.map((host) => (
-              <article className="item" key={host._id}>
+              <article className={itemClass} key={host._id}>
                 <div>
-                  <p className="item-title">
-                    {host.displayName} <span className="muted">({host.hostKey})</span>
+                  <p className={itemTitleClass}>
+                    {host.displayName} <span className={mutedClass}>({host.hostKey})</span>
                   </p>
-                  <p className="item-meta">
+                  <p className={itemMetaClass}>
                     {host.tokenPrefix}... · heartbeat {formatRelative(host.lastHeartbeatAt)}
                     {host.capabilities?.harnesses?.length
                       ? ` · harnesses: ${host.capabilities.harnesses.join(", ")}`
@@ -170,7 +181,7 @@ function HostsSection() {
                   {host.revokedAt ? "Revoked" : host.status}
                 </Badge>
                 {!host.revokedAt ? (
-                  <button className="icon-button" type="button" title="Revoke host" onClick={() => void revoke(host)}>
+                  <button className={iconButtonClass} type="button" title="Revoke host" onClick={() => void revoke(host)}>
                     <X size={17} aria-hidden />
                   </button>
                 ) : null}
@@ -251,12 +262,12 @@ function ExecutionMappingsSection() {
   return (
     <Card>
       <h2>Project execution mappings</h2>
-      <p className="muted" style={{ maxWidth: 640 }}>
+      <p className={mutedClass} style={{ maxWidth: 640 }}>
         Which host executes each code project, and where its allowlisted checkout lives on that machine. The Execute
         button on a project board only appears once its project is mapped to an online host.
       </p>
 
-      <div className="form-grid" style={{ marginTop: 12 }}>
+      <div className={formGridClass} style={{ marginTop: 12 }}>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "end" }}>
           <Field label="Project">
             <Select value={projectId} onChange={(event) => setProjectId(event.target.value)} style={{ minWidth: 180 }}>
@@ -310,7 +321,7 @@ function ExecutionMappingsSection() {
         </div>
 
         {codeProjects.length === 0 && projects !== undefined ? (
-          <p className="muted" style={{ fontSize: 13 }}>
+          <p className={mutedClass} style={{ fontSize: 13 }}>
             No code projects found. Set a project&apos;s kind to “code” (with a repo URL) in its board settings first.
           </p>
         ) : null}
@@ -318,13 +329,13 @@ function ExecutionMappingsSection() {
         {configs === undefined ? (
           <LoadingRow label="Loading mappings..." />
         ) : !configs.length ? null : (
-          <div className="item-list">
+          <div className={itemListClass}>
             {configs.map((config) => (
-              <article className="item" key={config._id}>
+              <article className={itemClass} key={config._id}>
                 <div>
-                  <p className="item-title">{config.projectTitle}</p>
-                  <p className="item-meta">
-                    {config.hostDisplayName} ({config.hostStatus}) · <span className="code">{config.localPath}</span>
+                  <p className={itemTitleClass}>{config.projectTitle}</p>
+                  <p className={itemMetaClass}>
+                    {config.hostDisplayName} ({config.hostStatus}) · <span className={codeClass}>{config.localPath}</span>
                     {config.preferredHarness ? ` · prefers ${config.preferredHarness}` : ""}
                     {config.verifyCommand ? ` · verify: ${config.verifyCommand}` : ""}
                     {config.requirePushApproval ? " · push requires approval" : ""}
