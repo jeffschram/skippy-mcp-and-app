@@ -14,12 +14,12 @@ import {
   Wallet,
   type LucideIcon,
 } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { api } from "../../lib/skippy-api";
 import { AuthStatus } from "../live-auth";
 import { ToastProvider } from "./widgets";
 import { ViewerContextTracker } from "./viewer-context-tracker";
 import { ChatPanel } from "./chat-panel";
-import styles from "./app-shell.module.css";
 
 type NavProject = {
   _id: string;
@@ -92,6 +92,14 @@ export const secondaryHubs: Hub[] = [
 
 export const hubs = [...primaryHubs, ...secondaryHubs];
 
+const navLinkClass =
+  "flex min-h-[42px] items-center gap-[11px] rounded-[10px] px-3 text-[15px] font-bold text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground focus-visible:outline-none";
+const navLinkActiveClass = "bg-secondary text-foreground shadow-sm [&_svg]:text-primary";
+const navSubLinkClass =
+  "block truncate rounded-lg px-2.5 py-[7px] text-[13px] font-semibold leading-tight text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground focus-visible:outline-none";
+const mobileLinkClass =
+  "inline-flex min-h-9 items-center gap-1.5 whitespace-nowrap rounded-lg px-[11px] text-sm font-bold text-muted-foreground hover:text-foreground";
+
 function NavLinks({
   pathname,
   projects = [],
@@ -113,21 +121,30 @@ function NavLinks({
         const projectSubmenuOpen = showProjectSubmenu && (alwaysShowProjects || active);
         if (showProjectSubmenu) {
           return (
-            <div className={`${styles.navItem} ${projectSubmenuOpen ? styles.navItemOpen : ""}`} key={hub.href}>
+            <div className="group grid gap-[3px]" key={hub.href}>
               <Link
                 href={hub.href}
-                className={`${styles.navLink} ${active ? styles.active : ""}`}
+                className={cn(navLinkClass, active && navLinkActiveClass)}
                 aria-current={active ? "page" : undefined}
               >
                 <hub.icon size={18} aria-hidden />
                 {hub.label}
               </Link>
-              <div className={styles.navSubmenu} aria-label="Active projects">
+              <div
+                className={cn(
+                  "hidden gap-0.5 pb-2 pl-8 pt-0.5 group-focus-within:grid group-hover:grid",
+                  projectSubmenuOpen && "grid",
+                )}
+                aria-label="Active projects"
+              >
                 {projects.map((project) => (
                   <Link
                     key={project._id}
                     href={`/projects/${project._id}`}
-                    className={`${styles.navSubLink} ${pathname === `/projects/${project._id}` ? styles.activeSubLink : ""}`}
+                    className={cn(
+                      navSubLinkClass,
+                      pathname === `/projects/${project._id}` && "bg-secondary text-foreground",
+                    )}
                   >
                     {project.title}
                   </Link>
@@ -140,7 +157,10 @@ function NavLinks({
           <Link
             key={hub.href}
             href={hub.href}
-            className={`${mobile ? "" : styles.navLink} ${active ? styles.active : ""}`}
+            className={cn(
+              mobile ? mobileLinkClass : navLinkClass,
+              active && (mobile ? "bg-secondary text-foreground" : navLinkActiveClass),
+            )}
             aria-current={active ? "page" : undefined}
           >
             <hub.icon size={mobile ? 15 : 18} aria-hidden />
@@ -162,35 +182,35 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <ToastProvider>
       <ViewerContextTracker />
-      <div className={styles.shell}>
-        <aside className={styles.sidebar}>
-          <div className={styles.brand}>
-            <span className={styles.brandMark}>
+      <div className="grid min-h-screen grid-cols-1 desk:grid-cols-[248px_minmax(0,1fr)]">
+        <aside className="sticky top-0 hidden h-screen flex-col gap-1.5 self-start border-r bg-card px-3.5 py-[18px] desk:flex">
+          <div className="flex items-center gap-2.5 px-2 pb-3.5 pt-1.5 text-lg font-extrabold">
+            <span className="grid size-[34px] place-items-center rounded-[9px] border bg-secondary text-primary shadow-sm">
               <Brain size={19} aria-hidden />
             </span>
             Skippy
           </div>
-          <nav className={styles.nav} aria-label="Primary">
+          <nav className="grid gap-[3px]" aria-label="Primary">
             <NavLinks pathname={pathname} hubs={primaryHubs} projects={activeProjects ?? []} alwaysShowProjects />
           </nav>
-          <div className={styles.sidebarBottom}>
-            <nav className={styles.nav} aria-label="Secondary">
+          <div className="mt-auto grid gap-2.5">
+            <nav className="grid gap-[3px]" aria-label="Secondary">
               <NavLinks pathname={pathname} hubs={secondaryHubs} />
             </nav>
-            <div className={styles.sidebarFoot}>
+            <div className="grid gap-1.5 border-t pt-3">
               <AuthStatus />
             </div>
           </div>
         </aside>
 
-        <div className={styles.content}>
-          <header className={styles.mobileBar}>
+        <div className="min-w-0">
+          <header className="sticky top-0 z-20 grid items-center gap-2.5 border-b bg-background/90 px-4 py-2.5 backdrop-blur-lg desk:hidden">
             <AuthStatus />
-            <nav className={styles.mobileNav} aria-label="Primary">
+            <nav className="flex flex-1 gap-1 overflow-x-auto" aria-label="Primary">
               <NavLinks pathname={pathname} hubs={hubs} mobile />
             </nav>
           </header>
-          <main className={styles.page}>{children}</main>
+          <main className="mx-auto w-full px-[30px] pb-16 pt-[22px] desk:pt-[30px]">{children}</main>
         </div>
       </div>
       <ChatPanel />
@@ -210,15 +230,11 @@ export function PageHeader({
   action?: React.ReactNode;
 }) {
   return (
-    <div className="page-header">
+    <div className="mb-[22px] grid items-end justify-between gap-5 wide:flex">
       <div>
-        {eyebrow ? <p className="eyebrow">{eyebrow}</p> : null}
+        {eyebrow ? <p className="m-0 mb-[5px] text-[13px] font-bold uppercase text-green">{eyebrow}</p> : null}
         <h1>{title}</h1>
-        {description ? (
-          <p className="muted" style={{ marginTop: 8, maxWidth: 640 }}>
-            {description}
-          </p>
-        ) : null}
+        {description ? <p className="mt-2 max-w-[640px] text-muted-foreground">{description}</p> : null}
       </div>
       {action}
     </div>
