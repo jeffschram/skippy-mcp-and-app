@@ -26,6 +26,14 @@ export interface RunnerConfig {
   maxConcurrency: number;
   heartbeatIntervalMs: number;
   claimPollIntervalMs: number;
+  /**
+   * Chat turns only: run the harness with permissions bypassed
+   * (--dangerously-skip-permissions / --dangerously-bypass-approvals-and-sandbox).
+   * No approval cards, no sandbox — every action executes immediately as this
+   * user. Opt-in via SKIPPY_CHAT_BYPASS_PERMISSIONS=1; code runs are never
+   * affected (their approval model, including the publish gate, stays).
+   */
+  chatBypassPermissions: boolean;
 }
 
 function required(name: string): string {
@@ -51,5 +59,6 @@ export function loadConfig(): RunnerConfig {
     maxConcurrency: Number(process.env.SKIPPY_RUNNER_MAX_CONCURRENCY ?? "1"),
     heartbeatIntervalMs: 30_000,
     claimPollIntervalMs: 5_000,
+    chatBypassPermissions: ["1", "true"].includes(process.env.SKIPPY_CHAT_BYPASS_PERMISSIONS ?? ""),
   };
 }

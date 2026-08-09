@@ -47,6 +47,7 @@ export async function executeChatTurn(
     const result = await adapter.runTurn({
       prompt,
       worktreePath: cwd,
+      bypassPermissions: config.chatBypassPermissions,
       signal: abort.signal,
       // Chat turns keep no durable event stream (v1) — the reply is the product.
       onEvent: () => {},

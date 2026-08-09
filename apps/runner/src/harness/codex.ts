@@ -88,17 +88,14 @@ export class CodexAdapter implements HarnessAdapter {
     // New thread: `codex exec [opts] -`; resume: `codex exec resume <id> [opts] -`.
     // The prompt goes over stdin ("-") to avoid argv length/quoting issues.
     const args = threadId ? ["exec", "resume", threadId] : ["exec"];
-    args.push(
-      "--json",
-      "--cd",
-      worktreePath,
-      "--sandbox",
-      "workspace-write",
-      "--skip-git-repo-check",
-      "--color",
-      "never",
-      "-",
-    );
+    args.push("--json", "--cd", worktreePath, "--skip-git-repo-check", "--color", "never");
+    if (request.bypassPermissions) {
+      // Codex's equivalent of --dangerously-skip-permissions. Chat-only, opt-in.
+      args.push("--dangerously-bypass-approvals-and-sandbox");
+    } else {
+      args.push("--sandbox", "workspace-write");
+    }
+    args.push("-");
 
     return new Promise<HarnessTurnResult>((resolve) => {
       const child = spawn("codex", args, {

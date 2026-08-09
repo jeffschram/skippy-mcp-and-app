@@ -131,7 +131,9 @@ export class ClaudeAdapter implements HarnessAdapter {
 
     const options: Record<string, unknown> = {
       cwd: worktreePath,
-      permissionMode: "acceptEdits",
+      // bypassPermissions = --dangerously-skip-permissions: canUseTool is
+      // never consulted, so no approvals surface. Chat-only, opt-in.
+      permissionMode: request.bypassPermissions ? "bypassPermissions" : "acceptEdits",
       canUseTool,
       // The Agent SDK is isolated by default — it does NOT load the user's
       // Claude Code settings, which is where user-scope MCP servers (the
