@@ -11,6 +11,19 @@ import { LiveIngestionLogsContent, LiveSettingsContent } from "../live-pages";
 import { AgentHostsContent } from "./agent-hosts";
 import { projectStatusTone } from "../../lib/display";
 import { useViewerReady } from "./use-viewer";
+import { cn } from "@/lib/utils";
+import {
+  codeClass,
+  eyebrowClass,
+  itemClass,
+  itemIconClass,
+  itemMetaClass,
+  itemTitleClass,
+  mutedClass,
+  pageHeaderClass,
+  projectRowClass,
+  projectRowSideClass,
+} from "../page-classes";
 
 const TABS = [
   { key: "settings", label: "Settings" },
@@ -61,17 +74,17 @@ function ArchivedProjects() {
     <Card>
       <div style={{ display: "grid", gap: 10 }}>
         {archivedProjects.map((project: AnyRecord) => (
-          <div key={project._id} className="item project-row" style={{ gridTemplateColumns: "auto 1fr auto" }}>
-            <span className="item-icon">
+          <div key={project._id} className={cn(itemClass, projectRowClass)} style={{ gridTemplateColumns: "auto 1fr auto" }}>
+            <span className={itemIconClass}>
               <FolderKanban size={17} aria-hidden />
             </span>
             <div>
-              <p className="item-title">
+              <p className={itemTitleClass}>
                 <Link href={`/projects/${project._id}`}>{project.title}</Link>
               </p>
-              <p className="item-meta">{project.summary || "Archived project"}</p>
+              <p className={itemMetaClass}>{project.summary || "Archived project"}</p>
             </div>
-            <span className="project-row-side">
+            <span className={projectRowSideClass}>
               <Badge tone={projectStatusTone(project.status)}>archived</Badge>
               <Button small onClick={() => void restoreProject(project._id)}>
                 Restore
@@ -88,7 +101,7 @@ function About() {
   return (
     <Card>
       <h2>What Skippy is</h2>
-      <p className="muted" style={{ maxWidth: 640 }}>
+      <p className={mutedClass} style={{ maxWidth: 640 }}>
         Skippy is both an MCP server and this web app — a supervised second brain and project dashboard. Connected harnesses
         (like Claude) capture knowledge through MCP tools; you review and direct it here.
       </p>
@@ -99,8 +112,8 @@ function About() {
         <li>The agent reports progress back through MCP; you supervise the board and approve results.</li>
       </ul>
       <h3 style={{ marginTop: 20 }}>Connect a harness</h3>
-      <p className="muted" style={{ maxWidth: 640 }}>
-        Create an MCP token in the Settings tab, then point your harness at <span className="code">/api/mcp</span> with that
+      <p className={mutedClass} style={{ maxWidth: 640 }}>
+        Create an MCP token in the Settings tab, then point your harness at <span className={codeClass}>/api/mcp</span> with that
         token. Skippy exposes capture, recall, interview, planning, and task-execution tools.
       </p>
     </Card>
@@ -112,9 +125,9 @@ export function SettingsContent() {
 
   return (
     <LiveGate>
-      <div className="page-header">
+      <div className={pageHeaderClass}>
         <div>
-          <p className="eyebrow">Configuration</p>
+          <p className={eyebrowClass}>Configuration</p>
           <h1>Settings.</h1>
         </div>
       </div>

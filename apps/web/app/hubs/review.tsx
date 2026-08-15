@@ -8,6 +8,7 @@ import { Tabs } from "../components";
 import { LivePendingActionsContent, LiveTriageContent } from "../live-pages";
 import { LiveResurfacingContent } from "../resurfacing/live-client";
 import { useViewerReady } from "./use-viewer";
+import { eyebrowClass, mutedClass, pageHeaderClass } from "../page-classes";
 
 export function ReviewContent() {
   const [tab, setTab] = useState("signals");
@@ -24,17 +25,17 @@ export function ReviewContent() {
 
   return (
     <LiveGate>
-      <div className="page-header">
+      <div className={pageHeaderClass}>
         <div>
-          <p className="eyebrow">Review queue</p>
+          <p className={eyebrowClass}>Review queue</p>
           <h1>One place to decide.</h1>
-          <p className="muted" style={{ maxWidth: 560 }}>
+          <p className={`${mutedClass} max-w-[560px]`}>
             Unclear signals, external actions awaiting approval, and recall routines — triage them together.
           </p>
         </div>
       </div>
 
-      <div style={{ marginBottom: 18 }}>
+      <div className="mb-[18px]">
         <Tabs items={tabs} active={tab} onChange={setTab} />
       </div>
 

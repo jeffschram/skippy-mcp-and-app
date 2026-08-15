@@ -15,11 +15,9 @@ import { Card, LoadingRow, Select } from "../components";
 import { useViewerReady } from "./use-viewer";
 import { formatCents, formatSignedCents, monthKeyLabel, monthKeyShortLabel } from "./finances-helpers";
 import { windowLabel } from "./finances-insights-helpers";
-import styles from "./finances.module.css";
-
-function cx(...parts: Array<string | false | null | undefined>) {
-  return parts.filter(Boolean).join(" ");
-}
+import * as styles from "./finances-classes";
+import { cn } from "@/lib/utils";
+import { mutedClass } from "../page-classes";
 
 /* ------------------------------------------------------------------ */
 /* Shapes (mirror convex/finances.ts insightsForViewer)                */
@@ -103,7 +101,7 @@ function MonthMatrix({ months, currentMonthKey }: { months: InsightsMonth[]; cur
     <Card>
       <p className={styles.cardTitle}>
         Type by month
-        <span className={cx("muted", styles.cardTitleNote)}>
+        <span className={cn(mutedClass, styles.cardTitleNote)}>
           green = better than the previous month
         </span>
       </p>
@@ -113,7 +111,7 @@ function MonthMatrix({ months, currentMonthKey }: { months: InsightsMonth[]; cur
             <tr>
               <th scope="col" className={styles.statsHead} />
               {months.map((month) => (
-                <th key={month.monthKey} scope="col" className={cx(styles.statsHead, styles.statsValueCol)}>
+                <th key={month.monthKey} scope="col" className={cn(styles.statsHead, styles.statsValueCol)}>
                   {monthTickLabel(month.monthKey)}
                   {month.monthKey === currentMonthKey ? (
                     <span className={styles.statSub}>MTD</span>
@@ -129,7 +127,7 @@ function MonthMatrix({ months, currentMonthKey }: { months: InsightsMonth[]; cur
                   {row.label === "Net" ? (
                     "Net"
                   ) : (
-                    <span className={cx(styles.budgetTypeTag, BAND_CLASS[row.label as TxType])}>{row.label}</span>
+                    <span className={cn(styles.budgetTypeTag, BAND_CLASS[row.label as TxType])}>{row.label}</span>
                   )}
                 </th>
                 {months.map((month, index) => {
@@ -144,7 +142,7 @@ function MonthMatrix({ months, currentMonthKey }: { months: InsightsMonth[]; cur
                   return (
                     <td key={month.monthKey} className={styles.statsValueCol}>
                       <span
-                        className={cx(styles.statValue, tone)}
+                        className={cn(styles.statValue, tone)}
                         title={
                           prev === null
                             ? monthKeyLabel(month.monthKey)
@@ -175,7 +173,7 @@ function BalanceMatrix({ months, currentMonthKey }: { months: InsightsMonth[]; c
     <Card>
       <p className={styles.cardTitle}>
         Ending balance by month
-        <span className={cx("muted", styles.cardTitleNote)}>
+        <span className={cn(mutedClass, styles.cardTitleNote)}>
           latest snapshot per month, summed across accounts
         </span>
       </p>
@@ -188,7 +186,7 @@ function BalanceMatrix({ months, currentMonthKey }: { months: InsightsMonth[]; c
               <tr>
                 <th scope="col" className={styles.statsHead} />
                 {months.map((month) => (
-                  <th key={month.monthKey} scope="col" className={cx(styles.statsHead, styles.statsValueCol)}>
+                  <th key={month.monthKey} scope="col" className={cn(styles.statsHead, styles.statsValueCol)}>
                     {monthTickLabel(month.monthKey)}
                     {month.monthKey === currentMonthKey ? <span className={styles.statSub}>MTD</span> : null}
                   </th>
@@ -212,7 +210,7 @@ function BalanceMatrix({ months, currentMonthKey }: { months: InsightsMonth[]; c
                   return (
                     <td key={month.monthKey} className={styles.statsValueCol}>
                       <span
-                        className={cx(styles.statValue, tone)}
+                        className={cn(styles.statValue, tone)}
                         title={
                           value === null || prev === null
                             ? monthKeyLabel(month.monthKey)
@@ -251,7 +249,7 @@ function CategoryTable({ insights }: { insights: FinancialInsights }) {
                 <th
                   key={window.windowMonths}
                   scope="col"
-                  className={cx(styles.statsHead, styles.statsValueCol)}
+                  className={cn(styles.statsHead, styles.statsValueCol)}
                 >
                   {windowLabel(window.windowMonths, window.monthsUsed)}
                 </th>
@@ -273,14 +271,14 @@ function FragmentRows({ type, insights }: { type: (typeof INSIGHT_TYPES)[number]
   const windows = insights.windows;
   return (
     <>
-      <tr className={cx(styles.statsGroupRow, BAND_CLASS[type])}>
+      <tr className={cn(styles.statsGroupRow, BAND_CLASS[type])}>
         <th scope="rowgroup" colSpan={windows.length + 1}>
           {type}
         </th>
       </tr>
       {TX_TYPE_CATEGORIES[type].map((category) => (
         <tr key={category}>
-          <th scope="row" className={cx(styles.statsCategoryCell)}>
+          <th scope="row" className={cn(styles.statsCategoryCell)}>
             {category}
           </th>
           {windows.map((window) => (
@@ -309,7 +307,7 @@ function MoversCard({ insights }: { insights: FinancialInsights }) {
     <Card>
       <p className={styles.cardTitle}>
         Biggest movers
-        <span className={cx("muted", styles.cardTitleNote)}>
+        <span className={cn(mutedClass, styles.cardTitleNote)}>
           {shortMonths}-mo pace vs {longMonths}-mo baseline
         </span>
       </p>
@@ -342,16 +340,16 @@ function MoverRow({
   return (
     <li className={styles.moverRow}>
       <span className={styles.moverName}>
-        <span className={cx(styles.moverArrow, tone)} aria-label={up ? "up" : "down"}>
+        <span className={cn(styles.moverArrow, tone)} aria-label={up ? "up" : "down"}>
           {up ? <TrendingUp size={15} aria-hidden /> : <TrendingDown size={15} aria-hidden />}
         </span>
-        <span className={cx(styles.budgetTypeTag, BAND_CLASS[mover.txType])}>{mover.txType}</span>
+        <span className={cn(styles.budgetTypeTag, BAND_CLASS[mover.txType])}>{mover.txType}</span>
         {mover.category}
       </span>
       <span className={styles.moverValues}>
         {longMonths}-mo {formatCents(mover.longMeanCents)} → {shortMonths}-mo {formatCents(mover.shortMeanCents)}
         {mover.percentChange !== null ? (
-          <span className={cx(styles.moverPercent, tone)}>
+          <span className={cn(styles.moverPercent, tone)}>
             {mover.percentChange > 0 ? "+" : ""}
             {mover.percentChange}%
           </span>
@@ -370,20 +368,20 @@ function MonthToDateCard({ month }: { month: InsightsMonth }) {
     <Card>
       <p className={styles.cardTitle}>
         This month so far
-        <span className={cx("muted", styles.cardTitleNote)}>
+        <span className={cn(mutedClass, styles.cardTitleNote)}>
           {monthKeyLabel(month.monthKey)} · month-to-date, excluded from all averages
         </span>
       </p>
       <div className={styles.mtdList}>
         {INSIGHT_TYPES.map((type) => (
           <div key={type} className={styles.mtdRow}>
-            <span className={cx(styles.budgetTypeTag, BAND_CLASS[type])}>{type}</span>
+            <span className={cn(styles.budgetTypeTag, BAND_CLASS[type])}>{type}</span>
             <span className={styles.mtdValue}>{formatCents(month.typeTotalsCents[type] ?? 0)}</span>
           </div>
         ))}
         <div className={styles.mtdRow}>
           <span>Net</span>
-          <span className={cx(styles.mtdValue, month.netCents >= 0 ? styles.netPositive : styles.netNegative)}>
+          <span className={cn(styles.mtdValue, month.netCents >= 0 ? styles.netPositive : styles.netNegative)}>
             {formatCents(month.netCents)}
           </span>
         </div>

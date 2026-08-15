@@ -32,7 +32,18 @@ import {
   type RecurrenceRowInput,
 } from "./agenda-rows";
 import { CADENCE_PRESETS, type CadencePresetKey } from "./recurrences-helpers";
-import styles from "./life-tasks.module.css";
+import { cn } from "@/lib/utils";
+
+/* Shared Tailwind class strings for controls that appear in more than one
+   place, so both copies stay identical. */
+const addControlsClass = "flex flex-wrap items-center gap-2 [&_select]:flex-auto [&_select]:min-w-[120px]";
+const commitmentToggleClass = "inline-flex items-center gap-0.5 rounded-full border border-border p-0.5";
+const commitmentOptionClass =
+  "min-h-8 cursor-pointer appearance-none rounded-full border-none bg-transparent px-3.5 py-1.5 text-[13px] text-muted-foreground";
+const commitmentOptionActiveClass = "bg-gold/[0.16] text-inherit";
+const filterChipClass =
+  "min-h-[34px] cursor-pointer appearance-none rounded-full border border-border bg-transparent px-3 py-1.5 text-[13px] text-inherit";
+const filterChipActiveClass = "border-gold bg-gold/[0.12]";
 
 /* ------------------------------------------------------------------ */
 /* Agenda: one table for everything the owner is on the hook for —      */
@@ -81,17 +92,23 @@ function AgendaRowView({
   const when = dateLabel(row);
 
   return (
-    <div className={styles.row} id={`${row.kind}-${row.id}`}>
+    <div
+      className="flex items-start gap-3 border-b border-border px-1 py-3 last:border-b-0"
+      id={`${row.kind}-${row.id}`}
+    >
       {/* Events are attended, not completed, so they get no check control —
           a checkbox that does nothing is worse than no checkbox. */}
       {row.kind === "event" ? (
-        <span className={styles.eventMarker} aria-hidden>
+        <span
+          className="mt-px grid size-6 flex-none place-items-center text-muted-foreground"
+          aria-hidden
+        >
           <CalendarDays size={15} />
         </span>
       ) : (
         <button
           type="button"
-          className={styles.check}
+          className="mt-px grid size-6 flex-none cursor-pointer appearance-none place-items-center rounded-full border-[1.5px] border-border bg-transparent text-muted-foreground hover:border-gold hover:text-gold"
           onClick={() => onComplete(row)}
           aria-label={`Complete ${row.title}`}
           title={row.kind === "recurrence" ? "Log that you did this" : "Complete"}
@@ -100,9 +117,9 @@ function AgendaRowView({
         </button>
       )}
 
-      <div className={styles.rowBody}>
-        <span className={styles.rowTitle}>{row.title}</span>
-        <span className={styles.rowMeta}>
+      <div className="grid min-w-0 flex-auto gap-[3px]">
+        <span className="text-[15px] leading-[1.35] [overflow-wrap:anywhere]">{row.title}</span>
+        <span className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
           {row.kind === "event" ? <Badge tone="blue">Event</Badge> : null}
           {row.kind === "recurrence" || row.fromRecurrence ? (
             <Badge tone="gold">Recurring</Badge>
@@ -112,14 +129,14 @@ function AgendaRowView({
           {row.areaLabel ? <Badge tone="neutral">{row.areaLabel}</Badge> : null}
 
           {when ? (
-            <span className={row.isOverdue ? styles.overdue : undefined}>
+            <span className={row.isOverdue ? "font-semibold text-red" : undefined}>
               {row.isOverdue ? "overdue — " : ""}
               {when}
             </span>
           ) : null}
 
           {row.location ? (
-            <span className={styles.metaItem}>
+            <span className="inline-flex min-w-0 items-center gap-[3px] [overflow-wrap:anywhere]">
               <MapPin size={12} aria-hidden /> {row.location}
             </span>
           ) : null}
@@ -132,7 +149,7 @@ function AgendaRowView({
         </span>
       </div>
 
-      <div className={styles.rowActions}>
+      <div className="flex flex-none items-start gap-1">
         {row.isWaiting ? (
           <IconButton
             aria-label={`Nudge about ${row.title}`}
@@ -213,7 +230,7 @@ function AddRow({ onAdded }: { onAdded: () => void }) {
   }
 
   return (
-    <form className={styles.addRow} onSubmit={submit}>
+    <form className="mt-1 grid gap-2" onSubmit={submit}>
       <TextInput
         value={title}
         onChange={(event) => setTitle(event.target.value)}
@@ -228,17 +245,18 @@ function AddRow({ onAdded }: { onAdded: () => void }) {
         autoFocus
       />
 
-      <div className={styles.addControls}>
+      <div className={addControlsClass}>
         {/* Wants and repeats are mutually exclusive: a want has no schedule. */}
         {!repeats ? (
-          <div className={styles.commitmentToggle} role="group" aria-label="Commitment">
+          <div className={commitmentToggleClass} role="group" aria-label="Commitment">
             {(["must", "want"] as const).map((value) => (
               <button
                 key={value}
                 type="button"
-                className={`${styles.commitmentOption} ${
-                  commitment === value ? styles.commitmentOptionActive : ""
-                }`}
+                className={cn(
+                  commitmentOptionClass,
+                  commitment === value && commitmentOptionActiveClass,
+                )}
                 aria-pressed={commitment === value}
                 onClick={() => setCommitment(value)}
               >
@@ -272,7 +290,7 @@ function AddRow({ onAdded }: { onAdded: () => void }) {
       </div>
 
       {repeats ? (
-        <div className={styles.repeatFields}>
+        <div className="grid gap-2 rounded-[10px] border border-border bg-gold/5 px-3 py-2.5">
           {/* The anchor is never exposed as a raw enum — each option describes
               what will actually happen, and carries its own anchor. */}
           <Select
@@ -286,9 +304,9 @@ function AddRow({ onAdded }: { onAdded: () => void }) {
               </option>
             ))}
           </Select>
-          <p className={styles.hint}>{preset.hint}</p>
+          <p className="m-0 text-xs text-muted-foreground">{preset.hint}</p>
 
-          <div className={styles.addControls}>
+          <div className={addControlsClass}>
             {preset.needsDays ? (
               presetKey === "weekly-on-day" ? (
                 <Select
@@ -314,7 +332,7 @@ function AddRow({ onAdded }: { onAdded: () => void }) {
               )
             ) : null}
 
-            <div className={styles.commitmentToggle} role="group" aria-label="When due">
+            <div className={commitmentToggleClass} role="group" aria-label="When due">
               {[
                 { value: true, label: "Add to my list" },
                 { value: false, label: "Just show when due" },
@@ -322,9 +340,10 @@ function AddRow({ onAdded }: { onAdded: () => void }) {
                 <button
                   key={String(option.value)}
                   type="button"
-                  className={`${styles.commitmentOption} ${
-                    spawnTask === option.value ? styles.commitmentOptionActive : ""
-                  }`}
+                  className={cn(
+                    commitmentOptionClass,
+                    spawnTask === option.value && commitmentOptionActiveClass,
+                  )}
                   aria-pressed={spawnTask === option.value}
                   onClick={() => setSpawnTask(option.value)}
                 >
@@ -418,12 +437,12 @@ export function LifeTasksContent() {
   }
 
   return (
-    <div className={styles.grid}>
+    <div className="grid gap-4 min-[720px]:grid-cols-2 min-[720px]:items-start">
       <Section
         title="Agenda"
-        className={styles.fullWidth}
+        className="min-[720px]:col-span-full"
         action={
-          <span className={styles.sectionAction}>
+          <span className="inline-flex items-center gap-2">
             <Badge tone="neutral">{visible.length}</Badge>
             <Button variant="primary" small onClick={() => setAddOpen(true)}>
               <Plus size={15} aria-hidden /> Add
@@ -432,10 +451,13 @@ export function LifeTasksContent() {
         }
       >
         {areas.length > 1 ? (
-          <div className={styles.filters}>
+          <div className="mb-3 flex flex-wrap gap-1.5">
             <button
               type="button"
-              className={`${styles.filterChip} ${area === null ? styles.filterChipActive : ""}`}
+              className={cn(
+                filterChipClass,
+                area === null && filterChipActiveClass,
+              )}
               onClick={() => setArea(null)}
             >
               All
@@ -444,7 +466,10 @@ export function LifeTasksContent() {
               <button
                 key={value}
                 type="button"
-                className={`${styles.filterChip} ${area === value ? styles.filterChipActive : ""}`}
+                className={cn(
+                  filterChipClass,
+                  area === value && filterChipActiveClass,
+                )}
                 onClick={() => setArea(area === value ? null : value)}
               >
                 {areaLabel(value === "unsorted" ? undefined : value)}
@@ -458,7 +483,7 @@ export function LifeTasksContent() {
             Tasks, events, and repeating items all show up here.
           </EmptyState>
         ) : (
-          <div className={styles.list}>
+          <div className="grid gap-0.5">
             {visible.map((row) => (
               <AgendaRowView
                 key={`${row.kind}-${row.id}`}

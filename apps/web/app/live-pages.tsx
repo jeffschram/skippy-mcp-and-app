@@ -5,6 +5,53 @@ import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { useConvexAuth, useMutation, useQuery } from "convex/react";
 import { activeSourceSyncStatus } from "@skippy/shared";
 import { api } from "../lib/skippy-api";
+import { cn } from "@/lib/utils";
+import {
+  badgeBlueClass,
+  badgeClass,
+  badgeGoldClass,
+  badgeRedClass,
+  cardClass,
+  checkboxFieldBottomClass,
+  checkboxFieldClass,
+  codeClass,
+  errorTextClass,
+  eyebrowClass,
+  fieldClass,
+  fieldLabelClass,
+  formGridClass,
+  gridClass,
+  iconButtonClass,
+  iconButtonFavoriteClass,
+  inputClass,
+  itemClass,
+  itemIconActiveClass,
+  itemIconClass,
+  itemListClass,
+  itemMetaClass,
+  itemTitleClass,
+  mutedClass,
+  pendingActionItemClass,
+  pendingActionSideClass,
+  projectRowClass,
+  projectRowSideClass,
+  sectionClass,
+  selectClass,
+  settingsRowClass,
+  span12Class,
+  span4Class,
+  span5Class,
+  span6Class,
+  span7Class,
+  span8Class,
+  splitListClass,
+  taskItemClass,
+  taskSideClass,
+  textButtonClass,
+  textButtonCompactClass,
+  textareaClass,
+  toolbarClass,
+} from "./page-classes";
 import { focusItemKey, focusSummaryBullets, focusSummaryPresentation } from "./focus-summary";
 import { LiveGate } from "./live-auth";
 import { icons } from "./ui";
@@ -284,42 +331,52 @@ export function LiveHomeContent() {
   return (
     <LiveGate>
       {!data ? (
-        <section className="card section">
+        <section className={cn(cardClass, sectionClass)}>
           <h2>Loading focus</h2>
-          <p className="muted">Waiting for the latest Convex snapshot.</p>
+          <p className={mutedClass}>Waiting for the latest Convex snapshot.</p>
         </section>
       ) : (
-        <div className="grid">
-          <section className={`card section ${hasDecisionQueueItems ? "span-8" : "span-12"} focus-summary`}>
+        <div className={gridClass}>
+          <section
+            className={cn(
+              cardClass,
+              sectionClass,
+              hasDecisionQueueItems ? span8Class : span12Class,
+              "grid min-h-[260px] content-between gap-[18px] border-l-4 border-l-blue",
+            )}
+          >
             <div>
-              <div className="focus-summary-head">
-                <p className="eyebrow">Now</p>
+              <div className="mb-1.5 flex items-center gap-2.5">
+                <p className={cn(eyebrowClass, "mb-0")}>Now</p>
                 {sourceSyncStatus ? (
-                  <span className="sync-status-pill" title={sourceSyncStatus.message ?? "Source sync is running"}>
+                  <span
+                    className="inline-flex min-h-[26px] items-center gap-1.5 rounded-lg border bg-blue/10 px-[9px] text-xs font-extrabold text-blue [&_svg]:animate-spin"
+                    title={sourceSyncStatus.message ?? "Source sync is running"}
+                  >
                     <icons.RefreshCw size={14} aria-hidden />
                     Updating
                   </span>
                 ) : null}
               </div>
               {sourceSyncStatus ? (
-                <p className="sync-status-copy">
+                <p className="m-0 mb-3 max-w-[680px] text-sm leading-[1.35] text-muted-foreground">
                   {sourceSyncStatus.message ??
                     `Checking ${(sourceSyncStatus.sourceSystemsChecked ?? []).join(", ") || "connected sources"}.`}
                 </p>
               ) : null}
-              <h1 className="focus-heading">
+              <h1 className="mb-[18px] max-w-[760px] text-[clamp(28px,4vw,44px)] leading-[1.08]">
                 <InlineMarkdown>{displayedFocusHeading}</InlineMarkdown>
               </h1>
               {visibleFocusDetails.length ? (
-                <ul className="focus-summary-list">
+                <ul className="grid max-w-[680px] gap-3 pl-[1.15em] text-xl leading-[1.42] text-foreground marker:text-green [&_li]:pl-0.5 [&_li>span:first-child]:mr-2.5">
                   {visibleFocusDetails.map((item) => (
                     <li key={item.itemKey}>
                       <span>
                         <InlineMarkdown>{item.text}</InlineMarkdown>
                       </span>
-                      <span className="focus-item-actions">
+                      <span className="inline-flex gap-1.5 align-middle">
                         <button
-                          className="icon-button"
+                          className={cn(iconButtonClass, "size-[30px] min-h-[30px]")}
                           type="button"
                           title="Dismiss from focus"
                           aria-label={`Dismiss ${item.text}`}
@@ -329,7 +386,7 @@ export function LiveHomeContent() {
                           <icons.X size={16} aria-hidden />
                         </button>
                         <button
-                          className="text-button compact"
+                          className={cn(textButtonClass, textButtonCompactClass, "h-[30px]")}
                           type="button"
                           title="Turn into task"
                           disabled={busyFocusItemKey === item.itemKey}
@@ -338,7 +395,7 @@ export function LiveHomeContent() {
                           Task
                         </button>
                         <button
-                          className="icon-button"
+                          className={cn(iconButtonClass, "size-[30px] min-h-[30px]")}
                           type="button"
                           title="Already done"
                           aria-label={`Mark ${item.text} already done`}
@@ -352,36 +409,38 @@ export function LiveHomeContent() {
                   ))}
                 </ul>
               ) : (
-                <p className="muted">New source items and remaining focus bullets will appear here when they need attention.</p>
+                <p className={cn(mutedClass, "mb-0 max-w-[680px] text-xl leading-[1.42] text-foreground")}>
+                  New source items and remaining focus bullets will appear here when they need attention.
+                </p>
               )}
             </div>
           </section>
           {hasDecisionQueueItems ? (
-            <section className="span-4 section">
+            <section className={cn(span4Class, sectionClass)}>
               <h2>Decision queue</h2>
-              <div className="item-list">
+              <div className={itemListClass}>
                 {unclearSignalCount > 0 ? (
-                  <div className="item">
-                    <span className="item-icon">
+                  <div className={itemClass}>
+                    <span className={itemIconClass}>
                       <icons.Archive size={17} aria-hidden />
                     </span>
                     <div>
-                      <p className="item-title">{unclearSignalCount} unclear signals</p>
-                      <p className="item-meta">Fallback items that need a rubric decision.</p>
+                      <p className={itemTitleClass}>{unclearSignalCount} unclear signals</p>
+                      <p className={itemMetaClass}>Fallback items that need a rubric decision.</p>
                     </div>
-                    <span className="badge gold">Review</span>
+                    <span className={cn(badgeClass, badgeGoldClass)}>Review</span>
                   </div>
                 ) : null}
                 {pendingActionCount > 0 ? (
-                  <div className="item">
-                    <span className="item-icon">
+                  <div className={itemClass}>
+                    <span className={itemIconClass}>
                       <icons.MessageSquareText size={17} aria-hidden />
                     </span>
                     <div>
-                      <p className="item-title">{pendingActionCount} pending actions</p>
-                      <p className="item-meta">External effects stay separated until reviewed.</p>
+                      <p className={itemTitleClass}>{pendingActionCount} pending actions</p>
+                      <p className={itemMetaClass}>External effects stay separated until reviewed.</p>
                     </div>
-                    <span className="badge red">Approval</span>
+                    <span className={cn(badgeClass, badgeRedClass)}>Approval</span>
                   </div>
                 ) : null}
               </div>
@@ -409,13 +468,13 @@ export function LiveProjectsContent() {
   return (
     <LiveGate>
       {!data ? (
-        <section className="card section">
+        <section className={cn(cardClass, sectionClass)}>
           <h2>Loading projects</h2>
         </section>
       ) : data.projects.length === 0 ? (
-        <p className="muted">No accepted projects yet.</p>
+        <p className={mutedClass}>No accepted projects yet.</p>
       ) : (
-        <div className="item-list">
+        <div className={itemListClass}>
           {data.projects.map((project: AnyRecord) => (
             <ProjectRow
               key={project._id}
@@ -432,20 +491,20 @@ export function LiveProjectsContent() {
 
 function ProjectRow({ href, project, taskCount }: { href: string; project: AnyRecord; taskCount: number }) {
   return (
-    <Link className="item project-row" href={href}>
-      <span className="item-icon">
+    <Link className={cn(itemClass, projectRowClass)} href={href}>
+      <span className={itemIconClass}>
         <icons.BriefcaseBusiness size={17} aria-hidden />
       </span>
       <div>
-        <p className="item-title">{project.title}</p>
-        <p className="item-meta">
+        <p className={itemTitleClass}>{project.title}</p>
+        <p className={itemMetaClass}>
           {project.summary ?? "No summary yet."}
           {" · "}
           {taskCount} open task{taskCount === 1 ? "" : "s"}
         </p>
       </div>
-      <span className="project-row-side">
-        <span className="badge blue">{project.status}</span>
+      <span className={projectRowSideClass}>
+        <span className={cn(badgeClass, badgeBlueClass)}>{project.status}</span>
         <icons.ChevronRight size={18} aria-hidden />
       </span>
     </Link>
@@ -459,21 +518,21 @@ export function LiveIngestionLogsContent() {
   return (
     <LiveGate>
       {!runs ? (
-        <section className="card section">
+        <section className={cn(cardClass, sectionClass)}>
           <h2>Loading ingestion logs</h2>
         </section>
       ) : runs.length === 0 ? (
-        <p className="muted">No ingestion runs have been recorded yet.</p>
+        <p className={mutedClass}>No ingestion runs have been recorded yet.</p>
       ) : (
-        <div className="item-list">
+        <div className={itemListClass}>
           {runs.map((run) => (
-            <Link className="item project-row" href={`/ingestion-logs/${run._id}`} key={run._id}>
-              <span className={`item-icon ${run.status === "running" ? "is-active" : ""}`}>
+            <Link className={cn(itemClass, projectRowClass)} href={`/ingestion-logs/${run._id}`} key={run._id}>
+              <span className={cn(itemIconClass, run.status === "running" && itemIconActiveClass)}>
                 <icons.Archive size={17} aria-hidden />
               </span>
               <div>
-                <p className="item-title">{run.harness}</p>
-                <p className="item-meta">
+                <p className={itemTitleClass}>{run.harness}</p>
+                <p className={itemMetaClass}>
                   {formatDate(run.startedAt)}
                   {" · "}
                   {(run.sourceSystemsChecked ?? []).join(", ") || "no sources recorded"}
@@ -481,8 +540,8 @@ export function LiveIngestionLogsContent() {
                   {formatRunDuration(run)}
                 </p>
               </div>
-              <span className="project-row-side">
-                <span className={`badge ${run.status === "failed" ? "red" : run.status === "running" ? "gold" : "blue"}`}>
+              <span className={projectRowSideClass}>
+                <span className={cn(badgeClass, run.status === "failed" ? badgeRedClass : run.status === "running" ? badgeGoldClass : badgeBlueClass)}>
                   {run.status}
                 </span>
                 <icons.ChevronRight size={18} aria-hidden />
@@ -504,9 +563,9 @@ export function LiveIngestionLogDetailContent({ ingestionRunId }: { ingestionRun
 
   if (data === null) {
     return (
-      <section className="card section">
+      <section className={cn(cardClass, sectionClass)}>
         <h2>Log not found</h2>
-        <p className="muted">
+        <p className={mutedClass}>
           This ingestion log may have been removed. <Link href="/ingestion-logs">Back to ingestion logs</Link>.
         </p>
       </section>
@@ -524,47 +583,47 @@ export function LiveIngestionLogDetailContent({ ingestionRunId }: { ingestionRun
   return (
     <LiveGate>
       {!data ? (
-        <section className="card section">
+        <section className={cn(cardClass, sectionClass)}>
           <h2>Loading ingestion log</h2>
         </section>
       ) : (
-        <div className="grid">
-          <section className="card section span-12">
-            <div className="settings-row">
+        <div className={gridClass}>
+          <section className={cn(cardClass, sectionClass, span12Class)}>
+            <div className={settingsRowClass}>
               <div>
                 <h2>{run.harness}</h2>
-                <p className="muted">
+                <p className={mutedClass}>
                   Started {formatDate(run.startedAt)}
                   {run.completedAt ? ` · Completed ${formatDate(run.completedAt)}` : " · Still running"}
                   {" · "}
                   {formatRunDuration(run)}
                 </p>
               </div>
-              <span className={`badge ${run.status === "failed" ? "red" : run.status === "running" ? "gold" : "blue"}`}>
+              <span className={cn(badgeClass, run.status === "failed" ? badgeRedClass : run.status === "running" ? badgeGoldClass : badgeBlueClass)}>
                 {run.status}
               </span>
             </div>
-            <div className="toolbar">
+            <div className={toolbarClass}>
               {(run.sourceSystemsChecked ?? []).map((source: string) => (
-                <span className="badge" key={source}>
+                <span className={badgeClass} key={source}>
                   {source}
                 </span>
               ))}
             </div>
           </section>
 
-          <section className="card section span-12">
+          <section className={cn(cardClass, sectionClass, span12Class)}>
             <h2>Counts</h2>
-            <div className="toolbar">
-              <span className="badge blue">{run.objectsCreated ?? 0} created</span>
-              <span className="badge blue">{run.objectsUpdated ?? 0} updated</span>
-              <span className="badge gold">{run.candidatesSubmitted ?? 0} review candidates</span>
-              <span className={`badge ${run.errors?.length ? "red" : "blue"}`}>{run.errors?.length ?? 0} errors</span>
+            <div className={toolbarClass}>
+              <span className={cn(badgeClass, badgeBlueClass)}>{run.objectsCreated ?? 0} created</span>
+              <span className={cn(badgeClass, badgeBlueClass)}>{run.objectsUpdated ?? 0} updated</span>
+              <span className={cn(badgeClass, badgeGoldClass)}>{run.candidatesSubmitted ?? 0} review candidates</span>
+              <span className={cn(badgeClass, run.errors?.length ? badgeRedClass : badgeBlueClass)}>{run.errors?.length ?? 0} errors</span>
             </div>
             {run.errors?.length ? (
-              <div className="item-list">
+              <div className={itemListClass}>
                 {run.errors.map((error: string) => (
-                  <p className="muted" key={error}>
+                  <p className={mutedClass} key={error}>
                     {error}
                   </p>
                 ))}
@@ -572,35 +631,35 @@ export function LiveIngestionLogDetailContent({ ingestionRunId }: { ingestionRun
             ) : null}
           </section>
 
-          <section className="card section span-12">
+          <section className={cn(cardClass, sectionClass, span12Class)}>
             <h2>Audit trail</h2>
-            <div className="toolbar">
-              <span className="badge blue">{auditSummary.capturedDirect ?? 0} captured</span>
-              <span className="badge gold">{auditSummary.sentToReview ?? 0} sent to review</span>
-              <span className="badge blue">{auditSummary.linked ?? 0} linked</span>
-              <span className="badge blue">{auditSummary.updated ?? 0} updated</span>
-              <span className={`badge ${(auditSummary.rejected ?? 0) > 0 ? "red" : "blue"}`}>{auditSummary.rejected ?? 0} rejected</span>
-              <span className="badge">{auditSummary.ignored ?? 0} ignored</span>
+            <div className={toolbarClass}>
+              <span className={cn(badgeClass, badgeBlueClass)}>{auditSummary.capturedDirect ?? 0} captured</span>
+              <span className={cn(badgeClass, badgeGoldClass)}>{auditSummary.sentToReview ?? 0} sent to review</span>
+              <span className={cn(badgeClass, badgeBlueClass)}>{auditSummary.linked ?? 0} linked</span>
+              <span className={cn(badgeClass, badgeBlueClass)}>{auditSummary.updated ?? 0} updated</span>
+              <span className={cn(badgeClass, (auditSummary.rejected ?? 0) > 0 ? badgeRedClass : badgeBlueClass)}>{auditSummary.rejected ?? 0} rejected</span>
+              <span className={badgeClass}>{auditSummary.ignored ?? 0} ignored</span>
             </div>
             {memories.length || entities.length ? (
-              <div className="item-list">
+              <div className={itemListClass}>
                 {memories.map((memory: AnyRecord) => (
-                  <Link className="item project-row" href={memoryHref(memory)} key={memory._id}>
-                    <span className="item-icon">
+                  <Link className={cn(itemClass, projectRowClass)} href={memoryHref(memory)} key={memory._id}>
+                    <span className={itemIconClass}>
                       <icons.Brain size={17} aria-hidden />
                     </span>
                     <div>
-                      <p className="item-title">{memoryTitle(memory)}</p>
-                      <p className="item-meta">
+                      <p className={itemTitleClass}>{memoryTitle(memory)}</p>
+                      <p className={itemMetaClass}>
                         {memoryKind(memory)}
                         {" · "}
                         {memoryState(memory)}
                       </p>
-                      {memory.rubricDecision ? <p className="item-meta">Decision: {memory.rubricDecision}</p> : null}
-                      {memory.captureReason ? <p className="item-meta">Capture: {memory.captureReason}</p> : null}
+                      {memory.rubricDecision ? <p className={itemMetaClass}>Decision: {memory.rubricDecision}</p> : null}
+                      {memory.captureReason ? <p className={itemMetaClass}>Capture: {memory.captureReason}</p> : null}
                     </div>
-                    <span className="project-row-side">
-                      <span className={`badge ${badgeColorForState(memoryState(memory))}`}>{memoryState(memory)}</span>
+                    <span className={projectRowSideClass}>
+                      <span className={cn(badgeClass, badgeColorForState(memoryState(memory)))}>{memoryState(memory)}</span>
                       <icons.ChevronRight size={18} aria-hidden />
                     </span>
                   </Link>
@@ -608,82 +667,82 @@ export function LiveIngestionLogDetailContent({ ingestionRunId }: { ingestionRun
                 {entities.map((entry: AnyRecord) => {
                   const entity = entry.entity ?? entry;
                   return (
-                    <article className="item" key={`${entry.ref?.entityType ?? entity.entityType}:${entry.ref?.entityId ?? entity._id}`}>
-                      <span className="item-icon">
+                    <article className={itemClass} key={`${entry.ref?.entityType ?? entity.entityType}:${entry.ref?.entityId ?? entity._id}`}>
+                      <span className={itemIconClass}>
                         <icons.Archive size={17} aria-hidden />
                       </span>
                       <div>
-                        <p className="item-title">{relatedEntityTitle(entry)}</p>
-                        <p className="item-meta">{relatedEntityMeta(entry)}</p>
-                        {entity.priorityReason ? <p className="item-meta">{entity.priorityReason}</p> : null}
+                        <p className={itemTitleClass}>{relatedEntityTitle(entry)}</p>
+                        <p className={itemMetaClass}>{relatedEntityMeta(entry)}</p>
+                        {entity.priorityReason ? <p className={itemMetaClass}>{entity.priorityReason}</p> : null}
                       </div>
-                      <span className="badge blue">{entry.ref?.entityType ?? entity.entityType ?? "entity"}</span>
+                      <span className={cn(badgeClass, badgeBlueClass)}>{entry.ref?.entityType ?? entity.entityType ?? "entity"}</span>
                     </article>
                   );
                 })}
               </div>
             ) : (
-              <p className="muted">No created or linked Skippy entities were detected for this run.</p>
+              <p className={mutedClass}>No created or linked Skippy entities were detected for this run.</p>
             )}
             {ignoredItems.length ? (
               <details>
-                <summary className="item-title">Ignored or skipped items</summary>
-                <pre className="code rubric-rendered-text">{formatJson(ignoredItems)}</pre>
+                <summary className={itemTitleClass}>Ignored or skipped items</summary>
+                <pre className={cn(codeClass, "mt-2 max-h-[280px] overflow-auto whitespace-pre-wrap")}>{formatJson(ignoredItems)}</pre>
               </details>
             ) : null}
           </section>
 
-          <section className="card section span-12">
+          <section className={cn(cardClass, sectionClass, span12Class)}>
             <h2>Activity</h2>
             {activityEvents.length === 0 ? (
-              <p className="muted">No activity events were linked to this run or found in its time window.</p>
+              <p className={mutedClass}>No activity events were linked to this run or found in its time window.</p>
             ) : (
-              <div className="item-list">
+              <div className={itemListClass}>
                 {activityEvents.map((event: AnyRecord) => (
-                  <article className="item" key={event._id}>
-                    <span className="item-icon">
+                  <article className={itemClass} key={event._id}>
+                    <span className={itemIconClass}>
                       <icons.Clock3 size={17} aria-hidden />
                     </span>
                     <div>
-                      <p className="item-title">{event.summary}</p>
-                      <p className="item-meta">
+                      <p className={itemTitleClass}>{event.summary}</p>
+                      <p className={itemMetaClass}>
                         {event.activityType}
                         {" · "}
                         {formatDate(event.timestamp)}
                       </p>
                       {event.metadata?.rubricDecision ? (
-                        <p className="item-meta">Decision: {event.metadata.rubricDecision}</p>
+                        <p className={itemMetaClass}>Decision: {event.metadata.rubricDecision}</p>
                       ) : null}
                     </div>
-                    <span className="badge">{event.actorType}</span>
+                    <span className={badgeClass}>{event.actorType}</span>
                   </article>
                 ))}
               </div>
             )}
           </section>
 
-          <section className="card section span-12">
+          <section className={cn(cardClass, sectionClass, span12Class)}>
             <h2>Source refs</h2>
             {sourceRefs.length === 0 ? (
-              <p className="muted">No source references were linked to this run.</p>
+              <p className={mutedClass}>No source references were linked to this run.</p>
             ) : (
-              <div className="item-list">
+              <div className={itemListClass}>
                 {sourceRefs.map((sourceRef: AnyRecord) => (
-                  <article className="item" key={sourceRef._id}>
-                    <span className="item-icon">
+                  <article className={itemClass} key={sourceRef._id}>
+                    <span className={itemIconClass}>
                       <icons.LinkIcon size={17} aria-hidden />
                     </span>
                     <div>
-                      <p className="item-title">{sourceRef.summary ?? sourceRef.excerpt ?? sourceRef.externalId ?? sourceRef.sourceSystem}</p>
-                      <p className="item-meta">
+                      <p className={itemTitleClass}>{sourceRef.summary ?? sourceRef.excerpt ?? sourceRef.externalId ?? sourceRef.sourceSystem}</p>
+                      <p className={itemMetaClass}>
                         {sourceRef.sourceSystem}
                         {sourceRef.sourceTimestamp ? ` · ${formatDate(sourceRef.sourceTimestamp)}` : ""}
                       </p>
                       {sourceRef.participants?.length ? (
-                        <p className="item-meta">Participants: {sourceRef.participants.join(", ")}</p>
+                        <p className={itemMetaClass}>Participants: {sourceRef.participants.join(", ")}</p>
                       ) : null}
                     </div>
-                    <span className="badge">{sourceRef.messageId ?? sourceRef.eventId ?? sourceRef.threadId ?? "source"}</span>
+                    <span className={badgeClass}>{sourceRef.messageId ?? sourceRef.eventId ?? sourceRef.threadId ?? "source"}</span>
                   </article>
                 ))}
               </div>
@@ -691,9 +750,9 @@ export function LiveIngestionLogDetailContent({ ingestionRunId }: { ingestionRun
           </section>
 
           {run.metadata ? (
-            <section className="card section span-12">
+            <section className={cn(cardClass, sectionClass, span12Class)}>
               <h2>Run metadata</h2>
-              <pre className="code rubric-rendered-text">{formatJson(run.metadata)}</pre>
+              <pre className={cn(codeClass, "mt-2 max-h-[280px] overflow-auto whitespace-pre-wrap")}>{formatJson(run.metadata)}</pre>
             </section>
           ) : null}
         </div>
@@ -723,29 +782,29 @@ export function LiveProjectDetailContent({ projectId }: { projectId: string }) {
   return (
     <LiveGate>
       {!data ? (
-        <section className="card section">
+        <section className={cn(cardClass, sectionClass)}>
           <h2>Loading project</h2>
         </section>
       ) : !project ? (
-        <section className="card section">
+        <section className={cn(cardClass, sectionClass)}>
           <h2>Project not found</h2>
-          <p className="muted">
+          <p className={mutedClass}>
             This project may have been removed. <Link href="/projects">Back to projects</Link>.
           </p>
         </section>
       ) : (
-        <div className="grid">
-          <section className="card section span-12">
-            <div className="settings-row">
+        <div className={gridClass}>
+          <section className={cn(cardClass, sectionClass, span12Class)}>
+            <div className={settingsRowClass}>
               <div>
                 <h2>{project.title}</h2>
-                <p className="muted">{project.summary ?? "No summary yet."}</p>
+                <p className={mutedClass}>{project.summary ?? "No summary yet."}</p>
               </div>
-              <span className="badge blue">{project.status}</span>
+              <span className={cn(badgeClass, badgeBlueClass)}>{project.status}</span>
             </div>
-            {project.priorityReason ? <p className="muted">{project.priorityReason}</p> : null}
+            {project.priorityReason ? <p className={mutedClass}>{project.priorityReason}</p> : null}
           </section>
-          <section className="card section span-12">
+          <section className={cn(cardClass, sectionClass, span12Class)}>
             <h2>Tasks</h2>
             <TaskList
               tasks={tasks}
@@ -777,7 +836,7 @@ export function LiveTasksContent() {
   return (
     <LiveGate>
       {!data ? (
-        <section className="card section">
+        <section className={cn(cardClass, sectionClass)}>
           <h2>Loading tasks</h2>
         </section>
       ) : (
@@ -814,11 +873,11 @@ function TaskList({
   displayLabels: { ownerName: string; agentName: string };
 }) {
   if (tasks.length === 0) {
-    return <p className="muted">No tasks here.</p>;
+    return <p className={mutedClass}>No tasks here.</p>;
   }
 
   return (
-    <div className="item-list">
+    <div className={itemListClass}>
       {tasks.map((task) => {
         const isAgentTask = task.ownerType === "agent";
         const isInProgress = task.status === "in_progress";
@@ -829,8 +888,8 @@ function TaskList({
         const ActionIcon = isAgentTask ? icons.Play : icons.CircleCheck;
 
         return (
-          <article className="item task-item" key={task._id}>
-            <span className={`item-icon ${isInProgress ? "is-active" : ""}`}>
+          <article className={cn(itemClass, taskItemClass)} key={task._id}>
+            <span className={cn(itemIconClass, isInProgress && itemIconActiveClass)}>
               {isInProgress ? (
                 <icons.Clock3 size={17} aria-hidden />
               ) : (
@@ -838,17 +897,17 @@ function TaskList({
               )}
             </span>
             <div>
-              <p className="item-title">{task.title}</p>
-              <p className="item-meta">
+              <p className={itemTitleClass}>{task.title}</p>
+              <p className={itemMetaClass}>
                 {isInProgress ? `In progress${task.startedBy ? ` by ${task.startedBy}` : ""}` : (task.priorityReason ?? task.status)}
               </p>
             </div>
-            <span className="task-side">
-              {task.ownerType ? <span className="badge">{taskOwnerLabel(task.ownerType, displayLabels)}</span> : null}
-              <span className={`badge ${isInProgress ? "gold" : "blue"}`}>{task.status}</span>
+            <span className={taskSideClass}>
+              {task.ownerType ? <span className={badgeClass}>{taskOwnerLabel(task.ownerType, displayLabels)}</span> : null}
+              <span className={cn(badgeClass, isInProgress ? badgeGoldClass : badgeBlueClass)}>{task.status}</span>
             </span>
             <button
-              className="icon-button"
+              className={iconButtonClass}
               type="button"
               title={actionLabel}
               aria-label={`${actionLabel}: ${task.title}`}
@@ -888,16 +947,16 @@ export function LiveGoalsContent() {
   return (
     <LiveGate>
       {!data ? (
-        <section className="card section">
+        <section className={cn(cardClass, sectionClass)}>
           <h2>Loading goals</h2>
         </section>
       ) : (
-        <div className="grid">
-          <section className="card section span-12">
+        <div className={gridClass}>
+          <section className={cn(cardClass, sectionClass, span12Class)}>
             <h2>Add a goal</h2>
-            <div className="toolbar">
+            <div className={toolbarClass}>
               <input
-                className="input"
+                className={inputClass}
                 placeholder="New goal title"
                 value={newTitle}
                 onChange={(event) => setNewTitle(event.target.value)}
@@ -907,16 +966,16 @@ export function LiveGoalsContent() {
                   }
                 }}
               />
-              <button className="text-button" type="button" disabled={busy || !newTitle.trim()} onClick={() => void addGoal()}>
+              <button className={textButtonClass} type="button" disabled={busy || !newTitle.trim()} onClick={() => void addGoal()}>
                 Add goal
               </button>
             </div>
           </section>
-          <section className="span-12">
+          <section className={span12Class}>
             {data.goals.length === 0 ? (
-              <p className="muted">No goals yet. Add one above; active goals feed the importance rubric.</p>
+              <p className={mutedClass}>No goals yet. Add one above; active goals feed the importance rubric.</p>
             ) : (
-              <div className="item-list">
+              <div className={itemListClass}>
                 {data.goals.map((goal: AnyRecord) => (
                   <GoalRow key={goal._id} goal={goal} />
                 ))}
@@ -934,13 +993,13 @@ function GoalRow({ goal }: { goal: AnyRecord }) {
   const save = (patch: AnyRecord) => void updateGoal({ goalId: goal._id, ...patch } as any);
 
   return (
-    <article className="item">
-      <span className={`item-icon ${goal.status === "achieved" ? "is-active" : ""}`}>
+    <article className={itemClass}>
+      <span className={cn(itemIconClass, goal.status === "achieved" && itemIconActiveClass)}>
         <icons.Target size={17} aria-hidden />
       </span>
-      <div className="form-grid compact-form">
+      <div className={formGridClass}>
         <input
-          className="input"
+          className={inputClass}
           defaultValue={goal.title}
           onBlur={(event) => {
             const value = event.target.value.trim();
@@ -950,7 +1009,7 @@ function GoalRow({ goal }: { goal: AnyRecord }) {
           }}
         />
         <textarea
-          className="textarea"
+          className={textareaClass}
           placeholder="Description"
           defaultValue={goal.description ?? ""}
           onBlur={(event) => {
@@ -960,9 +1019,9 @@ function GoalRow({ goal }: { goal: AnyRecord }) {
           }}
         />
       </div>
-      <label className="field">
+      <label className={fieldClass}>
         <span>Status</span>
-        <select className="select" defaultValue={goal.status} onChange={(event) => save({ status: event.target.value })}>
+        <select className={selectClass} defaultValue={goal.status} onChange={(event) => save({ status: event.target.value })}>
           {(statusOptions.goal ?? []).map((statusValue) => (
             <option key={statusValue} value={statusValue}>
               {statusValue}
@@ -984,11 +1043,11 @@ export function LiveContactsContent() {
   return (
     <LiveGate>
       {!data ? (
-        <section className="card section">
+        <section className={cn(cardClass, sectionClass)}>
           <h2>Loading contacts</h2>
         </section>
       ) : (
-        <div className="split-list">
+        <div className={splitListClass}>
           <ContactList
             title="People"
             items={data.people}
@@ -1020,21 +1079,21 @@ function ContactList({
   return (
     <section>
       <h2>{title}</h2>
-      <div className="item-list">
-        {items.length === 0 ? <p className="muted">No accepted records yet.</p> : null}
+      <div className={itemListClass}>
+        {items.length === 0 ? <p className={mutedClass}>No accepted records yet.</p> : null}
         {items.map((item) => (
-          <article className="item" key={item._id}>
-            <span className="item-icon">
+          <article className={itemClass} key={item._id}>
+            <span className={itemIconClass}>
               <Icon size={17} aria-hidden />
             </span>
             <div>
-              <p className="item-title">{item[labelField]}</p>
-              <p className="item-meta">{item.relationshipContext ?? item.notes ?? item.domain ?? "Accepted"}</p>
+              <p className={itemTitleClass}>{item[labelField]}</p>
+              <p className={itemMetaClass}>{item.relationshipContext ?? item.notes ?? item.domain ?? "Accepted"}</p>
             </div>
-            <span className="project-row-side">
+            <span className={projectRowSideClass}>
               {onToggleFavorite ? (
                 <button
-                  className={`icon-button ${item.favorite ? "is-favorite" : ""}`}
+                  className={cn(iconButtonClass, item.favorite && iconButtonFavoriteClass)}
                   type="button"
                   title={item.favorite ? "Unfavorite contact" : "Favorite contact"}
                   aria-pressed={Boolean(item.favorite)}
@@ -1044,7 +1103,7 @@ function ContactList({
                   <icons.Star size={17} fill={item.favorite ? "currentColor" : "none"} aria-hidden />
                 </button>
               ) : null}
-              <span className="badge">{item.relationshipLabel ?? item.roleTitle ?? "Contact"}</span>
+              <span className={badgeClass}>{item.relationshipLabel ?? item.roleTitle ?? "Contact"}</span>
             </span>
           </article>
         ))}
@@ -1107,12 +1166,12 @@ function memoryReason(memory: AnyRecord) {
 
 function badgeColorForState(state: string) {
   if (/reject|error|archiv|discard/i.test(state)) {
-    return "red";
+    return badgeRedClass;
   }
   if (/suggest|pending|review|draft/i.test(state)) {
-    return "gold";
+    return badgeGoldClass;
   }
-  return "blue";
+  return badgeBlueClass;
 }
 
 function memoryHref(memory: AnyRecord) {
@@ -1211,27 +1270,27 @@ function MemoryRow({ memory, variant = "memory" }: { memory: AnyRecord; variant?
   const sourceRefIds = Array.isArray(memory.sourceRefIds) ? memory.sourceRefIds : [];
 
   return (
-    <Link className="item project-row" href={memoryHref(memory)}>
-      <span className={`item-icon ${variant === "inbox" ? "is-active" : ""}`}>
+    <Link className={cn(itemClass, projectRowClass)} href={memoryHref(memory)}>
+      <span className={cn(itemIconClass, variant === "inbox" && itemIconActiveClass)}>
         {variant === "inbox" ? <icons.Brain size={17} aria-hidden /> : <icons.BookOpen size={17} aria-hidden />}
       </span>
-      <div className="form-grid">
+      <div className={formGridClass}>
         <div>
-          <p className="item-title">{memoryTitle(memory)}</p>
-          <p className="item-meta">
+          <p className={itemTitleClass}>{memoryTitle(memory)}</p>
+          <p className={itemMetaClass}>
             {memoryKind(memory)}
             {memory.confidence ? ` · ${Math.round(Number(memory.confidence) * 100)}% confidence` : ""}
             {memory.updatedAt || memory.createdAt ? ` · ${formatDate(memory.updatedAt ?? memory.createdAt)}` : ""}
           </p>
         </div>
-        <p className="item-meta">{memorySummary(memory)}</p>
-        {reason ? <p className="item-meta">Capture: {reason}</p> : null}
+        <p className={itemMetaClass}>{memorySummary(memory)}</p>
+        {reason ? <p className={itemMetaClass}>Capture: {reason}</p> : null}
         <InlineSourceRefs sourceRefs={sourceRefs} sourceRefIds={sourceRefIds} />
         <InlineRelatedEntities entities={arrayValue(memory.relatedEntities)} />
       </div>
-      <span className="project-row-side">
+      <span className={projectRowSideClass}>
         {variant === "inbox" && memoryIsPendingReview(memory) ? <MemoryReviewActions memory={memory} small /> : null}
-        <span className={`badge ${badgeColorForState(state)}`}>{state}</span>
+        <span className={cn(badgeClass, badgeColorForState(state))}>{state}</span>
         <icons.ChevronRight size={18} aria-hidden />
       </span>
     </Link>
@@ -1240,19 +1299,19 @@ function MemoryRow({ memory, variant = "memory" }: { memory: AnyRecord; variant?
 
 function InlineSourceRefs({ sourceRefs, sourceRefIds }: { sourceRefs: AnyRecord[]; sourceRefIds?: unknown[] }) {
   if (sourceRefs.length === 0 && (!sourceRefIds || sourceRefIds.length === 0)) {
-    return <p className="item-meta">No source references attached.</p>;
+    return <p className={itemMetaClass}>No source references attached.</p>;
   }
 
   return (
-    <div className="toolbar" aria-label="Source references">
+    <div className={toolbarClass} aria-label="Source references">
       {sourceRefs.slice(0, 4).map((sourceRef) => (
-        <span className="badge" key={textValue(sourceRef._id, sourceRef.id, sourceRef.externalId, sourceRefTitle(sourceRef))}>
+        <span className={badgeClass} key={textValue(sourceRef._id, sourceRef.id, sourceRef.externalId, sourceRefTitle(sourceRef))}>
           {textValue(sourceRef.sourceSystem, sourceRef.provider) || "source"}
         </span>
       ))}
       {sourceRefs.length === 0
         ? sourceRefIds?.slice(0, 4).map((sourceRefId) => (
-            <span className="badge" key={String(sourceRefId)}>
+            <span className={badgeClass} key={String(sourceRefId)}>
               source
             </span>
           ))
@@ -1267,9 +1326,9 @@ function InlineRelatedEntities({ entities }: { entities: AnyRecord[] }) {
   }
 
   return (
-    <div className="toolbar" aria-label="Related entities">
+    <div className={toolbarClass} aria-label="Related entities">
       {entities.slice(0, 5).map((entity) => (
-        <span className="badge blue" key={textValue(entity.entityId, entity.id, entity._id, relatedEntityTitle(entity))}>
+        <span className={cn(badgeClass, badgeBlueClass)} key={textValue(entity.entityId, entity.id, entity._id, relatedEntityTitle(entity))}>
           {relatedEntityTitle(entity)}
         </span>
       ))}
@@ -1279,22 +1338,22 @@ function InlineRelatedEntities({ entities }: { entities: AnyRecord[] }) {
 
 function SourceRefList({ sourceRefs }: { sourceRefs: AnyRecord[] }) {
   if (sourceRefs.length === 0) {
-    return <p className="muted">No source references were returned for this memory.</p>;
+    return <p className={mutedClass}>No source references were returned for this memory.</p>;
   }
 
   return (
-    <div className="item-list">
+    <div className={itemListClass}>
       {sourceRefs.map((sourceRef) => (
-        <article className="item" key={textValue(sourceRef._id, sourceRef.id, sourceRef.externalId, sourceRefTitle(sourceRef))}>
-          <span className="item-icon">
+        <article className={itemClass} key={textValue(sourceRef._id, sourceRef.id, sourceRef.externalId, sourceRefTitle(sourceRef))}>
+          <span className={itemIconClass}>
             <icons.LinkIcon size={17} aria-hidden />
           </span>
           <div>
-            <p className="item-title">{sourceRefTitle(sourceRef)}</p>
-            <p className="item-meta">{sourceRefMeta(sourceRef)}</p>
-            {sourceRef.participants?.length ? <p className="item-meta">Participants: {sourceRef.participants.join(", ")}</p> : null}
+            <p className={itemTitleClass}>{sourceRefTitle(sourceRef)}</p>
+            <p className={itemMetaClass}>{sourceRefMeta(sourceRef)}</p>
+            {sourceRef.participants?.length ? <p className={itemMetaClass}>Participants: {sourceRef.participants.join(", ")}</p> : null}
           </div>
-          <span className="badge">{textValue(sourceRef.messageId, sourceRef.eventId, sourceRef.threadId, sourceRef.externalId) || "source"}</span>
+          <span className={badgeClass}>{textValue(sourceRef.messageId, sourceRef.eventId, sourceRef.threadId, sourceRef.externalId) || "source"}</span>
         </article>
       ))}
     </div>
@@ -1303,21 +1362,21 @@ function SourceRefList({ sourceRefs }: { sourceRefs: AnyRecord[] }) {
 
 function RelatedEntityList({ entities }: { entities: AnyRecord[] }) {
   if (entities.length === 0) {
-    return <p className="muted">No related entities were returned yet.</p>;
+    return <p className={mutedClass}>No related entities were returned yet.</p>;
   }
 
   return (
-    <div className="item-list">
+    <div className={itemListClass}>
       {entities.map((entity) => (
-        <article className="item" key={textValue(entity.entityId, entity.id, entity._id, relatedEntityTitle(entity))}>
-          <span className="item-icon">
+        <article className={itemClass} key={textValue(entity.entityId, entity.id, entity._id, relatedEntityTitle(entity))}>
+          <span className={itemIconClass}>
             <icons.LinkIcon size={17} aria-hidden />
           </span>
           <div>
-            <p className="item-title">{relatedEntityTitle(entity)}</p>
-            <p className="item-meta">{relatedEntityMeta(entity)}</p>
+            <p className={itemTitleClass}>{relatedEntityTitle(entity)}</p>
+            <p className={itemMetaClass}>{relatedEntityMeta(entity)}</p>
           </div>
-          <span className="badge blue">{textValue(entity.entityType, entity.type) || "entity"}</span>
+          <span className={cn(badgeClass, badgeBlueClass)}>{textValue(entity.entityType, entity.type) || "entity"}</span>
         </article>
       ))}
     </div>
@@ -1388,21 +1447,21 @@ export function LiveMemoryInboxContent() {
   return (
     <LiveGate>
       {!data ? (
-        <section className="card section">
+        <section className={cn(cardClass, sectionClass)}>
           <h2>Loading memory inbox</h2>
-          <p className="muted">Waiting for suggested memories and review states from Convex.</p>
+          <p className={mutedClass}>Waiting for suggested memories and review states from Convex.</p>
         </section>
       ) : items.length === 0 ? (
-        <section className="card section">
+        <section className={cn(cardClass, sectionClass)}>
           <h2>Inbox clear</h2>
-          <p className="muted">No captured memory objects need review right now.</p>
+          <p className={mutedClass}>No captured memory objects need review right now.</p>
         </section>
       ) : (
         <>
           {pendingCount > 0 ? (
-            <div className="toolbar" style={{ marginBottom: 12 }}>
+            <div className={toolbarClass} style={{ marginBottom: 12 }}>
               <button
-                className="text-button compact"
+                className={cn(textButtonClass, textButtonCompactClass)}
                 type="button"
                 disabled={bulkBusy}
                 onClick={() => void bulkResolve("accept")}
@@ -1410,19 +1469,19 @@ export function LiveMemoryInboxContent() {
                 Accept all
               </button>
               <button
-                className="text-button compact"
+                className={cn(textButtonClass, textButtonCompactClass)}
                 type="button"
                 disabled={bulkBusy}
                 onClick={() => void bulkResolve("archive")}
               >
                 Archive all
               </button>
-              <span className="muted">
+              <span className={mutedClass}>
                 Unreviewed candidates auto-archive after {Math.round(MEMORY_REVIEW_EXPIRY_MS / (24 * 60 * 60 * 1000))} days.
               </span>
             </div>
           ) : null}
-          <div className="item-list">
+          <div className={itemListClass}>
             {items.map((memory) => (
               <MemoryRow key={textValue(memory._id, memory.id, memoryTitle(memory))} memory={memory} variant="inbox" />
             ))}
@@ -1446,17 +1505,17 @@ export function LiveMemoryContent({ objectTypes, emptyMessage }: MemoryCollectio
   return (
     <LiveGate>
       {!data ? (
-        <section className="card section">
+        <section className={cn(cardClass, sectionClass)}>
           <h2>Loading memory</h2>
-          <p className="muted">Waiting for accepted memory objects from Convex.</p>
+          <p className={mutedClass}>Waiting for accepted memory objects from Convex.</p>
         </section>
       ) : (
-        <div className="grid">
-          <section className="span-12">
+        <div className={gridClass}>
+          <section className={span12Class}>
             {items.length === 0 ? (
-              <p className="muted">{emptyMessage ?? "No accepted memory objects yet."}</p>
+              <p className={mutedClass}>{emptyMessage ?? "No accepted memory objects yet."}</p>
             ) : (
-              <div className="item-list">
+              <div className={itemListClass}>
                 {items.map((memory) => (
                   <MemoryRow key={textValue(memory._id, memory.id, memoryTitle(memory))} memory={memory} />
                 ))}
@@ -1464,11 +1523,11 @@ export function LiveMemoryContent({ objectTypes, emptyMessage }: MemoryCollectio
             )}
           </section>
           {counts.length ? (
-            <section className="card section span-12">
+            <section className={cn(cardClass, sectionClass, span12Class)}>
               <h2>Types</h2>
-              <div className="toolbar">
+              <div className={toolbarClass}>
                 {counts.map((count) => (
-                  <span className="badge blue" key={textValue(count.objectType, count.type, count.label)}>
+                  <span className={cn(badgeClass, badgeBlueClass)} key={textValue(count.objectType, count.type, count.label)}>
                     {textValue(count.objectType, count.type, count.label)}: {count.count ?? count.total ?? 0}
                   </span>
                 ))}
@@ -1490,9 +1549,9 @@ export function LiveMemoryDetailContent({ memoryId }: { memoryId: string }) {
 
   if (data === null) {
     return (
-      <section className="card section">
+      <section className={cn(cardClass, sectionClass)}>
         <h2>Memory not found</h2>
-        <p className="muted">
+        <p className={mutedClass}>
           This memory may have been removed. <Link href="/memory">Back to Memory</Link>.
         </p>
       </section>
@@ -1508,62 +1567,62 @@ export function LiveMemoryDetailContent({ memoryId }: { memoryId: string }) {
   return (
     <LiveGate>
       {!data || !memory ? (
-        <section className="card section">
+        <section className={cn(cardClass, sectionClass)}>
           <h2>Loading memory</h2>
         </section>
       ) : (
-        <div className="grid">
-          <section className="card section span-12">
-            <div className="settings-row">
+        <div className={gridClass}>
+          <section className={cn(cardClass, sectionClass, span12Class)}>
+            <div className={settingsRowClass}>
               <div>
                 <h2>{memoryTitle(memory)}</h2>
-                <p className="muted">{memorySummary(memory)}</p>
+                <p className={mutedClass}>{memorySummary(memory)}</p>
               </div>
-              <span className="project-row-side">
+              <span className={projectRowSideClass}>
                 {memoryIsPendingReview(memory) ? <MemoryReviewActions memory={memory} /> : null}
-                <span className={`badge ${badgeColorForState(memoryState(memory))}`}>{memoryState(memory)}</span>
+                <span className={cn(badgeClass, badgeColorForState(memoryState(memory)))}>{memoryState(memory)}</span>
               </span>
             </div>
-            <div className="toolbar">
-              <span className="badge blue">{memoryKind(memory)}</span>
-              {memory.confidence ? <span className="badge">{Math.round(Number(memory.confidence) * 100)}% confidence</span> : null}
-              {memory.updatedAt || memory.createdAt ? <span className="badge">Updated {formatDate(memory.updatedAt ?? memory.createdAt)}</span> : null}
+            <div className={toolbarClass}>
+              <span className={cn(badgeClass, badgeBlueClass)}>{memoryKind(memory)}</span>
+              {memory.confidence ? <span className={badgeClass}>{Math.round(Number(memory.confidence) * 100)}% confidence</span> : null}
+              {memory.updatedAt || memory.createdAt ? <span className={badgeClass}>Updated {formatDate(memory.updatedAt ?? memory.createdAt)}</span> : null}
             </div>
-            {memoryReason(memory) ? <p className="muted">Capture: {memoryReason(memory)}</p> : null}
+            {memoryReason(memory) ? <p className={mutedClass}>Capture: {memoryReason(memory)}</p> : null}
           </section>
 
-          <section className="card section span-12">
+          <section className={cn(cardClass, sectionClass, span12Class)}>
             <h2>Sources</h2>
             <SourceRefList sourceRefs={sourceRefs} />
           </section>
 
-          <section className="card section span-6">
+          <section className={cn(cardClass, sectionClass, span6Class)}>
             <h2>Related entities</h2>
             <RelatedEntityList entities={relatedEntities} />
           </section>
 
-          <section className="card section span-6">
+          <section className={cn(cardClass, sectionClass, span6Class)}>
             <h2>Relationships</h2>
             <RelatedEntityList entities={relationships} />
           </section>
 
           {activityEvents.length ? (
-            <section className="card section span-12">
+            <section className={cn(cardClass, sectionClass, span12Class)}>
               <h2>Activity</h2>
-              <div className="item-list">
+              <div className={itemListClass}>
                 {activityEvents.map((event) => (
-                  <article className="item" key={textValue(event._id, event.id, event.summary)}>
-                    <span className="item-icon">
+                  <article className={itemClass} key={textValue(event._id, event.id, event.summary)}>
+                    <span className={itemIconClass}>
                       <icons.Clock3 size={17} aria-hidden />
                     </span>
                     <div>
-                      <p className="item-title">{textValue(event.summary, event.activityType) || "Activity"}</p>
-                      <p className="item-meta">
+                      <p className={itemTitleClass}>{textValue(event.summary, event.activityType) || "Activity"}</p>
+                      <p className={itemMetaClass}>
                         {textValue(event.activityType, event.actorType) || "event"}
                         {event.timestamp ? ` · ${formatDate(event.timestamp)}` : ""}
                       </p>
                     </div>
-                    <span className="badge">{textValue(event.actorType) || "system"}</span>
+                    <span className={badgeClass}>{textValue(event.actorType) || "system"}</span>
                   </article>
                 ))}
               </div>
@@ -1585,12 +1644,12 @@ export function LiveTriageContent() {
   return (
     <LiveGate>
       {!items || !entityOptions ? (
-        <section className="card section">
+        <section className={cn(cardClass, sectionClass)}>
           <h2>Loading review items</h2>
         </section>
       ) : (
-        <div className="item-list">
-          {items.length === 0 ? <p className="muted">No unclear signals need review.</p> : null}
+        <div className={itemListClass}>
+          {items.length === 0 ? <p className={mutedClass}>No unclear signals need review.</p> : null}
           {items.map((item) => (
             <TriageItem key={item._id} item={item} entityOptions={entityOptions} displayLabels={displayLabels} />
           ))}
@@ -1646,14 +1705,14 @@ function TriageItem({
   }
 
   return (
-    <article className="item">
-      <span className="item-icon">
+    <article className={itemClass}>
+      <span className={itemIconClass}>
         <icons.Archive size={17} aria-hidden />
       </span>
-      <div className="form-grid">
+      <div className={formGridClass}>
         <div>
-          <p className="item-title">{titleForReviewItem(item)}</p>
-          <p className="item-meta">
+          <p className={itemTitleClass}>{titleForReviewItem(item)}</p>
+          <p className={itemMetaClass}>
             {item.candidateEntityType} signal
             {item.confidence ? `, confidence ${Math.round(item.confidence * 100)}%` : ""}
           </p>
@@ -1664,11 +1723,11 @@ function TriageItem({
           setPayload={setEditedPayload}
           displayLabels={displayLabels}
         />
-        <div className="split-list">
-          <label className="field">
+        <div className={splitListClass}>
+          <label className={fieldClass}>
             <span>Target type</span>
             <select
-              className="select"
+              className={selectClass}
               value={targetEntityType}
               onChange={(event) => {
                 const nextType = event.target.value;
@@ -1683,9 +1742,9 @@ function TriageItem({
               ))}
             </select>
           </label>
-          <label className="field">
+          <label className={fieldClass}>
             <span>Merge target</span>
-            <select className="select" value={mergeTargetId} onChange={(event) => setMergeTargetId(event.target.value)}>
+            <select className={selectClass} value={mergeTargetId} onChange={(event) => setMergeTargetId(event.target.value)}>
               <option value="">Select existing {targetEntityType}</option>
               {bestMergeOptions.length ? <option disabled>Suggested matches</option> : null}
               {bestMergeOptions.map((option) => (
@@ -1703,9 +1762,9 @@ function TriageItem({
           </label>
         </div>
       </div>
-      <div className="toolbar" aria-label={`Review actions for ${titleForReviewItem(item)}`}>
+      <div className={toolbarClass} aria-label={`Review actions for ${titleForReviewItem(item)}`}>
         <button
-          className="icon-button"
+          className={iconButtonClass}
           type="button"
           title="Approve as-is"
           aria-label={`Approve ${titleForReviewItem(item)} as-is`}
@@ -1714,7 +1773,7 @@ function TriageItem({
           <icons.Check size={17} aria-hidden />
         </button>
         <button
-          className="icon-button"
+          className={iconButtonClass}
           type="button"
           title="Approve with edited payload"
           aria-label={`Approve ${titleForReviewItem(item)} with edited payload`}
@@ -1723,7 +1782,7 @@ function TriageItem({
           <icons.CircleCheck size={17} aria-hidden />
         </button>
         <button
-          className="icon-button"
+          className={iconButtonClass}
           type="button"
           title="Reclassify to selected target type"
           aria-label={`Reclassify ${titleForReviewItem(item)} to selected target type`}
@@ -1732,7 +1791,7 @@ function TriageItem({
           <icons.Shuffle size={17} aria-hidden />
         </button>
         <button
-          className="icon-button"
+          className={iconButtonClass}
           type="button"
           title="Merge into target ID"
           aria-label={`Merge ${titleForReviewItem(item)} into target ID`}
@@ -1742,7 +1801,7 @@ function TriageItem({
           <icons.LinkIcon size={17} aria-hidden />
         </button>
         <button
-          className="icon-button"
+          className={iconButtonClass}
           type="button"
           title="Reject signal"
           aria-label={`Reject ${titleForReviewItem(item)}`}
@@ -1771,13 +1830,13 @@ function PayloadEditor({
   }
 
   const field = (name: string, label: string, options?: { multiline?: boolean; type?: string }) => (
-    <label className="field" key={name}>
+    <label className={fieldClass} key={name}>
       <span>{label}</span>
       {options?.multiline ? (
-        <textarea className="textarea" value={payload[name] ?? ""} onChange={(event) => update(name, event.target.value)} />
+        <textarea className={textareaClass} value={payload[name] ?? ""} onChange={(event) => update(name, event.target.value)} />
       ) : (
         <input
-          className="input"
+          className={inputClass}
           type={options?.type ?? "text"}
           value={payload[name] ?? ""}
           onChange={(event) => update(name, event.target.value)}
@@ -1787,9 +1846,9 @@ function PayloadEditor({
   );
 
   const status = statusOptions[entityType] ? (
-    <label className="field">
+    <label className={fieldClass}>
       <span>Status</span>
-      <select className="select" value={payload.status ?? statusOptions[entityType][0]} onChange={(event) => update("status", event.target.value)}>
+      <select className={selectClass} value={payload.status ?? statusOptions[entityType][0]} onChange={(event) => update("status", event.target.value)}>
         {statusOptions[entityType].map((statusValue) => (
           <option key={statusValue} value={statusValue}>
             {statusValue}
@@ -1801,9 +1860,9 @@ function PayloadEditor({
 
   if (entityType === "task") {
     const ownerType = (
-      <label className="field">
+      <label className={fieldClass}>
         <span>Owner</span>
-        <select className="select" value={payload.ownerType ?? ""} onChange={(event) => update("ownerType", event.target.value)}>
+        <select className={selectClass} value={payload.ownerType ?? ""} onChange={(event) => update("ownerType", event.target.value)}>
           <option value="">Unspecified</option>
           <option value="owner">{displayLabels.ownerName}</option>
           <option value="agent">{displayLabels.agentName}</option>
@@ -1812,9 +1871,9 @@ function PayloadEditor({
     );
 
     return (
-      <div className="form-grid compact-form">
+      <div className={formGridClass}>
         {field("title", "Title")}
-        <div className="split-list">
+        <div className={splitListClass}>
           {status}
           {ownerType}
           {field("dueDate", "Due date")}
@@ -1828,7 +1887,7 @@ function PayloadEditor({
 
   if (entityType === "project") {
     return (
-      <div className="form-grid compact-form">
+      <div className={formGridClass}>
         {field("title", "Title")}
         {status}
         {field("summary", "Summary", { multiline: true })}
@@ -1839,8 +1898,8 @@ function PayloadEditor({
 
   if (entityType === "person") {
     return (
-      <div className="form-grid compact-form">
-        <div className="split-list">
+      <div className={formGridClass}>
+        <div className={splitListClass}>
           {field("name", "Name")}
           {field("email", "Email", { type: "email" })}
         </div>
@@ -1852,15 +1911,15 @@ function PayloadEditor({
 
   if (entityType === "company") {
     return (
-      <div className="form-grid compact-form">
-        <div className="split-list">
+      <div className={formGridClass}>
+        <div className={splitListClass}>
           {field("name", "Name")}
           {field("website", "Website", { type: "url" })}
         </div>
-        <label className="field">
+        <label className={fieldClass}>
           <span>Relationship</span>
           <select
-            className="select"
+            className={selectClass}
             value={payload.relationshipLabel ?? "other"}
             onChange={(event) => update("relationshipLabel", event.target.value)}
           >
@@ -1878,7 +1937,7 @@ function PayloadEditor({
 
   if (entityType === "link") {
     return (
-      <div className="form-grid compact-form">
+      <div className={formGridClass}>
         {field("url", "URL", { type: "url" })}
         {field("title", "Title")}
         {status}
@@ -1890,7 +1949,7 @@ function PayloadEditor({
 
   if (entityType === "note") {
     return (
-      <div className="form-grid compact-form">
+      <div className={formGridClass}>
         {field("title", "Title")}
         {field("body", "Body", { multiline: true })}
       </div>
@@ -1899,7 +1958,7 @@ function PayloadEditor({
 
   if (entityType === "goal") {
     return (
-      <div className="form-grid compact-form">
+      <div className={formGridClass}>
         {field("title", "Title")}
         {status}
         {field("description", "Description", { multiline: true })}
@@ -1908,7 +1967,7 @@ function PayloadEditor({
   }
 
   return (
-    <div className="form-grid compact-form">
+    <div className={formGridClass}>
       {field("objectType", "Object type")}
       {field("title", "Title")}
       {field("summary", "Summary", { multiline: true })}
@@ -1925,12 +1984,12 @@ export function LivePendingActionsContent() {
   return (
     <LiveGate>
       {!actions ? (
-        <section className="card section">
+        <section className={cn(cardClass, sectionClass)}>
           <h2>Loading pending actions</h2>
         </section>
       ) : (
-        <div className="item-list">
-          {actions.length === 0 ? <p className="muted">No pending external actions.</p> : null}
+        <div className={itemListClass}>
+          {actions.length === 0 ? <p className={mutedClass}>No pending external actions.</p> : null}
           {actions.map((action) => (
             <PendingActionItem key={action._id} action={action} reviewPendingAction={reviewPendingAction} />
           ))}
@@ -1981,47 +2040,47 @@ function PendingActionItem({
   }
 
   return (
-    <article className="item pending-action-item">
-      <span className="item-icon">
+    <article className={cn(itemClass, pendingActionItemClass)}>
+      <span className={itemIconClass}>
         <icons.MessageSquareText size={17} aria-hidden />
       </span>
-      <div className="form-grid">
+      <div className={formGridClass}>
         <div>
-          <p className="item-title">{action.subject ?? action.actionType}</p>
-          <p className="item-meta">{primaryText}</p>
+          <p className={itemTitleClass}>{action.subject ?? action.actionType}</p>
+          <p className={itemMetaClass}>{primaryText}</p>
         </div>
         {reviewable ? (
-          <div className="form-grid compact-form">
-            <div className="split-list">
-              <label className="field">
+          <div className={formGridClass}>
+            <div className={splitListClass}>
+              <label className={fieldClass}>
                 <span>Recipients</span>
-                <input className="input" value={draft.recipients} onChange={(event) => update("recipients", event.target.value)} />
+                <input className={inputClass} value={draft.recipients} onChange={(event) => update("recipients", event.target.value)} />
               </label>
-              <label className="field">
+              <label className={fieldClass}>
                 <span>Subject</span>
-                <input className="input" value={draft.subject} onChange={(event) => update("subject", event.target.value)} />
+                <input className={inputClass} value={draft.subject} onChange={(event) => update("subject", event.target.value)} />
               </label>
             </div>
-            <label className="field">
+            <label className={fieldClass}>
               <span>Message</span>
-              <textarea className="textarea" value={draft.messageBody || draft.body} onChange={(event) => update("messageBody", event.target.value)} />
+              <textarea className={textareaClass} value={draft.messageBody || draft.body} onChange={(event) => update("messageBody", event.target.value)} />
             </label>
-            <label className="field">
+            <label className={fieldClass}>
               <span>Review notes</span>
-              <input className="input" value={draft.approvalNotes} onChange={(event) => update("approvalNotes", event.target.value)} />
+              <input className={inputClass} value={draft.approvalNotes} onChange={(event) => update("approvalNotes", event.target.value)} />
             </label>
-            {error ? <p className="error-text">{error}</p> : null}
+            {error ? <p className={errorTextClass}>{error}</p> : null}
           </div>
         ) : (
-          <p className="muted">{statusDescription(action)}</p>
+          <p className={mutedClass}>{statusDescription(action)}</p>
         )}
       </div>
-      <div className="pending-action-side">
-        <span className={`badge ${badgeForPendingAction(action.status)}`}>{action.status}</span>
+      <div className={pendingActionSideClass}>
+        <span className={cn(badgeClass, badgeForPendingAction(action.status))}>{action.status}</span>
         {reviewable ? (
-          <div className="toolbar" aria-label={`Review actions for ${action.subject ?? action.actionType}`}>
+          <div className={toolbarClass} aria-label={`Review actions for ${action.subject ?? action.actionType}`}>
             <button
-              className="icon-button"
+              className={iconButtonClass}
               type="button"
               title="Approve action"
               aria-label={`Approve ${action.subject ?? action.actionType}`}
@@ -2031,7 +2090,7 @@ function PendingActionItem({
               <icons.Check size={17} aria-hidden />
             </button>
             <button
-              className="icon-button"
+              className={iconButtonClass}
               type="button"
               title="Save revisions"
               aria-label={`Save revisions for ${action.subject ?? action.actionType}`}
@@ -2041,7 +2100,7 @@ function PendingActionItem({
               <icons.CircleCheck size={17} aria-hidden />
             </button>
             <button
-              className="icon-button"
+              className={iconButtonClass}
               type="button"
               title="Reject action"
               aria-label={`Reject ${action.subject ?? action.actionType}`}
@@ -2094,12 +2153,12 @@ function parseRecipients(recipients: string) {
 
 function badgeForPendingAction(status: string) {
   if (status === "approved" || status === "sent" || status === "completed") {
-    return "blue";
+    return badgeBlueClass;
   }
   if (status === "rejected" || status === "failed") {
-    return "red";
+    return badgeRedClass;
   }
-  return "gold";
+  return badgeGoldClass;
 }
 
 function statusDescription(action: AnyRecord) {
@@ -2174,19 +2233,19 @@ function RubricContextGroup({
   empty: string;
 }) {
   return (
-    <div className="rubric-group">
-      <div className="settings-row">
+    <div className="grid gap-2">
+      <div className={settingsRowClass}>
         <h3>{label}</h3>
-        <Link className="text-button compact" href={href}>
+        <Link className={cn(textButtonClass, textButtonCompactClass)} href={href}>
           Manage
         </Link>
       </div>
       {items.length === 0 ? (
-        <p className="muted">{empty}</p>
+        <p className={mutedClass}>{empty}</p>
       ) : (
-        <div className="toolbar">
+        <div className={toolbarClass}>
           {items.map((item) => (
-            <span className="badge blue" key={item}>
+            <span className={cn(badgeClass, badgeBlueClass)} key={item}>
               {item}
             </span>
           ))}
@@ -2232,22 +2291,22 @@ export function LiveSettingsContent() {
   return (
     <LiveGate>
       {!data ? (
-        <section className="card section">
+        <section className={cn(cardClass, sectionClass)}>
           <h2>Loading settings</h2>
         </section>
       ) : (
-        <div className="grid">
-          <section className="card section span-7">
+        <div className={gridClass}>
+          <section className={cn(cardClass, sectionClass, span7Class)}>
             <h2>Importance policy</h2>
-            <p className="muted">
+            <p className={mutedClass}>
               Your stable, hand-written rubric. Harnesses combine this with live context (goals, in-progress projects,
               favorited contacts) to decide what belongs in Skippy. Items that clear the bar are written directly into
               accepted knowledge with source references and a short decision note.
             </p>
-            <label className="field">
+            <label className={fieldClass}>
               <span>Policy text</span>
               <textarea
-                className="textarea"
+                className={textareaClass}
                 key={
                   data.operatingRules?.find(
                     (rule: AnyRecord) => rule.scope === "importance" && rule.ruleType === "default",
@@ -2271,13 +2330,13 @@ export function LiveSettingsContent() {
               />
             </label>
           </section>
-          <section className="card section span-5">
+          <section className={cn(cardClass, sectionClass, span5Class)}>
             <h2>Effective rubric</h2>
-            <p className="muted">What harnesses receive from get_importance_rubric — your policy plus live context.</p>
+            <p className={mutedClass}>What harnesses receive from get_importance_rubric — your policy plus live context.</p>
             {!effectiveRubric ? (
-              <p className="muted">Composing…</p>
+              <p className={mutedClass}>Composing…</p>
             ) : (
-              <div className="form-grid">
+              <div className={formGridClass}>
                 <RubricContextGroup
                   label="Active goals"
                   href="/goals"
@@ -2296,21 +2355,23 @@ export function LiveSettingsContent() {
                   items={effectiveRubric.favoriteContacts.map((contact: AnyRecord) => contact.name)}
                   empty="No favorited contacts."
                 />
-                <details className="rubric-rendered">
-                  <summary>Preview composed text</summary>
-                  <pre className="code rubric-rendered-text">{effectiveRubric.renderedText}</pre>
+                <details>
+                  <summary className="cursor-pointer text-[13px] font-bold">Preview composed text</summary>
+                  <pre className={cn(codeClass, "mt-2 max-h-[280px] overflow-auto whitespace-pre-wrap")}>
+                    {effectiveRubric.renderedText}
+                  </pre>
                 </details>
               </div>
             )}
           </section>
-          <section className="card section span-6">
+          <section className={cn(cardClass, sectionClass, span6Class)}>
             <h2>Privacy and storage</h2>
-            <p className="muted">What Skippy should avoid storing, and how much source material harnesses may keep.</p>
-            <div className="form-grid">
-              <label className="field">
+            <p className={mutedClass}>What Skippy should avoid storing, and how much source material harnesses may keep.</p>
+            <div className={formGridClass}>
+              <label className={fieldClass}>
                 <span>Storage mode</span>
                 <select
-                  className="select"
+                  className={selectClass}
                   value={memoryPrivacyPolicy.storageMode}
                   onChange={(event) =>
                     void updateSecondBrainSettings({
@@ -2323,10 +2384,10 @@ export function LiveSettingsContent() {
                   <option value="full_content_when_important">Full content when important</option>
                 </select>
               </label>
-              <label className="field">
+              <label className={fieldClass}>
                 <span>Do not store</span>
                 <textarea
-                  className="textarea"
+                  className={textareaClass}
                   key={`excluded-${memoryPrivacyPolicy.excludedContent}`}
                   defaultValue={memoryPrivacyPolicy.excludedContent}
                   onBlur={(event) =>
@@ -2336,10 +2397,10 @@ export function LiveSettingsContent() {
                   }
                 />
               </label>
-              <label className="field">
+              <label className={fieldClass}>
                 <span>Sensitive content handling</span>
                 <textarea
-                  className="textarea"
+                  className={textareaClass}
                   key={`sensitive-${memoryPrivacyPolicy.sensitiveContentInstructions}`}
                   defaultValue={memoryPrivacyPolicy.sensitiveContentInstructions}
                   onBlur={(event) =>
@@ -2351,14 +2412,14 @@ export function LiveSettingsContent() {
               </label>
             </div>
           </section>
-          <section className="card section span-6">
+          <section className={cn(cardClass, sectionClass, span6Class)}>
             <h2>Recall cadence</h2>
-            <p className="muted">When Skippy should bring stored context back into focus.</p>
-            <div className="form-grid">
-              <label className="field">
+            <p className={mutedClass}>When Skippy should bring stored context back into focus.</p>
+            <div className={formGridClass}>
+              <label className={fieldClass}>
                 <span>Recall rhythm</span>
                 <select
-                  className="select"
+                  className={selectClass}
                   value={recallPreferences.cadence}
                   onChange={(event) =>
                     void updateSecondBrainSettings({
@@ -2372,7 +2433,7 @@ export function LiveSettingsContent() {
                   <option value="manual">Only when asked</option>
                 </select>
               </label>
-              <label className="checkbox-field">
+              <label className={checkboxFieldClass}>
                 <input
                   type="checkbox"
                   checked={recallPreferences.allowProactiveRecall}
@@ -2384,10 +2445,10 @@ export function LiveSettingsContent() {
                 />
                 <span>Allow proactive recall</span>
               </label>
-              <label className="field">
+              <label className={fieldClass}>
                 <span>Recall focus</span>
                 <textarea
-                  className="textarea"
+                  className={textareaClass}
                   key={`recall-${recallPreferences.focusWindow}`}
                   defaultValue={recallPreferences.focusWindow}
                   onBlur={(event) =>
@@ -2399,14 +2460,14 @@ export function LiveSettingsContent() {
               </label>
             </div>
           </section>
-          <section className="card section span-6">
+          <section className={cn(cardClass, sectionClass, span6Class)}>
             <h2>Harness autonomy</h2>
-            <p className="muted">How much local harnesses may do before asking you to review.</p>
-            <div className="form-grid">
-              <label className="field">
+            <p className={mutedClass}>How much local harnesses may do before asking you to review.</p>
+            <div className={formGridClass}>
+              <label className={fieldClass}>
                 <span>Memory ingestion</span>
                 <select
-                  className="select"
+                  className={selectClass}
                   value={harnessAutonomyPolicy.ingestionMode}
                   onChange={(event) =>
                     void updateSecondBrainSettings({
@@ -2419,10 +2480,10 @@ export function LiveSettingsContent() {
                   <option value="auto_accept_with_action_review">Auto-accept memory, review actions</option>
                 </select>
               </label>
-              <label className="field">
+              <label className={fieldClass}>
                 <span>External actions</span>
                 <select
-                  className="select"
+                  className={selectClass}
                   value={harnessAutonomyPolicy.actionApproval}
                   onChange={(event) =>
                     void updateSecondBrainSettings({
@@ -2435,10 +2496,10 @@ export function LiveSettingsContent() {
                   <option value="allow_low_risk_send">Allow low-risk sends</option>
                 </select>
               </label>
-              <label className="field">
+              <label className={fieldClass}>
                 <span>Autonomy notes</span>
                 <textarea
-                  className="textarea"
+                  className={textareaClass}
                   key={`autonomy-${harnessAutonomyPolicy.notes}`}
                   defaultValue={harnessAutonomyPolicy.notes}
                   onBlur={(event) =>
@@ -2450,21 +2511,21 @@ export function LiveSettingsContent() {
               </label>
             </div>
           </section>
-          <section className="card section span-6">
+          <section className={cn(cardClass, sectionClass, span6Class)}>
             <h2>Brain settings</h2>
-            <div className="form-grid">
-              <label className="field">
+            <div className={formGridClass}>
+              <label className={fieldClass}>
                 <span>Assistant name</span>
                 <input
-                  className="input"
+                  className={inputClass}
                   defaultValue={data.config?.assistantDisplayName ?? "Skippy"}
                   onBlur={(event) => void updateConfig({ assistantDisplayName: event.target.value })}
                 />
               </label>
-              <label className="field">
+              <label className={fieldClass}>
                 <span>LLM provider</span>
                 <select
-                  className="select"
+                  className={selectClass}
                   defaultValue={data.config?.llmProviderMode ?? "none"}
                   onChange={(event) => void updateConfig({ llmProviderMode: event.target.value as any })}
                 >
@@ -2475,17 +2536,17 @@ export function LiveSettingsContent() {
                   ))}
                 </select>
               </label>
-              <label className="field">
+              <label className={fieldClass}>
                 <span>Embedding provider</span>
                 <input
-                  className="input"
+                  className={inputClass}
                   defaultValue={data.config?.embeddingProviderMode ?? "none"}
                   onBlur={(event) => void updateConfig({ embeddingProviderMode: event.target.value })}
                 />
               </label>
             </div>
           </section>
-          <section className="card section span-6">
+          <section className={cn(cardClass, sectionClass, span6Class)}>
             <h2>Notifications</h2>
             <NotificationSettings
               config={data.config}
@@ -2499,15 +2560,15 @@ export function LiveSettingsContent() {
               disablePushSubscription={async (args) => disablePushSubscription(args as any)}
             />
           </section>
-          <section className="card section span-6">
+          <section className={cn(cardClass, sectionClass, span6Class)}>
             <h2>MCP tokens</h2>
-            <div className="form-grid">
-              <label className="field">
+            <div className={formGridClass}>
+              <label className={fieldClass}>
                 <span>New token label</span>
-                <input className="input" value={label} onChange={(event) => setLabel(event.target.value)} />
+                <input className={inputClass} value={label} onChange={(event) => setLabel(event.target.value)} />
               </label>
               <button
-                className="text-button"
+                className={textButtonClass}
                 type="button"
                 onClick={async () => {
                   const result = (await createToken({ label })) as { token: string };
@@ -2517,25 +2578,25 @@ export function LiveSettingsContent() {
                 Create token
               </button>
               {createdToken ? (
-                <p className="code">
+                <p className={codeClass}>
                   {createdToken}
                   <br />
                   This full value is only returned once.
                 </p>
               ) : null}
-              <div className="item-list">
+              <div className={itemListClass}>
                 {data.tokens.map((token: AnyRecord) => (
-                  <article className="item" key={token._id}>
+                  <article className={itemClass} key={token._id}>
                     <div>
-                      <p className="item-title">{token.label}</p>
-                      <p className="item-meta">
+                      <p className={itemTitleClass}>{token.label}</p>
+                      <p className={itemMetaClass}>
                         {token.tokenPrefix}..., last used {formatDate(token.lastUsedAt)}
                       </p>
                     </div>
-                    <span className={token.revokedAt ? "badge red" : "badge blue"}>
+                    <span className={cn(badgeClass, token.revokedAt ? badgeRedClass : badgeBlueClass)}>
                       {token.revokedAt ? "Revoked" : "Active"}
                     </span>
-                    <button className="icon-button" type="button" title="Revoke" onClick={() => void revokeToken({ tokenId: token._id })}>
+                    <button className={iconButtonClass} type="button" title="Revoke" onClick={() => void revokeToken({ tokenId: token._id })}>
                       <icons.X size={17} aria-hidden />
                     </button>
                   </article>
@@ -2632,28 +2693,28 @@ function NotificationSettings({
   }
 
   return (
-    <div className="form-grid">
-      <div className="settings-row">
+    <div className={formGridClass}>
+      <div className={settingsRowClass}>
         <div>
           <h3>Browser push</h3>
-          <p className="muted">
+          <p className={mutedClass}>
             Permission {permissionState}; {activeSubscriptions.length} active subscription
             {activeSubscriptions.length === 1 ? "" : "s"}.
           </p>
         </div>
-        <span className={config?.notificationsEnabled ? "badge blue" : "badge"}>{config?.notificationsEnabled ? "On" : "Off"}</span>
+        <span className={cn(badgeClass, config?.notificationsEnabled && badgeBlueClass)}>{config?.notificationsEnabled ? "On" : "Off"}</span>
       </div>
-      <div className="toolbar">
-        <button className="text-button" type="button" onClick={() => void enableBrowserNotifications()}>
+      <div className={toolbarClass}>
+        <button className={textButtonClass} type="button" onClick={() => void enableBrowserNotifications()}>
           Enable browser push
         </button>
-        <button className="text-button" type="button" onClick={() => void updateConfig({ notificationsEnabled: false })}>
+        <button className={textButtonClass} type="button" onClick={() => void updateConfig({ notificationsEnabled: false })}>
           Pause notifications
         </button>
       </div>
-      {error ? <p className="error-text">{error}</p> : null}
-      <div className="split-list">
-        <label className="checkbox-field">
+      {error ? <p className={errorTextClass}>{error}</p> : null}
+      <div className={splitListClass}>
+        <label className={checkboxFieldClass}>
           <input
             type="checkbox"
             checked={preferences.urgentEnabled}
@@ -2661,7 +2722,7 @@ function NotificationSettings({
           />
           <span>Urgent items</span>
         </label>
-        <label className="checkbox-field">
+        <label className={checkboxFieldClass}>
           <input
             type="checkbox"
             checked={preferences.pendingActionEnabled}
@@ -2669,7 +2730,7 @@ function NotificationSettings({
           />
           <span>Pending actions</span>
         </label>
-        <label className="checkbox-field">
+        <label className={checkboxFieldClass}>
           <input
             type="checkbox"
             checked={preferences.focusSummaryEnabled}
@@ -2677,7 +2738,7 @@ function NotificationSettings({
           />
           <span>Focus summaries</span>
         </label>
-        <label className="checkbox-field">
+        <label className={checkboxFieldClass}>
           <input
             type="checkbox"
             checked={preferences.dailyDigestEnabled}
@@ -2686,11 +2747,11 @@ function NotificationSettings({
           <span>Daily digest</span>
         </label>
       </div>
-      <div className="split-list">
-        <label className="field">
+      <div className={splitListClass}>
+        <label className={fieldClass}>
           <span>Minimum priority</span>
           <input
-            className="input"
+            className={inputClass}
             type="number"
             min="0"
             max="1"
@@ -2699,7 +2760,7 @@ function NotificationSettings({
             onChange={(event) => void setPreference("minPriorityScore", Number(event.target.value))}
           />
         </label>
-        <label className="checkbox-field checkbox-field-bottom">
+        <label className={cn(checkboxFieldClass, checkboxFieldBottomClass)}>
           <input
             type="checkbox"
             checked={preferences.quietHours.enabled}
@@ -2713,11 +2774,11 @@ function NotificationSettings({
           <span>Quiet hours</span>
         </label>
       </div>
-      <div className="split-list">
-        <label className="field">
+      <div className={splitListClass}>
+        <label className={fieldClass}>
           <span>Quiet start</span>
           <input
-            className="input"
+            className={inputClass}
             type="time"
             value={preferences.quietHours.start}
             onChange={(event) =>
@@ -2728,10 +2789,10 @@ function NotificationSettings({
             }
           />
         </label>
-        <label className="field">
+        <label className={fieldClass}>
           <span>Quiet end</span>
           <input
-            className="input"
+            className={inputClass}
             type="time"
             value={preferences.quietHours.end}
             onChange={(event) =>
@@ -2743,20 +2804,20 @@ function NotificationSettings({
           />
         </label>
       </div>
-      <div className="item-list">
+      <div className={itemListClass}>
         {pushSubscriptions.map((subscription) => (
-          <article className="item" key={subscription._id}>
+          <article className={itemClass} key={subscription._id}>
             <div>
-              <p className="item-title">{subscription.userAgent?.split(" ").slice(0, 4).join(" ") ?? "Browser subscription"}</p>
-              <p className="item-meta">
+              <p className={itemTitleClass}>{subscription.userAgent?.split(" ").slice(0, 4).join(" ") ?? "Browser subscription"}</p>
+              <p className={itemMetaClass}>
                 Last seen {formatDate(subscription.lastSeenAt)}; permission {subscription.permissionState ?? "unknown"}
               </p>
             </div>
-            <span className={subscription.enabled && !subscription.revokedAt ? "badge blue" : "badge red"}>
+            <span className={cn(badgeClass, subscription.enabled && !subscription.revokedAt ? badgeBlueClass : badgeRedClass)}>
               {subscription.enabled && !subscription.revokedAt ? "Active" : "Disabled"}
             </span>
             <button
-              className="icon-button"
+              className={iconButtonClass}
               type="button"
               title="Disable subscription"
               disabled={!subscription.enabled || Boolean(subscription.revokedAt)}

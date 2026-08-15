@@ -3,7 +3,11 @@
 import { useEffect, useState } from "react";
 import { SignInButton, UserButton, useAuth } from "@clerk/nextjs";
 import { useConvexAuth, useMutation, useQuery } from "convex/react";
+import { cn } from "@/lib/utils";
 import { api } from "../lib/skippy-api";
+import { badgeBlueClass, badgeClass, cardClass, mutedClass, sectionClass, textButtonClass } from "./page-classes";
+
+const authControlsClass = "flex items-center justify-between gap-2.5 desk:justify-start";
 
 export function AuthStatus() {
   const { isLoaded: isClerkLoaded, isSignedIn } = useAuth();
@@ -25,20 +29,20 @@ export function AuthStatus() {
   }, [bootstrapping, ensureViewer, isAuthenticated, viewer]);
 
   if (!isClerkLoaded || (isSignedIn && isConvexAuthLoading)) {
-    return <span className="badge">Connecting</span>;
+    return <span className={badgeClass}>Connecting</span>;
   }
 
   return (
-    <div className="auth-controls">
+    <div className={authControlsClass}>
       {!isSignedIn ? (
         <SignInButton mode="modal">
-          <button className="text-button" type="button">
+          <button className={textButtonClass} type="button">
             Sign in
           </button>
         </SignInButton>
       ) : (
         <>
-          <span className="badge blue">{isAuthenticated ? viewer?.brain?.displayName ?? "Skippy" : "Connecting Convex"}</span>
+          <span className={cn(badgeClass, badgeBlueClass)}>{isAuthenticated ? viewer?.brain?.displayName ?? "Skippy" : "Connecting Convex"}</span>
           <UserButton />
         </>
       )}
@@ -53,20 +57,20 @@ export function LiveGate({ children }: { children: React.ReactNode }) {
 
   if (!isClerkLoaded || isLoading || (isAuthenticated && viewer === undefined)) {
     return (
-      <section className="card section">
+      <section className={cn(cardClass, sectionClass)}>
         <h2>Loading brain</h2>
-        <p className="muted">Connecting to Convex and checking your brain instance.</p>
+        <p className={mutedClass}>Connecting to Convex and checking your brain instance.</p>
       </section>
     );
   }
 
   if (!isSignedIn) {
     return (
-      <section className="card section">
+      <section className={cn(cardClass, sectionClass)}>
         <h2>Sign in</h2>
-        <p className="muted">Use Clerk to connect your Skippy brain.</p>
+        <p className={mutedClass}>Use Clerk to connect your Skippy brain.</p>
         <SignInButton mode="modal">
-          <button className="text-button" type="button">
+          <button className={textButtonClass} type="button">
             Sign in with Clerk
           </button>
         </SignInButton>
@@ -76,9 +80,9 @@ export function LiveGate({ children }: { children: React.ReactNode }) {
 
   if (!isAuthenticated) {
     return (
-      <section className="card section">
+      <section className={cn(cardClass, sectionClass)}>
         <h2>Connecting Convex</h2>
-        <p className="muted">Clerk sign-in is active. Waiting for Convex to accept the session token.</p>
+        <p className={mutedClass}>Clerk sign-in is active. Waiting for Convex to accept the session token.</p>
       </section>
     );
   }

@@ -5,14 +5,25 @@ import type {
   SelectHTMLAttributes,
   TextareaHTMLAttributes,
 } from "react";
-import styles from "./ui.module.css";
-
-function cx(...parts: Array<string | false | null | undefined>) {
-  return parts.filter(Boolean).join(" ");
-}
+import { Loader2 } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { Button as ShadButton } from "./ui/button";
+import { Badge as ShadBadge } from "./ui/badge";
+import { Card as ShadCard } from "./ui/card";
+import { Input } from "./ui/input";
+import { Textarea } from "./ui/textarea";
+import { Label } from "./ui/label";
+import { Progress } from "./ui/progress";
 
 /* ---------------- Button ---------------- */
 type ButtonVariant = "default" | "primary" | "danger" | "ghost";
+
+const buttonVariantMap = {
+  default: "outline",
+  primary: "default",
+  danger: "destructive",
+  ghost: "ghost",
+} as const;
 
 export function Button({
   variant = "default",
@@ -27,20 +38,14 @@ export function Button({
   block?: boolean;
 }) {
   return (
-    <button
-      className={cx(
-        styles.button,
-        variant === "primary" && styles.primary,
-        variant === "danger" && styles.danger,
-        variant === "ghost" && styles.ghost,
-        small && styles.small,
-        block && styles.block,
-        className,
-      )}
+    <ShadButton
+      variant={buttonVariantMap[variant]}
+      size={small ? "sm" : "default"}
+      className={cn("font-bold", block && "w-full", className)}
       {...rest}
     >
       {children}
-    </button>
+    </ShadButton>
   );
 }
 
@@ -51,9 +56,14 @@ export function IconButton({
   ...rest
 }: ButtonHTMLAttributes<HTMLButtonElement> & { small?: boolean }) {
   return (
-    <button className={cx(styles.iconButton, small && styles.small, className)} {...rest}>
+    <ShadButton
+      variant="outline"
+      size="icon"
+      className={cn(small && "h-8 w-8", className)}
+      {...rest}
+    >
       {children}
-    </button>
+    </ShadButton>
   );
 }
 
@@ -71,12 +81,17 @@ export function Card({
   children: ReactNode;
 } & React.HTMLAttributes<HTMLDivElement>) {
   return (
-    <div
-      className={cx(styles.card, pad && styles.cardPad, interactive && styles.cardInteractive, className)}
+    <ShadCard
+      className={cn(
+        pad && "p-5",
+        interactive &&
+          "cursor-pointer text-left transition-[border-color,box-shadow,transform] hover:border-primary hover:shadow-md focus-visible:border-primary focus-visible:outline-none active:translate-y-px",
+        className,
+      )}
       {...rest}
     >
       {children}
-    </div>
+    </ShadCard>
   );
 }
 
@@ -96,8 +111,8 @@ export function Section({
   return (
     <Card pad={pad ?? true} className={className}>
       {title ? (
-        <div className={styles.sectionTitle}>
-          <h2>{title}</h2>
+        <div className="mb-3.5 flex items-center justify-between gap-3.5">
+          <h2 className="m-0 text-[19px]">{title}</h2>
           {action}
         </div>
       ) : null}
@@ -108,6 +123,14 @@ export function Section({
 
 /* ---------------- Badge ---------------- */
 export type BadgeTone = "neutral" | "blue" | "green" | "gold" | "red";
+
+const badgeToneClasses: Record<BadgeTone, string> = {
+  neutral: "bg-muted text-muted-foreground border-border",
+  blue: "bg-blue/10 text-blue border-blue/30",
+  green: "bg-green/20 text-[#2f7d4a] border-green/50",
+  gold: "bg-gold/10 text-gold border-gold/30",
+  red: "bg-red/10 text-red border-red/30",
+};
 
 export function Badge({
   tone = "neutral",
@@ -120,7 +143,19 @@ export function Badge({
   className?: string;
   children: ReactNode;
 }) {
-  return <span className={cx(styles.badge, styles[tone], dot && styles.dot, className)}>{children}</span>;
+  return (
+    <ShadBadge
+      variant="outline"
+      className={cn(
+        "min-h-6 gap-1.5 whitespace-nowrap rounded-full px-2.5 font-bold",
+        badgeToneClasses[tone],
+        className,
+      )}
+    >
+      {dot ? <span className="size-[7px] rounded-full bg-current" aria-hidden /> : null}
+      {children}
+    </ShadBadge>
+  );
 }
 
 /* ---------------- EmptyState ---------------- */
@@ -136,10 +171,12 @@ export function EmptyState({
   action?: ReactNode;
 }) {
   return (
-    <div className={styles.empty}>
-      {icon ? <span className={styles.emptyIcon}>{icon}</span> : null}
-      <p className={styles.emptyTitle}>{title}</p>
-      {children ? <p>{children}</p> : null}
+    <div className="grid justify-items-center gap-2.5 px-5 py-10 text-center text-muted-foreground">
+      {icon ? (
+        <span className="grid size-[46px] place-items-center rounded-xl bg-accent text-primary">{icon}</span>
+      ) : null}
+      <p className="m-0 text-base font-bold text-foreground">{title}</p>
+      {children ? <p className="m-0 max-w-[420px] text-sm">{children}</p> : null}
       {action}
     </div>
   );
@@ -147,12 +184,12 @@ export function EmptyState({
 
 /* ---------------- Spinner / Loading ---------------- */
 export function Spinner() {
-  return <span className={styles.spinner} aria-hidden />;
+  return <Loader2 className="inline-block size-[18px] animate-spin text-primary" aria-hidden />;
 }
 
 export function LoadingRow({ label = "Loading…" }: { label?: string }) {
   return (
-    <span className={styles.loadingRow}>
+    <span className="inline-flex items-center gap-2.5 text-sm text-muted-foreground">
       <Spinner /> {label}
     </span>
   );
@@ -162,39 +199,56 @@ export function LoadingRow({ label = "Loading…" }: { label?: string }) {
 export function ProgressBar({ value, tone }: { value: number; tone?: "blue" | "green" }) {
   const pct = Math.max(0, Math.min(100, Math.round(value)));
   return (
-    <div className={styles.progress} role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
-      <div className={cx(styles.progressFill, tone === "green" && styles.green)} style={{ width: `${pct}%` }} />
-    </div>
+    <Progress
+      value={pct}
+      className={cn("h-2", tone === "green" && "[&>div]:bg-[#4a9a68]")}
+    />
   );
 }
 
 /* ---------------- ActivityBar ---------------- */
 /** Skinny indeterminate progress bar — shows that background work (brief generation, agent execution) is running. */
 export function ActivityBar({ label = "Working…", className }: { label?: string; className?: string }) {
-  return <div className={cx(styles.activity, className)} role="progressbar" aria-label={label} />;
+  return (
+    <div
+      className={cn("h-1 w-full overflow-hidden rounded-full bg-muted", className)}
+      role="progressbar"
+      aria-label={label}
+    >
+      <div className="h-full w-1/3 animate-pulse rounded-full bg-primary/70" />
+    </div>
+  );
 }
 
 /* ---------------- Fields ---------------- */
 export function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <label className={styles.field}>
-      <span className={styles.fieldLabel}>{label}</span>
+    <label className="grid gap-1.5">
+      <Label asChild>
+        <span className="text-[13px] font-bold text-muted-foreground">{label}</span>
+      </Label>
       {children}
     </label>
   );
 }
 
 export function TextInput({ className, ...rest }: InputHTMLAttributes<HTMLInputElement>) {
-  return <input className={cx(styles.input, className)} {...rest} />;
+  return <Input className={cn("min-h-10 bg-secondary", className)} {...rest} />;
 }
 
 export function TextArea({ className, ...rest }: TextareaHTMLAttributes<HTMLTextAreaElement>) {
-  return <textarea className={cx(styles.textarea, className)} {...rest} />;
+  return <Textarea className={cn("min-h-[110px] resize-y bg-secondary leading-[1.45]", className)} {...rest} />;
 }
 
 export function Select({ className, children, ...rest }: SelectHTMLAttributes<HTMLSelectElement>) {
   return (
-    <select className={cx(styles.select, className)} {...rest}>
+    <select
+      className={cn(
+        "w-full min-h-10 rounded-md border border-input bg-secondary px-2.5 text-sm shadow-sm transition-colors focus-visible:border-primary focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50",
+        className,
+      )}
+      {...rest}
+    >
       {children}
     </select>
   );
@@ -206,8 +260,8 @@ export function Checkbox({
   ...rest
 }: InputHTMLAttributes<HTMLInputElement> & { label: ReactNode }) {
   return (
-    <label className={cx(styles.checkbox, className)}>
-      <input type="checkbox" {...rest} />
+    <label className={cn("inline-flex min-h-10 cursor-pointer items-center gap-2 font-bold text-foreground", className)}>
+      <input type="checkbox" className="size-4 accent-primary" {...rest} />
       {label}
     </label>
   );
@@ -215,17 +269,17 @@ export function Checkbox({
 
 /* ---------------- Layout helpers ---------------- */
 export function Toolbar({ children, className }: { children: ReactNode; className?: string }) {
-  return <div className={cx(styles.toolbar, className)}>{children}</div>;
+  return <div className={cn("flex flex-wrap items-center gap-2", className)}>{children}</div>;
 }
 
 export function Stack({ children, className, gap }: { children: ReactNode; className?: string; gap?: number }) {
   return (
-    <div className={cx(styles.stack, className)} style={gap != null ? { gap } : undefined}>
+    <div className={cn("grid gap-2.5", className)} style={gap != null ? { gap } : undefined}>
       {children}
     </div>
   );
 }
 
 export function ErrorText({ children }: { children: ReactNode }) {
-  return <p className={styles.errorText}>{children}</p>;
+  return <p className="m-0 text-[13px] font-bold text-destructive">{children}</p>;
 }

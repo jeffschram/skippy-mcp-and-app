@@ -18,7 +18,9 @@ import {
 } from "lucide-react";
 import { api } from "../../lib/skippy-api";
 import { Button, IconButton, Card, LoadingRow, Spinner, useToast } from "../components";
+import { cn } from "@/lib/utils";
 import { useViewerReady } from "./use-viewer";
+import { textButtonClass, textButtonCompactClass } from "../page-classes";
 import {
   PROJECT_FILE_ACCEPT,
   checkProjectFile,
@@ -26,17 +28,12 @@ import {
   formatUploadDate,
   iconKindForMimeType,
 } from "./project-library-helpers";
-import styles from "./project-library.module.css";
 
 /* ------------------------------------------------------------------ */
 /* Project Library: cloud file storage per project (and per task).     */
 /* Upload flow: generateUploadUrl mutation → POST bytes → register.    */
 /* The reactive listFilesForViewer query picks up new rows on its own. */
 /* ------------------------------------------------------------------ */
-
-function cx(...parts: Array<string | false | null | undefined>) {
-  return parts.filter(Boolean).join(" ");
-}
 
 type LibraryFile = {
   _id: string;
@@ -150,7 +147,11 @@ function UploadStatusList({
   return (
     <div style={{ display: "grid", gap: 6 }}>
       {entries.map((entry) => (
-        <div key={entry.id} className={styles.uploadRow} data-status={entry.status}>
+        <div
+          key={entry.id}
+          className="flex items-center gap-2 text-[13px] text-muted-foreground data-[status=failed]:text-red"
+          data-status={entry.status}
+        >
           {entry.status === "uploading" ? (
             <Spinner />
           ) : entry.status === "done" ? (
@@ -158,8 +159,8 @@ function UploadStatusList({
           ) : (
             <AlertTriangle size={15} aria-hidden />
           )}
-          <span className={styles.uploadName}>{entry.fileName}</span>
-          <span className={styles.uploadNote}>
+          <span className="font-bold [overflow-wrap:anywhere]">{entry.fileName}</span>
+          <span className="[overflow-wrap:anywhere]">
             {entry.status === "uploading" ? "Uploading…" : entry.status === "done" ? "Uploaded" : entry.reason}
           </span>
           {entry.status === "failed" ? (
@@ -214,7 +215,7 @@ function UploadZone({ onFiles, compact }: { onFiles: (files: File[]) => void; co
   if (compact) {
     return (
       <span onDrop={handleDrop} onDragOver={handleDragOver} onDragLeave={() => setDragOver(false)}>
-        <button type="button" className="text-button compact" onClick={openPicker}>
+        <button type="button" className={cn(textButtonClass, textButtonCompactClass)} onClick={openPicker}>
           <Paperclip size={14} aria-hidden /> Attach file
         </button>
         {input}
@@ -227,7 +228,10 @@ function UploadZone({ onFiles, compact }: { onFiles: (files: File[]) => void; co
       role="button"
       tabIndex={0}
       aria-label="Add files to the project library"
-      className={cx(styles.dropZone, dragOver && styles.dropZoneActive)}
+      className={cn(
+        "flex cursor-pointer flex-wrap items-center justify-center gap-2.5 rounded-[10px] border-[1.5px] border-dashed border-border bg-card px-3.5 py-[18px] text-center text-sm text-muted-foreground transition-colors hover:border-primary focus-visible:border-primary focus-visible:outline-none",
+        dragOver && "border-primary bg-[light-dark(#eef6ff,#18293a)]",
+      )}
       onClick={openPicker}
       onKeyDown={(event: KeyboardEvent) => {
         if (event.key === "Enter" || event.key === " ") {
@@ -239,7 +243,7 @@ function UploadZone({ onFiles, compact }: { onFiles: (files: File[]) => void; co
       onDragOver={handleDragOver}
       onDragLeave={() => setDragOver(false)}
     >
-      <span className={styles.dropZoneHint}>
+      <span className="inline-flex items-center gap-2">
         <Upload size={16} aria-hidden /> Drag &amp; drop files here, or
       </span>
       <Button
@@ -285,30 +289,51 @@ function FileRow({ file, compact }: { file: LibraryFile; compact?: boolean }) {
 
   const isImage = iconKindForMimeType(file.mimeType) === "image";
   return (
-    <div className={cx(styles.fileRow, compact && styles.fileRowCompact)}>
+    <div className="flex flex-wrap items-center gap-2.5 rounded-[10px] border border-border bg-secondary px-2.5 py-2">
       {isImage && file.url ? (
         // eslint-disable-next-line @next/next/no-img-element -- ephemeral storage URL, not optimizable
-        <img className={styles.thumb} src={file.url} alt={file.fileName} loading="lazy" />
+        <img
+          className={cn("shrink-0 rounded-lg border border-border object-cover", compact ? "h-8 w-8" : "h-11 w-11")}
+          src={file.url}
+          alt={file.fileName}
+          loading="lazy"
+        />
       ) : (
-        <span className={styles.fileIcon}>
+        <span
+          className={cn(
+            "grid shrink-0 place-items-center rounded-lg border border-border bg-card text-muted-foreground",
+            compact ? "h-8 w-8" : "h-11 w-11",
+          )}
+        >
           <FileTypeIcon mimeType={file.mimeType} size={compact ? 15 : 18} />
         </span>
       )}
-      <div className={styles.fileMeta}>
+      <div className="grid min-w-0 flex-[1_1_160px] gap-0.5">
         {file.url ? (
-          <a className={styles.fileName} href={file.url} target="_blank" rel="noreferrer" title="Download">
+          <a
+            className="text-sm font-bold text-inherit no-underline [overflow-wrap:anywhere] hover:text-primary hover:underline focus-visible:text-primary focus-visible:underline"
+            href={file.url}
+            target="_blank"
+            rel="noreferrer"
+            title="Download"
+          >
             {file.fileName}
           </a>
         ) : (
-          <span className={styles.fileName}>{file.fileName}</span>
+          <span className="text-sm font-bold text-inherit [overflow-wrap:anywhere]">{file.fileName}</span>
         )}
-        <span className={styles.fileSub}>
+        <span className="text-[12.5px] text-muted-foreground">
           {formatFileSize(file.sizeBytes)} · {formatUploadDate(file.createdAt)}
         </span>
       </div>
-      <div className={styles.fileActions}>
+      <div className="ml-auto flex items-center gap-1.5">
         {confirming ? (
-          <button type="button" className={styles.confirmDelete} disabled={deleting} onClick={() => void remove()}>
+          <button
+            type="button"
+            className="cursor-pointer rounded-lg border border-red bg-transparent px-2.5 py-1 text-[13px] font-bold text-red disabled:cursor-default disabled:opacity-60"
+            disabled={deleting}
+            onClick={() => void remove()}
+          >
             {deleting ? "Deleting…" : "Confirm?"}
           </button>
         ) : (
@@ -340,33 +365,37 @@ export function ProjectLibrarySection({
   const open = alwaysOpen || openState;
 
   return (
-    <Card pad={false} className={styles.libraryCard}>
+    <Card pad={false} className="mt-4">
       {!alwaysOpen ? (
         <button
           type="button"
-          className={styles.libraryToggle}
+          className="flex w-full cursor-pointer items-center gap-2 border-0 bg-transparent px-4 py-3.5 text-left text-[15px] font-bold text-inherit focus-visible:rounded-xl focus-visible:outline-2 focus-visible:outline-solid focus-visible:-outline-offset-2 focus-visible:outline-primary"
           aria-expanded={open}
           onClick={() => setOpenState((current) => !current)}
         >
           {open ? <ChevronDown size={16} aria-hidden /> : <ChevronRight size={16} aria-hidden />}
           <span>Library</span>
-          {files !== undefined ? <span className={styles.libraryCount}>{files.length}</span> : null}
+          {files !== undefined ? (
+            <span className="inline-grid h-[22px] min-w-[22px] place-items-center rounded-full bg-muted px-1.5 text-xs text-muted-foreground">
+              {files.length}
+            </span>
+          ) : null}
         </button>
       ) : null}
       {open ? (
-        <div className={styles.libraryBody}>
+        <div className="grid gap-3 px-4 pb-4">
           <UploadZone onFiles={(dropped) => void uploadFiles(dropped)} />
           <UploadStatusList entries={entries} onDismiss={removeEntry} />
           {files === undefined ? (
             <LoadingRow label="Loading files…" />
           ) : files.length === 0 ? (
             entries.length === 0 ? (
-              <p className={styles.emptyNote}>
+              <p className="m-0 text-sm text-muted-foreground">
                 Upload project files from any device — agents read these when working on tasks.
               </p>
             ) : null
           ) : (
-            <div className={styles.fileList}>
+            <div className="grid gap-2">
               {files.map((file) => (
                 <FileRow key={file._id} file={file} />
               ))}
@@ -393,7 +422,7 @@ export function TaskAttachments({ projectId, taskId }: { projectId: string; task
       <h3 style={{ marginBottom: 8 }}>Attachments</h3>
       <div style={{ display: "grid", gap: 8 }}>
         {files?.length ? (
-          <div className={styles.fileList}>
+          <div className="grid gap-2">
             {files.map((file) => (
               <FileRow key={file._id} file={file} compact />
             ))}

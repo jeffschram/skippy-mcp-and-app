@@ -3,6 +3,7 @@ import { isLiveConfigured } from "../../../lib/skippy-api";
 import { AppShell, PageHeader } from "../../components";
 import { LiveInterviewDetail } from "../ui";
 import { NotConfigured } from "../../hubs/not-configured";
+import { textButtonClass } from "../../page-classes";
 
 export default async function InterviewDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -14,7 +15,7 @@ export default async function InterviewDetailPage({ params }: { params: Promise<
         eyebrow="Interview"
         title="Guided check-in"
         action={
-          <Link className="text-button" href="/brain">
+          <Link className={textButtonClass} href="/brain">
             Back to Brain
           </Link>
         }

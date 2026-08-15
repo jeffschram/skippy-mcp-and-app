@@ -9,6 +9,18 @@ import { LiveGate } from "../live-auth";
 import { Badge, Button, Card, Dialog, EmptyState, Field, LoadingRow, TextArea, TextInput, useToast } from "../components";
 import { projectStatusTone } from "../../lib/display";
 import { useViewerReady } from "./use-viewer";
+import { cn } from "@/lib/utils";
+import {
+  eyebrowClass,
+  itemClass,
+  itemIconClass,
+  itemMetaClass,
+  itemTitleClass,
+  mutedClass,
+  pageHeaderClass,
+  projectRowClass,
+  projectRowSideClass,
+} from "../page-classes";
 
 type AnyRecord = Record<string, any>;
 
@@ -54,11 +66,11 @@ export function ProjectsListContent() {
 
   return (
     <LiveGate>
-      <div className="page-header">
+      <div className={pageHeaderClass}>
         <div>
-          <p className="eyebrow">Projects</p>
+          <p className={eyebrowClass}>Projects</p>
           <h1>Build, supervised.</h1>
-          <p className="muted" style={{ maxWidth: 560 }}>
+          <p className={mutedClass} style={{ maxWidth: 560 }}>
             Each project can be decomposed by Skippy into executable task briefs you hand to a coding agent.
           </p>
         </div>
@@ -90,18 +102,18 @@ export function ProjectsListContent() {
           {projects.map((project: AnyRecord) => {
             const count = taskCountByProject.get(project._id) ?? 0;
             return (
-              <Link key={project._id} className="item project-row" href={`/projects/${project._id}`} style={{ gridTemplateColumns: "auto 1fr auto" }}>
-                <span className="item-icon">
+              <Link key={project._id} className={cn(itemClass, projectRowClass)} href={`/projects/${project._id}`} style={{ gridTemplateColumns: "auto 1fr auto" }}>
+                <span className={itemIconClass}>
                   <FolderKanban size={17} aria-hidden />
                 </span>
                 <div>
-                  <p className="item-title">{project.title}</p>
-                  <p className="item-meta">
+                  <p className={itemTitleClass}>{project.title}</p>
+                  <p className={itemMetaClass}>
                     {project.summary ? `${project.summary} · ` : ""}
                     {count} open task{count === 1 ? "" : "s"}
                   </p>
                 </div>
-                <span className="project-row-side">
+                <span className={projectRowSideClass}>
                   <Badge tone={projectStatusTone(project.status)}>{String(project.status).replace(/_/g, " ")}</Badge>
                   <ArrowRight size={18} aria-hidden />
                 </span>

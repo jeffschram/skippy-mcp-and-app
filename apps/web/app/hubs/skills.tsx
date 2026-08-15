@@ -4,8 +4,22 @@ import Link from "next/link";
 import { useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { ClipboardCopy, Pencil, ScrollText } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { api } from "../../lib/skippy-api";
 import { Badge, Button, Card, Dialog, EmptyState, Field, LoadingRow, TextArea, TextInput, useToast } from "../components";
+import {
+  codeClass,
+  eyebrowClass,
+  itemClass,
+  itemIconClass,
+  itemMetaClass,
+  itemTitleClass,
+  mutedClass,
+  pageHeaderClass,
+  projectRowSideClass,
+  textButtonClass,
+  textButtonCompactClass,
+} from "../page-classes";
 import { useViewerReady } from "./use-viewer";
 
 type AnyRecord = Record<string, any>;
@@ -20,7 +34,7 @@ function copyText(text: string, toast: ReturnType<typeof useToast>) {
 function MarkdownBlock({ text }: { text: string }) {
   return (
     <pre
-      className="code"
+      className={codeClass}
       style={{
         margin: 0,
         padding: 16,
@@ -39,11 +53,11 @@ export function SkillsListContent() {
 
   return (
     <>
-      <div className="page-header">
+      <div className={pageHeaderClass}>
         <div>
-          <p className="eyebrow">Harness skills</p>
+          <p className={eyebrowClass}>Harness skills</p>
           <h1>Skills.</h1>
-          <p className="muted" style={{ maxWidth: 640 }}>
+          <p className={mutedClass} style={{ maxWidth: 640 }}>
             Portable Skippy instructions that Codex, Claude, Hermes, or another harness can load without copy-paste drift.
           </p>
         </div>
@@ -62,15 +76,15 @@ export function SkillsListContent() {
       ) : (
         <div style={{ display: "grid", gap: 10 }}>
           {skills.map((skill) => (
-            <Link key={skill.slug} className="item" href={`/skills/${skill.slug}`} style={{ gridTemplateColumns: "auto 1fr auto" }}>
-              <span className="item-icon">
+            <Link key={skill.slug} className={itemClass} href={`/skills/${skill.slug}`} style={{ gridTemplateColumns: "auto 1fr auto" }}>
+              <span className={itemIconClass}>
                 <ScrollText size={17} aria-hidden />
               </span>
               <div>
-                <p className="item-title">{skill.title}</p>
-                <p className="item-meta">{skill.description}</p>
+                <p className={itemTitleClass}>{skill.title}</p>
+                <p className={itemMetaClass}>{skill.description}</p>
               </div>
-              <span className="project-row-side">
+              <span className={projectRowSideClass}>
                 <Badge tone={skill.isDefault ? "neutral" : "blue"}>v{skill.version}</Badge>
               </span>
             </Link>
@@ -131,14 +145,14 @@ export function SkillDetailContent({ slug }: { slug: string }) {
 
   return (
     <>
-      <div className="page-header">
+      <div className={pageHeaderClass}>
         <div>
-          <p className="eyebrow">Skill</p>
+          <p className={eyebrowClass}>Skill</p>
           <h1>{skill?.title ?? "Skill"}</h1>
-          {skill?.description ? <p className="muted" style={{ maxWidth: 640 }}>{skill.description}</p> : null}
+          {skill?.description ? <p className={mutedClass} style={{ maxWidth: 640 }}>{skill.description}</p> : null}
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
-          <Link className="text-button compact" href="/skills">
+          <Link className={cn(textButtonClass, textButtonCompactClass)} href="/skills">
             Skills
           </Link>
           {skill ? (
@@ -177,8 +191,8 @@ export function SkillDetailContent({ slug }: { slug: string }) {
           </Card>
           <Card>
             <h2 style={{ marginTop: 0 }}>How to use this skill</h2>
-            {skill.usageDescription ? <p className="muted">{skill.usageDescription}</p> : null}
-            {skill.usageLeadIn ? <p className="muted">{skill.usageLeadIn}</p> : null}
+            {skill.usageDescription ? <p className={mutedClass}>{skill.usageDescription}</p> : null}
+            {skill.usageLeadIn ? <p className={mutedClass}>{skill.usageLeadIn}</p> : null}
             <TextArea
               aria-label="Harness scheduler instructions"
               readOnly
@@ -200,16 +214,16 @@ export function SkillDetailContent({ slug }: { slug: string }) {
                 {versions.map((version) => (
                   <div
                     key={version._id ?? `${version.slug}-${version.version}`}
-                    className="item"
+                    className={itemClass}
                     style={{ gridTemplateColumns: "1fr auto", minHeight: "auto" }}
                   >
                     <div>
-                      <p className="item-title">Version {version.version}</p>
-                      <p className="item-meta">
+                      <p className={itemTitleClass}>Version {version.version}</p>
+                      <p className={itemMetaClass}>
                         {version.updatedAt ? new Date(version.updatedAt).toLocaleString() : "Default skill"}
                       </p>
                     </div>
-                    <span className="project-row-side">
+                    <span className={projectRowSideClass}>
                       <Badge tone={version.isCurrent ? "green" : "neutral"}>
                         {version.isCurrent ? "current" : version.isDefault ? "default" : "archived"}
                       </Badge>

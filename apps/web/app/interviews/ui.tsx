@@ -5,7 +5,35 @@ import { useRouter } from "next/navigation";
 import { FormEvent, useMemo, useState } from "react";
 import { useConvexAuth, useMutation, useQuery } from "convex/react";
 import { api } from "../../lib/skippy-api";
+import { cn } from "@/lib/utils";
 import { LiveGate } from "../live-auth";
+import {
+  badgeBlueClass,
+  badgeClass,
+  badgeGoldClass,
+  cardClass,
+  checkboxFieldClass,
+  eyebrowClass,
+  gridClass,
+  inputClass,
+  itemClass,
+  itemIconActiveClass,
+  itemIconClass,
+  itemListClass,
+  itemMetaClass,
+  itemTitleClass,
+  mutedClass,
+  projectRowClass,
+  sectionClass,
+  selectClass,
+  settingsRowClass,
+  span5Class,
+  span7Class,
+  span12Class,
+  textareaClass,
+  textButtonClass,
+  toolbarClass,
+} from "../page-classes";
 import { icons } from "../ui";
 
 type AnyRecord = Record<string, any>;
@@ -120,18 +148,18 @@ export function LiveInterviewsIndex() {
   return (
     <LiveGate>
       {!viewerReady || !data ? (
-        <section className="card section">
+        <section className={cn(cardClass, sectionClass)}>
           <h2>Loading interviews</h2>
-          <p className="muted">Checking active and recent guided check-ins.</p>
+          <p className={mutedClass}>Checking active and recent guided check-ins.</p>
         </section>
       ) : (
-        <div className="grid">
-          <section className="card section span-5">
+        <div className={gridClass}>
+          <section className={cn(cardClass, sectionClass, span5Class)}>
             <h2>Start interview</h2>
-            <form className="item-list" onSubmit={handleSubmit}>
+            <form className={itemListClass} onSubmit={handleSubmit}>
               <label>
-                <span className="eyebrow">Template</span>
-                <select className="select" value={kind} onChange={(event) => setKind(event.target.value as InterviewKind)}>
+                <span className={eyebrowClass}>Template</span>
+                <select className={selectClass} value={kind} onChange={(event) => setKind(event.target.value as InterviewKind)}>
                   {templates.map((template) => (
                     <option value={template.kind} key={template.kind}>
                       {template.title}
@@ -140,66 +168,66 @@ export function LiveInterviewsIndex() {
                 </select>
               </label>
               <label>
-                <span className="eyebrow">Title</span>
+                <span className={eyebrowClass}>Title</span>
                 <input
-                  className="input"
+                  className={inputClass}
                   value={title}
                   onChange={(event) => setTitle(event.target.value)}
                   placeholder="Optional custom title"
                 />
               </label>
               <label>
-                <span className="eyebrow">Subject</span>
+                <span className={eyebrowClass}>Subject</span>
                 <input
-                  className="input"
+                  className={inputClass}
                   value={subjectLabel}
                   onChange={(event) => setSubjectLabel(event.target.value)}
                   placeholder="Optional project, goal, person, or decision label"
                 />
               </label>
-              {error ? <p className="item-meta">{error}</p> : null}
-              <button className="text-button" type="submit" disabled={submitting}>
+              {error ? <p className={itemMetaClass}>{error}</p> : null}
+              <button className={textButtonClass} type="submit" disabled={submitting}>
                 {submitting ? "Starting" : "Start"}
               </button>
             </form>
           </section>
 
-          <section className="card section span-7">
+          <section className={cn(cardClass, sectionClass, span7Class)}>
             <h2>Templates</h2>
-            <div className="item-list">
+            <div className={itemListClass}>
               {templates.map((template) => (
-                <article className="item" key={template.kind}>
-                  <span className="item-icon">
+                <article className={itemClass} key={template.kind}>
+                  <span className={itemIconClass}>
                     <icons.MessageSquareText size={17} aria-hidden />
                   </span>
                   <div>
-                    <p className="item-title">{template.title}</p>
-                    <p className="item-meta">{template.description}</p>
+                    <p className={itemTitleClass}>{template.title}</p>
+                    <p className={itemMetaClass}>{template.description}</p>
                   </div>
-                  <span className="badge blue">{template.questionCount} q</span>
+                  <span className={cn(badgeClass, badgeBlueClass)}>{template.questionCount} q</span>
                 </article>
               ))}
             </div>
           </section>
 
-          <section className="card section span-12">
+          <section className={cn(cardClass, sectionClass, span12Class)}>
             <h2>Active and recent</h2>
             {recent.length === 0 ? (
-              <p className="muted">No interviews yet.</p>
+              <p className={mutedClass}>No interviews yet.</p>
             ) : (
-              <div className="item-list">
+              <div className={itemListClass}>
                 {recent.map((interview) => (
-                  <Link className="item project-row" href={`/interviews/${interview._id}`} key={interview._id}>
-                    <span className={interview.status === "active" ? "item-icon is-active" : "item-icon"}>
+                  <Link className={cn(itemClass, projectRowClass)} href={`/interviews/${interview._id}`} key={interview._id}>
+                    <span className={cn(itemIconClass, interview.status === "active" && itemIconActiveClass)}>
                       <icons.MessageSquareText size={17} aria-hidden />
                     </span>
                     <div>
-                      <p className="item-title">{interview.title}</p>
-                      <p className="item-meta">
+                      <p className={itemTitleClass}>{interview.title}</p>
+                      <p className={itemMetaClass}>
                         {formatKind(interview.templateKind)} · {progressText(interview, interview.questionCount)}
                       </p>
                     </div>
-                    <span className={interview.status === "active" ? "badge gold" : "badge blue"}>{interview.status}</span>
+                    <span className={cn(badgeClass, interview.status === "active" ? badgeGoldClass : badgeBlueClass)}>{interview.status}</span>
                   </Link>
                 ))}
               </div>
@@ -293,50 +321,50 @@ export function LiveInterviewDetail({ interviewId }: { interviewId: string }) {
   return (
     <LiveGate>
       {!viewerReady || data === undefined ? (
-        <section className="card section">
+        <section className={cn(cardClass, sectionClass)}>
           <h2>Loading interview</h2>
-          <p className="muted">Fetching questions and responses.</p>
+          <p className={mutedClass}>Fetching questions and responses.</p>
         </section>
       ) : !data ? (
-        <section className="card section">
+        <section className={cn(cardClass, sectionClass)}>
           <h2>Interview not found</h2>
-          <p className="muted">This interview may have been archived or removed.</p>
+          <p className={mutedClass}>This interview may have been archived or removed.</p>
         </section>
       ) : (
-        <div className="grid">
-          <section className="card section span-7">
-            <div className="settings-row">
+        <div className={gridClass}>
+          <section className={cn(cardClass, sectionClass, span7Class)}>
+            <div className={settingsRowClass}>
               <div>
                 <h2>{data.interview.title}</h2>
-                <p className="muted">
+                <p className={mutedClass}>
                   {data.template.title} · {data.progress.answered} of {data.progress.total} answered
                 </p>
               </div>
-              <span className={data.interview.status === "active" ? "badge gold" : "badge blue"}>{data.interview.status}</span>
+              <span className={cn(badgeClass, data.interview.status === "active" ? badgeGoldClass : badgeBlueClass)}>{data.interview.status}</span>
             </div>
 
             {data.currentQuestion ? (
-              <form className="item-list" onSubmit={handleAnswer}>
-                <article className="item">
-                  <span className="item-icon is-active">
+              <form className={itemListClass} onSubmit={handleAnswer}>
+                <article className={itemClass}>
+                  <span className={cn(itemIconClass, itemIconActiveClass)}>
                     <icons.MessageSquareText size={17} aria-hidden />
                   </span>
                   <div>
-                    <p className="item-title">{data.currentQuestion.prompt}</p>
+                    <p className={itemTitleClass}>{data.currentQuestion.prompt}</p>
                     {data.currentQuestion.helper || data.currentQuestion.placeholder ? (
-                      <p className="item-meta">{data.currentQuestion.helper ?? data.currentQuestion.placeholder}</p>
+                      <p className={itemMetaClass}>{data.currentQuestion.helper ?? data.currentQuestion.placeholder}</p>
                     ) : null}
                   </div>
-                  <span className="badge">current</span>
+                  <span className={badgeClass}>current</span>
                 </article>
                 <textarea
-                  className="textarea"
+                  className={textareaClass}
                   value={answerText}
                   onChange={(event) => setAnswerText(event.target.value)}
                   placeholder={data.currentQuestion.placeholder ?? "Write the answer Skippy should remember as context."}
                 />
                 {data.currentQuestion.captureMemoryAs ? (
-                  <label className="checkbox-field">
+                  <label className={checkboxFieldClass}>
                     <input
                       type="checkbox"
                       checked={createMemoryCandidate}
@@ -345,39 +373,39 @@ export function LiveInterviewDetail({ interviewId }: { interviewId: string }) {
                     Send this answer to memory review
                   </label>
                 ) : null}
-                <div className="toolbar">
-                  <button className="text-button" type="submit" disabled={submitting || !answerText.trim()}>
+                <div className={toolbarClass}>
+                  <button className={textButtonClass} type="submit" disabled={submitting || !answerText.trim()}>
                     Save answer
                   </button>
-                  <button className="text-button" type="button" disabled={submitting} onClick={handleComplete}>
+                  <button className={textButtonClass} type="button" disabled={submitting} onClick={handleComplete}>
                     Complete now
                   </button>
-                  <button className="text-button" type="button" disabled={submitting} onClick={handleArchive}>
+                  <button className={textButtonClass} type="button" disabled={submitting} onClick={handleArchive}>
                     Archive
                   </button>
                 </div>
               </form>
             ) : (
-              <div className="item-list">
-                <article className="item">
-                  <span className="item-icon">
+              <div className={itemListClass}>
+                <article className={itemClass}>
+                  <span className={itemIconClass}>
                     <icons.CircleCheck size={17} aria-hidden />
                   </span>
                   <div>
-                    <p className="item-title">All questions answered</p>
-                    <p className="item-meta">Complete the interview, optionally sending a summary to memory review.</p>
+                    <p className={itemTitleClass}>All questions answered</p>
+                    <p className={itemMetaClass}>Complete the interview, optionally sending a summary to memory review.</p>
                   </div>
-                  <span className="badge blue">ready</span>
+                  <span className={cn(badgeClass, badgeBlueClass)}>ready</span>
                 </article>
                 {data.interview.status === "active" ? (
                   <>
                     <textarea
-                      className="textarea"
+                      className={textareaClass}
                       value={summary}
                       onChange={(event) => setSummary(event.target.value)}
                       placeholder="Optional short summary"
                     />
-                    <label className="checkbox-field">
+                    <label className={checkboxFieldClass}>
                       <input
                         type="checkbox"
                         checked={createSummaryMemoryCandidate}
@@ -385,11 +413,11 @@ export function LiveInterviewDetail({ interviewId }: { interviewId: string }) {
                       />
                       Send interview summary to memory review
                     </label>
-                    <div className="toolbar">
-                      <button className="text-button" type="button" disabled={submitting} onClick={handleComplete}>
+                    <div className={toolbarClass}>
+                      <button className={textButtonClass} type="button" disabled={submitting} onClick={handleComplete}>
                         Complete
                       </button>
-                      <button className="text-button" type="button" disabled={submitting} onClick={handleArchive}>
+                      <button className={textButtonClass} type="button" disabled={submitting} onClick={handleArchive}>
                         Archive
                       </button>
                     </div>
@@ -397,25 +425,25 @@ export function LiveInterviewDetail({ interviewId }: { interviewId: string }) {
                 ) : null}
               </div>
             )}
-            {notice ? <p className="item-meta">{notice}</p> : null}
-            {error ? <p className="item-meta">{error}</p> : null}
+            {notice ? <p className={itemMetaClass}>{notice}</p> : null}
+            {error ? <p className={itemMetaClass}>{error}</p> : null}
           </section>
 
-          <section className="card section span-5">
+          <section className={cn(cardClass, sectionClass, span5Class)}>
             <h2>Responses</h2>
             {data.responses.length === 0 ? (
-              <p className="muted">No answers saved yet.</p>
+              <p className={mutedClass}>No answers saved yet.</p>
             ) : (
-              <div className="item-list">
+              <div className={itemListClass}>
                 {data.responses.map((response) => (
-                  <article className="item" key={response._id}>
-                    <span className="item-icon">
+                  <article className={itemClass} key={response._id}>
+                    <span className={itemIconClass}>
                       <icons.Check size={17} aria-hidden />
                     </span>
                     <div>
-                      <p className="item-title">{response.prompt}</p>
-                      <p className="item-meta">{response.answerText}</p>
-                      {response.memoryCandidateId ? <span className="badge blue">memory review</span> : null}
+                      <p className={itemTitleClass}>{response.prompt}</p>
+                      <p className={itemMetaClass}>{response.answerText}</p>
+                      {response.memoryCandidateId ? <span className={cn(badgeClass, badgeBlueClass)}>memory review</span> : null}
                     </div>
                   </article>
                 ))}

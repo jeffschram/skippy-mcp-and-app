@@ -8,7 +8,7 @@ import { groupAgendaByDay, type AgendaItem } from "@skippy/shared";
 import { api } from "../../lib/skippy-api";
 import { Badge, EmptyState, LoadingRow, Section } from "../components";
 import { useViewerReady } from "./use-viewer";
-import styles from "./agenda.module.css";
+import { textButtonClass, textButtonCompactClass } from "../page-classes";
 
 /* ------------------------------------------------------------------ */
 /* Agenda: an ordered list of what is happening and what is due.       */
@@ -62,24 +62,31 @@ const SOURCE_LABELS: Record<AgendaItem["source"], string> = {
   recurrence: "Recurring",
 };
 
+/* Row layout: fixed 64px time column so titles line up down the day. */
+const rowClass =
+  "flex items-baseline gap-2.5 border-b py-2 px-1 text-inherit no-underline last:border-b-0";
+/* Anchor rows get a hover/focus wash; plain div rows do not. */
+const linkRowClass = `${rowClass} hover:rounded-lg hover:bg-secondary focus-visible:rounded-lg focus-visible:bg-secondary`;
+const metaItemClass = "inline-flex min-w-0 items-center gap-[3px] [overflow-wrap:anywhere]";
+
 function AgendaRow({ item, timeZone }: { item: AgendaItem; timeZone: string }) {
   const body = (
     <>
-      <span className={styles.time}>{timeLabel(item, timeZone)}</span>
-      <span className={styles.body}>
-        <span className={styles.title}>{item.title}</span>
-        <span className={styles.meta}>
+      <span className="flex-[0_0_64px] text-xs tabular-nums text-muted-foreground">{timeLabel(item, timeZone)}</span>
+      <span className="grid min-w-0 flex-auto gap-0.5">
+        <span className="text-sm leading-[1.35] [overflow-wrap:anywhere]">{item.title}</span>
+        <span className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
           <Badge tone={item.source === "event" ? "blue" : "neutral"}>
             {SOURCE_LABELS[item.source]}
           </Badge>
-          {item.isOverdue ? <span className={styles.overdue}>overdue</span> : null}
+          {item.isOverdue ? <span className="font-semibold text-red">overdue</span> : null}
           {item.location ? (
-            <span className={styles.metaItem}>
+            <span className={metaItemClass}>
               <MapPin size={12} aria-hidden /> {item.location}
             </span>
           ) : null}
           {item.conferenceUrl ? (
-            <span className={styles.metaItem}>
+            <span className={metaItemClass}>
               <Video size={12} aria-hidden /> video
             </span>
           ) : null}
@@ -89,15 +96,15 @@ function AgendaRow({ item, timeZone }: { item: AgendaItem; timeZone: string }) {
   );
 
   if (!item.href) {
-    return <div className={styles.row}>{body}</div>;
+    return <div className={rowClass}>{body}</div>;
   }
 
   return item.href.startsWith("/") ? (
-    <Link className={styles.row} href={item.href}>
+    <Link className={linkRowClass} href={item.href}>
       {body}
     </Link>
   ) : (
-    <a className={styles.row} href={item.href} target="_blank" rel="noreferrer">
+    <a className={linkRowClass} href={item.href} target="_blank" rel="noreferrer">
       {body}
     </a>
   );
@@ -132,7 +139,7 @@ export function AgendaSection({ days = 7 }: { days?: number }) {
         </span>
       }
       action={
-        <Link className="text-button compact" href="/tasks">
+        <Link className={`${textButtonClass} ${textButtonCompactClass}`} href="/tasks">
           Tasks
         </Link>
       }
@@ -147,11 +154,11 @@ export function AgendaSection({ days = 7 }: { days?: number }) {
           Calendar events, due tasks, and recurring items will appear here together.
         </EmptyState>
       ) : (
-        <div className={styles.days}>
+        <div className="grid gap-3.5">
           {grouped.map((day) => (
-            <div key={day.dayKey} className={styles.day}>
-              <p className={styles.dayLabel}>{dayLabel(day.dayKey, timeZone)}</p>
-              <div className={styles.list}>
+            <div key={day.dayKey} className="grid gap-1">
+              <p className="m-0 text-xs font-bold uppercase tracking-[0.04em] text-muted-foreground">{dayLabel(day.dayKey, timeZone)}</p>
+              <div className="grid gap-px">
                 {day.items.map((item) => (
                   <AgendaRow key={`${item.source}-${item.id}`} item={item} timeZone={timeZone} />
                 ))}

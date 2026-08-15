@@ -16,8 +16,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { useConvexAuth, useMutation, useQuery } from "convex/react";
 import { MessageCircle, SendHorizontal, X } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { api } from "../../lib/skippy-api";
-import styles from "./chat-panel.module.css";
 
 type AnyRecord = Record<string, any>;
 
@@ -51,6 +51,12 @@ function scopeForPathname(pathname: string): ChatScope {
   const known = PAGE_LABELS[pageKey] ? pageKey : "home";
   return { kind: "page", pageKey: known, label: PAGE_LABELS[known] ?? "Home" };
 }
+
+const bubbleClass =
+  "max-w-[88%] whitespace-pre-wrap break-words rounded-xl px-[11px] py-2 text-[13.5px] leading-[1.45]";
+const bubbleAssistantClass = "self-start rounded-bl-[4px] border bg-secondary";
+const bubbleUserClass = "self-end rounded-br-[4px] bg-primary text-primary-foreground";
+const bubbleErrorClass = "self-start border border-destructive bg-transparent text-destructive";
 
 export function ChatPanel() {
   const pathname = usePathname() ?? "/";
@@ -102,7 +108,12 @@ export function ChatPanel() {
 
   if (!open) {
     return (
-      <button type="button" className={styles.toggle} onClick={() => setOpen(true)} aria-label="Open chat">
+      <button
+        type="button"
+        className="fixed bottom-3.5 right-3.5 z-[60] inline-flex cursor-pointer items-center gap-2 rounded-full border bg-secondary px-3.5 py-2.5 font-bold shadow-md desk:bottom-[18px] desk:right-[18px]"
+        onClick={() => setOpen(true)}
+        aria-label="Open chat"
+      >
         <MessageCircle size={17} aria-hidden />
         Chat
       </button>
@@ -113,19 +124,22 @@ export function ChatPanel() {
     scope.kind === "project" ? (data?.chat?.title ?? "Project chat") : `${scope.label} · page chat`;
 
   return (
-    <section className={styles.panel} aria-label="Skippy chat">
-      <header className={styles.header}>
+    <section
+      className="fixed bottom-0 right-0 z-[70] flex h-[calc(100dvh-110px)] w-screen flex-col overflow-hidden rounded-t-[14px] border border-x-0 border-b-0 bg-card shadow-md desk:bottom-[18px] desk:right-[18px] desk:h-[min(560px,calc(100vh-90px))] desk:w-[min(400px,calc(100vw-36px))] desk:rounded-[14px] desk:border"
+      aria-label="Skippy chat"
+    >
+      <header className="flex items-center gap-2 border-b bg-secondary px-3 py-2.5">
         <MessageCircle size={16} aria-hidden />
-        <span className={styles.headerTitle}>
+        <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-sm font-bold">
           Chat
-          <span className={styles.headerContext}>
+          <span className="block text-[11px] font-normal opacity-70">
             {contextLine}
             {boundHarness ? ` · ${boundHarness}` : ""}
           </span>
         </span>
         {!boundHarness ? (
           <select
-            className={styles.harnessSelect}
+            className="rounded-[7px] border bg-card px-1.5 py-1 text-xs"
             value={pickedHarness}
             onChange={(event) => setPickedHarness(event.target.value as "claude" | "codex")}
             aria-label="Harness for this chat"
@@ -135,14 +149,19 @@ export function ChatPanel() {
             <option value="codex">Codex</option>
           </select>
         ) : null}
-        <button type="button" className={styles.iconButton} onClick={() => setOpen(false)} aria-label="Close chat">
+        <button
+          type="button"
+          className="inline-flex size-7 cursor-pointer items-center justify-center rounded-[7px] border-0 bg-transparent hover:bg-border"
+          onClick={() => setOpen(false)}
+          aria-label="Close chat"
+        >
           <X size={16} aria-hidden />
         </button>
       </header>
 
-      <div className={styles.messages} ref={messagesRef}>
+      <div className="flex flex-1 flex-col gap-2.5 overflow-y-auto p-3" ref={messagesRef}>
         {messages.length === 0 ? (
-          <p className={styles.empty}>
+          <p className="m-auto px-6 text-center text-[13px] opacity-65">
             {scope.kind === "project"
               ? "Chat with your local harness about this project — it runs in the project checkout with your normal tools."
               : `Chat with your local harness from the ${scope.label} page — same capabilities as a terminal session.`}
@@ -151,14 +170,14 @@ export function ChatPanel() {
           messages.map((message) => {
             if (message.role === "assistant" && message.status === "pending") {
               return (
-                <div key={message._id} className={`${styles.bubble} ${styles.bubbleAssistant}`}>
-                  <span className={styles.pendingDots}>Thinking…</span>
+                <div key={message._id} className={cn(bubbleClass, bubbleAssistantClass)}>
+                  <span className="inline-block animate-pulse">Thinking…</span>
                 </div>
               );
             }
             if (message.role === "assistant" && message.status === "error") {
               return (
-                <div key={message._id} className={`${styles.bubble} ${styles.bubbleError}`}>
+                <div key={message._id} className={cn(bubbleClass, bubbleErrorClass)}>
                   {message.error ?? "Reply failed."}
                 </div>
               );
@@ -166,7 +185,7 @@ export function ChatPanel() {
             return (
               <div
                 key={message._id}
-                className={`${styles.bubble} ${message.role === "user" ? styles.bubbleUser : styles.bubbleAssistant}`}
+                className={cn(bubbleClass, message.role === "user" ? bubbleUserClass : bubbleAssistantClass)}
               >
                 {message.content}
               </div>
@@ -176,24 +195,26 @@ export function ChatPanel() {
       </div>
 
       {pendingApprovals.length ? (
-        <div className={styles.approvals}>
+        <div className="grid gap-2 border-t bg-secondary px-3 py-2">
           {pendingApprovals.map((approval) => (
-            <div key={approval._id} className={styles.approvalCard}>
-              <p className={styles.approvalTitle}>{approval.title}</p>
+            <div key={approval._id} className="grid gap-1.5 rounded-[10px] border border-gold px-2.5 py-2">
+              <p className="m-0 text-[13px] font-bold">{approval.title}</p>
               {approval.details?.command ? (
-                <pre className={styles.approvalDetail}>{approval.details.command}</pre>
+                <pre className="m-0 max-h-[90px] overflow-y-auto whitespace-pre-wrap break-words font-mono text-xs">
+                  {approval.details.command}
+                </pre>
               ) : null}
-              <div className={styles.approvalActions}>
+              <div className="flex gap-2">
                 <button
                   type="button"
-                  className={styles.approve}
+                  className="cursor-pointer rounded-lg border border-primary bg-primary px-3 py-[5px] text-[12.5px] font-bold text-primary-foreground"
                   onClick={() => void decideApproval({ approvalId: approval._id, decision: "accepted" } as any)}
                 >
                   Approve
                 </button>
                 <button
                   type="button"
-                  className={styles.decline}
+                  className="cursor-pointer rounded-lg border bg-card px-3 py-[5px] text-[12.5px] font-bold"
                   onClick={() => void decideApproval({ approvalId: approval._id, decision: "declined" } as any)}
                 >
                   Decline
@@ -204,9 +225,9 @@ export function ChatPanel() {
         </div>
       ) : null}
 
-      <div className={styles.composer}>
+      <div className="flex items-end gap-2 border-t bg-secondary px-3 py-2.5">
         <textarea
-          className={styles.input}
+          className="min-h-[38px] max-h-[120px] flex-1 resize-none rounded-[10px] border bg-card px-[11px] py-[9px] text-[13.5px]"
           value={draft}
           placeholder={`Message ${scope.kind === "project" ? "about this project" : scope.label}…`}
           rows={1}
@@ -220,7 +241,7 @@ export function ChatPanel() {
         />
         <button
           type="button"
-          className={styles.send}
+          className="inline-flex size-[38px] cursor-pointer items-center justify-center rounded-[10px] border-0 bg-primary text-primary-foreground disabled:cursor-default disabled:opacity-50"
           disabled={!draft.trim() || sending}
           onClick={() => void send()}
           aria-label="Send message"
