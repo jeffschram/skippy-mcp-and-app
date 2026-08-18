@@ -75,6 +75,10 @@ export class ClaudeAdapter implements HarnessAdapter {
     let approvalCounter = 0;
     let sessionId: string | undefined = request.externalThreadId;
     let resultText: string | undefined;
+    // Kept for diagnosis: when the process dies (e.g. subscription usage
+    // limit — "You've hit your limit"), the last assistant text usually says
+    // why, while the SDK error is just "exited with code 1".
+    let lastAssistantText: string | undefined;
 
     const canUseTool = async (toolName: string, input: any) => {
       const deny = (message: string) => ({ behavior: "deny", message });
@@ -157,7 +161,10 @@ export class ClaudeAdapter implements HarnessAdapter {
             break;
           case "assistant": {
             const text = extractText(message.message?.content);
-            if (text) onEvent({ type: "assistant_message", payload: { text } });
+            if (text) {
+              onEvent({ type: "assistant_message", payload: { text } });
+              lastAssistantText = text;
+            }
             const toolUses = Array.isArray(message.message?.content)
               ? message.message.content.filter((b: any) => b?.type === "tool_use")
               : [];
@@ -197,7 +204,12 @@ export class ClaudeAdapter implements HarnessAdapter {
       return { externalThreadId: sessionId, outcome: "completed", resultText };
     } catch (error: unknown) {
       if (signal.aborted) return { externalThreadId: sessionId, outcome: "interrupted" };
-      const messageText = error instanceof Error ? error.message : String(error);
+      let messageText = error instanceof Error ? error.message : String(error);
+      // A bare process exit is opaque; the session's last words usually carry
+      // the real reason (usage limit, auth). Surface them together.
+      if (/exited with code/i.test(messageText) && lastAssistantText) {
+        messageText = `${messageText} — last message: "${lastAssistantText.slice(0, 200)}"`;
+      }
       onEvent({ type: "error", payload: { message: messageText.slice(0, 500) } });
       return { externalThreadId: sessionId, outcome: "failed", errorMessage: messageText.slice(0, 500) };
     }
