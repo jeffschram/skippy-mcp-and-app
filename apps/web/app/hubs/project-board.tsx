@@ -5,6 +5,8 @@ import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import { useMutation, useQuery } from "convex/react";
 import {
   ArrowLeft,
+  Archive,
+  ArchiveRestore,
   Check,
   CheckCircle2,
   ExternalLink,
@@ -17,6 +19,7 @@ import {
   Play,
   Plus,
   Rocket,
+  Settings2,
   Sparkles,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -26,8 +29,13 @@ import {
   Badge,
   Button,
   Card,
+  Dialog,
+  Field,
   LoadingRow,
   ProgressBar,
+  Select,
+  TextArea,
+  TextInput,
   useToast,
 } from "../components";
 import { LiveGate } from "../live-auth";
@@ -185,18 +193,13 @@ function TaskRow({
         />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            {featured ? (
-              <span className="text-[11px] font-bold uppercase tracking-[0.08em] text-primary">
-                Next
-              </span>
-            ) : null}
             <h3 className="m-0 min-w-0 flex-[1_1_180px] whitespace-normal break-words text-[13px] font-semibold leading-snug">
               {task.title}
             </h3>
             {task.ownerType === "agent" ? (
               <Badge tone="blue">Agent</Badge>
             ) : null}
-            <Badge tone={inProgress ? "gold" : "neutral"}>{state}</Badge>
+            {inProgress ? <Badge tone="gold">In Progress</Badge> : null}
           </div>
           {featured && (task.executionBrief || task.description) ? (
             <p className="mb-0 mt-2 whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">
@@ -538,9 +541,21 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
   const ensurePhases = useMutation(api.projects.ensureProjectPhasesForViewer);
   const setExecState = useMutation(api.projects.setTaskExecutionStateForViewer);
   const executeTask = useMutation(api.agentWorkbench.executeTaskForViewer);
+  const updateProject = useMutation(api.projects.updateProjectForViewer);
   const toast = useToast();
   const [view, setView] = useState<ProjectView>("overview");
   const [busy, setBusy] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [projectTitle, setProjectTitle] = useState("");
+  const [projectKind, setProjectKind] = useState("general");
+  const [projectSummary, setProjectSummary] = useState("");
+  const [repoUrl, setRepoUrl] = useState("");
+  const [vercelUrl, setVercelUrl] = useState("");
+  const [liveUrl, setLiveUrl] = useState("");
+  const [baseBranch, setBaseBranch] = useState("");
+  const [localPath, setLocalPath] = useState("");
+  const [assetsFolderPath, setAssetsFolderPath] = useState("");
+  const [outputFolderPath, setOutputFolderPath] = useState("");
   const ensured = useRef(false);
 
   useEffect(() => {
@@ -593,6 +608,84 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
       </div>
     );
 
+  const openProjectSettings = () => {
+    const project = board.project;
+    setProjectTitle(project.title ?? "");
+    setProjectKind(project.kind ?? "general");
+    setProjectSummary(project.summary ?? "");
+    setRepoUrl(project.repoUrl ?? "");
+    setVercelUrl(project.vercelUrl ?? "");
+    setLiveUrl(project.liveUrl ?? "");
+    setBaseBranch(project.defaultBaseBranch ?? "");
+    setLocalPath(project.localPath ?? "");
+    setAssetsFolderPath(project.assetsFolderPath ?? "");
+    setOutputFolderPath(project.outputFolderPath ?? "");
+    setSettingsOpen(true);
+  };
+
+  const saveProjectSettings = async () => {
+    if (!projectTitle.trim()) {
+      toast("Project title cannot be empty.", "error");
+      return;
+    }
+    setBusy(true);
+    try {
+      await updateProject({
+        projectId: projectId as any,
+        title: projectTitle,
+        kind: projectKind as any,
+        summary: projectSummary,
+        repoUrl,
+        vercelUrl,
+        liveUrl,
+        defaultBaseBranch: baseBranch,
+        localPath,
+        assetsFolderPath,
+        outputFolderPath,
+      } as any);
+      toast("Project updated.", "success");
+      setSettingsOpen(false);
+    } catch (error) {
+      toast(
+        error instanceof Error ? error.message : "Could not update project",
+        "error",
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const setProjectArchived = async (archived: boolean) => {
+    if (
+      archived &&
+      !window.confirm(
+        `Archive "${board.project.title}"? You can restore it from Settings.`,
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    try {
+      await updateProject({
+        projectId: projectId as any,
+        status: archived ? "archived" : "planned",
+      } as any);
+      toast(archived ? "Project archived." : "Project restored.", "success");
+      setSettingsOpen(false);
+    } catch (error) {
+      toast(
+        error instanceof Error
+          ? error.message
+          : archived
+            ? "Could not archive project"
+            : "Could not restore project",
+        "error",
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const startTask = async (task: AnyRecord) => {
     setBusy(true);
     try {
@@ -637,9 +730,12 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
     }
   };
 
+  const folderBase = localPath.trim().replace(/[\\/]+$/, "");
+
   return (
     <LiveGate>
-      <div className="flex min-h-[calc(100dvh-92px)] flex-col desk:h-screen desk:min-h-0">
+      <>
+        <div className="flex min-h-[calc(100dvh-92px)] flex-col desk:h-screen desk:min-h-0">
         <header className="flex items-center gap-3 border-b bg-card px-4 py-3 desk:px-5">
           <Link
             href="/projects"
@@ -658,6 +754,10 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
             <Sparkles size={14} className="text-primary" aria-hidden />{" "}
             {board.progress.done}/{board.progress.total} complete
           </div>
+          <Button small onClick={openProjectSettings} title="Project settings">
+            <Settings2 size={15} aria-hidden />
+            <span className="hidden desk:inline">Settings</span>
+          </Button>
         </header>
 
         <nav
@@ -724,7 +824,135 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
             </div>
           ) : null}
         </div>
-      </div>
+        </div>
+
+        <Dialog
+          open={settingsOpen}
+          onClose={() => setSettingsOpen(false)}
+          title="Project settings"
+        >
+          <div className="grid gap-4">
+            <Field label="Project name">
+              <TextInput
+                value={projectTitle}
+                onChange={(event) => setProjectTitle(event.target.value)}
+                autoFocus
+              />
+            </Field>
+            <Field label="Description">
+              <TextArea
+                value={projectSummary}
+                onChange={(event) => setProjectSummary(event.target.value)}
+              />
+            </Field>
+            <Field label="Project type">
+              <Select
+                value={projectKind}
+                onChange={(event) => setProjectKind(event.target.value)}
+              >
+                <option value="general">General</option>
+                <option value="code">Code project</option>
+              </Select>
+            </Field>
+
+            <div className="border-t pt-4">
+              <h3 className="mb-3 text-sm">Links</h3>
+              <div className="grid gap-3">
+                <Field label="GitHub repository URL">
+                  <TextInput
+                    type="url"
+                    value={repoUrl}
+                    onChange={(event) => setRepoUrl(event.target.value)}
+                    placeholder="https://github.com/you/repository"
+                  />
+                </Field>
+                <Field label="Vercel project URL">
+                  <TextInput
+                    type="url"
+                    value={vercelUrl}
+                    onChange={(event) => setVercelUrl(event.target.value)}
+                    placeholder="https://vercel.com/you/project"
+                  />
+                </Field>
+                <Field label="Live URL">
+                  <TextInput
+                    type="url"
+                    value={liveUrl}
+                    onChange={(event) => setLiveUrl(event.target.value)}
+                    placeholder="https://example.com"
+                  />
+                </Field>
+                {projectKind === "code" ? (
+                  <Field label="Default base branch">
+                    <TextInput
+                      value={baseBranch}
+                      onChange={(event) => setBaseBranch(event.target.value)}
+                      placeholder="main"
+                    />
+                  </Field>
+                ) : null}
+              </div>
+            </div>
+
+            <div className="border-t pt-4">
+              <h3 className="mb-3 text-sm">Folders</h3>
+              <div className="grid gap-3">
+                <Field label="Project local folder">
+                  <TextInput
+                    value={localPath}
+                    onChange={(event) => setLocalPath(event.target.value)}
+                    placeholder="/Users/you/projects/project"
+                  />
+                </Field>
+                <Field label="Library folder">
+                  <TextInput
+                    value={assetsFolderPath}
+                    onChange={(event) => setAssetsFolderPath(event.target.value)}
+                    placeholder={folderBase ? `${folderBase}/_library` : "Set the project folder first"}
+                    disabled={!folderBase}
+                  />
+                </Field>
+                <Field label="Output folder">
+                  <TextInput
+                    value={outputFolderPath}
+                    onChange={(event) => setOutputFolderPath(event.target.value)}
+                    placeholder={folderBase ? `${folderBase}/_output` : "Set the project folder first"}
+                    disabled={!folderBase}
+                  />
+                </Field>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4">
+              {board.project.status === "archived" ? (
+                <Button disabled={busy} onClick={() => void setProjectArchived(false)}>
+                  <ArchiveRestore size={15} aria-hidden /> Restore project
+                </Button>
+              ) : (
+                <Button
+                  variant="danger"
+                  disabled={busy}
+                  onClick={() => void setProjectArchived(true)}
+                >
+                  <Archive size={15} aria-hidden /> Archive project
+                </Button>
+              )}
+              <div className="ml-auto flex gap-2">
+                <Button disabled={busy} onClick={() => setSettingsOpen(false)}>
+                  Cancel
+                </Button>
+                <Button
+                  variant="primary"
+                  disabled={busy || !projectTitle.trim()}
+                  onClick={() => void saveProjectSettings()}
+                >
+                  Save
+                </Button>
+              </div>
+            </div>
+          </div>
+        </Dialog>
+      </>
     </LiveGate>
   );
 }
