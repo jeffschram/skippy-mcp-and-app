@@ -54,6 +54,9 @@ function createFakeClient(overrides: Partial<SkippyClient> = {}): SkippyClient {
     recordPendingActionResult: async () => ({ ok: true }),
     recordEntityReview: async () => ({ ok: true }),
     getCurrentContext: async () => ({ activeRoute: "/projects/project_123", activeProject: { _id: "project_123", title: "Demo" } }),
+    getProjectPlan: async () => ({ project: { _id: "project_123", title: "Demo" }, phases: [], tasks: [] }),
+    updateProject: async (_brainInstanceId, input) => ({ ...input, status: "updated" }),
+    updatePhase: async (_brainInstanceId, input) => ({ ...input, status: "updated" }),
     planProject: async (_brainInstanceId, input) => ({
       status: "planned",
       planId: "plan_123",

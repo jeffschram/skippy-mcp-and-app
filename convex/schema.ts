@@ -337,6 +337,8 @@ export default defineSchema({
     // "code" projects have a GitHub repo + local folder and follow the branch->PR agent workflow.
     kind: v.optional(v.union(v.literal("code"), v.literal("general"))),
     repoUrl: v.optional(v.string()),
+    vercelUrl: v.optional(v.string()),
+    liveUrl: v.optional(v.string()),
     defaultBaseBranch: v.optional(v.string()),
     // Project local folder (all projects may have one).
     localPath: v.optional(v.string()),
@@ -395,6 +397,9 @@ export default defineSchema({
     orderIndex: v.optional(v.number()),
     briefReadyAt: v.optional(v.number()),
     planRunId: v.optional(v.id("projectPlans")),
+    // Optional plan grouping. Existing tasks remain valid and are assigned to
+    // a default phase lazily when their project is first opened.
+    phaseId: v.optional(v.id("phases")),
     gitBranchName: v.optional(v.string()),
     prUrl: v.optional(v.string()),
     prNumber: v.optional(v.number()),
@@ -413,7 +418,8 @@ export default defineSchema({
     .index("by_brain_due", ["brainInstanceId", "dueAt"])
     .index("by_brain_commitment", ["brainInstanceId", "commitment"])
     .index("by_brain_execution_state", ["brainInstanceId", "executionState"])
-    .index("by_brain_plan", ["brainInstanceId", "planRunId"]),
+    .index("by_brain_plan", ["brainInstanceId", "planRunId"])
+    .index("by_brain_phase", ["brainInstanceId", "phaseId"]),
 
   // Repeating life obligations: furnace filters, oil changes, renewals, trash
   // night, quarterly taxes. A task with a dueAt cannot express any of these,
@@ -806,6 +812,21 @@ export default defineSchema({
   })
     .index("by_brain_project", ["brainInstanceId", "projectId"])
     .index("by_brain_created", ["brainInstanceId", "createdAt"]),
+
+  // Ordered, narrative sections of a project plan. Tasks point at a phase via
+  // tasks.phaseId; the project board composes that relationship into each
+  // phase's ordered task list.
+  phases: defineTable({
+    brainInstanceId: v.id("brainInstances"),
+    projectId: v.id("projects"),
+    orderNum: v.number(),
+    title: v.string(),
+    descriptionMd: v.string(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_brain_project", ["brainInstanceId", "projectId"])
+    .index("by_project_order", ["projectId", "orderNum"]),
 
   // Cloud-canonical project library backed by Convex file storage. The local
   // `_library` folder (effectiveAssetsPath) is the harness's materialization of

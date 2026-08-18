@@ -70,7 +70,7 @@ async function buildBoard(db: any, brainInstanceId: any, projectId: string) {
   // once a project gets large enough — which is what took this board down.
   const dependsOnByTask = await dependencyTaskIdsByTask(db, brainInstanceId);
 
-  const tasks = [];
+  const tasks: any[] = [];
   for (const task of rawTasks) {
     const dependsOn = dependsOnByTask.get(task._id as string) ?? [];
     tasks.push({
@@ -83,6 +83,7 @@ async function buildBoard(db: any, brainInstanceId: any, projectId: string) {
       executionBrief: task.executionBrief,
       acceptanceCriteria: task.acceptanceCriteria,
       orderIndex: task.orderIndex ?? 0,
+      phaseId: task.phaseId,
       ownerType: task.ownerType,
       agentRequestStatus: task.agentRequestStatus,
       requestedHarness: task.requestedHarness,
@@ -119,6 +120,14 @@ async function buildBoard(db: any, brainInstanceId: any, projectId: string) {
   plans.sort((a: any, b: any) => b.createdAt - a.createdAt);
   const latestPlan = plans[0];
 
+  const phases = await db
+    .query("phases")
+    .withIndex("by_brain_project", (q: any) =>
+      q.eq("brainInstanceId", brainInstanceId).eq("projectId", projectId),
+    )
+    .collect();
+  phases.sort((a: any, b: any) => a.orderNum - b.orderNum);
+
   return {
     project: {
       _id: project._id,
@@ -127,6 +136,8 @@ async function buildBoard(db: any, brainInstanceId: any, projectId: string) {
       status: project.status,
       kind: project.kind ?? "general",
       repoUrl: project.repoUrl,
+      vercelUrl: project.vercelUrl,
+      liveUrl: project.liveUrl,
       defaultBaseBranch: project.defaultBaseBranch,
       localPath: project.localPath,
       assetsFolderPath: project.assetsFolderPath,
@@ -134,6 +145,13 @@ async function buildBoard(db: any, brainInstanceId: any, projectId: string) {
       ...effectivePaths(project),
     },
     tasks,
+    phases: phases.map((phase: any) => ({
+      _id: phase._id,
+      orderNum: phase.orderNum,
+      title: phase.title,
+      descriptionMd: phase.descriptionMd,
+      taskIds: tasks.filter((task) => task.phaseId === phase._id).map((task) => task._id),
+    })),
     progress: {
       total,
       done,
@@ -733,6 +751,14 @@ export const createTaskProposalForViewer = mutationGeneric({
     if (!proposalText) throw new Error("proposal cannot be empty");
     const title = args.title?.trim() || provisionalTitleFromProposal(proposalText);
 
+    const phases = await ctx.db
+      .query("phases")
+      .withIndex("by_brain_project", (q: any) =>
+        q.eq("brainInstanceId", brain._id).eq("projectId", args.projectId),
+      )
+      .collect();
+    phases.sort((a: any, b: any) => a.orderNum - b.orderNum);
+
     const now = Date.now();
     const taskId = await ctx.db.insert("tasks", {
       brainInstanceId: brain._id,
@@ -744,6 +770,7 @@ export const createTaskProposalForViewer = mutationGeneric({
       kind: args.kind ?? "coding",
       executionState: "proposed",
       orderIndex: now,
+      phaseId: phases[0]?._id,
       createdAt: now,
       updatedAt: now,
     });
@@ -793,6 +820,8 @@ export const updateProjectForViewer = mutationGeneric({
     ),
     kind: v.optional(v.union(v.literal("code"), v.literal("general"))),
     repoUrl: v.optional(v.string()),
+    vercelUrl: v.optional(v.string()),
+    liveUrl: v.optional(v.string()),
     defaultBaseBranch: v.optional(v.string()),
     localPath: v.optional(v.string()),
     // Explicit assets/output folder overrides. Empty string clears the
@@ -817,6 +846,8 @@ export const updateProjectForViewer = mutationGeneric({
     if (args.status !== undefined) patch.status = args.status;
     if (args.kind !== undefined) patch.kind = args.kind;
     if (args.repoUrl !== undefined) patch.repoUrl = args.repoUrl.trim() || undefined;
+    if (args.vercelUrl !== undefined) patch.vercelUrl = args.vercelUrl.trim() || undefined;
+    if (args.liveUrl !== undefined) patch.liveUrl = args.liveUrl.trim() || undefined;
     if (args.defaultBaseBranch !== undefined) patch.defaultBaseBranch = args.defaultBaseBranch.trim() || undefined;
     if (args.localPath !== undefined) patch.localPath = args.localPath.trim() || undefined;
     // Format-check only — the app/Convex never checks existence (the browser
@@ -830,6 +861,161 @@ export const updateProjectForViewer = mutationGeneric({
     }
     await ctx.db.patch(args.projectId, patch);
     return { projectId: args.projectId, status: "updated" };
+  },
+});
+
+/**
+ * Backward-compatible phase bootstrap. Older projects already have ordered
+ * tasks, so the first visit wraps them in one editable phase without asking
+ * the owner to migrate anything manually.
+ */
+export const ensureProjectPhasesForViewer = mutationGeneric({
+  args: { projectId: v.id("projects") },
+  handler: async (ctx, args) => {
+    const { brain } = await requireOwnedBrain(ctx);
+    const project = await ctx.db.get(args.projectId);
+    if (!project || project.brainInstanceId !== brain._id) throw new Error("project not found");
+
+    const existing = await ctx.db
+      .query("phases")
+      .withIndex("by_brain_project", (q: any) =>
+        q.eq("brainInstanceId", brain._id).eq("projectId", args.projectId),
+      )
+      .collect();
+    if (existing.length) return { phaseId: existing.sort((a: any, b: any) => a.orderNum - b.orderNum)[0]._id };
+
+    const plans = await ctx.db
+      .query("projectPlans")
+      .withIndex("by_brain_project", (q: any) =>
+        q.eq("brainInstanceId", brain._id).eq("projectId", args.projectId),
+      )
+      .collect();
+    plans.sort((a: any, b: any) => b.createdAt - a.createdAt);
+    const now = Date.now();
+    const phaseId = await ctx.db.insert("phases", {
+      brainInstanceId: brain._id,
+      projectId: args.projectId,
+      orderNum: 0,
+      title: "Project plan",
+      descriptionMd: plans[0]?.summary || project.summary || "",
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    for (const taskId of await projectTaskIds(ctx.db, brain._id, args.projectId)) {
+      const task = await ctx.db.get(taskId as any);
+      if (task && task.brainInstanceId === brain._id && !task.phaseId) {
+        await ctx.db.patch(task._id, { phaseId, updatedAt: now });
+      }
+    }
+    return { phaseId };
+  },
+});
+
+export const createPhaseForViewer = mutationGeneric({
+  args: {
+    projectId: v.id("projects"),
+    title: v.string(),
+    descriptionMd: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const { brain } = await requireOwnedBrain(ctx);
+    const project = await ctx.db.get(args.projectId);
+    if (!project || project.brainInstanceId !== brain._id) throw new Error("project not found");
+    const title = args.title.trim();
+    if (!title) throw new Error("phase title cannot be empty");
+    const phases = await ctx.db
+      .query("phases")
+      .withIndex("by_brain_project", (q: any) =>
+        q.eq("brainInstanceId", brain._id).eq("projectId", args.projectId),
+      )
+      .collect();
+    const now = Date.now();
+    const phaseId = await ctx.db.insert("phases", {
+      brainInstanceId: brain._id,
+      projectId: args.projectId,
+      orderNum: phases.length ? Math.max(...phases.map((phase: any) => phase.orderNum)) + 1 : 0,
+      title,
+      descriptionMd: args.descriptionMd?.trim() ?? "",
+      createdAt: now,
+      updatedAt: now,
+    });
+    return { phaseId };
+  },
+});
+
+export const updatePhaseForViewer = mutationGeneric({
+  args: {
+    phaseId: v.id("phases"),
+    title: v.optional(v.string()),
+    descriptionMd: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const { brain } = await requireOwnedBrain(ctx);
+    const phase = await ctx.db.get(args.phaseId);
+    if (!phase || phase.brainInstanceId !== brain._id) throw new Error("phase not found");
+    const patch: Record<string, unknown> = { updatedAt: Date.now() };
+    if (args.title !== undefined) {
+      const title = args.title.trim();
+      if (!title) throw new Error("phase title cannot be empty");
+      patch.title = title;
+    }
+    // Keep an intentionally empty description: the inline editor should feel
+    // like a document surface, not a required form field.
+    if (args.descriptionMd !== undefined) patch.descriptionMd = args.descriptionMd;
+    await ctx.db.patch(args.phaseId, patch);
+    return { phaseId: args.phaseId };
+  },
+});
+
+export const reorderTaskInPhaseForViewer = mutationGeneric({
+  args: {
+    projectId: v.id("projects"),
+    phaseId: v.id("phases"),
+    taskId: v.id("tasks"),
+    beforeTaskId: v.optional(v.id("tasks")),
+  },
+  handler: async (ctx, args) => {
+    const { brain } = await requireOwnedBrain(ctx);
+    const phase = await ctx.db.get(args.phaseId);
+    const task = await ctx.db.get(args.taskId);
+    if (!phase || phase.brainInstanceId !== brain._id || phase.projectId !== args.projectId) {
+      throw new Error("phase not found");
+    }
+    if (!task || task.brainInstanceId !== brain._id) throw new Error("task not found");
+    const projectIds = await projectTaskIds(ctx.db, brain._id, args.projectId);
+    if (!projectIds.includes(args.taskId)) throw new Error("task does not belong to this project");
+
+    const siblings: any[] = [];
+    for (const taskId of projectIds) {
+      if (taskId === args.taskId) continue;
+      const candidate = await ctx.db.get(taskId as any);
+      if (candidate?.phaseId === args.phaseId && candidate.processingState === "accepted") siblings.push(candidate);
+    }
+    siblings.sort((a, b) => (a.orderIndex ?? 0) - (b.orderIndex ?? 0));
+    const beforePosition = args.beforeTaskId
+      ? siblings.findIndex((candidate) => candidate._id === args.beforeTaskId)
+      : -1;
+    const insertAt = beforePosition === -1 ? siblings.length : beforePosition;
+    const orderIndex = orderIndexBetween(
+      insertAt > 0 ? (siblings[insertAt - 1].orderIndex ?? 0) : undefined,
+      insertAt < siblings.length ? (siblings[insertAt].orderIndex ?? 0) : undefined,
+    );
+    const now = Date.now();
+    if (orderIndex !== undefined) {
+      await ctx.db.patch(args.taskId, { phaseId: args.phaseId, orderIndex, updatedAt: now });
+      return { taskId: args.taskId, phaseId: args.phaseId, orderIndex };
+    }
+    siblings.splice(insertAt, 0, task);
+    const base = siblings.length ? Math.min(...siblings.map((candidate) => candidate.orderIndex ?? 0)) : 0;
+    for (let index = 0; index < siblings.length; index += 1) {
+      await ctx.db.patch(siblings[index]._id, {
+        phaseId: args.phaseId,
+        orderIndex: base + index,
+        updatedAt: now,
+      });
+    }
+    return { taskId: args.taskId, phaseId: args.phaseId, orderIndex: base + insertAt };
   },
 });
 
@@ -1102,6 +1288,8 @@ async function currentContext(db: any, brainInstanceId: any) {
         title: project.title,
         kind: project.kind,
         repoUrl: project.repoUrl,
+        vercelUrl: project.vercelUrl,
+        liveUrl: project.liveUrl,
         localPath: project.localPath,
         ...effectivePaths(project),
       };
@@ -1152,6 +1340,56 @@ export const projectBoardForBrain = queryGeneric({
   args: { brainInstanceId: v.id("brainInstances"), projectId: v.id("projects") },
   handler: async ({ db }, args) => {
     return buildBoard(db, args.brainInstanceId, args.projectId);
+  },
+});
+
+export const updateProjectForBrain = mutationGeneric({
+  args: {
+    brainInstanceId: v.id("brainInstances"),
+    projectId: v.id("projects"),
+    title: v.optional(v.string()),
+    summary: v.optional(v.string()),
+    repoUrl: v.optional(v.string()),
+    vercelUrl: v.optional(v.string()),
+    liveUrl: v.optional(v.string()),
+  },
+  handler: async ({ db }, args) => {
+    const project = await db.get(args.projectId);
+    if (!project || project.brainInstanceId !== args.brainInstanceId) throw new Error("project not found");
+    const patch: Record<string, unknown> = { updatedAt: Date.now() };
+    if (args.title !== undefined) {
+      const title = args.title.trim();
+      if (!title) throw new Error("project title cannot be empty");
+      patch.title = title;
+    }
+    if (args.summary !== undefined) patch.summary = args.summary.trim() || undefined;
+    if (args.repoUrl !== undefined) patch.repoUrl = args.repoUrl.trim() || undefined;
+    if (args.vercelUrl !== undefined) patch.vercelUrl = args.vercelUrl.trim() || undefined;
+    if (args.liveUrl !== undefined) patch.liveUrl = args.liveUrl.trim() || undefined;
+    await db.patch(args.projectId, patch);
+    return { projectId: args.projectId, status: "updated" };
+  },
+});
+
+export const updatePhaseForBrain = mutationGeneric({
+  args: {
+    brainInstanceId: v.id("brainInstances"),
+    phaseId: v.id("phases"),
+    title: v.optional(v.string()),
+    descriptionMd: v.optional(v.string()),
+  },
+  handler: async ({ db }, args) => {
+    const phase = await db.get(args.phaseId);
+    if (!phase || phase.brainInstanceId !== args.brainInstanceId) throw new Error("phase not found");
+    const patch: Record<string, unknown> = { updatedAt: Date.now() };
+    if (args.title !== undefined) {
+      const title = args.title.trim();
+      if (!title) throw new Error("phase title cannot be empty");
+      patch.title = title;
+    }
+    if (args.descriptionMd !== undefined) patch.descriptionMd = args.descriptionMd;
+    await db.patch(args.phaseId, patch);
+    return { phaseId: args.phaseId, status: "updated" };
   },
 });
 

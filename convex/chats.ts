@@ -253,6 +253,9 @@ export const claimNextChatTurn = mutationGeneric({
             `The user is chatting from the project "${project.title}" (status: ${project.status}).`,
             project.summary ? `Project summary: ${project.summary}` : "",
             project.repoUrl ? `Repository: ${project.repoUrl}` : "",
+            project.vercelUrl ? `Vercel: ${project.vercelUrl}` : "",
+            project.liveUrl ? `Live URL: ${project.liveUrl}` : "",
+            "Use the Skippy MCP get_project_plan tool for the ordered phases/tasks, update_project for Overview details and links, and update_phase for phase descriptions.",
             cwd ? `The project checkout is your working directory.` : "",
           ]
             .filter(Boolean)
