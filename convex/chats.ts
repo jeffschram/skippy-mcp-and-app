@@ -73,6 +73,54 @@ async function activeTurnForChat(db: any, chatId: any) {
   return turns.find((t: any) => ["queued", "claimed", "running"].includes(t.status)) ?? null;
 }
 
+async function expireStaleChatTurns(ctx: any, brainInstanceId: any, now: number) {
+  const activeTurns = (
+    await Promise.all(
+      ["claimed", "running"].map((status) =>
+        ctx.db
+          .query("chatTurns")
+          .withIndex("by_brain_status", (q: any) =>
+            q.eq("brainInstanceId", brainInstanceId).eq("status", status),
+          )
+          .collect(),
+      ),
+    )
+  ).flat();
+
+  for (const turn of activeTurns) {
+    const leaseExpiresAt = turn.leaseExpiresAt ?? turn.updatedAt + CHAT_LEASE_MS;
+    if (leaseExpiresAt > now) continue;
+
+    const errorMessage = "The runner connection was interrupted before this reply completed. Please try again.";
+    const assistantMessage = await ctx.db.get(turn.assistantMessageId);
+    if (assistantMessage?.status === "pending") {
+      await ctx.db.patch(turn.assistantMessageId, {
+        status: "error",
+        content: "",
+        error: errorMessage,
+      });
+    }
+    await ctx.db.patch(turn._id, {
+      status: "failed",
+      errorMessage,
+      hostId: undefined,
+      claimToken: undefined,
+      leaseExpiresAt: undefined,
+      updatedAt: now,
+    });
+
+    const approvals = await ctx.db
+      .query("agentApprovals")
+      .withIndex("by_chat_turn", (q: any) => q.eq("chatTurnId", turn._id))
+      .collect();
+    for (const approval of approvals) {
+      if (approval.status === "pending") {
+        await ctx.db.patch(approval._id, { status: "expired", updatedAt: now });
+      }
+    }
+  }
+}
+
 /* ------------------------------------------------------------------ */
 /* Viewer surface                                                     */
 /* ------------------------------------------------------------------ */
@@ -209,8 +257,9 @@ export const claimNextChatTurn = mutationGeneric({
   args: { hostToken: v.string() },
   handler: async (ctx, { hostToken }) => {
     const host = await requireHost(ctx, hostToken);
-    if (host.draining) return null;
     const now = Date.now();
+    await expireStaleChatTurns(ctx, host.brainInstanceId, now);
+    if (host.draining) return null;
     const harnesses: string[] = host.capabilities?.harnesses ?? [];
 
     const queued = await ctx.db
@@ -235,6 +284,16 @@ export const claimNextChatTurn = mutationGeneric({
       const chat = await ctx.db.get(turn.chatId);
       if (!chat || chat.state === "archived") continue;
       const userMessage = await ctx.db.get(turn.userMessageId);
+      const priorTurns = siblings
+        .filter((sibling: any) => sibling._id !== turn._id && sibling.createdAt < turn.createdAt)
+        .sort((a: any, b: any) => b.createdAt - a.createdAt);
+      const latestPriorTurn = priorTurns[0];
+      const resetHarnessThread =
+        latestPriorTurn?.status === "failed" || latestPriorTurn?.status === "cancelled";
+      const externalThreadId = resetHarnessThread ? undefined : chat.externalThreadId;
+      if (resetHarnessThread && chat.externalThreadId) {
+        await ctx.db.patch(chat._id, { externalThreadId: undefined, updatedAt: now });
+      }
 
       // Scope context + working directory for the harness.
       let scopeContext = "";
@@ -271,8 +330,19 @@ export const claimNextChatTurn = mutationGeneric({
         .query("chatMessages")
         .withIndex("by_chat", (q: any) => q.eq("chatId", turn.chatId))
         .collect();
+      const successfulMessageIds = new Set(
+        siblings
+          .filter((sibling: any) => sibling.status === "completed")
+          .flatMap((sibling: any) => [sibling.userMessageId, sibling.assistantMessageId]),
+      );
       const history = all
-        .filter((m: any) => m.status === "complete" && m.content && m._id !== turn.userMessageId)
+        .filter(
+          (m: any) =>
+            m.status === "complete" &&
+            m.content &&
+            m._id !== turn.userMessageId &&
+            (!resetHarnessThread || successfulMessageIds.has(m._id)),
+        )
         .slice(-HISTORY_LIMIT)
         .map((m: any) => ({ role: m.role, content: m.content }));
 
@@ -291,7 +361,7 @@ export const claimNextChatTurn = mutationGeneric({
         claimToken,
         chatId: turn.chatId,
         harness: turn.harness,
-        externalThreadId: chat.externalThreadId,
+        externalThreadId,
         scopeContext,
         cwd,
         history,
@@ -425,7 +495,13 @@ export const completeChatTurn = mutationGeneric({
       ...(failed ? { errorMessage: (args.errorMessage ?? "").slice(0, 500) } : {}),
       updatedAt: now,
     });
-    if (args.externalThreadId) {
+    if (failed) {
+      // A harness-native session that just failed may no longer be resumable
+      // (for example after its project cwd or runner account changes). The
+      // next message starts a clean session and receives successful transcript
+      // history instead of retrying the broken session forever.
+      await ctx.db.patch(turn.chatId, { externalThreadId: undefined, updatedAt: now });
+    } else if (args.externalThreadId) {
       await ctx.db.patch(turn.chatId, { externalThreadId: args.externalThreadId, updatedAt: now });
     }
     // Nothing should stay waiting on a finished turn.
