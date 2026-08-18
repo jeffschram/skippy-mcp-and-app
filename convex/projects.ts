@@ -98,7 +98,9 @@ async function buildBoard(db: any, brainInstanceId: any, projectId: string) {
       lastPrCreatedAt: task.lastPrCreatedAt,
       resultSummary: task.resultSummary,
       resultUrl: task.resultUrl,
+      startedAt: task.startedAt,
       startedBy: task.startedBy,
+      completedAt: task.completedAt,
       dependsOn,
       updatedAt: task.updatedAt,
     });
@@ -1120,7 +1122,11 @@ async function applyExecutionStateChange(
 ) {
   const patch: Record<string, unknown> = { executionState, updatedAt: now };
   // Keep the user-facing status roughly in sync with the lifecycle.
-  if (executionState === "in_progress") patch.status = "in_progress";
+  if (executionState === "in_progress") {
+    patch.status = "in_progress";
+    patch.startedAt = task.startedAt ?? now;
+    patch.startedBy = task.startedBy ?? user.displayName ?? user.email;
+  }
   else if (executionState === "done") {
     patch.status = "done";
     patch.completedAt = now;
