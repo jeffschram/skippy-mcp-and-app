@@ -41,6 +41,9 @@ const markTaskDoneRef = makeFunctionReference<"mutation">("knowledge:markTaskDon
 const recordPendingActionResultRef = makeFunctionReference<"mutation">("knowledge:recordPendingActionResult");
 const recordEntityReviewRef = makeFunctionReference<"mutation">("knowledge:recordEntityReview");
 const currentContextForBrainRef = makeFunctionReference<"query">("projects:currentContextForBrain");
+const projectBoardForBrainRef = makeFunctionReference<"query">("projects:projectBoardForBrain");
+const updateProjectForBrainRef = makeFunctionReference<"mutation">("projects:updateProjectForBrain");
+const updatePhaseForBrainRef = makeFunctionReference<"mutation">("projects:updatePhaseForBrain");
 const planProjectForBrainRef = makeFunctionReference<"action">("planning:planProjectForBrain");
 const readyTasksForBrainRef = makeFunctionReference<"query">("projects:readyTasksForBrain");
 const requestedReadyTasksForBrainRef = makeFunctionReference<"query">("projects:requestedReadyTasksForBrain");
@@ -144,6 +147,12 @@ export function createConvexSkippyClient(convexUrl: string, authToken?: string):
       client.mutation(recordEntityReviewRef, { brainInstanceId, ...review }),
     getCurrentContext: (brainInstanceId) =>
       client.query(currentContextForBrainRef, { brainInstanceId }),
+    getProjectPlan: (brainInstanceId, input) =>
+      client.query(projectBoardForBrainRef, { brainInstanceId, ...input }),
+    updateProject: (brainInstanceId, input) =>
+      client.mutation(updateProjectForBrainRef, { brainInstanceId, ...input }),
+    updatePhase: (brainInstanceId, input) =>
+      client.mutation(updatePhaseForBrainRef, { brainInstanceId, ...input }),
     planProject: (brainInstanceId, input) =>
       client.action(planProjectForBrainRef, { brainInstanceId, ...input }),
     listReadyTasks: (brainInstanceId, input) =>

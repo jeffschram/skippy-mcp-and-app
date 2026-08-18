@@ -94,6 +94,7 @@ const skippyInstructions = [
   "For noisy sources, submit only items that are actionable, relationship-building, deadline-bearing, decision-relevant, or clearly useful later.",
   "Use pending actions only for external side effects that need separate approval/execution. Do not send email, edit calendars, or mark source systems changed through Skippy.",
   "Use capture_thought, record_memory, record_decision, and record_principle for durable second-brain memory. Include source refs, related entity refs, confidence, captureReason/rubricDecision, and reviewBehavior when available.",
+  "On a project page, use get_project_plan to understand phases and ordered tasks. Use update_project for the Overview description and links, and update_phase for a phase title or Markdown description when the user asks chat to change them.",
   "Use submit_memory_review_candidate when a possible memory is useful but uncertain. Do not queue transient alerts (balance notifications, promo deadlines, ToS notices); skip them or record directly with expiry context. Use list_memory/get_context_bundle/get_memory_detail before adding likely duplicates or answering from memory, and link_memory to attach memories to accepted entities.",
   "Use list_interview_templates/start_interview/get_interview/answer_interview_question/complete_interview/archive_interview to run guided second-brain interviews inside the harness chat. Ask one question at a time in chat, using the assistantDisplayName returned by Skippy.",
   "During scheduled or batch source-ingestion runs, also drain the Home quick-capture inbox in addition to external sources: call list_quick_captures for pending captures the owner dropped on the home page, turn useful ones into Skippy objects with the ingestion tools (ingest_object etc.), then call mark_quick_capture_handled with 'processed' or 'discarded' for each. Hold-intent captures are private device-to-device transfers: they are never returned by list_quick_captures and must never be ingested.",
@@ -1846,6 +1847,63 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
       inputSchema: z.object({}),
     },
     async () => toolResult(await tools.getCurrentContext()),
+  );
+
+  server.registerTool(
+    "get_project_plan",
+    {
+      title: "Get a project's overview and ordered plan",
+      description:
+        "Read-only. Returns the project Overview fields, ordered phases with Markdown descriptions, ordered tasks, progress, and the currently featured next task ordering. Call get_current_context first when the user says 'this project'.",
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: z.object({ projectId: z.string().describe("Accepted project ID.") }),
+    },
+    async (args) => toolResult(await tools.getProjectPlan({ projectId: args.projectId })),
+  );
+
+  server.registerTool(
+    "update_project",
+    {
+      title: "Update a project's Overview",
+      description:
+        "Update the project name, description, or relevant links shown in Overview. Omit fields that should stay unchanged; pass an empty string to clear an optional field.",
+      annotations: { destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: z.object({
+        projectId: z.string().describe("Accepted project ID."),
+        title: z.string().optional(),
+        summary: z.string().optional().describe("Project description."),
+        repoUrl: z.string().optional().describe("GitHub repository URL."),
+        vercelUrl: z.string().optional().describe("Vercel project or dashboard URL."),
+        liveUrl: z.string().optional().describe("Public live URL."),
+      }),
+    },
+    async (args) =>
+      toolResult(
+        await tools.updateProject(
+          stripUndefined(args) as Parameters<typeof tools.updateProject>[0],
+        ),
+      ),
+  );
+
+  server.registerTool(
+    "update_phase",
+    {
+      title: "Update a project phase",
+      description:
+        "Update an existing phase title or its Markdown description. Use get_project_plan first to identify the phase ID. Omit fields that should stay unchanged; descriptionMd may be empty.",
+      annotations: { destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: z.object({
+        phaseId: z.string().describe("Phase ID returned by get_project_plan."),
+        title: z.string().optional(),
+        descriptionMd: z.string().optional().describe("Full Markdown phase description."),
+      }),
+    },
+    async (args) =>
+      toolResult(
+        await tools.updatePhase(
+          stripUndefined(args) as Parameters<typeof tools.updatePhase>[0],
+        ),
+      ),
   );
 
   server.registerTool(

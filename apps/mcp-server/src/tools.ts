@@ -183,6 +183,22 @@ export type SkippyClient = {
   ): Promise<unknown>;
   recordEntityReview(brainInstanceId: string, review: EntityReviewInput): Promise<unknown>;
   getCurrentContext(brainInstanceId: string): Promise<unknown>;
+  getProjectPlan(brainInstanceId: string, input: { projectId: string }): Promise<unknown>;
+  updateProject(
+    brainInstanceId: string,
+    input: {
+      projectId: string;
+      title?: string;
+      summary?: string;
+      repoUrl?: string;
+      vercelUrl?: string;
+      liveUrl?: string;
+    },
+  ): Promise<unknown>;
+  updatePhase(
+    brainInstanceId: string,
+    input: { phaseId: string; title?: string; descriptionMd?: string },
+  ): Promise<unknown>;
   planProject(brainInstanceId: string, input: { projectId: string; maxTasks?: number }): Promise<unknown>;
   listReadyTasks(brainInstanceId: string, input: { limit?: number }): Promise<unknown>;
   listRequestedReadyTasks(brainInstanceId: string, input: { limit?: number }): Promise<unknown>;
@@ -1198,6 +1214,25 @@ export function createSkippyToolHandlers(client: SkippyClient, brainInstanceId: 
 
     async getCurrentContext() {
       return await client.getCurrentContext(brainInstanceId);
+    },
+
+    async getProjectPlan(input: { projectId: string }) {
+      return await client.getProjectPlan(brainInstanceId, input);
+    },
+
+    async updateProject(input: {
+      projectId: string;
+      title?: string;
+      summary?: string;
+      repoUrl?: string;
+      vercelUrl?: string;
+      liveUrl?: string;
+    }) {
+      return await client.updateProject(brainInstanceId, input);
+    },
+
+    async updatePhase(input: { phaseId: string; title?: string; descriptionMd?: string }) {
+      return await client.updatePhase(brainInstanceId, input);
     },
 
     async planProject(input: { projectId: string; maxTasks?: number }) {

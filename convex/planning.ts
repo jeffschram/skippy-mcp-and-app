@@ -238,6 +238,24 @@ export const writePlan = internalMutationGeneric({
       completedAt: now,
     });
 
+    const existingPhases = await db
+      .query("phases")
+      .withIndex("by_brain_project", (q: any) =>
+        q.eq("brainInstanceId", args.brainInstanceId).eq("projectId", args.projectId),
+      )
+      .collect();
+    const phaseId = await db.insert("phases", {
+      brainInstanceId: args.brainInstanceId,
+      projectId: args.projectId,
+      orderNum: existingPhases.length
+        ? Math.max(...existingPhases.map((phase: any) => phase.orderNum)) + 1
+        : 0,
+      title: `Phase ${existingPhases.length + 1}`,
+      descriptionMd: args.summary || "",
+      createdAt: now,
+      updatedAt: now,
+    });
+
     const taskIds: string[] = [];
     for (let index = 0; index < args.tasks.length; index += 1) {
       const draft = args.tasks[index] as ProjectPlanTaskDraft;
@@ -256,6 +274,7 @@ export const writePlan = internalMutationGeneric({
         orderIndex: index,
         briefReadyAt: now,
         planRunId: planId,
+        phaseId,
         priorityReason: args.summary || undefined,
         createdAt: now,
         updatedAt: now,

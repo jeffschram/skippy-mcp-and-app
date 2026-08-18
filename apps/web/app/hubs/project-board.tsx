@@ -1,765 +1,637 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
-import { useAction, useMutation, useQuery } from "convex/react";
+import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
+import { useMutation, useQuery } from "convex/react";
 import {
   ArrowLeft,
-  Archive,
-  ArchiveRestore,
-  Ban,
-  ChevronDown,
-  ChevronRight,
-  ClipboardCopy,
+  Check,
+  CheckCircle2,
   ExternalLink,
-  Folder,
+  FileText,
   GitBranch,
-  GitPullRequest,
   GripVertical,
-  Pencil,
-  Plus,
+  Link2,
+  ListChecks,
+  MessageCircle,
   Play,
-  RotateCcw,
-  Settings2,
+  Plus,
+  Rocket,
   Sparkles,
 } from "lucide-react";
-import { isValidFolderPathFormat } from "@skippy/shared";
+import { cn } from "@/lib/utils";
 import { api } from "../../lib/skippy-api";
-import { LiveGate } from "../live-auth";
+import { ProjectChatWorkspace } from "../components/chat-panel";
 import {
-  ActivityBar,
   Badge,
   Button,
   Card,
-  Dialog,
-  Drawer,
-  EmptyState,
-  Field,
   LoadingRow,
   ProgressBar,
-  Select,
-  Tabs,
-  TextArea,
-  TextInput,
   useToast,
 } from "../components";
-import { EXECUTION_COLUMNS, executionStateTone, taskStatusTone, titleCase } from "../../lib/display";
+import { LiveGate } from "../live-auth";
+import { ProjectLibrarySection } from "./project-library";
 import { useViewerReady } from "./use-viewer";
-import { ProjectLibrarySection, TaskAttachments, useProjectFileUploader } from "./project-library";
-import { checkProjectFile, formatFileSize, PROJECT_FILE_ACCEPT } from "./project-library-helpers";
-import { cn } from "@/lib/utils";
-import {
-  badgeBlueClass,
-  badgeClass,
-  cardClass,
-  codeClass,
-  eyebrowClass,
-  inputClass,
-  mutedClass,
-  textareaClass,
-  textButtonClass,
-  textButtonCompactClass,
-} from "../page-classes";
 
 type AnyRecord = Record<string, any>;
+type ProjectView = "chat" | "overview" | "plan" | "library";
 
-// States where the task hasn't been executed yet — brief is editable, no result capture.
-const PRE_EXECUTION = new Set(["unplanned", "briefed", "ready", "blocked"]);
-// States where recording a result makes sense.
-const RESULT_STATES = new Set(["in_progress", "in_review"]);
-// States the owner can abandon — running or completed work records its result instead.
-const ABANDONABLE_STATES = new Set(["proposed", "unplanned", "briefed", "ready", "blocked"]);
-// Agent-run states that count as "still going" for board affordances.
-const ACTIVE_RUN_STATES = new Set([
-  "queued",
-  "claimed",
-  "preparing",
-  "running",
-  "waiting_for_approval",
-  "verifying",
-  "awaiting_publish_approval",
-  "publishing",
-]);
-const RUN_STATE_LABELS: Record<string, string> = {
-  queued: "Queued",
-  claimed: "Claimed",
-  preparing: "Preparing",
-  running: "Running",
-  waiting_for_approval: "Waiting for approval",
-  verifying: "Verifying",
-  awaiting_publish_approval: "Awaiting publish approval",
-  publishing: "Publishing",
-  in_review: "In review",
-  interrupted: "Interrupted",
-  failed: "Failed",
-  cancelled: "Cancelled",
-};
+const panelTabs: Array<{ key: Exclude<ProjectView, "chat">; label: string }> = [
+  { key: "overview", label: "Overview" },
+  { key: "plan", label: "Plan" },
+  { key: "library", label: "Library" },
+];
 
-/**
- * Text input for an assets/output folder override. Unset means "derived from
- * the project local folder" — the muted hint shows the derived default and a
- * reset affordance clears the override back to it.
- */
-function FolderOverrideField({
-  label,
-  value,
-  onChange,
-  derivedDefault,
-  disabled,
-}: {
+const mobileTabs: Array<{
+  key: ProjectView;
   label: string;
-  value: string;
-  onChange: (value: string) => void;
-  derivedDefault: string | undefined;
-  disabled: boolean;
-}) {
+  icon: typeof MessageCircle;
+}> = [
+  { key: "chat", label: "Chat", icon: MessageCircle },
+  { key: "overview", label: "Overview", icon: FileText },
+  { key: "plan", label: "Plan", icon: ListChecks },
+  { key: "library", label: "Library", icon: Link2 },
+];
+
+function displayState(
+  task: AnyRecord,
+): "Not started" | "In Progress" | "Completed" {
+  if (task.executionState === "done" || task.status === "done")
+    return "Completed";
+  if (
+    task.executionState === "in_progress" ||
+    task.executionState === "in_review" ||
+    task.agentRequestStatus === "requested"
+  )
+    return "In Progress";
+  return "Not started";
+}
+
+function PhaseDescription({ phase }: { phase: AnyRecord }) {
+  const updatePhase = useMutation(api.projects.updatePhaseForViewer);
+  const [draft, setDraft] = useState(phase.descriptionMd ?? "");
+  const focused = useRef(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (!focused.current) setDraft(phase.descriptionMd ?? "");
+  }, [phase.descriptionMd]);
+
+  const save = (value: string) => {
+    if (timer.current) clearTimeout(timer.current);
+    if (value === (phase.descriptionMd ?? "")) return;
+    timer.current = setTimeout(() => {
+      void updatePhase({ phaseId: phase._id as any, descriptionMd: value });
+    }, 650);
+  };
+
+  useEffect(
+    () => () => {
+      if (timer.current) clearTimeout(timer.current);
+    },
+    [],
+  );
+
   return (
-    <Field label={label}>
-      <TextInput
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        placeholder={derivedDefault ?? ""}
-        disabled={disabled}
-      />
-      <span className={mutedClass} style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 12 }}>
-        <span>{disabled ? "set the project local folder first" : `default: ${derivedDefault}`}</span>
-        {!disabled && value ? (
-          <button
-            type="button"
-            className={textButtonClass}
-            style={{ fontSize: 12 }}
-            onClick={(event) => {
-              event.preventDefault();
-              onChange("");
-            }}
-          >
-            Reset to default
-          </button>
-        ) : null}
-      </span>
-    </Field>
+    <textarea
+      className="min-h-20 w-full resize-y rounded-lg border border-transparent bg-transparent px-2 py-1.5 text-sm leading-relaxed text-muted-foreground transition-colors placeholder:text-muted-foreground/55 hover:border-border focus:border-primary/55 focus:bg-background focus:outline-none"
+      aria-label={`${phase.title} description`}
+      placeholder="Type a phase description in Markdown…"
+      value={draft}
+      onFocus={() => {
+        focused.current = true;
+      }}
+      onBlur={(event) => {
+        focused.current = false;
+        if (timer.current) clearTimeout(timer.current);
+        if (event.currentTarget.value !== (phase.descriptionMd ?? "")) {
+          void updatePhase({
+            phaseId: phase._id as any,
+            descriptionMd: event.currentTarget.value,
+          });
+        }
+      }}
+      onChange={(event) => {
+        setDraft(event.target.value);
+        save(event.target.value);
+      }}
+    />
   );
 }
 
-/** One line of the run execution log, keyed by runner event type. */
-function RunEventLine({ event }: { event: AnyRecord }) {
-  const payload = event.payload ?? {};
-  const mono: React.CSSProperties = { margin: 0, fontSize: 12, fontFamily: "monospace", whiteSpace: "pre-wrap" };
-  switch (event.type) {
-    case "assistant_message":
-      return <p style={{ margin: 0, fontSize: 13, whiteSpace: "pre-wrap" }}>{payload.text}</p>;
-    case "plan_update":
-      return (
-        <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12 }}>
-          {(payload.todos ?? []).map((todo: AnyRecord, index: number) => (
-            <li key={index} className={todo.status === "completed" ? mutedClass : undefined}>
-              {todo.status === "completed" ? "✓ " : ""}
-              {todo.content ?? todo.title ?? JSON.stringify(todo)}
-            </li>
-          ))}
-        </ul>
-      );
-    case "command":
-      return <p style={mono}>$ {payload.command}</p>;
-    case "command_result":
-      return (
-        <p style={mono} className={payload.exitCode ? undefined : mutedClass}>
-          {payload.phase === "verify" ? "verify " : ""}exit {payload.exitCode}
-          {payload.outputTail ? `\n${payload.outputTail}` : ""}
-        </p>
-      );
-    case "file_change":
-      return (
-        <p className={mutedClass} style={mono}>
-          {payload.tool ?? "edit"}: {payload.filePath}
-        </p>
-      );
-    case "status":
-      return (
-        <p className={mutedClass} style={{ margin: 0, fontSize: 12 }}>
-          — {payload.phase}
-          {payload.verifyLine ? ` · ${payload.verifyLine}` : ""}
-        </p>
-      );
-    case "error":
-      return (
-        <p style={{ ...mono, color: "var(--red, #b04040)" }}>
-          {payload.phase ? `[${payload.phase}] ` : ""}
-          {payload.message}
-        </p>
-      );
-    default:
-      return null;
+function TaskRow({
+  task,
+  featured,
+  busy,
+  onStart,
+  onComplete,
+  onDragStart,
+  onDrop,
+}: {
+  task: AnyRecord;
+  featured: boolean;
+  busy: boolean;
+  onStart: () => void;
+  onComplete: () => void;
+  onDragStart: (event: DragEvent<HTMLElement>) => void;
+  onDrop: (event: DragEvent<HTMLElement>) => void;
+}) {
+  const state = displayState(task);
+  const completed = state === "Completed";
+  const inProgress = state === "In Progress";
+
+  if (completed) {
+    return (
+      <article
+        draggable
+        onDragStart={onDragStart}
+        onDragOver={(event) => event.preventDefault()}
+        onDrop={onDrop}
+        className="flex items-center gap-2 rounded-lg border border-transparent px-2 py-2 text-sm text-muted-foreground hover:border-border"
+      >
+        <GripVertical
+          className="cursor-grab opacity-35"
+          size={15}
+          aria-hidden
+        />
+        <CheckCircle2 className="text-green" size={16} aria-hidden />
+        <span className="min-w-0 flex-1 whitespace-normal break-words text-[13px] leading-snug line-through decoration-border">
+          {task.title}
+        </span>
+        <span className="text-xs">Completed</span>
+      </article>
+    );
   }
+
+  return (
+    <article
+      draggable
+      onDragStart={onDragStart}
+      onDragOver={(event) => event.preventDefault()}
+      onDrop={onDrop}
+      className={cn(
+        "rounded-xl border p-3 transition-colors",
+        featured
+          ? "border-primary/55 bg-primary/[0.07] shadow-sm"
+          : "border-border bg-background/40",
+      )}
+    >
+      <div className="flex items-start gap-2.5">
+        <GripVertical
+          className="mt-1 cursor-grab text-muted-foreground/55"
+          size={16}
+          aria-hidden
+        />
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            {featured ? (
+              <span className="text-[11px] font-bold uppercase tracking-[0.08em] text-primary">
+                Next
+              </span>
+            ) : null}
+            <h3 className="m-0 min-w-0 flex-[1_1_180px] whitespace-normal break-words text-[13px] font-semibold leading-snug">
+              {task.title}
+            </h3>
+            {task.ownerType === "agent" ? (
+              <Badge tone="blue">Agent</Badge>
+            ) : null}
+            <Badge tone={inProgress ? "gold" : "neutral"}>{state}</Badge>
+          </div>
+          {featured && (task.executionBrief || task.description) ? (
+            <p className="mb-0 mt-2 whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">
+              {task.executionBrief || task.description}
+            </p>
+          ) : null}
+          {featured ? (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {!inProgress ? (
+                <Button
+                  small
+                  variant="primary"
+                  disabled={busy}
+                  onClick={onStart}
+                >
+                  <Play size={14} aria-hidden />{" "}
+                  {task.ownerType === "agent"
+                    ? "Start task"
+                    : "Mark in progress"}
+                </Button>
+              ) : null}
+              {task.ownerType !== "agent" && inProgress ? (
+                <Button
+                  small
+                  variant="primary"
+                  disabled={busy}
+                  onClick={onComplete}
+                >
+                  <Check size={14} aria-hidden /> Mark complete
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </article>
+  );
 }
 
-function buildBriefText(task: AnyRecord, project?: AnyRecord): string {
-  const lines = [`# ${task.title}`];
-  if (project?.title) lines.push(`Project: ${project.title}`);
-  if (project?.repoUrl) lines.push(`Repo: ${project.repoUrl}`);
-  if (project?.localPath) lines.push(`Local folder: ${project.localPath}`);
-  if (task.kind) lines.push(`Kind: ${task.kind}`);
-  if (task.description) lines.push("", task.description);
-  if (task.executionBrief) lines.push("", "## Brief", task.executionBrief);
-  if (task.acceptanceCriteria?.length) {
-    lines.push("", "## Acceptance criteria", ...task.acceptanceCriteria.map((c: string) => `- [ ] ${c}`));
-  }
-  return lines.join("\n");
+function ProjectOverview({ project }: { project: AnyRecord }) {
+  const links = [
+    project.repoUrl
+      ? { label: "GitHub repository", href: project.repoUrl, icon: GitBranch }
+      : null,
+    project.vercelUrl
+      ? { label: "Vercel project", href: project.vercelUrl, icon: Rocket }
+      : null,
+    project.liveUrl
+      ? { label: "Live site", href: project.liveUrl, icon: ExternalLink }
+      : null,
+  ].filter(Boolean) as Array<{
+    label: string;
+    href: string;
+    icon: typeof GitBranch;
+  }>;
+
+  return (
+    <div className="space-y-7 p-5 desk:p-6">
+      <section>
+        <p className="mb-2 text-xs font-bold uppercase tracking-[0.08em] text-green">
+          {project.kind === "code" ? "Code project" : "Project"}
+        </p>
+        <h1 className="text-[clamp(32px,4vw,52px)]">{project.title}</h1>
+        <p className="mb-0 mt-4 whitespace-pre-wrap text-[15px] leading-relaxed text-muted-foreground">
+          {project.summary ||
+            "No project description yet. Ask chat to add one."}
+        </p>
+      </section>
+
+      <section>
+        <h2 className="mb-3 text-lg">Links</h2>
+        {links.length ? (
+          <div className="grid gap-2">
+            {links.map((item) => (
+              <a
+                key={item.label}
+                href={item.href}
+                target="_blank"
+                rel="noreferrer"
+                className="flex items-center gap-3 rounded-xl border bg-card p-3 text-sm font-bold text-foreground no-underline hover:border-primary"
+              >
+                <item.icon size={17} className="text-primary" aria-hidden />
+                <span className="min-w-0 flex-1 truncate">{item.label}</span>
+                <ExternalLink
+                  size={14}
+                  className="text-muted-foreground"
+                  aria-hidden
+                />
+              </a>
+            ))}
+          </div>
+        ) : (
+          <p className="rounded-xl border border-dashed p-4 text-sm text-muted-foreground">
+            No links yet. Ask chat to add the GitHub, Vercel, or live URL.
+          </p>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function ProjectPlan({
+  board,
+  featuredTask,
+  busy,
+  onStart,
+  onComplete,
+}: {
+  board: AnyRecord;
+  featuredTask: AnyRecord | null;
+  busy: boolean;
+  onStart: (task: AnyRecord) => void;
+  onComplete: (task: AnyRecord) => void;
+}) {
+  const createPhase = useMutation(api.projects.createPhaseForViewer);
+  const reorderTask = useMutation(api.projects.reorderTaskInPhaseForViewer);
+  const toast = useToast();
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const tasks: AnyRecord[] = board.tasks ?? [];
+  const phases: AnyRecord[] = board.phases ?? [];
+
+  const moveBefore = async (phaseId: string, beforeTaskId?: string) => {
+    if (!draggingId || draggingId === beforeTaskId) return;
+    try {
+      await reorderTask({
+        projectId: board.project._id as any,
+        phaseId: phaseId as any,
+        taskId: draggingId as any,
+        ...(beforeTaskId ? { beforeTaskId: beforeTaskId as any } : {}),
+      });
+    } catch (error) {
+      toast(
+        error instanceof Error ? error.message : "Could not reorder task",
+        "error",
+      );
+    } finally {
+      setDraggingId(null);
+    }
+  };
+
+  return (
+    <div className="space-y-5 p-4 desk:p-5">
+      <div className="mb-2 flex items-baseline justify-between gap-3">
+        <h2 className="m-0 text-xl">What’s next</h2>
+        <span className="text-sm font-bold">
+          {board.progress.percent}% complete
+        </span>
+      </div>
+      <ProgressBar value={board.progress.percent} />
+      {featuredTask ? (
+        <div className="mt-4">
+          <p className="mb-1 text-xs font-bold uppercase tracking-[0.08em] text-primary">
+            Next in the plan
+          </p>
+          <p className="mb-1 font-bold">{featuredTask.title}</p>
+          <p className="m-0 text-sm text-muted-foreground">
+            {featuredTask.executionBrief ||
+              featuredTask.description ||
+              "This is the first unfinished task in the ordered plan."}
+          </p>
+        </div>
+      ) : (
+        <div className="mt-4 flex items-center gap-2 text-sm font-bold text-green">
+          <CheckCircle2 size={17} aria-hidden /> Project plan complete
+        </div>
+      )}
+
+      {phases.map((phase) => {
+        const phaseTasks = tasks.filter((task) => task.phaseId === phase._id);
+        const completedTasks = phaseTasks.filter(
+          (task) => displayState(task) === "Completed",
+        );
+        const incompleteTasks = phaseTasks.filter(
+          (task) => displayState(task) !== "Completed",
+        );
+        const completeCount = completedTasks.length;
+        return (
+          <section key={phase._id}>
+            <div className="flex items-start justify-between gap-3 pt-2 mb-2">
+              <div>
+                <p className="mb-1 text-[11px] font-bold uppercase tracking-[0.08em] text-muted-foreground">
+                  Phase {phase.orderNum + 1}
+                </p>
+                <h2 className="m-0 text-xl">{phase.title}</h2>
+              </div>
+              <span className="mt-1 text-xs text-muted-foreground">
+                {completeCount}/{phaseTasks.length}
+              </span>
+            </div>
+            <PhaseDescription phase={phase} />
+            <div className="mt-2 grid gap-2">
+              {incompleteTasks.map((task) => (
+                <TaskRow
+                  key={task._id}
+                  task={task}
+                  featured={featuredTask?._id === task._id}
+                  busy={busy}
+                  onStart={() => onStart(task)}
+                  onComplete={() => onComplete(task)}
+                  onDragStart={(event) => {
+                    setDraggingId(task._id);
+                    event.dataTransfer.effectAllowed = "move";
+                    event.dataTransfer.setData("text/plain", task._id);
+                  }}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    void moveBefore(phase._id, task._id);
+                  }}
+                />
+              ))}
+              <button
+                type="button"
+                className="flex min-h-10 items-center justify-center rounded-lg border border-dashed text-xs font-bold text-muted-foreground hover:border-primary hover:text-primary"
+                onDragOver={(event) => event.preventDefault()}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  void moveBefore(phase._id);
+                }}
+              >
+                Drop here to move to the end of this phase
+              </button>
+              {completedTasks.length ? (
+                <details className="mt-2 rounded-xl border bg-background/30 px-3 py-2">
+                  <summary className="cursor-pointer text-xs font-bold text-muted-foreground">
+                    Completed ({completedTasks.length})
+                  </summary>
+                  <div className="mt-2 grid gap-1 border-t pt-2">
+                    {completedTasks.map((task) => (
+                      <TaskRow
+                        key={task._id}
+                        task={task}
+                        featured={false}
+                        busy={busy}
+                        onStart={() => onStart(task)}
+                        onComplete={() => onComplete(task)}
+                        onDragStart={(event) => {
+                          setDraggingId(task._id);
+                          event.dataTransfer.effectAllowed = "move";
+                          event.dataTransfer.setData("text/plain", task._id);
+                        }}
+                        onDrop={(event) => {
+                          event.preventDefault();
+                          void moveBefore(phase._id, task._id);
+                        }}
+                      />
+                    ))}
+                  </div>
+                </details>
+              ) : null}
+            </div>
+          </section>
+        );
+      })}
+
+      <Button
+        className="w-full border-dashed"
+        onClick={() =>
+          void createPhase({
+            projectId: board.project._id as any,
+            title: `Phase ${phases.length + 1}`,
+          })
+        }
+      >
+        <Plus size={15} aria-hidden /> Add phase
+      </Button>
+    </div>
+  );
+}
+
+function SidePanel({
+  board,
+  view,
+  onView,
+  featuredTask,
+  busy,
+  onStart,
+  onComplete,
+}: {
+  board: AnyRecord;
+  view: ProjectView;
+  onView: (view: ProjectView) => void;
+  featuredTask: AnyRecord | null;
+  busy: boolean;
+  onStart: (task: AnyRecord) => void;
+  onComplete: (task: AnyRecord) => void;
+}) {
+  return (
+    <aside className="flex min-h-0 flex-col bg-secondary/35">
+      <div
+        className="flex border-b bg-card px-3 pt-3"
+        role="tablist"
+        aria-label="Project details"
+      >
+        {panelTabs.map((tab) => (
+          <button
+            key={tab.key}
+            type="button"
+            role="tab"
+            aria-selected={view === tab.key}
+            className={cn(
+              "border-b-2 border-transparent px-3 py-2.5 text-sm font-bold text-muted-foreground",
+              view === tab.key && "border-primary text-foreground",
+            )}
+            onClick={() => onView(tab.key)}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        {view === "overview" ? (
+          <ProjectOverview project={board.project} />
+        ) : null}
+        {view === "plan" ? (
+          <ProjectPlan
+            board={board}
+            featuredTask={featuredTask}
+            busy={busy}
+            onStart={onStart}
+            onComplete={onComplete}
+          />
+        ) : null}
+        {view === "library" ? (
+          <div className="p-4">
+            <ProjectLibrarySection projectId={board.project._id} alwaysOpen />
+          </div>
+        ) : null}
+      </div>
+    </aside>
+  );
 }
 
 export function ProjectBoardContent({ projectId }: { projectId: string }) {
   const viewerReady = useViewerReady();
-  const board = useQuery(api.projects.projectBoardForViewer, viewerReady ? { projectId: projectId as any } : "skip") as
-    | AnyRecord
-    | null
-    | undefined;
-  const planProject = useAction(api.planning.planProject);
-  const briefTaskProposal = useAction(api.planning.briefTaskProposal);
-  const markDone = useMutation(api.knowledge.markTaskDoneForViewer);
-  const createTaskProposal = useMutation(api.projects.createTaskProposalForViewer);
-  const { uploadFiles: uploadProposalFiles } = useProjectFileUploader(projectId);
-  const recordResult = useMutation(api.projects.recordTaskResultForViewer);
-  const requestAgent = useMutation(api.projects.requestAgentForTaskForViewer);
-  const setExecState = useMutation(api.projects.setTaskExecutionStateForViewer);
-  const reorderTask = useMutation(api.projects.reorderTaskForViewer);
-  const cancelTask = useMutation(api.projects.cancelTaskForViewer);
-  const restoreTask = useMutation(api.projects.restoreTaskForViewer);
-  const updateBrief = useMutation(api.projects.updateTaskBriefForViewer);
-  const updateProject = useMutation(api.projects.updateProjectForViewer);
-  const executeTaskRun = useMutation(api.agentWorkbench.executeTaskForViewer);
-  const cancelAgentRun = useMutation(api.agentWorkbench.cancelRunForViewer);
-  const decideApproval = useMutation(api.agentWorkbench.decideApprovalForViewer);
-  const toast = useToast();
-
-  const [planning, setPlanning] = useState(false);
-  const [view, setView] = useState<"tasks" | "library">("tasks");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [resultUrl, setResultUrl] = useState("");
-  const [resultSummary, setResultSummary] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [briefingTaskIds, setBriefingTaskIds] = useState<Set<string>>(new Set());
-  const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
-  const [dragOverState, setDragOverState] = useState<string | null>(null);
-
-  // Stacked (mobile) board drag: native HTML drag events never fire for touch,
-  // so the grip handle drives a pointer-event drag instead. `index` is the
-  // insertion position among the target bucket's visible cards.
-  const [touchDrag, setTouchDrag] = useState<{ taskId: string; fromState: string } | null>(null);
-  const [touchDropTarget, setTouchDropTarget] = useState<{ state: string; index: number } | null>(null);
-
-  // Abandon (cancel) flow: two-click confirm in the drawer + collapsed list below the board.
-  const [abandonConfirming, setAbandonConfirming] = useState(false);
-  const [abandonedOpen, setAbandonedOpen] = useState(false);
-
-  // Brief editing
-  const [editingBrief, setEditingBrief] = useState(false);
-  const [briefDraft, setBriefDraft] = useState("");
-  const [criteriaDraft, setCriteriaDraft] = useState("");
-
-  // Proposal editing (proposed tasks: title + proposal text)
-  const [editingProposal, setEditingProposal] = useState(false);
-  const [titleDraft, setTitleDraft] = useState("");
-  const [proposalDraft, setProposalDraft] = useState("");
-
-  // Task proposal dialog
-  const [proposalOpen, setProposalOpen] = useState(false);
-  const [proposalText, setProposalText] = useState("");
-  const [proposalKind, setProposalKind] = useState("coding");
-  const [proposalBusy, setProposalBusy] = useState(false);
-  const [proposalFiles, setProposalFiles] = useState<File[]>([]);
-
-  // Project settings dialog
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [pKind, setPKind] = useState("general");
-  const [pRepo, setPRepo] = useState("");
-  const [pBaseBranch, setPBaseBranch] = useState("");
-  const [pFolder, setPFolder] = useState("");
-  const [pAssets, setPAssets] = useState("");
-  const [pOutput, setPOutput] = useState("");
-  const [pSummary, setPSummary] = useState("");
-  // Live base for the derived assets/output hints: the local-folder input,
-  // trimmed with trailing slashes stripped (matches server normalization).
-  const pFolderBase = useMemo(() => {
-    const trimmed = pFolder.trim();
-    return trimmed.replace(/[\\/]+$/, "") || trimmed;
-  }, [pFolder]);
-
-  const selected = board?.tasks?.find((task: AnyRecord) => task._id === selectedId) ?? null;
-  const detail = useQuery(
-    api.projects.getTaskBriefForViewer,
-    viewerReady && selectedId ? { taskId: selectedId as any } : "skip",
-  ) as AnyRecord | null | undefined;
-
-  // Mac mini agent workbench: execution host mapping for this project and the
-  // selected task's latest run (docs/mac-mini-agent-workbench.md).
-  const execConfig = useQuery(
-    api.agentWorkbench.projectExecutionConfigForViewer,
+  const board = useQuery(
+    api.projects.projectBoardForViewer,
     viewerReady ? { projectId: projectId as any } : "skip",
   ) as AnyRecord | null | undefined;
-  const selectedRunInfo = useQuery(
-    api.agentWorkbench.runForTaskForViewer,
-    viewerReady && selectedId ? { taskId: selectedId as any } : "skip",
-  ) as AnyRecord | null | undefined;
-  const allPendingApprovals = useQuery(api.agentWorkbench.pendingApprovalsForViewer, viewerReady ? {} : "skip") as
-    | AnyRecord[]
-    | undefined;
-  const selectedRunEvents = useQuery(
-    api.agentWorkbench.runEventsForViewer,
-    viewerReady && selectedRunInfo?.run ? { runId: selectedRunInfo.run._id as any, limit: 500 } : "skip",
-  ) as AnyRecord | undefined;
-  // "" = follow the resolution default (task request → project preference → claude).
-  const [executeHarness, setExecuteHarness] = useState<"" | "codex" | "claude">("");
+  const ensurePhases = useMutation(api.projects.ensureProjectPhasesForViewer);
+  const setExecState = useMutation(api.projects.setTaskExecutionStateForViewer);
+  const executeTask = useMutation(api.agentWorkbench.executeTaskForViewer);
+  const toast = useToast();
+  const [view, setView] = useState<ProjectView>("overview");
+  const [busy, setBusy] = useState(false);
+  const ensured = useRef(false);
 
-  // The 'Confirm?' abandon state resets on its own after a moment.
   useEffect(() => {
-    if (!abandonConfirming) return;
-    const timer = window.setTimeout(() => setAbandonConfirming(false), 3500);
-    return () => window.clearTimeout(timer);
-  }, [abandonConfirming]);
-
-  // Reset edit state whenever a different task is opened.
-  useEffect(() => {
-    setEditingBrief(false);
-    setEditingProposal(false);
-    setAbandonConfirming(false);
-    setExecuteHarness("");
-    if (selected) {
-      setBriefDraft(selected.executionBrief ?? "");
-      setCriteriaDraft((selected.acceptanceCriteria ?? []).join("\n"));
-      setTitleDraft(selected.title ?? "");
-      setProposalDraft(selected.description ?? "");
-    }
-  }, [selectedId]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const project = board?.project;
-  const cancelledTasks: AnyRecord[] =
-    board?.tasks?.filter((task: AnyRecord) => task.executionState === "cancelled") ?? [];
-  const agentName = board?.agentName ?? "Agent";
-
-  const selectedRun = selectedRunInfo?.run ?? null;
-  const selectedRunActive = selectedRun ? ACTIVE_RUN_STATES.has(selectedRun.status) : false;
-  // Harness resolution order: explicit pick → task request (when a valid enum
-  // value) → project preference → claude.
-  const defaultHarness: "codex" | "claude" =
-    selected?.requestedHarness === "codex" || selected?.requestedHarness === "claude"
-      ? selected.requestedHarness
-      : (execConfig?.preferredHarness ?? "claude");
-  const chosenHarness = executeHarness || defaultHarness;
-  const canExecute = Boolean(execConfig?.enabled && execConfig?.host && execConfig.host.status !== "offline");
-  const selectedRunApprovals = selectedRun
-    ? (allPendingApprovals ?? []).filter((approval) => approval.runId === selectedRun._id)
-    : [];
-  // Resume path: a dead attempt (or a publish failure that preserved the work)
-  // can be retried even though the task has moved past Ready.
-  const selectedRunResumable = Boolean(
-    selectedRun &&
-      !selectedRunActive &&
-      (["failed", "interrupted", "cancelled"].includes(selectedRun.status) ||
-        (selectedRun.status === "in_review" && selectedRun.errorCategory === "publish")) &&
-      ["in_progress", "in_review"].includes(selected?.executionState),
-  );
-
-  const decideRunApproval = async (approvalId: string, decision: "accepted" | "declined") => {
-    setBusy(true);
-    try {
-      await decideApproval({ approvalId: approvalId as any, decision });
-      toast(decision === "accepted" ? "Approved." : "Declined.", decision === "accepted" ? "success" : "info");
-    } catch (error) {
-      toast(error instanceof Error ? error.message : "Could not record decision", "error");
-    } finally {
-      setBusy(false);
-    }
-  };
-  const ownerName = board?.ownerName ?? "Owner";
-  const openSettings = () => {
-    if (!project) return;
-    setPKind(project.kind ?? "general");
-    setPRepo(project.repoUrl ?? "");
-    setPBaseBranch(project.defaultBaseBranch ?? "");
-    setPFolder(project.localPath ?? "");
-    setPAssets(project.assetsFolderPath ?? "");
-    setPOutput(project.outputFolderPath ?? "");
-    setPSummary(project.summary ?? "");
-    setSettingsOpen(true);
-  };
-
-  const runPlan = async () => {
-    setPlanning(true);
-    try {
-      const result = (await planProject({ projectId: projectId as any })) as AnyRecord;
-      toast(`Skippy planned ${result.taskCount} task${result.taskCount === 1 ? "" : "s"}.`, "success");
-    } catch (error) {
-      toast(error instanceof Error ? error.message : "Planning failed", "error");
-    } finally {
-      setPlanning(false);
-    }
-  };
-
-  const copyBrief = async (task: AnyRecord) => {
-    try {
-      await navigator.clipboard.writeText(buildBriefText(task, project));
-      toast("Brief copied — paste it into your coding agent.", "success");
-    } catch {
-      toast("Could not copy to clipboard", "error");
-    }
-  };
-
-  const proposeTask = async () => {
-    const text = proposalText.trim();
-    if (!text) {
-      toast("Add proposal notes first.", "error");
-      return;
-    }
-    setProposalBusy(true);
-    try {
-      const result = (await createTaskProposal({
-        projectId: projectId as any,
-        proposalText: text,
-        kind: proposalKind as any,
-      })) as { taskId: string };
-      // Attachments upload after the task exists so they land task-scoped;
-      // a failed upload never orphans the proposal (re-attach from the panel).
-      let uploadNote = "";
-      if (proposalFiles.length > 0 && result?.taskId) {
-        const { done, failed } = await uploadProposalFiles(proposalFiles, result.taskId);
-        uploadNote = failed > 0 ? ` ${done}/${done + failed} files attached.` : ` ${done} file${done === 1 ? "" : "s"} attached.`;
-      }
-      setProposalOpen(false);
-      setProposalText("");
-      setProposalKind("coding");
-      setProposalFiles([]);
-      toast(`Task proposed.${uploadNote}`, "success");
-    } catch (error) {
-      toast(error instanceof Error ? error.message : "Could not propose task", "error");
-    } finally {
-      setProposalBusy(false);
-    }
-  };
-
-  // Track in-flight brief generation per task so the activity bar survives closing the sidepanel.
-  const setTaskBriefing = (taskId: string, briefing: boolean) => {
-    setBriefingTaskIds((previous) => {
-      const next = new Set(previous);
-      if (briefing) next.add(taskId);
-      else next.delete(taskId);
-      return next;
+    if (!board || board.phases?.length || ensured.current) return;
+    ensured.current = true;
+    void ensurePhases({ projectId: projectId as any }).catch((error) => {
+      ensured.current = false;
+      console.error("could not initialize project phases", error);
     });
-  };
+  }, [board, ensurePhases, projectId]);
 
-  // Briefing (transient, client-side) or executing (persistent, from board data) — both show the activity bar.
-  const isTaskActive = (task: AnyRecord) => briefingTaskIds.has(task._id) || task.executionState === "in_progress";
-  const activityLabel = (task: AnyRecord) => (briefingTaskIds.has(task._id) ? "Generating brief…" : "In progress…");
+  const activeTasks = useMemo(() => {
+    const tasks: AnyRecord[] = board?.tasks ?? [];
+    const byId = new Map(tasks.map((task) => [task._id, task]));
+    const ordered = (board?.phases ?? []).flatMap((phase: AnyRecord) =>
+      (phase.taskIds ?? [])
+        .map((taskId: string) => byId.get(taskId))
+        .filter(Boolean),
+    );
+    const phaseTaskIds = new Set(ordered.map((task: AnyRecord) => task._id));
+    ordered.push(...tasks.filter((task) => !phaseTaskIds.has(task._id)));
+    return ordered.filter(
+      (task: AnyRecord) => task.executionState !== "cancelled",
+    );
+  }, [board?.phases, board?.tasks]);
+  const featuredTask =
+    activeTasks.find((task: AnyRecord) => displayState(task) !== "Completed") ??
+    null;
+  const inProgressTask =
+    activeTasks.find((task: AnyRecord) => displayState(task) === "In Progress") ??
+    null;
+  const completedTask =
+    activeTasks
+      .filter((task: AnyRecord) => displayState(task) === "Completed")
+      .slice()
+      .sort(
+        (a: AnyRecord, b: AnyRecord) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0),
+      )[0] ?? null;
 
-  const createBriefForTask = async (taskId: string) => {
+  if (board === undefined)
+    return (
+      <div className="p-6">
+        <LoadingRow label="Loading project…" />
+      </div>
+    );
+  if (!board)
+    return (
+      <div className="p-6">
+        <Card>Project not found.</Card>
+      </div>
+    );
+
+  const startTask = async (task: AnyRecord) => {
     setBusy(true);
-    setTaskBriefing(taskId, true);
     try {
-      await briefTaskProposal({ taskId: taskId as any });
-      toast("Brief created.", "success");
-    } catch (error) {
-      toast(error instanceof Error ? error.message : "Could not create brief", "error");
-    } finally {
-      setBusy(false);
-      setTaskBriefing(taskId, false);
-    }
-  };
-
-  const moveTo = async (taskId: string, state: string, taskOverride?: AnyRecord | null) => {
-    const task = taskOverride ?? board?.tasks?.find((candidate: AnyRecord) => candidate._id === taskId);
-    const briefing = task?.executionState === "proposed" && state === "briefed";
-    setBusy(true);
-    if (briefing) setTaskBriefing(taskId, true);
-    try {
-      if (briefing) {
-        await briefTaskProposal({ taskId: taskId as any });
-        toast("Brief created.", "success");
+      if (task.ownerType === "agent") {
+        if (task.executionState !== "ready") {
+          await setExecState({
+            taskId: task._id as any,
+            executionState: "ready",
+          });
+        }
+        await executeTask({ taskId: task._id as any });
+        toast("Task started in the workspace.", "success");
       } else {
-        await setExecState({ taskId: taskId as any, executionState: state as any });
-        toast(`Moved to ${titleCase(state)}.`, "info");
-      }
-    } catch (error) {
-      toast(error instanceof Error ? error.message : "Could not move task", "error");
-    } finally {
-      setBusy(false);
-      if (briefing) setTaskBriefing(taskId, false);
-    }
-  };
-
-  const requestAgentForTask = async (task: AnyRecord) => {
-    setBusy(true);
-    try {
-      await requestAgent({
-        taskId: task._id as any,
-        requestedHarness: agentName,
-        agentRequestMessage: `Execute task ${task._id} (${task.title}) and record the result for review.`,
-      });
-      toast(`${agentName} requested.`, "success");
-    } catch (error) {
-      toast(error instanceof Error ? error.message : `Could not request ${agentName}`, "error");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const executeSelectedTask = async (task: AnyRecord) => {
-    setBusy(true);
-    try {
-      const result = await executeTaskRun({ taskId: task._id as any, harness: chosenHarness as any });
-      toast(
-        result.existing
-          ? "A run is already active for this task."
-          : `Execution queued on ${chosenHarness === "claude" ? "Claude" : "Codex"}.`,
-        result.existing ? "info" : "success",
-      );
-    } catch (error) {
-      toast(error instanceof Error ? error.message : "Could not queue execution", "error");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const cancelSelectedRun = async (runId: string) => {
-    setBusy(true);
-    try {
-      await cancelAgentRun({ runId: runId as any });
-      toast("Cancellation requested.", "info");
-    } catch (error) {
-      toast(error instanceof Error ? error.message : "Could not cancel run", "error");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const abandonTask = async (taskId: string) => {
-    setBusy(true);
-    try {
-      await cancelTask({ taskId: taskId as any });
-      setAbandonConfirming(false);
-      setSelectedId(null);
-      toast("Task abandoned.", "info");
-    } catch (error) {
-      setAbandonConfirming(false);
-      toast(error instanceof Error ? error.message : "Could not abandon task", "error");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const restoreAbandonedTask = async (taskId: string) => {
-    setBusy(true);
-    try {
-      await restoreTask({ taskId: taskId as any });
-      toast("Task restored to Proposed.", "success");
-    } catch (error) {
-      toast(error instanceof Error ? error.message : "Could not restore task", "error");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const dropTaskInState = async (state: string) => {
-    if (!draggedTaskId) return;
-    const task = board?.tasks?.find((candidate: AnyRecord) => candidate._id === draggedTaskId);
-    setDraggedTaskId(null);
-    setDragOverState(null);
-    if (!task || task.executionState === state) return;
-    await moveTo(draggedTaskId, state, task);
-  };
-
-  // Which bucket/insertion-slot sits under the pointer, via hit test against
-  // the bucket + card data attributes rendered below.
-  const touchDropTargetAt = (x: number, y: number): { state: string; index: number } | null => {
-    const bucketEl = (document.elementFromPoint(x, y) as HTMLElement | null)?.closest?.(
-      "[data-bucket-state]",
-    ) as HTMLElement | null;
-    if (!bucketEl?.dataset.bucketState) return null;
-    const cards = Array.from(bucketEl.querySelectorAll<HTMLElement>("[data-task-id]"));
-    let index = cards.length;
-    for (let i = 0; i < cards.length; i += 1) {
-      const rect = cards[i]?.getBoundingClientRect();
-      if (rect && y < rect.top + rect.height / 2) {
-        index = i;
-        break;
-      }
-    }
-    return { state: bucketEl.dataset.bucketState, index };
-  };
-
-  const startTouchDrag = (event: React.PointerEvent<HTMLElement>, task: AnyRecord) => {
-    event.preventDefault();
-    event.currentTarget.setPointerCapture(event.pointerId);
-    setTouchDrag({ taskId: task._id, fromState: task.executionState });
-    setTouchDropTarget(touchDropTargetAt(event.clientX, event.clientY));
-  };
-
-  const moveTouchDrag = (event: React.PointerEvent<HTMLElement>) => {
-    if (!touchDrag) return;
-    setTouchDropTarget(touchDropTargetAt(event.clientX, event.clientY));
-    // Keep long stacked boards reachable: nudge the page near the viewport edges.
-    const edge = 72;
-    if (event.clientY < edge) window.scrollBy(0, -14);
-    else if (event.clientY > window.innerHeight - edge) window.scrollBy(0, 14);
-  };
-
-  const cancelTouchDrag = () => {
-    setTouchDrag(null);
-    setTouchDropTarget(null);
-  };
-
-  const endTouchDrag = () => {
-    const drag = touchDrag;
-    const target = touchDropTarget;
-    cancelTouchDrag();
-    if (!drag || !target) return;
-    const bucketTasks: AnyRecord[] =
-      board?.tasks?.filter((task: AnyRecord) => task.executionState === target.state) ?? [];
-    if (target.state === drag.fromState) {
-      const from = bucketTasks.findIndex((task) => task._id === drag.taskId);
-      // Dropped back where it started — nothing to persist.
-      if (from === -1 || target.index === from || target.index === from + 1) return;
-    }
-    if (target.state !== drag.fromState && drag.fromState === "proposed" && target.state === "briefed") {
-      // Mirror desktop column drops: moving a proposal to Briefed generates the brief.
-      void moveTo(drag.taskId, target.state);
-      return;
-    }
-    let beforeTask = bucketTasks[target.index];
-    if (beforeTask?._id === drag.taskId) beforeTask = bucketTasks[target.index + 1];
-    void (async () => {
-      try {
-        await reorderTask({
-          taskId: drag.taskId as any,
-          projectId: projectId as any,
-          executionState: target.state as any,
-          beforeTaskId: (beforeTask?._id ?? undefined) as any,
+        await setExecState({
+          taskId: task._id as any,
+          executionState: "in_progress",
         });
-        if (target.state !== drag.fromState) toast(`Moved to ${titleCase(target.state)}.`, "info");
-      } catch (error) {
-        toast(error instanceof Error ? error.message : "Could not move task", "error");
+        toast("Task marked in progress.", "success");
       }
-    })();
-  };
-
-  const saveBrief = async (taskId: string) => {
-    setBusy(true);
-    try {
-      await updateBrief({
-        taskId: taskId as any,
-        executionBrief: briefDraft,
-        acceptanceCriteria: criteriaDraft
-          .split("\n")
-          .map((line) => line.trim())
-          .filter(Boolean),
-      } as any);
-      toast("Brief updated.", "success");
-      setEditingBrief(false);
     } catch (error) {
-      toast(error instanceof Error ? error.message : "Could not save brief", "error");
+      toast(
+        error instanceof Error ? error.message : "Could not start task",
+        "error",
+      );
     } finally {
       setBusy(false);
     }
   };
 
-  const saveProposal = async (taskId: string) => {
-    if (!titleDraft.trim()) {
-      toast("Title cannot be empty.", "error");
-      return;
-    }
+  const completeTask = async (task: AnyRecord) => {
     setBusy(true);
     try {
-      await updateBrief({
-        taskId: taskId as any,
-        title: titleDraft,
-        description: proposalDraft,
-      } as any);
-      toast("Proposal updated.", "success");
-      setEditingProposal(false);
+      await setExecState({ taskId: task._id as any, executionState: "done" });
+      toast("Task complete. The next task is ready.", "success");
     } catch (error) {
-      toast(error instanceof Error ? error.message : "Could not save proposal", "error");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const submitResult = async (taskId: string, markComplete: boolean) => {
-    setBusy(true);
-    try {
-      await recordResult({
-        taskId: taskId as any,
-        resultSummary: resultSummary || undefined,
-        resultUrl: resultUrl || undefined,
-        markDone: markComplete,
-      } as any);
-      if (markComplete) await markDone({ taskId: taskId as any }).catch(() => undefined);
-      toast(markComplete ? "Task completed." : "Result recorded for review.", "success");
-      setSelectedId(null);
-      setResultUrl("");
-      setResultSummary("");
-    } catch (error) {
-      toast(error instanceof Error ? error.message : "Could not record result", "error");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const saveSettings = async () => {
-    // Mirror the server's format-only validation; existence checks are the
-    // executing harness's job, never the app's.
-    for (const [label, value] of [
-      ["Library folder", pAssets],
-      ["Output folder", pOutput],
-    ] as const) {
-      const trimmed = value.trim();
-      if (trimmed && !isValidFolderPathFormat(trimmed)) {
-        toast(`${label} must be an absolute path starting with '/', '~', or a drive letter.`, "error");
-        return;
-      }
-    }
-    setBusy(true);
-    try {
-      await updateProject({
-        projectId: projectId as any,
-        kind: pKind as any,
-        repoUrl: pRepo,
-        defaultBaseBranch: pBaseBranch,
-        localPath: pFolder,
-        assetsFolderPath: pAssets,
-        outputFolderPath: pOutput,
-        summary: pSummary,
-      } as any);
-      toast("Project updated.", "success");
-      setSettingsOpen(false);
-    } catch (error) {
-      toast(error instanceof Error ? error.message : "Could not update project", "error");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const archiveProject = async () => {
-    if (!project) return;
-    if (!window.confirm(`Archive "${project.title}"? It will disappear from primary project lists, but you can restore it from Settings.`)) {
-      return;
-    }
-    setBusy(true);
-    try {
-      await updateProject({ projectId: projectId as any, status: "archived" } as any);
-      toast("Project archived.", "success");
-      setSettingsOpen(false);
-    } catch (error) {
-      toast(error instanceof Error ? error.message : "Could not archive project", "error");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const restoreProject = async () => {
-    setBusy(true);
-    try {
-      await updateProject({ projectId: projectId as any, status: "planned" } as any);
-      toast("Project restored.", "success");
-    } catch (error) {
-      toast(error instanceof Error ? error.message : "Could not restore project", "error");
+      toast(
+        error instanceof Error ? error.message : "Could not complete task",
+        "error",
+      );
     } finally {
       setBusy(false);
     }
@@ -767,850 +639,92 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
 
   return (
     <LiveGate>
-      {board === undefined ? (
-        <Card>
-          <LoadingRow label="Loading project board…" />
-        </Card>
-      ) : board === null ? (
-        <Card>
-          <EmptyState title="Project not found">
-            <Link className={textButtonClass} href="/projects">
-              Back to projects
-            </Link>
-          </EmptyState>
-        </Card>
-      ) : (
-        <>
-          <div style={{ marginBottom: 18 }}>
-            <Link href="/projects" className={cn(textButtonClass, textButtonCompactClass)} style={{ marginBottom: 14 }}>
-              <ArrowLeft size={15} aria-hidden /> Projects
-            </Link>
-            <div className="flex flex-wrap items-end justify-between gap-4">
-              <div>
-                <p className={eyebrowClass}>{project.kind === "code" ? "Code project" : "Project"}</p>
-                <h1>{project.title}</h1>
-                {project.status === "archived" ? (
-                  <p className={mutedClass} style={{ maxWidth: 640 }}>
-                    This project is archived. It is hidden from primary project lists until restored.
-                  </p>
-                ) : null}
-                {project.summary ? <p className={mutedClass} style={{ maxWidth: 640 }}>{project.summary}</p> : null}
-                {project.repoUrl || project.localPath ? (
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
-                    {project.repoUrl ? (
-                      <a className={cn(badgeClass, badgeBlueClass)} href={project.repoUrl} target="_blank" rel="noreferrer" style={{ gap: 6 }}>
-                        <GitBranch size={13} aria-hidden /> Repo
-                      </a>
-                    ) : null}
-                    {project.localPath ? (
-                      <span className={badgeClass} style={{ gap: 6 }} title={project.localPath}>
-                        <Folder size={13} aria-hidden /> {project.localPath}
-                      </span>
-                    ) : null}
-                  </div>
-                ) : null}
-              </div>
-              <div className="ml-auto flex flex-[1_1_320px] flex-wrap justify-end gap-2">
-                <Button onClick={openSettings} title="Project settings">
-                  <Settings2 size={16} aria-hidden /> Settings
-                </Button>
-                <Button onClick={() => setProposalOpen(true)}>
-                  <Plus size={16} aria-hidden /> Propose task
-                </Button>
-                {board.tasks.length === 0 ? (
-                  <Button variant="primary" onClick={() => void runPlan()} disabled={planning}>
-                    <Sparkles size={17} aria-hidden />
-                    {planning ? "Planning…" : "Plan with AI"}
-                  </Button>
-                ) : null}
-              </div>
-            </div>
+      <div className="flex min-h-[calc(100dvh-92px)] flex-col desk:h-screen desk:min-h-0">
+        <header className="flex items-center gap-3 border-b bg-card px-4 py-3 desk:px-5">
+          <Link
+            href="/projects"
+            className="grid size-9 place-items-center rounded-lg border text-muted-foreground hover:text-foreground"
+            aria-label="Back to projects"
+          >
+            <ArrowLeft size={17} aria-hidden />
+          </Link>
+          <div className="min-w-0 flex-1">
+            <p className="m-0 truncate font-bold">{board.project.title}</p>
+            <p className="m-0 text-xs text-muted-foreground">
+              {featuredTask ? `Next: ${featuredTask.title}` : "Plan complete"}
+            </p>
           </div>
+          <div className="hidden items-center gap-2 text-xs text-muted-foreground desk:flex">
+            <Sparkles size={14} className="text-primary" aria-hidden />{" "}
+            {board.progress.done}/{board.progress.total} complete
+          </div>
+        </header>
 
-          <div style={{ marginBottom: 16 }}>
-            <Tabs
-              items={[
-                { key: "tasks", label: "Tasks" },
-                { key: "library", label: "Library" },
-              ]}
-              active={view}
-              onChange={(key) => setView(key as "tasks" | "library")}
+        <nav
+          className="grid grid-cols-4 border-b bg-card desk:hidden"
+          aria-label="Project views"
+        >
+          {mobileTabs.map((tab) => (
+            <button
+              key={tab.key}
+              type="button"
+              className={cn(
+                "flex min-h-14 flex-col items-center justify-center gap-1 border-b-2 border-transparent text-[11px] font-bold text-muted-foreground",
+                view === tab.key && "border-primary text-primary",
+              )}
+              onClick={() => setView(tab.key)}
+            >
+              <tab.icon size={16} aria-hidden /> {tab.label}
+            </button>
+          ))}
+        </nav>
+
+        <div className="hidden min-h-0 flex-1 grid-cols-[minmax(0,2fr)_minmax(340px,1fr)] desk:grid">
+          <ProjectChatWorkspace
+            projectId={projectId}
+            activeTask={inProgressTask}
+            completedTask={completedTask}
+            className="border-r"
+          />
+          <SidePanel
+            board={board}
+            view={view === "chat" ? "overview" : view}
+            onView={setView}
+            featuredTask={featuredTask}
+            busy={busy}
+            onStart={(task) => void startTask(task)}
+            onComplete={(task) => void completeTask(task)}
+          />
+        </div>
+
+        <div className="min-h-0 flex-1 desk:hidden">
+          {view === "chat" ? (
+            <ProjectChatWorkspace
+              projectId={projectId}
+              activeTask={inProgressTask}
+              completedTask={completedTask}
+              className="h-[calc(100dvh-204px)]"
             />
-          </div>
-
+          ) : null}
+          {view === "overview" ? (
+            <ProjectOverview project={board.project} />
+          ) : null}
+          {view === "plan" ? (
+            <ProjectPlan
+              board={board}
+              featuredTask={featuredTask}
+              busy={busy}
+              onStart={(task) => void startTask(task)}
+              onComplete={(task) => void completeTask(task)}
+            />
+          ) : null}
           {view === "library" ? (
-            <ProjectLibrarySection projectId={projectId} alwaysOpen />
-          ) : (
-            <>
-          {/* Progress */}
-          <Card className="mb-4">
-            <div className="mb-2.5 flex flex-wrap items-baseline justify-between gap-3">
-              <strong className="text-[17px] font-bold">{board.progress.percent}% complete</strong>
-              <span className={mutedClass}>
-                {board.progress.done}/{board.progress.total} tasks · {board.progress.ready} ready · {board.progress.inReview} in
-                review · {board.progress.blocked} blocked
-              </span>
-            </div>
-            <ProgressBar value={board.progress.percent} tone={board.progress.percent === 100 ? "green" : "blue"} />
-            {board.latestPlan?.summary ? (
-              <p className={mutedClass} style={{ margin: "12px 0 0", fontSize: 14 }}>
-                <Sparkles size={13} aria-hidden style={{ verticalAlign: "-1px" }} /> {board.latestPlan.summary}
-              </p>
-            ) : null}
-          </Card>
-
-          {board.tasks.length === 0 ? (
-            <Card>
-              <EmptyState icon={<Sparkles size={20} aria-hidden />} title="No tasks yet">
-                Click <strong>Plan with AI</strong> to decompose this project into executable task briefs you can hand to a
-                coding agent.
-              </EmptyState>
-            </Card>
-          ) : (
-            <div className="grid grid-cols-[minmax(0,1fr)] gap-3 desk:auto-cols-[minmax(232px,1fr)] desk:grid-flow-col desk:grid-cols-none desk:overflow-x-auto desk:pb-2">
-              {EXECUTION_COLUMNS.map((column) => {
-                const tasks = board.tasks.filter((task: AnyRecord) => task.executionState === column.key);
-                return (
-                  <div
-                    key={column.key}
-                    data-bucket-state={column.key}
-                    className={cn(
-                      "flex min-h-[120px] flex-col rounded-xl border border-border bg-card transition-[border-color,background-color,box-shadow]",
-                      (dragOverState === column.key || touchDropTarget?.state === column.key) &&
-                        "border-primary bg-[light-dark(#eef6ff,#18293a)] shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--blue)_42%,transparent)]",
-                    )}
-                    onDragOver={(event) => {
-                      event.preventDefault();
-                      event.dataTransfer.dropEffect = "move";
-                      setDragOverState(column.key);
-                    }}
-                    onDragLeave={(event) => {
-                      if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
-                        setDragOverState(null);
-                      }
-                    }}
-                    onDrop={(event) => {
-                      event.preventDefault();
-                      void dropTaskInState(column.key);
-                    }}
-                  >
-                    <div className="flex items-center justify-between border-b border-border px-3.5 py-3 text-sm font-bold">
-                      <span>{column.label}</span>
-                      <span className="inline-grid h-[22px] min-w-[22px] place-items-center rounded-full bg-muted px-1.5 text-xs text-muted-foreground">
-                        {tasks.length}
-                      </span>
-                    </div>
-                    <div className="grid content-start gap-1.5 overscroll-contain p-2.5 desk:max-h-[min(70vh,720px)] desk:gap-2 desk:overflow-y-auto">
-                      {tasks.map((task: AnyRecord, index: number) => (
-                        <button
-                          key={task._id}
-                          data-task-id={task._id}
-                          className={cn(
-                            "relative grid min-h-[52px] w-full cursor-pointer content-center gap-[5px] rounded-[10px] border border-border bg-secondary py-[9px] pl-3 pr-12 text-left transition-[border-color,box-shadow,opacity,transform] hover:border-primary hover:shadow-md focus-visible:border-primary focus-visible:shadow-md focus-visible:outline-none desk:static desk:min-h-[auto] desk:content-normal desk:gap-2 desk:px-3 desk:py-[11px]",
-                            task.ownerType === "owner" &&
-                              "border-[color:color-mix(in_srgb,var(--gold)_58%,var(--border))] shadow-[inset_3px_0_0_color-mix(in_srgb,var(--gold)_78%,transparent)] hover:border-gold focus-visible:border-gold",
-                            (draggedTaskId === task._id || touchDrag?.taskId === task._id) &&
-                              "scale-[0.99] opacity-55",
-                            touchDropTarget?.state === column.key &&
-                              touchDropTarget.index === index &&
-                              "shadow-[0_-3px_0_0_var(--blue)]",
-                            touchDropTarget?.state === column.key &&
-                              touchDropTarget.index === tasks.length &&
-                              index === tasks.length - 1 &&
-                              "shadow-[0_3px_0_0_var(--blue)]",
-                          )}
-                          draggable
-                          aria-grabbed={draggedTaskId === task._id}
-                          aria-label={`${task.title}. ${task.ownerType === "owner" ? `${ownerName} owned task` : `${agentName} owned task`}.`}
-                          onDragStart={(event) => {
-                            setDraggedTaskId(task._id);
-                            event.dataTransfer.effectAllowed = "move";
-                            event.dataTransfer.setData("text/plain", task._id);
-                          }}
-                          onDragEnd={() => {
-                            setDraggedTaskId(null);
-                            setDragOverState(null);
-                          }}
-                          onClick={() => setSelectedId(task._id)}
-                          type="button"
-                        >
-                          <span className="text-sm font-bold leading-[1.35]">{task.title}</span>
-                          <span className="flex flex-wrap gap-[5px]">
-                            {task.ownerType === "owner" ? <Badge tone="gold">{ownerName}</Badge> : null}
-                            {task.kind ? (
-                              <span className="hidden desk:contents">
-                                <Badge tone="neutral">{task.kind}</Badge>
-                              </span>
-                            ) : null}
-                            {task.agentRequestStatus === "requested" ? (
-                              <Badge tone="blue">Queued for {task.requestedHarness ?? agentName}</Badge>
-                            ) : null}
-                            {task.dependsOn?.length ? (
-                              <span className="hidden desk:contents">
-                                <Badge tone="gold">{task.dependsOn.length} dep</Badge>
-                              </span>
-                            ) : null}
-                            {task.resultUrl ? <Badge tone="green">result</Badge> : null}
-                          </span>
-                          {isTaskActive(task) ? <ActivityBar label={activityLabel(task)} /> : null}
-                          <span
-                            className="absolute right-[3px] top-1/2 grid h-[42px] w-[42px] -translate-y-1/2 cursor-grab touch-none place-items-center text-muted-foreground desk:hidden"
-                            aria-hidden
-                            onClick={(event) => event.stopPropagation()}
-                            onPointerDown={(event) => startTouchDrag(event, task)}
-                            onPointerMove={moveTouchDrag}
-                            onPointerUp={endTouchDrag}
-                            onPointerCancel={cancelTouchDrag}
-                          >
-                            <GripVertical size={17} aria-hidden />
-                          </span>
-                        </button>
-                      ))}
-                      {tasks.length === 0 ? (
-                        <p className="m-0 p-1.5 text-center text-[13px] text-muted-foreground">—</p>
-                      ) : null}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          {cancelledTasks.length > 0 ? (
-            <div className="mt-3.5">
-              <button
-                type="button"
-                className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border-none bg-transparent px-2 py-1.5 text-[13px] font-bold text-muted-foreground hover:bg-card hover:text-foreground focus-visible:bg-card focus-visible:text-foreground focus-visible:outline-none"
-                aria-expanded={abandonedOpen}
-                onClick={() => setAbandonedOpen((open) => !open)}
-              >
-                {abandonedOpen ? <ChevronDown size={15} aria-hidden /> : <ChevronRight size={15} aria-hidden />}
-                Abandoned ({cancelledTasks.length})
-              </button>
-              {abandonedOpen ? (
-                <div className="mt-2 grid gap-1.5">
-                  {cancelledTasks.map((task: AnyRecord) => (
-                    <div
-                      key={task._id}
-                      className="flex items-center gap-2.5 rounded-[10px] border border-dashed border-border bg-card px-3 py-2 text-sm text-muted-foreground"
-                    >
-                      <span className="truncate line-through decoration-[color-mix(in_srgb,var(--muted-foreground)_55%,transparent)]">
-                        {task.title}
-                      </span>
-                      {task.kind ? <Badge tone="neutral">{task.kind}</Badge> : null}
-                      <Button
-                        small
-                        disabled={busy}
-                        onClick={() => void restoreAbandonedTask(task._id)}
-                        title="Restore to Proposed"
-                        style={{ marginLeft: "auto" }}
-                      >
-                        <RotateCcw size={14} aria-hidden /> Restore
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              ) : null}
+            <div className="p-4">
+              <ProjectLibrarySection projectId={projectId} alwaysOpen />
             </div>
           ) : null}
-            </>
-          )}
-
-          <Drawer
-            open={Boolean(selectedId)}
-            onClose={() => setSelectedId(null)}
-            eyebrow={selected ? titleCase(selected.executionState) : "Task"}
-            title={selected?.title ?? "Task"}
-            footer={
-              selected ? (
-                <>
-                  {selected.executionState === "proposed" ? (
-                    <Button variant="primary" disabled={busy} onClick={() => void createBriefForTask(selected._id)}>
-                      <Sparkles size={16} aria-hidden /> Create Brief
-                    </Button>
-                  ) : (
-                    <Button onClick={() => void copyBrief(selected)}>
-                      <ClipboardCopy size={16} aria-hidden /> Copy brief
-                    </Button>
-                  )}
-                  {selected.executionState === "briefed" ? (
-                    <Button variant="primary" disabled={busy} onClick={() => void moveTo(selected._id, "ready")}>
-                      Mark Ready
-                    </Button>
-                  ) : selected.executionState === "ready" && selected.ownerType === "agent" ? (
-                    canExecute ? (
-                      <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                        <Select
-                          value={chosenHarness}
-                          disabled={busy || selectedRunActive}
-                          onChange={(event) => setExecuteHarness(event.target.value as "codex" | "claude")}
-                          aria-label="Harness"
-                          style={{ maxWidth: 110 }}
-                        >
-                          <option value="claude">Claude</option>
-                          <option value="codex">Codex</option>
-                        </Select>
-                        <Button
-                          variant="primary"
-                          disabled={busy || selectedRunActive}
-                          onClick={() => void executeSelectedTask(selected)}
-                        >
-                          <Play size={16} aria-hidden />
-                          {selectedRunActive ? RUN_STATE_LABELS[selectedRun.status] : "Execute"}
-                        </Button>
-                      </span>
-                    ) : (
-                      <Button
-                        variant="primary"
-                        disabled={busy || selected.agentRequestStatus === "requested"}
-                        onClick={() => void requestAgentForTask(selected)}
-                        title={
-                          execConfig === null
-                            ? "No execution host mapped to this project — falls back to the heartbeat queue."
-                            : undefined
-                        }
-                      >
-                        <Play size={16} aria-hidden />
-                        {selected.agentRequestStatus === "requested" ? `${agentName} requested` : `Request ${agentName}`}
-                      </Button>
-                    )
-                  ) : selected.executionState === "ready" ? (
-                    <Button variant="primary" disabled={busy} onClick={() => void moveTo(selected._id, "in_progress")}>
-                      <Play size={16} aria-hidden /> Mark in progress
-                    </Button>
-                  ) : selectedRunResumable && selected.ownerType === "agent" && canExecute ? (
-                    <Button variant="primary" disabled={busy} onClick={() => void executeSelectedTask(selected)}>
-                      <RotateCcw size={16} aria-hidden />
-                      {selectedRun.errorCategory === "publish" ? "Retry publish" : "Retry run"}
-                    </Button>
-                  ) : null}
-                  {ABANDONABLE_STATES.has(selected.executionState) ? (
-                    abandonConfirming ? (
-                      <Button
-                        variant="danger"
-                        disabled={busy}
-                        onClick={() => void abandonTask(selected._id)}
-                        style={{ marginLeft: "auto" }}
-                      >
-                        Confirm?
-                      </Button>
-                    ) : (
-                      <Button
-                        variant="ghost"
-                        disabled={busy}
-                        onClick={() => setAbandonConfirming(true)}
-                        title="Abandon this task. It leaves the board but can be restored later."
-                        style={{ marginLeft: "auto" }}
-                      >
-                        <Ban size={15} aria-hidden /> Abandon task
-                      </Button>
-                    )
-                  ) : null}
-                </>
-              ) : null
-            }
-          >
-            {selected ? (
-              <div style={{ display: "grid", gap: 16 }}>
-                {isTaskActive(selected) ? <ActivityBar label={activityLabel(selected)} /> : null}
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
-                  <Badge tone={executionStateTone(selected.executionState)} dot>
-                    {titleCase(selected.executionState)}
-                  </Badge>
-                  {selected.executionState !== "proposed" &&
-                  titleCase(selected.status) !== titleCase(selected.executionState) ? (
-                    <Badge tone={taskStatusTone(selected.status)}>Status: {titleCase(selected.status)}</Badge>
-                  ) : null}
-                  {selected.kind ? <Badge tone="neutral">{selected.kind}</Badge> : null}
-                  {selected.agentRequestStatus === "requested" && !selectedRun ? (
-                    <Badge tone="blue">Queued for {selected.requestedHarness ?? agentName}</Badge>
-                  ) : null}
-                  {selectedRun ? (
-                    <Badge tone={selectedRunActive ? "blue" : selectedRun.status === "in_review" ? "green" : "neutral"} dot={selectedRunActive}>
-                      Run {selectedRun.attempt}: {RUN_STATE_LABELS[selectedRun.status] ?? selectedRun.status} ({selectedRun.harness})
-                    </Badge>
-                  ) : null}
-                  {selectedRunInfo?.pendingApprovals ? (
-                    <Badge tone="gold">
-                      {selectedRunInfo.pendingApprovals} approval{selectedRunInfo.pendingApprovals > 1 ? "s" : ""} pending
-                    </Badge>
-                  ) : null}
-                  {selectedRunActive ? (
-                    <Button
-                      variant="ghost"
-                      disabled={busy || selectedRun.cancelRequested}
-                      onClick={() => void cancelSelectedRun(selectedRun._id)}
-                      style={{ marginLeft: "auto" }}
-                    >
-                      <Ban size={14} aria-hidden />
-                      {selectedRun.cancelRequested ? "Cancelling…" : "Cancel run"}
-                    </Button>
-                  ) : null}
-                </div>
-
-                {selectedRun?.errorMessage ? (
-                  <p className={mutedClass} style={{ margin: 0, fontSize: 13, color: "var(--red, #b04040)" }}>
-                    Run error ({selectedRun.errorCategory ?? "unknown"}): {selectedRun.errorMessage}
-                  </p>
-                ) : null}
-
-                {/* Execution log: the run's durable event stream, live. */}
-                {selectedRun && selectedRunEvents?.events?.length ? (
-                  <details open={selectedRunActive}>
-                    <summary style={{ cursor: "pointer", fontWeight: 700, fontSize: 14 }}>
-                      Execution log ({selectedRunEvents.events.length} events
-                      {selectedRunEvents.events.length >= 500 ? ", truncated" : ""})
-                    </summary>
-                    <div
-                      style={{
-                        display: "grid",
-                        gap: 6,
-                        marginTop: 8,
-                        maxHeight: 320,
-                        overflowY: "auto",
-                        padding: "8px 10px",
-                        border: "1px solid var(--border, #333)",
-                        borderRadius: 8,
-                      }}
-                    >
-                      {selectedRunEvents.events.map((event: AnyRecord) => (
-                        <RunEventLine key={event.seq} event={event} />
-                      ))}
-                    </div>
-                  </details>
-                ) : null}
-
-                {/* Pending approvals for the selected task's run: the runner is
-                    blocked until each is decided here. */}
-                {selectedRunApprovals.length ? (
-                  <div style={{ display: "grid", gap: 8 }}>
-                    {selectedRunApprovals.map((approval) => (
-                      <div
-                        key={approval._id}
-                        className={cardClass}
-                        style={{ padding: 12, display: "grid", gap: 6, borderLeft: "3px solid var(--gold, #b8860b)" }}
-                      >
-                        <p style={{ margin: 0, fontWeight: 700 }}>
-                          Approval needed · {titleCase(approval.kind)}
-                        </p>
-                        <p style={{ margin: 0, fontSize: 14 }}>{approval.title}</p>
-                        {approval.explanation ? (
-                          <p className={mutedClass} style={{ margin: 0, fontSize: 13, whiteSpace: "pre-wrap" }}>
-                            {approval.explanation}
-                          </p>
-                        ) : null}
-                        {approval.details?.command ? (
-                          <pre className={codeClass} style={{ margin: 0, fontSize: 12, overflowX: "auto" }}>
-                            {approval.details.command}
-                          </pre>
-                        ) : null}
-                        {approval.details?.verification ? (
-                          <p
-                            className={mutedClass}
-                            style={{ margin: 0, fontSize: 12, whiteSpace: "pre-wrap", fontFamily: "monospace" }}
-                          >
-                            {approval.details.verification}
-                          </p>
-                        ) : null}
-                        {approval.details?.diffStat ? (
-                          <pre className={codeClass} style={{ margin: 0, fontSize: 12, overflowX: "auto" }}>
-                            {approval.details.diffStat}
-                          </pre>
-                        ) : null}
-                        <div style={{ display: "flex", gap: 8 }}>
-                          <Button
-                            small
-                            variant="primary"
-                            disabled={busy}
-                            onClick={() => void decideRunApproval(approval._id, "accepted")}
-                          >
-                            Approve
-                          </Button>
-                          <Button
-                            small
-                            variant="ghost"
-                            disabled={busy}
-                            onClick={() => void decideRunApproval(approval._id, "declined")}
-                          >
-                            Decline
-                          </Button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : null}
-
-                {/* Move between states (kanban) */}
-                <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14 }}>
-                  <span className={mutedClass} style={{ fontWeight: 700 }}>Move to</span>
-                  <Select
-                    value={selected.executionState}
-                    disabled={busy}
-                    onChange={(event) => void moveTo(selected._id, event.target.value, selected)}
-                    style={{ maxWidth: 200 }}
-                  >
-                    {EXECUTION_COLUMNS.map((column) => (
-                      <option key={column.key} value={column.key}>
-                        {column.label}
-                      </option>
-                    ))}
-                  </Select>
-                </label>
-
-                {selected.description && selected.executionState !== "proposed" ? (
-                  <p style={{ margin: 0 }}>{selected.description}</p>
-                ) : null}
-
-                {selected.executionState === "proposed" ? (
-                  <section>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-                      <h3 style={{ margin: 0 }}>Proposal</h3>
-                      {!editingProposal ? (
-                        <Button
-                          small
-                          onClick={() => {
-                            setTitleDraft(selected.title ?? "");
-                            setProposalDraft(selected.description ?? "");
-                            setEditingProposal(true);
-                          }}
-                        >
-                          <Pencil size={14} aria-hidden /> Edit
-                        </Button>
-                      ) : null}
-                    </div>
-                    {editingProposal ? (
-                      <div style={{ display: "grid", gap: 10, marginTop: 8 }}>
-                        <Field label="Title">
-                          <TextInput
-                            value={titleDraft}
-                            onChange={(event) => setTitleDraft(event.target.value)}
-                            placeholder="Task title"
-                          />
-                        </Field>
-                        <Field label="Proposal">
-                          <TextArea
-                            value={proposalDraft}
-                            onChange={(event) => setProposalDraft(event.target.value)}
-                            placeholder="Describe the idea, problem, constraints, or proposed solution."
-                            style={{ minHeight: 120 }}
-                          />
-                        </Field>
-                        <div style={{ display: "flex", gap: 8 }}>
-                          <Button disabled={busy} onClick={() => setEditingProposal(false)}>
-                            Cancel
-                          </Button>
-                          <Button
-                            variant="primary"
-                            disabled={busy || !titleDraft.trim()}
-                            onClick={() => void saveProposal(selected._id)}
-                          >
-                            Save proposal
-                          </Button>
-                        </div>
-                      </div>
-                    ) : (
-                      <>
-                        <p className="m-0 whitespace-pre-wrap rounded-[10px] border border-border bg-secondary px-3.5 py-3 text-sm leading-normal">
-                          {selected.description ?? selected.title}
-                        </p>
-                        <p className={mutedClass} style={{ fontSize: 14 }}>
-                          Create a brief to turn this proposal into an editable, hand-off-ready task.
-                        </p>
-                      </>
-                    )}
-                  </section>
-                ) : null}
-
-                {/* Execution brief + acceptance criteria (editable pre-execution) */}
-                {selected.executionState !== "proposed" ? <section>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-                    <h3 style={{ margin: 0 }}>Execution brief</h3>
-                    {PRE_EXECUTION.has(selected.executionState) && !editingBrief ? (
-                      <Button small onClick={() => setEditingBrief(true)}>
-                        <Pencil size={14} aria-hidden /> Edit
-                      </Button>
-                    ) : null}
-                  </div>
-                  {editingBrief ? (
-                    <div style={{ display: "grid", gap: 10, marginTop: 8 }}>
-                      <TextArea
-                        value={briefDraft}
-                        onChange={(event) => setBriefDraft(event.target.value)}
-                        placeholder="What to do, where, and any context an executor needs."
-                        style={{ minHeight: 120 }}
-                      />
-                      <Field label="Acceptance criteria (one per line)">
-                        <TextArea
-                          value={criteriaDraft}
-                          onChange={(event) => setCriteriaDraft(event.target.value)}
-                          placeholder={"Tests pass\nFeature renders in the app"}
-                          style={{ minHeight: 90 }}
-                        />
-                      </Field>
-                      <div style={{ display: "flex", gap: 8 }}>
-                        <Button disabled={busy} onClick={() => setEditingBrief(false)}>
-                          Cancel
-                        </Button>
-                        <Button variant="primary" disabled={busy} onClick={() => void saveBrief(selected._id)}>
-                          Save brief
-                        </Button>
-                      </div>
-                    </div>
-                  ) : (
-                    <>
-                      {selected.executionBrief ? (
-                        <p className="m-0 whitespace-pre-wrap rounded-[10px] border border-border bg-secondary px-3.5 py-3 text-sm leading-normal">
-                          {selected.executionBrief}
-                        </p>
-                      ) : (
-                        <p className={mutedClass} style={{ fontSize: 14 }}>No brief yet.</p>
-                      )}
-                      {selected.acceptanceCriteria?.length ? (
-                        <>
-                          <h3 style={{ marginTop: 14 }}>Acceptance criteria</h3>
-                          <ul style={{ margin: 0, paddingLeft: 18, display: "grid", gap: 6 }}>
-                            {selected.acceptanceCriteria.map((criterion: string, index: number) => (
-                              <li key={index}>{criterion}</li>
-                            ))}
-                          </ul>
-                        </>
-                      ) : null}
-                    </>
-                  )}
-                </section> : null}
-
-                <TaskAttachments projectId={projectId} taskId={selected._id} />
-
-                {detail?.dependencies?.length ? (
-                  <section>
-                    <h3>Depends on</h3>
-                    <div style={{ display: "grid", gap: 6 }}>
-                      {detail.dependencies.map((dep: AnyRecord) => (
-                        <div key={dep._id} style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-                          <span>{dep.title}</span>
-                          <Badge tone={dep.done ? "green" : "gold"}>{dep.done ? "done" : dep.status}</Badge>
-                        </div>
-                      ))}
-                    </div>
-                  </section>
-                ) : null}
-
-                {selected.resultSummary || selected.resultUrl ? (
-                  <section>
-                    <h3>Result</h3>
-                    {selected.resultSummary ? <p style={{ margin: "0 0 6px" }}>{selected.resultSummary}</p> : null}
-                    {selected.resultUrl ? (
-                      <a className={codeClass} href={selected.resultUrl} target="_blank" rel="noreferrer">
-                        {selected.resultUrl}
-                      </a>
-                    ) : null}
-                  </section>
-                ) : null}
-
-                {(selected.prUrl || selected.gitBranchName || selected.executionState === "in_review") && project.repoUrl ? (
-                  <section>
-                    <h3>Pull Request</h3>
-                    {selected.prUrl ? (
-                      <p style={{ margin: 0 }}>
-                        <a className={textButtonClass} href={selected.prUrl} target="_blank" rel="noreferrer">
-                          <GitPullRequest size={16} aria-hidden />
-                          {selected.prNumber ? `PR #${selected.prNumber}` : "Open pull request"}
-                          <ExternalLink size={14} aria-hidden />
-                        </a>
-                      </p>
-                    ) : selected.executionState === "in_review" ? (
-                      <p className={mutedClass} style={{ margin: 0, fontSize: 14 }}>
-                        PR pending or not recorded yet.
-                      </p>
-                    ) : null}
-                    {selected.gitBranchName ? (
-                      <p className={mutedClass} style={{ margin: "6px 0 0", fontSize: 13 }}>
-                        Branch: <span className={codeClass}>{selected.gitBranchName}</span>
-                        {selected.prStatus ? ` · ${selected.prStatus}` : ""}
-                      </p>
-                    ) : null}
-                  </section>
-                ) : null}
-
-                {/* Record result only once work is underway (not for briefed/ready). */}
-                {RESULT_STATES.has(selected.executionState) ? (
-                  <section style={{ borderTop: "1px solid var(--line)", paddingTop: 14, display: "grid", gap: 10 }}>
-                    <h3 style={{ margin: 0 }}>Record result (supervise)</h3>
-                    <input
-                      className={inputClass}
-                      placeholder="PR or commit URL (optional)"
-                      value={resultUrl}
-                      onChange={(event) => setResultUrl(event.target.value)}
-                    />
-                    <textarea
-                      className={textareaClass}
-                      placeholder="What was done? (optional)"
-                      value={resultSummary}
-                      onChange={(event) => setResultSummary(event.target.value)}
-                      style={{ minHeight: 80 }}
-                    />
-                    <div style={{ display: "flex", gap: 8 }}>
-                      <Button disabled={busy} onClick={() => void submitResult(selected._id, false)}>
-                        Submit for review
-                      </Button>
-                      <Button variant="primary" disabled={busy} onClick={() => void submitResult(selected._id, true)}>
-                        Mark done
-                      </Button>
-                    </div>
-                  </section>
-                ) : null}
-              </div>
-            ) : null}
-          </Drawer>
-
-          <Dialog open={settingsOpen} onClose={() => setSettingsOpen(false)} title="Project settings">
-            <div style={{ display: "grid", gap: 14 }}>
-              <Field label="Project type">
-                <Select value={pKind} onChange={(event) => setPKind(event.target.value)}>
-                  <option value="general">General</option>
-                  <option value="code">Code (GitHub repo + branch/PR workflow)</option>
-                </Select>
-              </Field>
-              {pKind === "code" ? (
-                <Field label="GitHub repo URL">
-                  <TextInput value={pRepo} onChange={(event) => setPRepo(event.target.value)} placeholder="https://github.com/you/repo" />
-                </Field>
-              ) : null}
-              {pKind === "code" ? (
-                <Field label="Default base branch">
-                  <TextInput value={pBaseBranch} onChange={(event) => setPBaseBranch(event.target.value)} placeholder="main" />
-                </Field>
-              ) : null}
-              <Field label="Project local folder">
-                <TextInput value={pFolder} onChange={(event) => setPFolder(event.target.value)} placeholder="/Users/you/projects/thing" />
-              </Field>
-              <FolderOverrideField
-                label="Library folder (user files)"
-                value={pAssets}
-                onChange={setPAssets}
-                derivedDefault={pFolderBase ? `${pFolderBase}/_library` : undefined}
-                disabled={!pFolderBase}
-              />
-              <FolderOverrideField
-                label="Output folder (artifacts)"
-                value={pOutput}
-                onChange={setPOutput}
-                derivedDefault={pFolderBase ? `${pFolderBase}/_output` : undefined}
-                disabled={!pFolderBase}
-              />
-              <Field label="Summary">
-                <TextArea value={pSummary} onChange={(event) => setPSummary(event.target.value)} />
-              </Field>
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
-                {project.status === "archived" ? (
-                  <Button disabled={busy} onClick={() => void restoreProject()}>
-                    <ArchiveRestore size={16} aria-hidden /> Restore project
-                  </Button>
-                ) : (
-                  <Button variant="danger" disabled={busy} onClick={() => void archiveProject()}>
-                    <Archive size={16} aria-hidden /> Archive project
-                  </Button>
-                )}
-                <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-                  <Button onClick={() => setSettingsOpen(false)}>Cancel</Button>
-                  <Button variant="primary" disabled={busy} onClick={() => void saveSettings()}>
-                    Save
-                  </Button>
-                </div>
-              </div>
-            </div>
-          </Dialog>
-          <Dialog open={proposalOpen} onClose={() => setProposalOpen(false)} title="New task proposal">
-            <div style={{ display: "grid", gap: 14 }}>
-              <Field label="Kind">
-                <Select value={proposalKind} onChange={(event) => setProposalKind(event.target.value)}>
-                  <option value="coding">Coding</option>
-                  <option value="review">Review</option>
-                  <option value="design">Design</option>
-                  <option value="research">Research</option>
-                  <option value="planning">Planning</option>
-                  <option value="manual">Manual</option>
-                </Select>
-              </Field>
-              <Field label="Proposal">
-                <TextArea
-                  value={proposalText}
-                  onChange={(event) => setProposalText(event.target.value)}
-                  placeholder="Describe the idea, problem, constraints, or proposed solution."
-                  style={{ minHeight: 140 }}
-                />
-              </Field>
-              <Field label="Attachments (optional)">
-                <div style={{ display: "grid", gap: 6 }}>
-                  {proposalFiles.map((file, index) => (
-                    <div
-                      key={`${file.name}-${index}`}
-                      style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}
-                    >
-                      <Folder size={13} aria-hidden style={{ flexShrink: 0, opacity: 0.6 }} />
-                      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {file.name}
-                      </span>
-                      <span className={mutedClass} style={{ flexShrink: 0 }}>
-                        {formatFileSize(file.size)}
-                      </span>
-                      <button
-                        type="button"
-                        className={cn(textButtonClass, textButtonCompactClass)}
-                        style={{ marginLeft: "auto", flexShrink: 0 }}
-                        onClick={() => setProposalFiles((current) => current.filter((_, i) => i !== index))}
-                        disabled={proposalBusy}
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  ))}
-                  <label className={cn(textButtonClass, textButtonCompactClass)} style={{ cursor: "pointer", width: "fit-content" }}>
-                    <Plus size={14} aria-hidden /> Add files
-                    <input
-                      type="file"
-                      multiple
-                      accept={PROJECT_FILE_ACCEPT}
-                      style={{ display: "none" }}
-                      disabled={proposalBusy}
-                      onChange={(event) => {
-                        const picked = Array.from(event.target.files ?? []);
-                        event.target.value = "";
-                        const accepted: File[] = [];
-                        for (const file of picked) {
-                          const check = checkProjectFile({
-                            fileName: file.name,
-                            mimeType: file.type,
-                            sizeBytes: file.size,
-                          });
-                          if (check.ok) accepted.push(file);
-                          else toast(`${file.name}: ${check.reason}`, "error");
-                        }
-                        if (accepted.length) setProposalFiles((current) => [...current, ...accepted]);
-                      }}
-                    />
-                  </label>
-                  <p className={mutedClass} style={{ margin: 0, fontSize: 12 }}>
-                    Files upload to the project Library, attached to the new task.
-                  </p>
-                </div>
-              </Field>
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-                <Button onClick={() => setProposalOpen(false)} disabled={proposalBusy}>
-                  Cancel
-                </Button>
-                <Button
-                  variant="primary"
-                  disabled={proposalBusy || !proposalText.trim()}
-                  onClick={() => void proposeTask()}
-                >
-                  <Plus size={16} aria-hidden /> {proposalBusy ? "Proposing…" : "Propose Task"}
-                </Button>
-              </div>
-            </div>
-          </Dialog>
-        </>
-      )}
+        </div>
+      </div>
     </LiveGate>
   );
 }
