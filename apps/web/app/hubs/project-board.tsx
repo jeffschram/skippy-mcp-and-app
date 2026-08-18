@@ -584,16 +584,33 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
   const featuredTask =
     activeTasks.find((task: AnyRecord) => displayState(task) !== "Completed") ??
     null;
-  const inProgressTask =
-    activeTasks.find((task: AnyRecord) => displayState(task) === "In Progress") ??
-    null;
-  const completedTask =
-    activeTasks
-      .filter((task: AnyRecord) => displayState(task) === "Completed")
-      .slice()
-      .sort(
-        (a: AnyRecord, b: AnyRecord) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0),
-      )[0] ?? null;
+  const taskMoments = useMemo(() => {
+    const moments: AnyRecord[] = [];
+    for (const task of activeTasks) {
+      const state = displayState(task);
+      const startedAt =
+        task.agentRequestedAt ??
+        task.startedAt ??
+        (state === "In Progress" ? task.updatedAt : undefined);
+      if (startedAt) {
+        moments.push({
+          key: `task:${task._id}:started`,
+          timestamp: startedAt,
+          state: "in_progress",
+          task,
+        });
+      }
+      if (state === "Completed") {
+        moments.push({
+          key: `task:${task._id}:completed`,
+          timestamp: task.completedAt ?? task.updatedAt,
+          state: "completed",
+          task,
+        });
+      }
+    }
+    return moments;
+  }, [activeTasks]);
 
   if (board === undefined)
     return (
@@ -782,8 +799,7 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
         <div className="hidden min-h-0 flex-1 grid-cols-[minmax(0,2fr)_minmax(340px,1fr)] desk:grid">
           <ProjectChatWorkspace
             projectId={projectId}
-            activeTask={inProgressTask}
-            completedTask={completedTask}
+            taskMoments={taskMoments}
             className="border-r"
           />
           <SidePanel
@@ -801,8 +817,7 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
           {view === "chat" ? (
             <ProjectChatWorkspace
               projectId={projectId}
-              activeTask={inProgressTask}
-              completedTask={completedTask}
+              taskMoments={taskMoments}
               className="h-[calc(100dvh-204px)]"
             />
           ) : null}

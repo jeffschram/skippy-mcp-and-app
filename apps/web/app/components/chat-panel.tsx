@@ -37,8 +37,14 @@ function scopeForPathname(pathname: string): ChatScope {
   return { kind: "page", pageKey: known, label: PAGE_LABELS[known] ?? "Home" };
 }
 
-function TaskMoment({ task }: { task: AnyRecord }) {
-  const done = task.executionState === "done" || task.status === "done";
+function TaskMoment({
+  task,
+  state,
+}: {
+  task: AnyRecord;
+  state: "in_progress" | "completed";
+}) {
+  const done = state === "completed";
   return (
     <article className="my-2 w-full rounded-xl border border-primary/35 bg-primary/[0.06] p-4 shadow-sm">
       <div className="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-[0.08em] text-primary">
@@ -62,14 +68,12 @@ function ChatSurface({
   scope,
   className,
   header,
-  activeTask,
-  completedTask,
+  taskMoments,
 }: {
   scope: ChatScope;
   className?: string | undefined;
   header?: ReactNode | undefined;
-  activeTask?: AnyRecord | null | undefined;
-  completedTask?: AnyRecord | null | undefined;
+  taskMoments?: AnyRecord[] | undefined;
 }) {
   const { isAuthenticated } = useConvexAuth();
   const [draft, setDraft] = useState("");
@@ -81,19 +85,45 @@ function ChatSurface({
   const sendMessage = useMutation(api.chats.sendChatMessageForViewer);
   const decideApproval = useMutation(api.agentWorkbench.decideApprovalForViewer);
   const messages: AnyRecord[] = data?.messages ?? [];
-  const pendingMessages = messages.filter(
-    (message) => message.role === "assistant" && message.status === "pending",
-  );
-  const settledMessages = messages.filter(
-    (message) => !(message.role === "assistant" && message.status === "pending"),
-  );
   const pendingApprovals: AnyRecord[] = data?.pendingApprovals ?? [];
   const boundHarness: string | undefined = data?.chat?.harness;
+  const timelineItems = useMemo(
+    () =>
+      [
+        ...messages.map((message) => ({
+          kind: "message" as const,
+          key: `message:${message._id}`,
+          timestamp: Number(message.createdAt ?? 0),
+          tieBreak: 1,
+          message,
+        })),
+        ...(taskMoments ?? []).map((moment) => ({
+          kind: "task" as const,
+          key: moment.key as string,
+          timestamp: Number(moment.timestamp ?? 0),
+          tieBreak: 0,
+          moment,
+        })),
+      ].sort(
+        (a, b) =>
+          a.timestamp - b.timestamp ||
+          a.tieBreak - b.tieBreak ||
+          a.key.localeCompare(b.key),
+      ),
+    [messages, taskMoments],
+  );
+  const lastTimelineItem = timelineItems[timelineItems.length - 1];
 
   useEffect(() => {
     const el = messagesRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [messages.length, messages[messages.length - 1]?.status, activeTask?._id]);
+  }, [
+    timelineItems.length,
+    lastTimelineItem?.key,
+    lastTimelineItem?.kind === "message"
+      ? lastTimelineItem.message.status
+      : lastTimelineItem?.moment.state,
+  ]);
 
   const send = async () => {
     const content = draft.trim();
@@ -136,37 +166,47 @@ function ChatSurface({
       )}
 
       <div className="flex flex-1 flex-col gap-3 overflow-y-auto px-4 py-5 desk:px-6" ref={messagesRef}>
-        {messages.length === 0 ? (
+        {timelineItems.length === 0 ? (
           <div className="mx-auto my-auto max-w-md text-center">
             <MessageCircle className="mx-auto mb-3 text-primary" size={24} aria-hidden />
             <p className="mb-1 font-bold">Talk through this project</p>
             <p className="m-0 text-sm text-muted-foreground">
-              Ask what comes next, update project details, or tell the workspace to begin the next Agent task.
+              Ask what comes next, update project details, or discuss work already in progress.
             </p>
           </div>
         ) : (
-          settledMessages.map((message) => {
+          timelineItems.map((item) => {
+            if (item.kind === "task") {
+              return (
+                <TaskMoment
+                  key={item.key}
+                  task={item.moment.task}
+                  state={item.moment.state}
+                />
+              );
+            }
+            const message = item.message;
+            if (message.role === "assistant" && message.status === "pending") {
+              return (
+                <div key={item.key} className="max-w-[88%] self-start text-sm text-muted-foreground animate-pulse">
+                  Thinking…
+                </div>
+              );
+            }
             if (message.role === "assistant" && message.status === "error") {
-              return <div key={message._id} className="max-w-[88%] self-start text-sm text-destructive">{message.error ?? "Reply failed."}</div>;
+              return <div key={item.key} className="max-w-[88%] self-start text-sm text-destructive">{message.error ?? "Reply failed."}</div>;
             }
             return message.role === "user" ? (
-              <div key={message._id} className="max-w-[82%] self-end whitespace-pre-wrap rounded-2xl rounded-br-md bg-primary px-3.5 py-2.5 text-sm leading-relaxed text-primary-foreground">
+              <div key={item.key} className="max-w-[82%] self-end whitespace-pre-wrap rounded-2xl rounded-br-md bg-primary px-3.5 py-2.5 text-sm leading-relaxed text-primary-foreground">
                 {message.content}
               </div>
             ) : (
-              <div key={message._id} className="max-w-[92%] self-start whitespace-pre-wrap text-sm leading-relaxed">
+              <div key={item.key} className="max-w-[92%] self-start whitespace-pre-wrap text-sm leading-relaxed">
                 {message.content}
               </div>
             );
           })
         )}
-        {completedTask ? <TaskMoment task={completedTask} /> : null}
-        {activeTask ? <TaskMoment task={activeTask} /> : null}
-        {pendingMessages.map((message) => (
-          <div key={message._id} className="max-w-[88%] self-start text-sm text-muted-foreground animate-pulse">
-            Thinking…
-          </div>
-        ))}
       </div>
 
       {pendingApprovals.length ? (
@@ -207,20 +247,17 @@ function ChatSurface({
 
 export function ProjectChatWorkspace({
   projectId,
-  activeTask,
-  completedTask,
+  taskMoments,
   className,
 }: {
   projectId: string;
-  activeTask?: AnyRecord | null | undefined;
-  completedTask?: AnyRecord | null | undefined;
+  taskMoments?: AnyRecord[] | undefined;
   className?: string | undefined;
 }) {
   return (
     <ChatSurface
       scope={{ kind: "project", projectId, label: "Project" }}
-      activeTask={activeTask}
-      completedTask={completedTask}
+      taskMoments={taskMoments}
       className={className}
     />
   );
