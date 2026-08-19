@@ -537,6 +537,7 @@ function directCreateConfirmation(result: unknown, fallbackEntityType: "project"
     ownerType: resultRecord.ownerType,
     projectId: resultRecord.projectId,
     projectTitle: resultRecord.projectTitle,
+    phaseId: resultRecord.phaseId,
     relationshipId: resultRecord.relationshipId,
     reviewUrl: reviewUrl("/projects"),
   };
@@ -1684,7 +1685,7 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
     {
       title: "Create accepted task",
       description:
-        "Directly create an accepted task when the user explicitly asks to create/add a task. Optionally assign it to an accepted project by projectId. For source-derived tasks, prefer ingest_object with a rubricDecision and sourceRefs.",
+        "Directly create an accepted task when the user explicitly asks to create/add a task. Optionally assign it to an accepted project by projectId. Project tasks are placed into the project's Plan: pass phaseId (from get_project_plan) to target a specific phase, or omit it to default into the project's last phase. For source-derived tasks, prefer ingest_object with a rubricDecision and sourceRefs.",
       annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: false },
       inputSchema: z.object({
         title: z.string().describe("Task title from the user's explicit instruction."),
@@ -1704,6 +1705,12 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
         dueAt: z.number().optional().describe("Optional due date/time in epoch milliseconds."),
         priorityReason: z.string().optional().describe("Why this task matters or its intended priority."),
         projectId: z.string().optional().describe("Accepted project ID to assign the task to."),
+        phaseId: z
+          .string()
+          .optional()
+          .describe(
+            "Plan phase ID from get_project_plan. Requires projectId and must belong to that project. Omit to default into the project's last phase.",
+          ),
         createdBy: z.string().optional().describe("Harness/user identifier for audit logging."),
         area: z
           .enum(["work", "personal", "household", "health", "finance", "social", "errand"])
@@ -1907,6 +1914,26 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
   );
 
   server.registerTool(
+    "set_task_phase",
+    {
+      title: "Place a task in a Plan phase",
+      description:
+        "Assign or move an existing project task into a Plan phase, appended after the phase's current tasks. Use get_project_plan first to identify phase IDs (and to spot tasks with no phaseId, which are exactly the ones missing from the phase-grouped Plan). The phase must belong to the task's project.",
+      annotations: { destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: z.object({
+        taskId: z.string().describe("Task ID to place."),
+        phaseId: z.string().describe("Phase ID returned by get_project_plan."),
+      }),
+    },
+    async (args) =>
+      toolResult(
+        await tools.setTaskPhase(
+          stripUndefined(args) as Parameters<typeof tools.setTaskPhase>[0],
+        ),
+      ),
+  );
+
+  server.registerTool(
     "plan_project",
     {
       title: "Plan a project into tasks",
@@ -2020,6 +2047,12 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
           .enum(["coding", "review", "research", "design", "manual", "planning"])
           .optional()
           .describe("Optional task kind. Use coding for repo work."),
+        phaseId: z
+          .string()
+          .optional()
+          .describe(
+            "Optional Plan phase ID from get_project_plan to place the task in while briefing it. Must belong to the task's project.",
+          ),
       }),
     },
     async (args) =>
@@ -2209,6 +2242,7 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
 
   const upsertDescriptionNotes: Partial<Record<(typeof entityTypeValues)[number], string>> = {
     link: " Links are reference material: status defaults to 'saved' (no user interaction expected). Pass status 'unread' only when the user explicitly wants to read it later; if genuinely uncertain the link is valid or important, use submit_candidate_object so it lands in Review for a one-tap decision.",
+    task: " This always creates a NEW standalone task and cannot update an existing one — for project tasks use create_task (projectId/phaseId aware), brief_task to update briefs, and set_task_phase to place a task in a Plan phase.",
   };
 
   for (const entityType of entityTypeValues) {
@@ -2222,6 +2256,21 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
       },
       async (args) => {
         const candidatePayload = stripUndefined(args) as CandidateObjectInput<typeof entityType>["candidatePayload"];
+        // upsert_* is ingestion, not mutation: a payload that references an
+        // existing record would silently create an unlinked duplicate (this
+        // happened with upsert_task + taskId). Fail loudly and point at the
+        // update tools instead.
+        const updateKeys = ["taskId", "phaseId", "_id", "entityId"].filter(
+          (key) => key in (candidatePayload as Record<string, unknown>),
+        );
+        if (updateKeys.length) {
+          throw new Error(
+            `upsert_${entityType} creates a new ${entityType} and cannot update an existing record (got ${updateKeys.join(", ")}). ` +
+              (entityType === "task"
+                ? "Use create_task for new project tasks, brief_task to update a brief, or set_task_phase to place a task in a Plan phase."
+                : "Use the matching update tool or ingest_object instead."),
+          );
+        }
         const input = {
           candidateEntityType: entityType,
           candidatePayload,

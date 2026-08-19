@@ -137,6 +137,8 @@ export type SkippyClient = {
       dueAt?: number;
       priorityReason?: string;
       projectId?: string;
+      // Optional Plan phase; defaults to the project's last phase when omitted.
+      phaseId?: string;
       createdBy?: string;
       // Life-layer axes. Optional so existing callers are unaffected.
       area?: TaskArea;
@@ -213,8 +215,14 @@ export type SkippyClient = {
       title?: string;
       description?: string;
       kind?: "coding" | "review" | "research" | "design" | "manual" | "planning";
+      // Optional Plan phase to place the task in while briefing it.
+      phaseId?: string;
       actorId?: string;
     },
+  ): Promise<unknown>;
+  setTaskPhase(
+    brainInstanceId: string,
+    input: { taskId: string; phaseId: string; actorId?: string },
   ): Promise<unknown>;
   getSkill(brainInstanceId: string, input: { slug: string }): Promise<unknown>;
   recordTaskResult(
@@ -1262,11 +1270,20 @@ export function createSkippyToolHandlers(client: SkippyClient, brainInstanceId: 
       title?: string;
       description?: string;
       kind?: "coding" | "review" | "research" | "design" | "manual" | "planning";
+      phaseId?: string;
     }) {
       const executionBrief = normalizeRequiredText(input.executionBrief, "executionBrief");
       return await client.briefTask(brainInstanceId, {
         ...input,
         executionBrief,
+        actorId: "skippy_mcp",
+      });
+    },
+
+    async setTaskPhase(input: { taskId: string; phaseId: string }) {
+      return await client.setTaskPhase(brainInstanceId, {
+        taskId: normalizeRequiredText(input.taskId, "taskId"),
+        phaseId: normalizeRequiredText(input.phaseId, "phaseId"),
         actorId: "skippy_mcp",
       });
     },

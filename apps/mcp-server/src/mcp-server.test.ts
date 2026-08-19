@@ -57,6 +57,7 @@ function createFakeClient(overrides: Partial<SkippyClient> = {}): SkippyClient {
     getProjectPlan: async () => ({ project: { _id: "project_123", title: "Demo" }, phases: [], tasks: [] }),
     updateProject: async (_brainInstanceId, input) => ({ ...input, status: "updated" }),
     updatePhase: async (_brainInstanceId, input) => ({ ...input, status: "updated" }),
+    setTaskPhase: async (_brainInstanceId, input) => ({ ...input, phaseTitle: "Phase 1", orderIndex: 5, status: "updated" }),
     planProject: async (_brainInstanceId, input) => ({
       status: "planned",
       planId: "plan_123",
@@ -952,6 +953,133 @@ describe("Skippy MCP manifest", () => {
         executionState: "briefed",
         reviewUrl: "http://127.0.0.1:3000/projects",
       });
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
+  it("threads phaseId through create_task and brief_task so tasks land in the Plan", async () => {
+    const createCalls: Array<{ brainInstanceId: string; input: any }> = [];
+    const briefCalls: Array<{ brainInstanceId: string; input: any }> = [];
+    const server = createMcpServer(
+      createFakeClient({
+        createTaskDirect: async (brainInstanceId, input) => {
+          createCalls.push({ brainInstanceId, input });
+          return {
+            status: "created",
+            entityType: "task",
+            taskId: "task_123",
+            title: input.title,
+            projectId: input.projectId,
+            phaseId: input.phaseId ?? "phase_default",
+          };
+        },
+        briefTask: async (brainInstanceId, input) => {
+          briefCalls.push({ brainInstanceId, input });
+          return { taskId: input.taskId, executionState: "briefed", phaseId: (input as any).phaseId };
+        },
+      }),
+      "brain_123",
+    );
+    const client = new Client({ name: "phase-threading-test", version: "0.1.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    try {
+      await server.connect(serverTransport);
+      await client.connect(clientTransport);
+
+      const createResult = await client.callTool({
+        name: "create_task",
+        arguments: { title: "Phase-targeted task", projectId: "project_123", phaseId: "phase_2" },
+      });
+      expect(createCalls[0]?.input.phaseId).toBe("phase_2");
+      expect(textResult(createResult)).toMatchObject({ status: "created", phaseId: "phase_2" });
+
+      // Omitted phaseId still surfaces the server-resolved default phase.
+      const defaultResult = await client.callTool({
+        name: "create_task",
+        arguments: { title: "Defaulted task", projectId: "project_123" },
+      });
+      expect(createCalls[1]?.input.phaseId).toBeUndefined();
+      expect(textResult(defaultResult)).toMatchObject({ phaseId: "phase_default" });
+
+      await client.callTool({
+        name: "brief_task",
+        arguments: {
+          taskId: "task_123",
+          executionBrief: "Do the thing.",
+          acceptanceCriteria: ["It is done."],
+          phaseId: "phase_2",
+        },
+      });
+      expect(briefCalls[0]?.input.phaseId).toBe("phase_2");
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
+  it("places existing tasks into a phase via set_task_phase", async () => {
+    const calls: Array<{ brainInstanceId: string; input: any }> = [];
+    const server = createMcpServer(
+      createFakeClient({
+        setTaskPhase: async (brainInstanceId, input) => {
+          calls.push({ brainInstanceId, input });
+          return { ...input, phaseTitle: "Phase 2", orderIndex: 7, status: "updated" };
+        },
+      }),
+      "brain_123",
+    );
+    const client = new Client({ name: "set-task-phase-test", version: "0.1.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    try {
+      await server.connect(serverTransport);
+      await client.connect(clientTransport);
+
+      const result = await client.callTool({
+        name: "set_task_phase",
+        arguments: { taskId: "task_123", phaseId: "phase_2" },
+      });
+
+      expect(calls).toEqual([
+        {
+          brainInstanceId: "brain_123",
+          input: { taskId: "task_123", phaseId: "phase_2", actorId: "skippy_mcp" },
+        },
+      ]);
+      expect(textResult(result)).toMatchObject({
+        taskId: "task_123",
+        phaseId: "phase_2",
+        phaseTitle: "Phase 2",
+        status: "updated",
+      });
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
+  it("rejects upsert_task payloads that reference an existing record instead of duplicating it", async () => {
+    const server = createMcpServer(createFakeClient(), "brain_123");
+    const client = new Client({ name: "upsert-task-guard-test", version: "0.1.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    try {
+      await server.connect(serverTransport);
+      await client.connect(clientTransport);
+
+      const result = await client.callTool({
+        name: "upsert_task",
+        arguments: { title: "Existing task", taskId: "task_123", phaseId: "phase_2" },
+      });
+
+      expect(result.isError).toBe(true);
+      const content = result.content as Array<{ type: string; text?: string }>;
+      const text = content.find((item) => item.type === "text")?.text ?? "";
+      expect(text).toContain("cannot update an existing record");
+      expect(text).toContain("set_task_phase");
     } finally {
       await client.close();
       await server.close();
