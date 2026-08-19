@@ -1914,6 +1914,27 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
   );
 
   server.registerTool(
+    "create_phase",
+    {
+      title: "Create a project Plan phase",
+      description:
+        "Add a new phase to a project's Plan, appended after the existing phases. Use when the user wants a new section of work (e.g. a batch of related tasks). Follow with create_task using the returned phaseId to place tasks in it; update_phase edits it later.",
+      annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      inputSchema: z.object({
+        projectId: z.string().describe("Accepted project ID."),
+        title: z.string().describe("Phase title, e.g. 'Phase 3' or a thematic name."),
+        descriptionMd: z.string().optional().describe("Optional Markdown phase description."),
+      }),
+    },
+    async (args) =>
+      toolResult(
+        await tools.createPhase(
+          stripUndefined(args) as Parameters<typeof tools.createPhase>[0],
+        ),
+      ),
+  );
+
+  server.registerTool(
     "set_task_phase",
     {
       title: "Place a task in a Plan phase",

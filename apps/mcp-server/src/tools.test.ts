@@ -48,6 +48,7 @@ function createFakeClient(): { client: SkippyClient; calls: Array<{ name: string
       updateProject: (brainInstanceId, input) => record("updateProject", brainInstanceId, input),
       updatePhase: (brainInstanceId, input) => record("updatePhase", brainInstanceId, input),
       setTaskPhase: (brainInstanceId, input) => record("setTaskPhase", brainInstanceId, input),
+      createPhase: (brainInstanceId, input) => record("createPhase", brainInstanceId, input),
       planProject: (brainInstanceId, input) => record("planProject", brainInstanceId, input),
       listReadyTasks: (brainInstanceId, input) => record("listReadyTasks", brainInstanceId, input),
       listRequestedReadyTasks: (brainInstanceId, input) => record("listRequestedReadyTasks", brainInstanceId, input),
