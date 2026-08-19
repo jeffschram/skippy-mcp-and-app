@@ -1357,6 +1357,10 @@ export default defineSchema({
     status: v.union(v.literal("complete"), v.literal("pending"), v.literal("error")),
     error: v.optional(v.string()),
     createdAt: v.number(),
+    // Assistant placeholders are inserted at send time and filled when the
+    // turn finishes; completedAt records that finish so the chat timeline can
+    // order the reply after any task moments that happened during the turn.
+    completedAt: v.optional(v.number()),
   }).index("by_chat", ["chatId", "createdAt"]),
 
   // Work queue for conversational turns: lighter siblings of agentRuns — same

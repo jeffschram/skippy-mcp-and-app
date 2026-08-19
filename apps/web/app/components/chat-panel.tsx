@@ -6,6 +6,7 @@ import { useConvexAuth, useMutation, useQuery } from "convex/react";
 import { CheckCircle2, MessageCircle, SendHorizontal, Sparkles, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { api } from "../../lib/skippy-api";
+import { buildChatTimeline } from "../../lib/chat-timeline";
 
 type AnyRecord = Record<string, any>;
 
@@ -88,28 +89,7 @@ function ChatSurface({
   const pendingApprovals: AnyRecord[] = data?.pendingApprovals ?? [];
   const boundHarness: string | undefined = data?.chat?.harness;
   const timelineItems = useMemo(
-    () =>
-      [
-        ...messages.map((message) => ({
-          kind: "message" as const,
-          key: `message:${message._id}`,
-          timestamp: Number(message.createdAt ?? 0),
-          tieBreak: 1,
-          message,
-        })),
-        ...(taskMoments ?? []).map((moment) => ({
-          kind: "task" as const,
-          key: moment.key as string,
-          timestamp: Number(moment.timestamp ?? 0),
-          tieBreak: 0,
-          moment,
-        })),
-      ].sort(
-        (a, b) =>
-          a.timestamp - b.timestamp ||
-          a.tieBreak - b.tieBreak ||
-          a.key.localeCompare(b.key),
-      ),
+    () => buildChatTimeline(messages, taskMoments),
     [messages, taskMoments],
   );
   const lastTimelineItem = timelineItems[timelineItems.length - 1];
