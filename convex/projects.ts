@@ -1663,3 +1663,88 @@ export const restoreTaskForBrain = mutationGeneric({
     });
   },
 });
+
+/**
+ * Hard-delete a task plus the relationship edges that reference it. Unlike
+ * `cancelTask` (soft, restorable), this permanently removes the record — it
+ * exists for board cleanup of stale/duplicate items. Historical references
+ * from agentRuns/chat cards are left in place; consumers already treat a
+ * missing task as "no longer on the board".
+ */
+async function deleteTaskCascade(db: any, brainInstanceId: string, taskId: string) {
+  // Endpoint indexes keep this to exactly the edges touching the task —
+  // the brain's full edge set is far beyond function read limits.
+  const outgoing = await db
+    .query("relationships")
+    .withIndex("by_brain_from", (q: any) =>
+      q.eq("brainInstanceId", brainInstanceId).eq("from.entityId", taskId),
+    )
+    .collect();
+  const incoming = await db
+    .query("relationships")
+    .withIndex("by_brain_to", (q: any) =>
+      q.eq("brainInstanceId", brainInstanceId).eq("to.entityId", taskId),
+    )
+    .collect();
+  let removedEdges = 0;
+  for (const rel of [...outgoing, ...incoming]) {
+    await db.delete(rel._id);
+    removedEdges += 1;
+  }
+  await db.delete(taskId);
+  return removedEdges;
+}
+
+export const deleteTaskForBrain = mutationGeneric({
+  args: {
+    brainInstanceId: v.id("brainInstances"),
+    taskId: v.id("tasks"),
+    actorId: v.optional(v.string()),
+  },
+  handler: async ({ db }, args) => {
+    const task = await db.get(args.taskId);
+    if (!task || task.brainInstanceId !== args.brainInstanceId) {
+      throw new Error("task not found for brain instance");
+    }
+    const removedEdges = await deleteTaskCascade(db, args.brainInstanceId, args.taskId);
+    return { taskId: args.taskId, deleted: true, removedEdges, title: task.title };
+  },
+});
+
+/**
+ * Hard-delete a Plan phase. Refuses when the phase still contains tasks
+ * unless `deleteTasks` is set, so a caller can never silently vaporize work;
+ * the alternative is moving tasks out first via `setTaskPhaseForBrain`.
+ */
+export const deletePhaseForBrain = mutationGeneric({
+  args: {
+    brainInstanceId: v.id("brainInstances"),
+    phaseId: v.id("phases"),
+    deleteTasks: v.optional(v.boolean()),
+    actorId: v.optional(v.string()),
+  },
+  handler: async ({ db }, args) => {
+    const phase = await db.get(args.phaseId);
+    if (!phase || phase.brainInstanceId !== args.brainInstanceId) {
+      throw new Error("phase not found for brain instance");
+    }
+    const tasks = await db
+      .query("tasks")
+      .withIndex("by_brain_phase", (q: any) =>
+        q.eq("brainInstanceId", args.brainInstanceId).eq("phaseId", args.phaseId),
+      )
+      .collect();
+    if (tasks.length > 0 && !args.deleteTasks) {
+      throw new Error(
+        `phase still contains ${tasks.length} task(s); pass deleteTasks: true or move them out first`,
+      );
+    }
+    const deletedTaskIds: string[] = [];
+    for (const task of tasks) {
+      await deleteTaskCascade(db, args.brainInstanceId, task._id);
+      deletedTaskIds.push(task._id);
+    }
+    await db.delete(args.phaseId);
+    return { phaseId: args.phaseId, deleted: true, title: phase.title, deletedTaskIds };
+  },
+});
