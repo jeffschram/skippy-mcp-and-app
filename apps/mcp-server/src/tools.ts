@@ -201,6 +201,10 @@ export type SkippyClient = {
     brainInstanceId: string,
     input: { phaseId: string; title?: string; descriptionMd?: string },
   ): Promise<unknown>;
+  createPhase(
+    brainInstanceId: string,
+    input: { projectId: string; title: string; descriptionMd?: string; actorId?: string },
+  ): Promise<unknown>;
   planProject(brainInstanceId: string, input: { projectId: string; maxTasks?: number }): Promise<unknown>;
   listReadyTasks(brainInstanceId: string, input: { limit?: number }): Promise<unknown>;
   listRequestedReadyTasks(brainInstanceId: string, input: { limit?: number }): Promise<unknown>;
@@ -1241,6 +1245,14 @@ export function createSkippyToolHandlers(client: SkippyClient, brainInstanceId: 
 
     async updatePhase(input: { phaseId: string; title?: string; descriptionMd?: string }) {
       return await client.updatePhase(brainInstanceId, input);
+    },
+
+    async createPhase(input: { projectId: string; title: string; descriptionMd?: string }) {
+      return await client.createPhase(brainInstanceId, {
+        ...input,
+        title: normalizeRequiredText(input.title, "title"),
+        actorId: "skippy_mcp",
+      });
     },
 
     async planProject(input: { projectId: string; maxTasks?: number }) {

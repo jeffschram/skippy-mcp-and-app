@@ -1400,6 +1400,57 @@ export const updatePhaseForBrain = mutationGeneric({
 });
 
 /**
+ * Harness-facing phase creation: appended after the project's existing phases,
+ * mirroring createPhaseForViewer. Completes the MCP phase toolset so an agent
+ * can stand up a new plan section (create_phase -> create_task with phaseId)
+ * without a UI round-trip.
+ */
+export const createPhaseForBrain = mutationGeneric({
+  args: {
+    brainInstanceId: v.id("brainInstances"),
+    projectId: v.id("projects"),
+    title: v.string(),
+    descriptionMd: v.optional(v.string()),
+    actorId: v.optional(v.string()),
+  },
+  handler: async ({ db }, args) => {
+    const project = await db.get(args.projectId);
+    if (!project || project.brainInstanceId !== args.brainInstanceId) throw new Error("project not found");
+    const title = args.title.trim();
+    if (!title) throw new Error("phase title cannot be empty");
+    const phases = await db
+      .query("phases")
+      .withIndex("by_brain_project", (q: any) =>
+        q.eq("brainInstanceId", args.brainInstanceId).eq("projectId", args.projectId),
+      )
+      .collect();
+    const now = Date.now();
+    const phaseId = await db.insert("phases", {
+      brainInstanceId: args.brainInstanceId,
+      projectId: args.projectId,
+      orderNum: phases.length ? Math.max(...phases.map((phase: any) => phase.orderNum)) + 1 : 0,
+      title,
+      descriptionMd: args.descriptionMd?.trim() ?? "",
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    await db.insert("activityEvents", {
+      brainInstanceId: args.brainInstanceId,
+      entityRef: { entityType: "project", entityId: args.projectId },
+      activityType: "phase_created",
+      actorType: "harness",
+      actorId: args.actorId,
+      timestamp: now,
+      summary: `Phase created: ${title}`,
+      metadata: { phaseId },
+    });
+
+    return { phaseId, title, projectId: args.projectId, status: "created" };
+  },
+});
+
+/**
  * Harness-facing phase (re)assignment: place an existing task into a Plan
  * phase, appended after the phase's current tasks. This is the MCP escape
  * hatch for tasks that predate phase-aware creation (created without a

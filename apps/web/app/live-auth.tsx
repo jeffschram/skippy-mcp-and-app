@@ -68,7 +68,7 @@ export function LiveGate({ children }: { children: React.ReactNode }) {
     return (
       <section className={cn(cardClass, sectionClass)}>
         <h2>Sign in</h2>
-        <p className={mutedClass}>Use Clerk to connect your Skippy brain.</p>
+        <p className={mutedClass + " mb-4"}>Use Clerk to connect your Skippy brain.</p>
         <SignInButton mode="modal">
           <button className={textButtonClass} type="button">
             Sign in with Clerk

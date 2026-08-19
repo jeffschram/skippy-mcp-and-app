@@ -58,6 +58,12 @@ function createFakeClient(overrides: Partial<SkippyClient> = {}): SkippyClient {
     updateProject: async (_brainInstanceId, input) => ({ ...input, status: "updated" }),
     updatePhase: async (_brainInstanceId, input) => ({ ...input, status: "updated" }),
     setTaskPhase: async (_brainInstanceId, input) => ({ ...input, phaseTitle: "Phase 1", orderIndex: 5, status: "updated" }),
+    createPhase: async (_brainInstanceId, input) => ({
+      phaseId: "phase_new",
+      title: input.title,
+      projectId: input.projectId,
+      status: "created",
+    }),
     planProject: async (_brainInstanceId, input) => ({
       status: "planned",
       planId: "plan_123",
@@ -1054,6 +1060,51 @@ describe("Skippy MCP manifest", () => {
         phaseId: "phase_2",
         phaseTitle: "Phase 2",
         status: "updated",
+      });
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
+  it("creates a Plan phase via create_phase with the harness actor", async () => {
+    const calls: Array<{ brainInstanceId: string; input: any }> = [];
+    const server = createMcpServer(
+      createFakeClient({
+        createPhase: async (brainInstanceId, input) => {
+          calls.push({ brainInstanceId, input });
+          return { phaseId: "phase_new", title: input.title, projectId: input.projectId, status: "created" };
+        },
+      }),
+      "brain_123",
+    );
+    const client = new Client({ name: "create-phase-test", version: "0.1.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    try {
+      await server.connect(serverTransport);
+      await client.connect(clientTransport);
+
+      const result = await client.callTool({
+        name: "create_phase",
+        arguments: { projectId: "project_123", title: "  Phase 3  ", descriptionMd: "UX polish batch" },
+      });
+
+      expect(calls).toEqual([
+        {
+          brainInstanceId: "brain_123",
+          input: {
+            projectId: "project_123",
+            title: "Phase 3",
+            descriptionMd: "UX polish batch",
+            actorId: "skippy_mcp",
+          },
+        },
+      ]);
+      expect(textResult(result)).toMatchObject({
+        phaseId: "phase_new",
+        title: "Phase 3",
+        status: "created",
       });
     } finally {
       await client.close();
