@@ -32,7 +32,6 @@ import {
   Dialog,
   Field,
   LoadingRow,
-  ProgressBar,
   Select,
   TextArea,
   TextInput,
@@ -130,7 +129,6 @@ function PhaseDescription({ phase }: { phase: AnyRecord }) {
 
 function TaskRow({
   task,
-  featured,
   busy,
   onStart,
   onComplete,
@@ -138,7 +136,6 @@ function TaskRow({
   onDrop,
 }: {
   task: AnyRecord;
-  featured: boolean;
   busy: boolean;
   onStart: () => void;
   onComplete: () => void;
@@ -148,6 +145,18 @@ function TaskRow({
   const state = displayState(task);
   const completed = state === "Completed";
   const inProgress = state === "In Progress";
+  // Every actionable row carries its own start affordance; owner tasks that
+  // are underway swap it for a complete affordance. Agent tasks in progress
+  // show only the badge (the workspace run owns their lifecycle).
+  const action = !inProgress
+    ? {
+        icon: Play,
+        label: task.ownerType === "agent" ? "Start task" : "Mark in progress",
+        onClick: onStart,
+      }
+    : task.ownerType !== "agent"
+      ? { icon: Check, label: "Mark complete", onClick: onComplete }
+      : null;
 
   if (completed) {
     return (
@@ -178,12 +187,7 @@ function TaskRow({
       onDragStart={onDragStart}
       onDragOver={(event) => event.preventDefault()}
       onDrop={onDrop}
-      className={cn(
-        "rounded-xl border p-3 transition-colors",
-        featured
-          ? "border-primary/55 bg-primary/[0.07] shadow-sm"
-          : "border-border bg-background/40",
-      )}
+      className="rounded-xl border border-border bg-background/40 p-3 transition-colors"
     >
       <div className="flex items-start gap-2.5">
         <GripVertical
@@ -201,39 +205,23 @@ function TaskRow({
             ) : null}
             {inProgress ? <Badge tone="gold">In Progress</Badge> : null}
           </div>
-          {featured && (task.executionBrief || task.description) ? (
-            <p className="mb-0 mt-2 whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">
-              {task.executionBrief || task.description}
-            </p>
-          ) : null}
-          {featured ? (
-            <div className="mt-3 flex flex-wrap gap-2">
-              {!inProgress ? (
-                <Button
-                  small
-                  variant="primary"
-                  disabled={busy}
-                  onClick={onStart}
-                >
-                  <Play size={14} aria-hidden />{" "}
-                  {task.ownerType === "agent"
-                    ? "Start task"
-                    : "Mark in progress"}
-                </Button>
-              ) : null}
-              {task.ownerType !== "agent" && inProgress ? (
-                <Button
-                  small
-                  variant="primary"
-                  disabled={busy}
-                  onClick={onComplete}
-                >
-                  <Check size={14} aria-hidden /> Mark complete
-                </Button>
-              ) : null}
-            </div>
-          ) : null}
         </div>
+        {action ? (
+          <button
+            type="button"
+            aria-label={action.label}
+            title={action.label}
+            disabled={busy}
+            onClick={action.onClick}
+            className={cn(
+              "grid size-7 shrink-0 place-items-center rounded-full border border-primary/45 text-primary transition-colors",
+              "hover:bg-primary hover:text-primary-foreground disabled:pointer-events-none disabled:opacity-45",
+              busy && "animate-pulse",
+            )}
+          >
+            <action.icon size={13} aria-hidden />
+          </button>
+        ) : null}
       </div>
     </article>
   );
@@ -303,14 +291,12 @@ function ProjectOverview({ project }: { project: AnyRecord }) {
 
 function ProjectPlan({
   board,
-  featuredTask,
-  busy,
+  busyTaskId,
   onStart,
   onComplete,
 }: {
   board: AnyRecord;
-  featuredTask: AnyRecord | null;
-  busy: boolean;
+  busyTaskId: string | null;
   onStart: (task: AnyRecord) => void;
   onComplete: (task: AnyRecord) => void;
 }) {
@@ -342,31 +328,6 @@ function ProjectPlan({
 
   return (
     <div className="space-y-5 p-4 desk:p-5">
-      <div className="mb-2 flex items-baseline justify-between gap-3">
-        <h2 className="m-0 text-xl">What’s next</h2>
-        <span className="text-sm font-bold">
-          {board.progress.percent}% complete
-        </span>
-      </div>
-      <ProgressBar value={board.progress.percent} />
-      {featuredTask ? (
-        <div className="mt-4">
-          <p className="mb-1 text-xs font-bold uppercase tracking-[0.08em] text-primary">
-            Next in the plan
-          </p>
-          <p className="mb-1 font-bold">{featuredTask.title}</p>
-          <p className="m-0 text-sm text-muted-foreground">
-            {featuredTask.executionBrief ||
-              featuredTask.description ||
-              "This is the first unfinished task in the ordered plan."}
-          </p>
-        </div>
-      ) : (
-        <div className="mt-4 flex items-center gap-2 text-sm font-bold text-green">
-          <CheckCircle2 size={17} aria-hidden /> Project plan complete
-        </div>
-      )}
-
       {phases.map((phase) => {
         const phaseTasks = tasks.filter((task) => task.phaseId === phase._id);
         const completedTasks = phaseTasks.filter(
@@ -395,8 +356,7 @@ function ProjectPlan({
                 <TaskRow
                   key={task._id}
                   task={task}
-                  featured={featuredTask?._id === task._id}
-                  busy={busy}
+                  busy={busyTaskId === task._id}
                   onStart={() => onStart(task)}
                   onComplete={() => onComplete(task)}
                   onDragStart={(event) => {
@@ -431,8 +391,7 @@ function ProjectPlan({
                       <TaskRow
                         key={task._id}
                         task={task}
-                        featured={false}
-                        busy={busy}
+                        busy={busyTaskId === task._id}
                         onStart={() => onStart(task)}
                         onComplete={() => onComplete(task)}
                         onDragStart={(event) => {
@@ -473,16 +432,14 @@ function SidePanel({
   board,
   view,
   onView,
-  featuredTask,
-  busy,
+  busyTaskId,
   onStart,
   onComplete,
 }: {
   board: AnyRecord;
   view: ProjectView;
   onView: (view: ProjectView) => void;
-  featuredTask: AnyRecord | null;
-  busy: boolean;
+  busyTaskId: string | null;
   onStart: (task: AnyRecord) => void;
   onComplete: (task: AnyRecord) => void;
 }) {
@@ -516,8 +473,7 @@ function SidePanel({
         {view === "plan" ? (
           <ProjectPlan
             board={board}
-            featuredTask={featuredTask}
-            busy={busy}
+            busyTaskId={busyTaskId}
             onStart={onStart}
             onComplete={onComplete}
           />
@@ -545,6 +501,9 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
   const toast = useToast();
   const [view, setView] = useState<ProjectView>("overview");
   const [busy, setBusy] = useState(false);
+  // Task-row actions track WHICH task is busy so only the clicked row's
+  // button disables; the global `busy` stays for the settings dialog.
+  const [busyTaskId, setBusyTaskId] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [projectTitle, setProjectTitle] = useState("");
   const [projectKind, setProjectKind] = useState("general");
@@ -581,9 +540,6 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
       (task: AnyRecord) => task.executionState !== "cancelled",
     );
   }, [board?.phases, board?.tasks]);
-  const featuredTask =
-    activeTasks.find((task: AnyRecord) => displayState(task) !== "Completed") ??
-    null;
   const taskMoments = useMemo(() => {
     const moments: AnyRecord[] = [];
     for (const task of activeTasks) {
@@ -704,7 +660,8 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
   };
 
   const startTask = async (task: AnyRecord) => {
-    setBusy(true);
+    if (busyTaskId) return;
+    setBusyTaskId(task._id);
     try {
       if (task.ownerType === "agent") {
         if (task.executionState !== "ready") {
@@ -728,12 +685,13 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
         "error",
       );
     } finally {
-      setBusy(false);
+      setBusyTaskId(null);
     }
   };
 
   const completeTask = async (task: AnyRecord) => {
-    setBusy(true);
+    if (busyTaskId) return;
+    setBusyTaskId(task._id);
     try {
       await setExecState({ taskId: task._id as any, executionState: "done" });
       toast("Task complete. The next task is ready.", "success");
@@ -743,7 +701,7 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
         "error",
       );
     } finally {
-      setBusy(false);
+      setBusyTaskId(null);
     }
   };
 
@@ -764,7 +722,7 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
           <div className="min-w-0 flex-1">
             <p className="m-0 truncate font-bold">{board.project.title}</p>
             <p className="m-0 text-xs text-muted-foreground">
-              {featuredTask ? `Next: ${featuredTask.title}` : "Plan complete"}
+              {board.progress.done}/{board.progress.total} tasks complete
             </p>
           </div>
           <div className="hidden items-center gap-2 text-xs text-muted-foreground desk:flex">
@@ -806,8 +764,7 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
             board={board}
             view={view === "chat" ? "overview" : view}
             onView={setView}
-            featuredTask={featuredTask}
-            busy={busy}
+            busyTaskId={busyTaskId}
             onStart={(task) => void startTask(task)}
             onComplete={(task) => void completeTask(task)}
           />
@@ -827,8 +784,7 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
           {view === "plan" ? (
             <ProjectPlan
               board={board}
-              featuredTask={featuredTask}
-              busy={busy}
+              busyTaskId={busyTaskId}
               onStart={(task) => void startTask(task)}
               onComplete={(task) => void completeTask(task)}
             />
