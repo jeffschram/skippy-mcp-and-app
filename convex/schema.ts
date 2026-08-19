@@ -658,7 +658,13 @@ export default defineSchema({
     createdBy: v.union(v.literal("user"), v.literal("harness"), v.literal("skippy_ai"), v.literal("system")),
     createdAt: v.number(),
     updatedAt: v.number(),
-  }).index("by_brain_type", ["brainInstanceId", "type"]),
+  })
+    .index("by_brain_type", ["brainInstanceId", "type"])
+    // Endpoint lookups: find every edge touching a specific entity without
+    // scanning the brain's whole edge set (which is far past function read
+    // limits). Used by the task deletion cascade; general-purpose by design.
+    .index("by_brain_from", ["brainInstanceId", "from.entityId"])
+    .index("by_brain_to", ["brainInstanceId", "to.entityId"]),
 
   sourceRefs: defineTable({
     brainInstanceId: v.id("brainInstances"),
