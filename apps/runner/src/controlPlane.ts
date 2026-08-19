@@ -188,6 +188,19 @@ export class ControlPlane {
     return this.client.query(chatFns.chatTurnControlState, { hostToken: this.hostToken, turnId });
   }
 
+  reportChatTurnEvents(
+    turnId: string,
+    claimToken: string,
+    events: Array<{ seq: number; type: string; payload?: unknown }>,
+  ): Promise<{ accepted: number }> {
+    return this.client.mutation(chatFns.reportChatTurnEvents, {
+      hostToken: this.hostToken,
+      turnId,
+      claimToken,
+      events,
+    });
+  }
+
   completeChatTurn(
     turnId: string,
     claimToken: string,

@@ -10,8 +10,13 @@
 import fs from "node:fs";
 import type { RunnerConfig } from "./config.js";
 import type { ClaimedChatTurn, ControlPlane } from "./controlPlane.js";
-import type { HarnessAdapter } from "./harness/types.js";
+import type { HarnessAdapter, HarnessEvent } from "./harness/types.js";
 import { assertInsideAllowedRoot } from "./worktree.js";
+
+/** How often buffered live-activity events are flushed to the control plane. */
+const CHAT_EVENT_FLUSH_INTERVAL_MS = 1_000;
+/** Event types worth showing in the chat panel while the turn runs. */
+const LIVE_EVENT_TYPES = new Set(["assistant_message", "command", "file_change", "plan_update", "status", "error"]);
 
 export async function executeChatTurn(
   config: RunnerConfig,
@@ -28,6 +33,29 @@ export async function executeChatTurn(
       })
       .catch(() => {});
   }, 3_000);
+
+  // Live activity feed: buffer harness events and flush them on an interval so
+  // the chat panel can show what the harness is doing instead of bare
+  // "Thinking". Best-effort — a lost batch degrades the live view, never the
+  // turn (events are re-queued once; the reply remains the durable product).
+  let seq = 0;
+  let pending: Array<{ seq: number; type: string; payload?: unknown }> = [];
+  const emit = (event: HarnessEvent) => {
+    if (!LIVE_EVENT_TYPES.has(event.type)) return;
+    seq += 1;
+    pending.push({ seq, type: event.type, payload: event.payload });
+  };
+  const flushEvents = async () => {
+    const batch = pending.splice(0, pending.length);
+    if (!batch.length) return;
+    try {
+      await plane.reportChatTurnEvents(turn.turnId, turn.claimToken, batch);
+    } catch {
+      // Transient failure: put the batch back (bounded) and retry next tick.
+      pending = [...batch, ...pending].slice(-200);
+    }
+  };
+  const eventFlusher = setInterval(() => void flushEvents(), CHAT_EVENT_FLUSH_INTERVAL_MS);
 
   try {
     await plane.markChatTurnRunning(turn.turnId, turn.claimToken);
@@ -49,8 +77,10 @@ export async function executeChatTurn(
       worktreePath: cwd,
       bypassPermissions: config.chatBypassPermissions,
       signal: abort.signal,
-      // Chat turns keep no durable event stream (v1) — the reply is the product.
-      onEvent: () => {},
+      // Live activity: forwarded to the control plane for the chat panel's
+      // in-flight view; rows are deleted when the turn completes (the reply
+      // is the durable product).
+      onEvent: emit,
       requestApproval: async (approval) => {
         await plane.requestChatApproval(turn.turnId, turn.claimToken, approval);
         return plane.awaitChatApproval(turn.turnId, approval.harnessRequestId, { signal: abort.signal });
@@ -80,6 +110,7 @@ export async function executeChatTurn(
       .catch(() => {});
   } finally {
     clearInterval(cancelWatcher);
+    clearInterval(eventFlusher);
   }
 }
 
