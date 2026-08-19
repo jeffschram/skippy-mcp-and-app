@@ -1399,6 +1399,58 @@ export const updatePhaseForBrain = mutationGeneric({
   },
 });
 
+/**
+ * Harness-facing phase (re)assignment: place an existing task into a Plan
+ * phase, appended after the phase's current tasks. This is the MCP escape
+ * hatch for tasks that predate phase-aware creation (created without a
+ * phaseId) or that should move between phases.
+ */
+export const setTaskPhaseForBrain = mutationGeneric({
+  args: {
+    brainInstanceId: v.id("brainInstances"),
+    taskId: v.id("tasks"),
+    phaseId: v.id("phases"),
+    actorId: v.optional(v.string()),
+  },
+  handler: async ({ db }, args) => {
+    const task = await db.get(args.taskId);
+    if (!task || task.brainInstanceId !== args.brainInstanceId) throw new Error("task not found");
+    const phase = await db.get(args.phaseId);
+    if (!phase || phase.brainInstanceId !== args.brainInstanceId) throw new Error("phase not found");
+    const projectIds = await projectTaskIds(db, args.brainInstanceId, phase.projectId);
+    if (!projectIds.includes(args.taskId)) {
+      throw new Error("task does not belong to the phase's project");
+    }
+
+    // Append after the phase's current tasks so the Plan ordering is stable.
+    let maxOrderIndex: number | undefined;
+    for (const taskId of projectIds) {
+      if (taskId === args.taskId) continue;
+      const sibling = await db.get(taskId as any);
+      if (sibling?.phaseId === args.phaseId && sibling.processingState === "accepted") {
+        const orderIndex = sibling.orderIndex ?? 0;
+        maxOrderIndex = maxOrderIndex === undefined ? orderIndex : Math.max(maxOrderIndex, orderIndex);
+      }
+    }
+    const now = Date.now();
+    const orderIndex = maxOrderIndex === undefined ? (task.orderIndex ?? 0) : maxOrderIndex + 1;
+    await db.patch(args.taskId, { phaseId: args.phaseId, orderIndex, updatedAt: now });
+
+    await db.insert("activityEvents", {
+      brainInstanceId: args.brainInstanceId,
+      entityRef: { entityType: "task", entityId: args.taskId },
+      activityType: "task_phase_set",
+      actorType: "harness",
+      actorId: args.actorId,
+      timestamp: now,
+      summary: `Task placed in phase "${phase.title}": ${task.title}`,
+      metadata: { phaseId: args.phaseId, projectId: phase.projectId },
+    });
+
+    return { taskId: args.taskId, phaseId: args.phaseId, phaseTitle: phase.title, orderIndex, status: "updated" };
+  },
+});
+
 export const moveTasksToProjectForBrain = mutationGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),

@@ -3871,6 +3871,45 @@ export const createProjectDirect = mutationGeneric({
   },
 });
 
+/**
+ * Resolve which phase a task should land in so MCP-created tasks are never
+ * invisible in the phase-grouped Plan view. An explicit phaseId is validated
+ * against the brain and project; when omitted, the project's last phase (the
+ * one current work belongs to) is used. Projects without phases return
+ * undefined — the Plan bootstrap (ensureProjectPhases) backfills those tasks
+ * when the first phase is created.
+ */
+async function resolveTaskPhase(
+  db: any,
+  brainInstanceId: string,
+  projectId: string | undefined,
+  phaseId: string | undefined,
+): Promise<string | undefined> {
+  if (phaseId) {
+    const phase = await db.get(phaseId);
+    if (!phase || phase.brainInstanceId !== brainInstanceId) {
+      throw new Error("phase not found for brain instance");
+    }
+    if (!projectId) {
+      throw new Error("projectId is required when phaseId is provided");
+    }
+    if (phase.projectId !== projectId) {
+      throw new Error("phase does not belong to the given project");
+    }
+    return phaseId;
+  }
+  if (!projectId) return undefined;
+  const phases = await db
+    .query("phases")
+    .withIndex("by_brain_project", (q: any) =>
+      q.eq("brainInstanceId", brainInstanceId).eq("projectId", projectId),
+    )
+    .collect();
+  if (!phases.length) return undefined;
+  phases.sort((a: any, b: any) => a.orderNum - b.orderNum);
+  return phases[phases.length - 1]._id;
+}
+
 export const createTaskDirect = mutationGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
@@ -3890,6 +3929,10 @@ export const createTaskDirect = mutationGeneric({
     dueAt: v.optional(v.number()),
     priorityReason: v.optional(v.string()),
     projectId: v.optional(v.id("projects")),
+    // Optional Plan phase. Validated against the project; when omitted the
+    // task defaults into the project's last phase so it is never invisible
+    // in the phase-grouped Plan view.
+    phaseId: v.optional(v.id("phases")),
     createdBy: v.optional(v.string()),
     // Life-layer axes. The MCP `create_task` tool advertises these and the
     // rubric tells harnesses to set them, so omitting them here made every
@@ -3929,9 +3972,17 @@ export const createTaskDirect = mutationGeneric({
       }
       projectTitle = project.title;
     }
+    const resolvedPhaseId = await resolveTaskPhase(db, args.brainInstanceId, args.projectId, args.phaseId);
 
     if (duplicateTask) {
-      await db.patch(duplicateTask._id, mergeDuplicateEntityPatch("task", duplicateTask, normalizedPayload, now));
+      const duplicatePatch = mergeDuplicateEntityPatch("task", duplicateTask, normalizedPayload, now);
+      // A duplicate create is still an explicit request to have the task in
+      // the Plan: adopt the resolved phase when the existing task has none
+      // (or the caller explicitly targeted one).
+      if (resolvedPhaseId && (args.phaseId || !duplicateTask.phaseId)) {
+        (duplicatePatch as Record<string, unknown>).phaseId = resolvedPhaseId;
+      }
+      await db.patch(duplicateTask._id, duplicatePatch);
 
       if (args.projectId) {
         const existingRelationship = await db
@@ -3980,6 +4031,7 @@ export const createTaskDirect = mutationGeneric({
         kind: duplicateTask.kind ?? normalizedKind,
         projectId: args.projectId,
         projectTitle,
+        phaseId: resolvedPhaseId && (args.phaseId || !duplicateTask.phaseId) ? resolvedPhaseId : duplicateTask.phaseId,
         relationshipId,
       };
     }
@@ -3994,6 +4046,7 @@ export const createTaskDirect = mutationGeneric({
       executionState: args.ownerType === "agent" ? "ready" : undefined,
       dueAt: args.dueAt,
       priorityReason: args.priorityReason,
+      phaseId: resolvedPhaseId,
       processingState: "accepted",
       createdAt: now,
       updatedAt: now,
@@ -4038,6 +4091,7 @@ export const createTaskDirect = mutationGeneric({
       kind: normalizedKind,
       projectId: args.projectId,
       projectTitle,
+      phaseId: resolvedPhaseId,
       relationshipId,
     };
   },
