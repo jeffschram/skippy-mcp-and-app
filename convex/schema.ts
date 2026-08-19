@@ -1393,6 +1393,21 @@ export default defineSchema({
     .index("by_chat", ["chatId"])
     .index("by_host", ["hostId"]),
 
+  // Live activity for an in-flight chat turn: the harness's interim narration,
+  // commands, file edits, and plan updates, so the chat panel can show real
+  // progress instead of an indeterminate "Thinking" indicator. Ephemeral by
+  // design — rows are deleted when the turn finishes; the reply is the
+  // durable product (mirrors agentRunEvents' idempotent (turn, seq) shape).
+  chatTurnEvents: defineTable({
+    brainInstanceId: v.id("brainInstances"),
+    chatTurnId: v.id("chatTurns"),
+    seq: v.number(),
+    type: v.string(),
+    // Safe structured payload — secrets redacted runner-side before transmission.
+    payload: v.optional(v.any()),
+    createdAt: v.number(),
+  }).index("by_turn_seq", ["chatTurnId", "seq"]),
+
   // Durable execution attempts. A separate table rather than an evolution of
   // the task's agent-request fields: agentRequestStatus ("requested" |
   // "cancelled") cannot represent retries/attempts, and a task accumulates run

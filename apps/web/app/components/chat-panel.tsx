@@ -3,10 +3,11 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { usePathname } from "next/navigation";
 import { useConvexAuth, useMutation, useQuery } from "convex/react";
-import { CheckCircle2, MessageCircle, SendHorizontal, Sparkles, X } from "lucide-react";
+import { CheckCircle2, FilePenLine, ListChecks, MessageCircle, SendHorizontal, Sparkles, TerminalSquare, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { api } from "../../lib/skippy-api";
 import { buildChatTimeline } from "../../lib/chat-timeline";
+import { summarizeChatActivity, type ChatActivityLine } from "../../lib/chat-activity";
 
 type AnyRecord = Record<string, any>;
 
@@ -65,6 +66,62 @@ function TaskMoment({
   );
 }
 
+function activityLineIcon(line: ChatActivityLine) {
+  switch (line.kind) {
+    case "command":
+      return <TerminalSquare size={13} aria-hidden className="mt-0.5 shrink-0" />;
+    case "file_change":
+      return <FilePenLine size={13} aria-hidden className="mt-0.5 shrink-0" />;
+    default:
+      return <Sparkles size={13} aria-hidden className="mt-0.5 shrink-0" />;
+  }
+}
+
+/**
+ * In-flight reply: the harness's latest narration plus a compact tail of what
+ * it is actually doing (commands, edits, plan progress). Falls back to the
+ * classic "Thinking…" pulse until the first events arrive.
+ */
+function LiveActivity({ events }: { events: AnyRecord[] }) {
+  const activity = useMemo(() => summarizeChatActivity(events), [events]);
+  const idle = !activity.narration && !activity.lines.length && !activity.plan;
+  if (idle) {
+    return <div className="max-w-[88%] self-start text-sm text-muted-foreground animate-pulse">Thinking…</div>;
+  }
+  return (
+    <div className="grid max-w-[92%] gap-2 self-start">
+      {activity.narration ? (
+        <div className="whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">{activity.narration}</div>
+      ) : null}
+      <div className="grid gap-1 rounded-xl border border-dashed border-primary/30 bg-primary/[0.04] px-3 py-2">
+        {activity.plan ? (
+          <p className="m-0 flex items-start gap-1.5 text-xs text-muted-foreground">
+            <ListChecks size={13} aria-hidden className="mt-0.5 shrink-0" />
+            <span>
+              {activity.plan.done}/{activity.plan.total}
+              {activity.plan.current ? ` — ${activity.plan.current}` : " done"}
+            </span>
+          </p>
+        ) : null}
+        {activity.lines.map((line, index) => (
+          <p
+            key={`${line.kind}:${index}:${line.text}`}
+            className={cn(
+              "m-0 flex items-start gap-1.5 text-xs",
+              line.kind === "error" ? "text-destructive" : "text-muted-foreground",
+              line.kind === "command" && "font-mono",
+            )}
+          >
+            {activityLineIcon(line)}
+            <span className="min-w-0 break-words">{line.kind === "command" ? `$ ${line.text}` : line.text}</span>
+          </p>
+        ))}
+        <p className="m-0 text-xs font-bold text-primary animate-pulse">Working…</p>
+      </div>
+    </div>
+  );
+}
+
 function ChatSurface({
   scope,
   className,
@@ -87,6 +144,7 @@ function ChatSurface({
   const decideApproval = useMutation(api.agentWorkbench.decideApprovalForViewer);
   const messages: AnyRecord[] = data?.messages ?? [];
   const pendingApprovals: AnyRecord[] = data?.pendingApprovals ?? [];
+  const activeTurnEvents: AnyRecord[] = data?.activeTurnEvents ?? [];
   const boundHarness: string | undefined = data?.chat?.harness;
   const timelineItems = useMemo(
     () => buildChatTimeline(messages, taskMoments),
@@ -103,6 +161,9 @@ function ChatSurface({
     lastTimelineItem?.kind === "message"
       ? lastTimelineItem.message.status
       : lastTimelineItem?.moment.state,
+    // Keep the view pinned to the bottom while live activity streams in.
+    activeTurnEvents.length,
+    activeTurnEvents[activeTurnEvents.length - 1]?.seq,
   ]);
 
   const send = async () => {
@@ -167,11 +228,7 @@ function ChatSurface({
             }
             const message = item.message;
             if (message.role === "assistant" && message.status === "pending") {
-              return (
-                <div key={item.key} className="max-w-[88%] self-start text-sm text-muted-foreground animate-pulse">
-                  Thinking…
-                </div>
-              );
+              return <LiveActivity key={item.key} events={activeTurnEvents} />;
             }
             if (message.role === "assistant" && message.status === "error") {
               return <div key={item.key} className="max-w-[88%] self-start text-sm text-destructive">{message.error ?? "Reply failed."}</div>;

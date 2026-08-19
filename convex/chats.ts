@@ -109,6 +109,7 @@ async function expireStaleChatTurns(ctx: any, brainInstanceId: any, now: number)
       leaseExpiresAt: undefined,
       updatedAt: now,
     });
+    await deleteTurnEvents(ctx, turn._id);
 
     const approvals = await ctx.db
       .query("agentApprovals")
@@ -144,6 +145,7 @@ export const chatForScopeForViewer = queryGeneric({
       .collect();
     const activeTurn = await activeTurnForChat(ctx.db, chat._id);
     let pendingApprovals: any[] = [];
+    let activeTurnEvents: any[] = [];
     if (activeTurn) {
       const approvals = await ctx.db
         .query("agentApprovals")
@@ -158,11 +160,27 @@ export const chatForScopeForViewer = queryGeneric({
           explanation: a.explanation,
           details: a.details,
         }));
+      // Live harness activity for the in-flight turn so the panel can show
+      // real progress (commands, edits, narration) instead of bare "Thinking".
+      const events = await ctx.db
+        .query("chatTurnEvents")
+        .withIndex("by_turn_seq", (q: any) => q.eq("chatTurnId", activeTurn._id))
+        .collect();
+      activeTurnEvents = events
+        .sort((a: any, b: any) => a.seq - b.seq)
+        .slice(-40)
+        .map((event: any) => ({
+          seq: event.seq,
+          type: event.type,
+          payload: event.payload,
+          createdAt: event.createdAt,
+        }));
     }
     return {
       chat: { _id: chat._id, title: chat.title, kind: chat.kind, harness: chat.harness },
       activeTurnStatus: activeTurn?.status ?? null,
       pendingApprovals,
+      activeTurnEvents,
       messages: messages.map((m: any) => ({
         _id: m._id,
         role: m.role,
@@ -442,6 +460,73 @@ export const requestChatApproval = mutationGeneric({
   },
 });
 
+/** Max live-activity rows kept per turn; older rows are pruned as new ones land. */
+const MAX_TURN_EVENTS = 200;
+
+export const reportChatTurnEvents = mutationGeneric({
+  args: {
+    hostToken: v.string(),
+    turnId: v.id("chatTurns"),
+    claimToken: v.string(),
+    events: v.array(
+      v.object({
+        seq: v.number(),
+        type: v.string(),
+        payload: v.optional(v.any()),
+      }),
+    ),
+  },
+  handler: async (ctx, args) => {
+    const host = await requireHost(ctx, args.hostToken);
+    const turn = await requireClaimedTurn(ctx, host, args.turnId, args.claimToken);
+    if (!args.events.length) return { accepted: 0 };
+    const now = Date.now();
+
+    // Idempotent by (turn, seq): a retried batch after a transient network
+    // failure must not duplicate rows.
+    const lastStored = await ctx.db
+      .query("chatTurnEvents")
+      .withIndex("by_turn_seq", (q: any) => q.eq("chatTurnId", args.turnId))
+      .order("desc")
+      .first();
+    const lastSeq = lastStored?.seq ?? 0;
+    const fresh = args.events.filter((event) => event.seq > lastSeq);
+    for (const event of fresh) {
+      await ctx.db.insert("chatTurnEvents", {
+        brainInstanceId: turn.brainInstanceId,
+        chatTurnId: args.turnId,
+        seq: event.seq,
+        type: event.type,
+        payload: event.payload,
+        createdAt: now,
+      });
+    }
+
+    // Bound the live feed: prune oldest rows beyond the cap so a long turn
+    // cannot grow the table (the panel only shows the tail anyway).
+    const total = await ctx.db
+      .query("chatTurnEvents")
+      .withIndex("by_turn_seq", (q: any) => q.eq("chatTurnId", args.turnId))
+      .collect();
+    if (total.length > MAX_TURN_EVENTS) {
+      const excess = total
+        .sort((a: any, b: any) => a.seq - b.seq)
+        .slice(0, total.length - MAX_TURN_EVENTS);
+      for (const row of excess) await ctx.db.delete(row._id);
+    }
+    return { accepted: fresh.length };
+  },
+});
+
+/** Delete a finished turn's live-activity rows — the reply is the product. */
+async function deleteTurnEvents(ctx: any, turnId: string) {
+  const events = await ctx.db
+    .query("chatTurnEvents")
+    .withIndex("by_turn_seq", (q: any) => q.eq("chatTurnId", turnId))
+    .collect();
+  for (const event of events) await ctx.db.delete(event._id);
+}
+
 export const chatTurnControlState = queryGeneric({
   args: { hostToken: v.string(), turnId: v.id("chatTurns") },
   handler: async (ctx, { hostToken, turnId }) => {
@@ -502,6 +587,7 @@ export const completeChatTurn = mutationGeneric({
       ...(failed ? { errorMessage: (args.errorMessage ?? "").slice(0, 500) } : {}),
       updatedAt: now,
     });
+    await deleteTurnEvents(ctx, args.turnId);
     if (failed) {
       // A harness-native session that just failed may no longer be resumable
       // (for example after its project cwd or runner account changes). The
