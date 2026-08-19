@@ -75,15 +75,93 @@ function displayState(
   return "Not started";
 }
 
+// Grow a textarea to fit its content so inline fields read as document text
+// (no inner scrollbar). Reset first so shrinking content also shrinks the box.
+function autosizeTextArea(el: HTMLTextAreaElement | null) {
+  if (!el) return;
+  el.style.height = "auto";
+  el.style.height = `${el.scrollHeight}px`;
+}
+
+function PhaseTitle({ phase }: { phase: AnyRecord }) {
+  const updatePhase = useMutation(api.projects.updatePhaseForViewer);
+  const toast = useToast();
+  const [draft, setDraft] = useState(phase.title ?? "");
+  const focused = useRef(false);
+  const field = useRef<HTMLTextAreaElement | null>(null);
+
+  // Focused-editing guard: only sync remote updates while the field is idle.
+  useEffect(() => {
+    if (!focused.current) setDraft(phase.title ?? "");
+  }, [phase.title]);
+
+  useEffect(() => {
+    autosizeTextArea(field.current);
+  }, [draft]);
+
+  return (
+    <h2 className="m-0 text-xl">
+      <textarea
+        ref={field}
+        rows={1}
+        className="block w-full resize-none overflow-hidden border-0 bg-transparent p-0 font-heading text-xl font-medium leading-snug text-foreground focus:outline-none"
+        aria-label="Phase title"
+        value={draft}
+        onFocus={() => {
+          focused.current = true;
+        }}
+        onKeyDown={(event) => {
+          // Titles are single-line: Enter commits via the blur-to-save path.
+          if (event.key === "Enter") {
+            event.preventDefault();
+            event.currentTarget.blur();
+          }
+        }}
+        onBlur={(event) => {
+          focused.current = false;
+          const next = event.currentTarget.value.trim();
+          const previous = phase.title ?? "";
+          // The server rejects empty titles, so revert instead of saving.
+          if (!next) {
+            setDraft(previous);
+            return;
+          }
+          setDraft(next);
+          if (next === previous) return;
+          void updatePhase({ phaseId: phase._id as any, title: next }).catch(
+            (error) => {
+              setDraft(previous);
+              toast(
+                error instanceof Error
+                  ? error.message
+                  : "Could not rename phase",
+                "error",
+              );
+            },
+          );
+        }}
+        onChange={(event) => setDraft(event.target.value)}
+      />
+    </h2>
+  );
+}
+
 function PhaseDescription({ phase }: { phase: AnyRecord }) {
   const updatePhase = useMutation(api.projects.updatePhaseForViewer);
   const [draft, setDraft] = useState(phase.descriptionMd ?? "");
   const focused = useRef(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const field = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
     if (!focused.current) setDraft(phase.descriptionMd ?? "");
   }, [phase.descriptionMd]);
+
+  // Fit the full description on load and while typing — the board surface
+  // should read like a document, not a scrollable form field.
+  useEffect(() => {
+    autosizeTextArea(field.current);
+  }, [draft]);
 
   const save = (value: string) => {
     if (timer.current) clearTimeout(timer.current);
@@ -102,7 +180,8 @@ function PhaseDescription({ phase }: { phase: AnyRecord }) {
 
   return (
     <textarea
-      className="min-h-20 w-full resize-y rounded-lg border border-transparent bg-transparent px-2 py-1.5 text-sm leading-relaxed text-muted-foreground transition-colors placeholder:text-muted-foreground/55 hover:border-border focus:border-primary/55 focus:bg-background focus:outline-none"
+      ref={field}
+      className="block w-full resize-none overflow-hidden border-0 bg-transparent p-0 text-sm leading-relaxed text-muted-foreground placeholder:text-muted-foreground/55 focus:outline-none"
       aria-label={`${phase.title} description`}
       placeholder="Type a phase description in Markdown…"
       value={draft}
@@ -340,11 +419,11 @@ function ProjectPlan({
         return (
           <section key={phase._id}>
             <div className="flex items-start justify-between gap-3 pt-2 mb-2">
-              <div>
+              <div className="min-w-0 flex-1">
                 <p className="mb-1 text-[11px] font-bold uppercase tracking-[0.08em] text-muted-foreground">
                   Phase {phase.orderNum + 1}
                 </p>
-                <h2 className="m-0 text-xl">{phase.title}</h2>
+                <PhaseTitle phase={phase} />
               </div>
               <span className="mt-1 text-xs text-muted-foreground">
                 {completeCount}/{phaseTasks.length}

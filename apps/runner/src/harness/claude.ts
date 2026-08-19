@@ -38,17 +38,36 @@ const AUTO_ALLOWED_COMMAND_PREFIXES = [
   "pnpm run",
   "pnpm typecheck",
   "pnpm build",
+  "pnpm --filter",
+  "pnpm -r",
+  "corepack pnpm",
+  "npx pnpm",
   "npx tsc",
   "npx vitest",
+  // `cd` is harmless on its own; compound commands are classified per segment,
+  // so a leading `cd <worktree>` no longer forces an approval round-trip.
+  "cd ",
 ];
 
 const DESTRUCTIVE_PATTERNS = [/\brm\s+-rf?\b/, /\bgit\s+push\b/, /\bgit\s+reset\s+--hard\b/, /\bsudo\b/];
 
-function classifyCommand(command: string): "allow" | "ask" {
+export function classifyCommand(command: string): "allow" | "ask" {
   const trimmed = command.trim();
   if (DESTRUCTIVE_PATTERNS.some((re) => re.test(trimmed))) return "ask";
-  if (AUTO_ALLOWED_COMMAND_PREFIXES.some((prefix) => trimmed.startsWith(prefix))) return "allow";
-  return "ask";
+  // Split shell chaining (&&, ||, ;) and require EVERY segment to be
+  // allowlisted. This both unblocks the common `cd <dir> && pnpm …` shape and
+  // closes the old hole where `pnpm typecheck && <anything>` matched the
+  // "pnpm typecheck" prefix and auto-allowed the whole line. Pipes and other
+  // shell syntax we don't model fall through to "ask" (fail closed).
+  const segments = trimmed
+    .split(/&&|\|\||;/)
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+  if (segments.length === 0) return "ask";
+  const allowed = segments.every((segment) =>
+    AUTO_ALLOWED_COMMAND_PREFIXES.some((prefix) => segment.startsWith(prefix)),
+  );
+  return allowed ? "allow" : "ask";
 }
 
 function pathInside(candidate: string, root: string): boolean {
