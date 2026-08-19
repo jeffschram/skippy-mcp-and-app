@@ -541,6 +541,41 @@ export const decideApprovalForViewer = mutationGeneric({
   },
 });
 
+/**
+ * Host-authenticated approval decision. Exists because the web app currently
+ * has no surface for run approvals (v2 regression, being restored by the task
+ * detail panel work): until then, the owner can consent in chat and the chat
+ * harness clears the gate on their behalf. Requires the host token, so it is
+ * no weaker than the runner's own control-plane access. A proxied decision is
+ * distinguishable from a viewer one by its missing `decidedByUserId`.
+ */
+export const decideApprovalForBrain = mutationGeneric({
+  args: {
+    hostToken: v.string(),
+    approvalId: v.id("agentApprovals"),
+    decision: v.union(v.literal("accepted"), v.literal("declined")),
+  },
+  handler: async (ctx, args) => {
+    const host = await requireHost(ctx, args.hostToken);
+    const approval = await ctx.db.get(args.approvalId);
+    if (!approval || approval.brainInstanceId !== host.brainInstanceId) {
+      throw new Error("approval not found for host's brain");
+    }
+    if (approval.status !== "pending") {
+      // Same idempotency contract as the viewer path: never flip a settled
+      // decision.
+      return { approvalId: args.approvalId, status: approval.status };
+    }
+    const now = Date.now();
+    await ctx.db.patch(args.approvalId, {
+      status: args.decision,
+      decidedAt: now,
+      updatedAt: now,
+    });
+    return { approvalId: args.approvalId, status: args.decision };
+  },
+});
+
 export const pendingApprovalsForViewer = queryGeneric({
   args: {},
   handler: async (ctx) => {
