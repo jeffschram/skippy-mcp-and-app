@@ -98,6 +98,7 @@ async function expireStaleChatTurns(ctx: any, brainInstanceId: any, now: number)
         status: "error",
         content: "",
         error: errorMessage,
+        completedAt: now,
       });
     }
     await ctx.db.patch(turn._id, {
@@ -169,6 +170,7 @@ export const chatForScopeForViewer = queryGeneric({
         status: m.status,
         error: m.error,
         createdAt: m.createdAt,
+        completedAt: m.completedAt,
       })),
     };
   },
@@ -483,11 +485,16 @@ export const completeChatTurn = mutationGeneric({
         status: "error",
         error: (args.errorMessage ?? "chat turn failed").slice(0, 500),
         content: "",
+        completedAt: now,
       });
     } else {
+      // completedAt (not the placeholder's send-time createdAt) is what the
+      // chat timeline sorts finished replies by, so the reply lands after any
+      // task moments (started/completed) that occurred during the turn.
       await ctx.db.patch(turn.assistantMessageId, {
         status: "complete",
         content: (args.resultText ?? "").slice(0, MAX_MESSAGE_CHARS) || "(no reply)",
+        completedAt: now,
       });
     }
     await ctx.db.patch(args.turnId, {
