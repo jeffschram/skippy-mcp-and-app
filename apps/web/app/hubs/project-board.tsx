@@ -39,6 +39,7 @@ import {
 } from "../components";
 import { LiveGate } from "../live-auth";
 import { ProjectLibrarySection } from "./project-library";
+import { TaskDetailPanel } from "./task-detail";
 import { useViewerReady } from "./use-viewer";
 
 type AnyRecord = Record<string, any>;
@@ -209,6 +210,7 @@ function PhaseDescription({ phase }: { phase: AnyRecord }) {
 function TaskRow({
   task,
   busy,
+  onSelect,
   onStart,
   onComplete,
   onDragStart,
@@ -216,6 +218,7 @@ function TaskRow({
 }: {
   task: AnyRecord;
   busy: boolean;
+  onSelect: () => void;
   onStart: () => void;
   onComplete: () => void;
   onDragStart: (event: DragEvent<HTMLElement>) => void;
@@ -244,7 +247,8 @@ function TaskRow({
         onDragStart={onDragStart}
         onDragOver={(event) => event.preventDefault()}
         onDrop={onDrop}
-        className="flex items-center gap-2 rounded-lg border border-transparent px-2 py-2 text-sm text-muted-foreground hover:border-border"
+        onClick={onSelect}
+        className="flex cursor-pointer items-center gap-2 rounded-lg border border-transparent px-2 py-2 text-sm text-muted-foreground hover:border-border"
       >
         <GripVertical
           className="cursor-grab opacity-35"
@@ -266,7 +270,8 @@ function TaskRow({
       onDragStart={onDragStart}
       onDragOver={(event) => event.preventDefault()}
       onDrop={onDrop}
-      className="rounded-xl border border-border bg-background/40 p-3 transition-colors"
+      onClick={onSelect}
+      className="cursor-pointer rounded-xl border border-border bg-background/40 p-3 transition-colors hover:border-primary/45"
     >
       <div className="flex items-start gap-2.5">
         <GripVertical
@@ -291,7 +296,12 @@ function TaskRow({
             aria-label={action.label}
             title={action.label}
             disabled={busy}
-            onClick={action.onClick}
+            onClick={(event) => {
+              // The row itself opens the detail panel; the action button
+              // must not also trigger that navigation.
+              event.stopPropagation();
+              action.onClick();
+            }}
             className={cn(
               "grid size-7 shrink-0 place-items-center rounded-full border border-primary/45 text-primary transition-colors",
               "hover:bg-primary hover:text-primary-foreground disabled:pointer-events-none disabled:opacity-45",
@@ -371,11 +381,13 @@ function ProjectOverview({ project }: { project: AnyRecord }) {
 function ProjectPlan({
   board,
   busyTaskId,
+  onSelect,
   onStart,
   onComplete,
 }: {
   board: AnyRecord;
   busyTaskId: string | null;
+  onSelect: (task: AnyRecord) => void;
   onStart: (task: AnyRecord) => void;
   onComplete: (task: AnyRecord) => void;
 }) {
@@ -436,6 +448,7 @@ function ProjectPlan({
                   key={task._id}
                   task={task}
                   busy={busyTaskId === task._id}
+                  onSelect={() => onSelect(task)}
                   onStart={() => onStart(task)}
                   onComplete={() => onComplete(task)}
                   onDragStart={(event) => {
@@ -471,6 +484,7 @@ function ProjectPlan({
                         key={task._id}
                         task={task}
                         busy={busyTaskId === task._id}
+                        onSelect={() => onSelect(task)}
                         onStart={() => onStart(task)}
                         onComplete={() => onComplete(task)}
                         onDragStart={(event) => {
@@ -512,6 +526,7 @@ function SidePanel({
   view,
   onView,
   busyTaskId,
+  onSelect,
   onStart,
   onComplete,
 }: {
@@ -519,6 +534,7 @@ function SidePanel({
   view: ProjectView;
   onView: (view: ProjectView) => void;
   busyTaskId: string | null;
+  onSelect: (task: AnyRecord) => void;
   onStart: (task: AnyRecord) => void;
   onComplete: (task: AnyRecord) => void;
 }) {
@@ -553,6 +569,7 @@ function SidePanel({
           <ProjectPlan
             board={board}
             busyTaskId={busyTaskId}
+            onSelect={onSelect}
             onStart={onStart}
             onComplete={onComplete}
           />
@@ -579,6 +596,9 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
   const updateProject = useMutation(api.projects.updateProjectForViewer);
   const toast = useToast();
   const [view, setView] = useState<ProjectView>("overview");
+  // A selected Plan task swaps the chat's slot for its detail panel; the chat
+  // stays mounted underneath so its draft and scroll position survive.
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   // Task-row actions track WHICH task is busy so only the clicked row's
   // button disables; the global `busy` stays for the settings dialog.
@@ -604,6 +624,16 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
       console.error("could not initialize project phases", error);
     });
   }, [board, ensurePhases, projectId]);
+
+  // Drop the selection when the task disappears from the board (e.g. it was
+  // deleted elsewhere) so the panel never renders a stale record.
+  useEffect(() => {
+    if (!selectedTaskId || !board) return;
+    const exists = (board.tasks ?? []).some(
+      (task: AnyRecord) => task._id === selectedTaskId,
+    );
+    if (!exists) setSelectedTaskId(null);
+  }, [board, selectedTaskId]);
 
   const activeTasks = useMemo(() => {
     const tasks: AnyRecord[] = board?.tasks ?? [];
@@ -659,6 +689,11 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
         <Card>Project not found.</Card>
       </div>
     );
+
+  const selectedTask =
+    (board.tasks ?? []).find(
+      (task: AnyRecord) => task._id === selectedTaskId,
+    ) ?? null;
 
   const openProjectSettings = () => {
     const project = board.project;
@@ -834,45 +869,76 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
         </nav>
 
         <div className="hidden min-h-0 flex-1 grid-cols-[minmax(0,2fr)_minmax(340px,1fr)] desk:grid">
-          <ProjectChatWorkspace
-            projectId={projectId}
-            taskMoments={taskMoments}
-            className="border-r"
-          />
+          {/* The detail panel overlays the chat instead of replacing it so the
+              chat keeps its draft text and scroll position while hidden. */}
+          <div className="relative flex min-h-0 min-w-0 flex-col border-r">
+            <ProjectChatWorkspace
+              projectId={projectId}
+              taskMoments={taskMoments}
+              className="min-h-0 flex-1"
+            />
+            {selectedTask ? (
+              <TaskDetailPanel
+                task={selectedTask}
+                busy={busyTaskId === selectedTask._id}
+                onBack={() => setSelectedTaskId(null)}
+                onStart={() => void startTask(selectedTask)}
+                onComplete={() => void completeTask(selectedTask)}
+                className="absolute inset-0 z-10"
+              />
+            ) : null}
+          </div>
           <SidePanel
             board={board}
             view={view === "chat" ? "overview" : view}
             onView={setView}
             busyTaskId={busyTaskId}
+            onSelect={(task) => setSelectedTaskId(task._id)}
             onStart={(task) => void startTask(task)}
             onComplete={(task) => void completeTask(task)}
           />
         </div>
 
         <div className="min-h-0 flex-1 desk:hidden">
-          {view === "chat" ? (
-            <ProjectChatWorkspace
-              projectId={projectId}
-              taskMoments={taskMoments}
+          {/* On mobile the detail panel takes over the active view; mobile
+              tabs unmount the chat anyway, so there is no draft to protect. */}
+          {selectedTask ? (
+            <TaskDetailPanel
+              task={selectedTask}
+              busy={busyTaskId === selectedTask._id}
+              onBack={() => setSelectedTaskId(null)}
+              onStart={() => void startTask(selectedTask)}
+              onComplete={() => void completeTask(selectedTask)}
               className="h-[calc(100dvh-204px)]"
             />
-          ) : null}
-          {view === "overview" ? (
-            <ProjectOverview project={board.project} />
-          ) : null}
-          {view === "plan" ? (
-            <ProjectPlan
-              board={board}
-              busyTaskId={busyTaskId}
-              onStart={(task) => void startTask(task)}
-              onComplete={(task) => void completeTask(task)}
-            />
-          ) : null}
-          {view === "library" ? (
-            <div className="p-4">
-              <ProjectLibrarySection projectId={projectId} alwaysOpen />
-            </div>
-          ) : null}
+          ) : (
+            <>
+              {view === "chat" ? (
+                <ProjectChatWorkspace
+                  projectId={projectId}
+                  taskMoments={taskMoments}
+                  className="h-[calc(100dvh-204px)]"
+                />
+              ) : null}
+              {view === "overview" ? (
+                <ProjectOverview project={board.project} />
+              ) : null}
+              {view === "plan" ? (
+                <ProjectPlan
+                  board={board}
+                  busyTaskId={busyTaskId}
+                  onSelect={(task) => setSelectedTaskId(task._id)}
+                  onStart={(task) => void startTask(task)}
+                  onComplete={(task) => void completeTask(task)}
+                />
+              ) : null}
+              {view === "library" ? (
+                <div className="p-4">
+                  <ProjectLibrarySection projectId={projectId} alwaysOpen />
+                </div>
+              ) : null}
+            </>
+          )}
         </div>
         </div>
 
