@@ -12,6 +12,7 @@ import { loadConfig } from "./config.js";
 import { ControlPlane, type ClaimedChatTurn, type ClaimedRun } from "./controlPlane.js";
 import { ClaudeAdapter } from "./harness/claude.js";
 import { CodexAdapter } from "./harness/codex.js";
+import { isHarnessTeardownError } from "./harness/teardownErrors.js";
 import type { HarnessAdapter } from "./harness/types.js";
 import { RunExecutor } from "./runExecutor.js";
 import { executeChatTurn } from "./chatExecutor.js";
@@ -21,12 +22,61 @@ function log(message: string, extra?: unknown) {
   console.log(`[skippy-runner ${new Date().toISOString()}] ${message}${suffix}`);
 }
 
+/**
+ * Process-level backstops (incident 2026-08-19, run qx719evfy): the Claude
+ * Agent SDK dispatches control-request handlers without awaiting them, so a
+ * transport write racing a harness teardown (SIGTERM, exit 143) surfaces as
+ * an unhandled rejection outside every adapter try/catch — and, unhandled, it
+ * crashed the whole daemon and killed an unrelated in-flight chat turn.
+ *
+ * Policy: one session must never kill sibling work. Teardown-attributable
+ * errors are logged and swallowed. Other escapes are also logged-and-survived
+ * rather than fatal: the runner holds no state Convex cannot reconstruct
+ * (events re-flush, leases expire, reconciliation marks orphans interrupted),
+ * so staying up to finish sibling runs/chat turns is strictly safer than a
+ * launchd restart that interrupts all of them.
+ */
+function installProcessBackstops() {
+  process.on("uncaughtException", (error, origin) => {
+    if (isHarnessTeardownError(error)) {
+      log("suppressed harness teardown race (uncaughtException); daemon continues", {
+        origin,
+        error: String(error),
+      });
+      return;
+    }
+    log("UNEXPECTED uncaughtException — daemon continues, but investigate", {
+      origin,
+      error: String(error),
+      stack: error instanceof Error ? error.stack?.slice(0, 2000) : undefined,
+    });
+  });
+  process.on("unhandledRejection", (reason) => {
+    if (isHarnessTeardownError(reason)) {
+      log("suppressed harness teardown race (unhandledRejection); daemon continues", {
+        error: String(reason),
+      });
+      return;
+    }
+    log("UNEXPECTED unhandledRejection — daemon continues, but investigate", {
+      error: String(reason),
+      stack: reason instanceof Error ? reason.stack?.slice(0, 2000) : undefined,
+    });
+  });
+}
+
 async function main() {
+  installProcessBackstops();
   const config = loadConfig();
   const plane = new ControlPlane(config.convexUrl, config.hostToken);
   const adapters = new Map<string, HarnessAdapter>();
   for (const harness of config.harnesses) {
-    adapters.set(harness, harness === "claude" ? new ClaudeAdapter() : new CodexAdapter());
+    adapters.set(
+      harness,
+      harness === "claude"
+        ? new ClaudeAdapter({ skippyMcpUrl: config.skippyMcpUrl, skippyMcpToken: config.skippyMcpToken })
+        : new CodexAdapter({ skippyMcpUrl: config.skippyMcpUrl }),
+    );
   }
 
   const registration = await plane.registerHost({

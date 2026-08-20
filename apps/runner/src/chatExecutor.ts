@@ -83,6 +83,9 @@ export async function executeChatTurn(
       onEvent: emit,
       requestApproval: async (approval) => {
         await plane.requestChatApproval(turn.turnId, turn.claimToken, approval);
+        // Deliberately no approval timeout here (unlike code runs): a chat
+        // approval card sits in front of an interactive user who can decide
+        // or cancel the turn; auto-expiring it would only add noise.
         return plane.awaitChatApproval(turn.turnId, approval.harnessRequestId, { signal: abort.signal });
       },
       ...(turn.externalThreadId ? { externalThreadId: turn.externalThreadId } : {}),

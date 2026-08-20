@@ -151,6 +151,26 @@ export class ControlPlane {
     return this.client.query(fns.runControlState, { hostToken: this.hostToken, runId });
   }
 
+  /**
+   * Cancel a still-pending approval with an explicit reason (e.g. the
+   * runner's approval timeout expired). Idempotent: settled approvals are
+   * left untouched.
+   */
+  cancelApproval(
+    runId: string,
+    claimToken: string,
+    harnessRequestId: string,
+    reason: string,
+  ): Promise<{ approvalId: string; status: string }> {
+    return this.client.mutation(fns.cancelApproval, {
+      hostToken: this.hostToken,
+      runId,
+      claimToken,
+      harnessRequestId,
+      reason,
+    });
+  }
+
   /* ---- Conversational chat turns (local-harness chat) ---- */
 
   claimNextChatTurn(): Promise<ClaimedChatTurn | null> {
@@ -233,12 +253,19 @@ export class ControlPlane {
   /**
    * Block until the named approval is decided (or the run is cancelled).
    * Polls control state; a decision made in the web app lands within pollMs.
+   *
+   * timeoutMs > 0 bounds the wait: when it elapses with the approval still
+   * pending, "timed_out" is returned and the caller is responsible for
+   * cancelling the approval doc + failing the run with an explicit message.
+   * This is THE approval timeout — there is deliberately no hidden one
+   * anywhere else (the Convex claim lease renews on heartbeat while waiting).
    */
   async awaitApproval(
     runId: string,
     harnessRequestId: string,
-    { pollMs = 2_000, signal }: { pollMs?: number; signal?: AbortSignal } = {},
-  ): Promise<"accepted" | "declined" | "cancelled"> {
+    { pollMs = 2_000, signal, timeoutMs = 0 }: { pollMs?: number; signal?: AbortSignal; timeoutMs?: number } = {},
+  ): Promise<"accepted" | "declined" | "cancelled" | "timed_out"> {
+    const deadline = timeoutMs > 0 ? Date.now() + timeoutMs : undefined;
     for (;;) {
       if (signal?.aborted) return "cancelled";
       const state = await this.controlState(runId);
@@ -247,6 +274,7 @@ export class ControlPlane {
       if (approval && approval.status !== "pending") {
         return approval.status === "accepted" ? "accepted" : "declined";
       }
+      if (deadline !== undefined && Date.now() >= deadline) return "timed_out";
       await new Promise((resolve) => setTimeout(resolve, pollMs));
     }
   }
