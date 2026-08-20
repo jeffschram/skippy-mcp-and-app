@@ -357,6 +357,151 @@ export const projectExecutionConfigForViewer = queryGeneric({
 /* Viewer: execute, cancel, approvals, run reads                      */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Shared run-minting path for the viewer play button and the host-token
+ * chat-harness equivalent. All validation, dedupe, chat reuse, attempt
+ * numbering, and audit logging live here so the two entry points cannot
+ * drift; only authentication and actor attribution differ.
+ */
+async function queueTaskExecution(
+  ctx: any,
+  brainId: any,
+  opts: {
+    taskId: any;
+    harness?: AgentHarness | undefined;
+    actor: { actorType: "user" | "harness"; actorId?: string; requestedBy?: string };
+  },
+) {
+  const task = await ctx.db.get(opts.taskId);
+  if (!task || task.brainInstanceId !== brainId) throw new Error("task not found");
+  if (task.processingState !== "accepted") throw new Error("only accepted tasks can be executed");
+  if (task.ownerType !== "agent") throw new Error("only agent-owned tasks can be executed");
+
+  // Duplicate execution request: return the existing active run and its chat
+  // rather than creating a competing run.
+  const existing = await activeRunForTask(ctx.db, brainId, opts.taskId);
+  if (existing) {
+    return { runId: existing._id, chatId: existing.chatId, status: existing.status, existing: true };
+  }
+
+  const executionState = task.executionState ?? (task.status === "done" ? "done" : "ready");
+  if (executionState !== "ready") {
+    // Resume path (doc → Task action states: Interrupted or failed → Resume).
+    // A prior attempt moved the task to in_progress/in_review before dying;
+    // with no run active, a new attempt is legal.
+    const taskRuns = await ctx.db
+      .query("agentRuns")
+      .withIndex("by_brain_task", (q: any) => q.eq("brainInstanceId", brainId).eq("taskId", opts.taskId))
+      .collect();
+    taskRuns.sort((a: any, b: any) => b.createdAt - a.createdAt);
+    const latest = taskRuns[0];
+    const resumable =
+      (executionState === "in_progress" || executionState === "in_review") &&
+      latest &&
+      (["failed", "interrupted", "cancelled"].includes(latest.status) ||
+        // Publish-failed runs finish in_review with the work preserved on
+        // the branch; re-executing retries the push.
+        (latest.status === "in_review" && latest.errorCategory === "publish"));
+    if (!resumable) throw new Error("only ready tasks (or failed/interrupted attempts) can be executed");
+  }
+
+  const projectId = await projectIdForTask(ctx.db, brainId, opts.taskId);
+  if (!projectId) throw new Error("task is not linked to a project");
+  const project = await ctx.db.get(projectId);
+  if (!project) throw new Error("project not found");
+  if ((project.kind ?? "general") !== "code" || !project.repoUrl) {
+    throw new Error("task's project is not a code project with a configured repository");
+  }
+  const config = await ctx.db
+    .query("projectExecutionConfigs")
+    .withIndex("by_brain_project", (q: any) => q.eq("brainInstanceId", brainId).eq("projectId", projectId))
+    .first();
+  if (!config || !config.enabled) {
+    throw new Error("project has no enabled execution host mapping");
+  }
+
+  // Harness resolution order (docs/mac-mini-agent-workbench.md → Harness):
+  // explicit pick → task.requestedHarness when it is a valid enum value →
+  // project preferredHarness → default "claude".
+  const harness: AgentHarness =
+    opts.harness ??
+    (isHarness(task.requestedHarness) ? task.requestedHarness : undefined) ??
+    config.preferredHarness ??
+    "claude";
+
+  const now = Date.now();
+
+  // Reuse the task chat only when its harness matches — a chat is bound to
+  // one harness for its lifetime (context lives in the harness thread).
+  const chats = await ctx.db
+    .query("projectChats")
+    .withIndex("by_brain_task", (q: any) => q.eq("brainInstanceId", brainId).eq("taskId", opts.taskId))
+    .collect();
+  let chat = chats.find(
+    (c: any) => c.kind === "task" && c.state !== "archived" && (!c.harness || c.harness === harness),
+  );
+  let chatId = chat?._id;
+  if (!chatId) {
+    chatId = await ctx.db.insert("projectChats", {
+      brainInstanceId: brainId,
+      projectId,
+      taskId: opts.taskId,
+      title: `Task: ${task.title}`,
+      kind: "task",
+      harness,
+      state: "active",
+      createdAt: now,
+      updatedAt: now,
+    });
+  } else if (!chat.harness) {
+    await ctx.db.patch(chatId, { harness, updatedAt: now });
+  }
+
+  const priorRuns = await ctx.db
+    .query("agentRuns")
+    .withIndex("by_brain_task", (q: any) => q.eq("brainInstanceId", brainId).eq("taskId", opts.taskId))
+    .collect();
+
+  const runId = await ctx.db.insert("agentRuns", {
+    brainInstanceId: brainId,
+    projectId,
+    chatId,
+    taskId: opts.taskId,
+    attempt: priorRuns.length + 1,
+    status: "queued",
+    harness,
+    baseBranch: project.defaultBaseBranch ?? "main",
+    executionBrief: task.executionBrief,
+    acceptanceCriteria: task.acceptanceCriteria,
+    approvalPolicy: config.approvalPolicy ?? { requirePushApproval: true },
+    claimVersion: 0,
+    queuedAt: now,
+    lastEventSeq: 0,
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  await ctx.db.patch(chatId, { activeRunId: runId, updatedAt: now });
+  await ctx.db.patch(opts.taskId, {
+    agentRequestStatus: "requested",
+    agentRequestedAt: task.agentRequestedAt ?? now,
+    agentRequestedBy: opts.actor.requestedBy,
+    updatedAt: now,
+  });
+  await ctx.db.insert("activityEvents", {
+    brainInstanceId: brainId,
+    entityRef: { entityType: "task", entityId: opts.taskId },
+    activityType: "agent_run_queued",
+    actorType: opts.actor.actorType,
+    actorId: opts.actor.actorId,
+    timestamp: now,
+    summary: `Execution queued (${harness}): ${task.title}`,
+    metadata: { runId, chatId, harness },
+  });
+
+  return { runId, chatId, status: "queued", existing: false };
+}
+
 export const executeTaskForViewer = mutationGeneric({
   args: {
     taskId: v.id("tasks"),
@@ -364,134 +509,46 @@ export const executeTaskForViewer = mutationGeneric({
   },
   handler: async (ctx, args) => {
     const { user, brain } = await requireOwnedBrain(ctx);
-    const task = await ctx.db.get(args.taskId);
-    if (!task || task.brainInstanceId !== brain._id) throw new Error("task not found");
-    if (task.processingState !== "accepted") throw new Error("only accepted tasks can be executed");
-    if (task.ownerType !== "agent") throw new Error("only agent-owned tasks can be executed");
-
-    // Duplicate execution request: return the existing active run and its chat
-    // rather than creating a competing run.
-    const existing = await activeRunForTask(ctx.db, brain._id, args.taskId);
-    if (existing) {
-      return { runId: existing._id, chatId: existing.chatId, status: existing.status, existing: true };
-    }
-
-    const executionState = task.executionState ?? (task.status === "done" ? "done" : "ready");
-    if (executionState !== "ready") {
-      // Resume path (doc → Task action states: Interrupted or failed → Resume).
-      // A prior attempt moved the task to in_progress/in_review before dying;
-      // with no run active, a new attempt is legal.
-      const taskRuns = await ctx.db
-        .query("agentRuns")
-        .withIndex("by_brain_task", (q: any) => q.eq("brainInstanceId", brain._id).eq("taskId", args.taskId))
-        .collect();
-      taskRuns.sort((a: any, b: any) => b.createdAt - a.createdAt);
-      const latest = taskRuns[0];
-      const resumable =
-        (executionState === "in_progress" || executionState === "in_review") &&
-        latest &&
-        (["failed", "interrupted", "cancelled"].includes(latest.status) ||
-          // Publish-failed runs finish in_review with the work preserved on
-          // the branch; re-executing retries the push.
-          (latest.status === "in_review" && latest.errorCategory === "publish"));
-      if (!resumable) throw new Error("only ready tasks (or failed/interrupted attempts) can be executed");
-    }
-
-    const projectId = await projectIdForTask(ctx.db, brain._id, args.taskId);
-    if (!projectId) throw new Error("task is not linked to a project");
-    const project = await ctx.db.get(projectId);
-    if (!project) throw new Error("project not found");
-    if ((project.kind ?? "general") !== "code" || !project.repoUrl) {
-      throw new Error("task's project is not a code project with a configured repository");
-    }
-    const config = await ctx.db
-      .query("projectExecutionConfigs")
-      .withIndex("by_brain_project", (q: any) => q.eq("brainInstanceId", brain._id).eq("projectId", projectId))
-      .first();
-    if (!config || !config.enabled) {
-      throw new Error("project has no enabled execution host mapping");
-    }
-
-    // Harness resolution order (docs/mac-mini-agent-workbench.md → Harness):
-    // explicit pick → task.requestedHarness when it is a valid enum value →
-    // project preferredHarness → default "claude".
-    const harness: AgentHarness =
-      args.harness ??
-      (isHarness(task.requestedHarness) ? task.requestedHarness : undefined) ??
-      config.preferredHarness ??
-      "claude";
-
-    const now = Date.now();
-
-    // Reuse the task chat only when its harness matches — a chat is bound to
-    // one harness for its lifetime (context lives in the harness thread).
-    const chats = await ctx.db
-      .query("projectChats")
-      .withIndex("by_brain_task", (q: any) => q.eq("brainInstanceId", brain._id).eq("taskId", args.taskId))
-      .collect();
-    let chat = chats.find(
-      (c: any) => c.kind === "task" && c.state !== "archived" && (!c.harness || c.harness === harness),
-    );
-    let chatId = chat?._id;
-    if (!chatId) {
-      chatId = await ctx.db.insert("projectChats", {
-        brainInstanceId: brain._id,
-        projectId,
-        taskId: args.taskId,
-        title: `Task: ${task.title}`,
-        kind: "task",
-        harness,
-        state: "active",
-        createdAt: now,
-        updatedAt: now,
-      });
-    } else if (!chat.harness) {
-      await ctx.db.patch(chatId, { harness, updatedAt: now });
-    }
-
-    const priorRuns = await ctx.db
-      .query("agentRuns")
-      .withIndex("by_brain_task", (q: any) => q.eq("brainInstanceId", brain._id).eq("taskId", args.taskId))
-      .collect();
-
-    const runId = await ctx.db.insert("agentRuns", {
-      brainInstanceId: brain._id,
-      projectId,
-      chatId,
+    return queueTaskExecution(ctx, brain._id, {
       taskId: args.taskId,
-      attempt: priorRuns.length + 1,
-      status: "queued",
-      harness,
-      baseBranch: project.defaultBaseBranch ?? "main",
-      executionBrief: task.executionBrief,
-      acceptanceCriteria: task.acceptanceCriteria,
-      approvalPolicy: config.approvalPolicy ?? { requirePushApproval: true },
-      claimVersion: 0,
-      queuedAt: now,
-      lastEventSeq: 0,
-      createdAt: now,
-      updatedAt: now,
+      harness: args.harness,
+      actor: { actorType: "user", actorId: user._id, requestedBy: user.displayName ?? user.email },
     });
+  },
+});
 
-    await ctx.db.patch(chatId, { activeRunId: runId, updatedAt: now });
-    await ctx.db.patch(args.taskId, {
-      agentRequestStatus: "requested",
-      agentRequestedAt: task.agentRequestedAt ?? now,
-      agentRequestedBy: user.displayName ?? user.email,
-      updatedAt: now,
+/**
+ * Host-authenticated play button. Lets the chat harness queue a task run on
+ * the owner's explicit instruction ("start task X", "initiate all tasks in
+ * Phase N") without a board round-trip — same consent convention as
+ * decideApprovalForBrain, same host-token credential the runner itself
+ * holds. Convenience: a `briefed` task is promoted to `ready` as part of
+ * execution, mirroring what the viewer play button does in two steps.
+ * Attribution: activity is recorded with actorType "harness" so proxied
+ * starts are always distinguishable from owner clicks.
+ */
+export const executeTaskForBrain = mutationGeneric({
+  args: {
+    hostToken: v.string(),
+    taskId: v.id("tasks"),
+    harness: v.optional(harnessArg),
+    actorId: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const host = await requireHost(ctx, args.hostToken);
+    const task = await ctx.db.get(args.taskId);
+    if (!task || task.brainInstanceId !== host.brainInstanceId) {
+      throw new Error("task not found for host's brain");
+    }
+    if ((task.executionState ?? "") === "briefed") {
+      await ctx.db.patch(args.taskId, { executionState: "ready", updatedAt: Date.now() });
+    }
+    const actorId = args.actorId ?? "chat-harness";
+    return queueTaskExecution(ctx, host.brainInstanceId, {
+      taskId: args.taskId,
+      harness: args.harness,
+      actor: { actorType: "harness", actorId, requestedBy: actorId },
     });
-    await ctx.db.insert("activityEvents", {
-      brainInstanceId: brain._id,
-      entityRef: { entityType: "task", entityId: args.taskId },
-      activityType: "agent_run_queued",
-      actorType: "user",
-      actorId: user._id,
-      timestamp: now,
-      summary: `Execution queued (${harness}): ${task.title}`,
-      metadata: { runId, chatId, harness },
-    });
-
-    return { runId, chatId, status: "queued", existing: false };
   },
 });
 
@@ -901,6 +958,33 @@ export const updateRunStatus = mutationGeneric({
             resultUrl: args.resultUrl ?? run.resultUrl,
             resultRecordedAt: now,
             updatedAt: now,
+          });
+        }
+        // Dead-run cleanup (2026-08-20 incident): a failed/interrupted/
+        // cancelled run previously left its task orphaned — executionState
+        // stuck at in_progress and agentRequestStatus stuck at "requested",
+        // which hid the play button and made the board lie about live work.
+        // Return the task to ready so the next attempt is one click (or one
+        // executeTaskForBrain call) away. in_review tasks are left alone:
+        // their work is preserved on a branch and has its own resume path.
+        if (
+          ["failed", "interrupted", "cancelled"].includes(args.status) &&
+          task.executionState === "in_progress"
+        ) {
+          await ctx.db.patch(run.taskId, {
+            executionState: "ready",
+            status: "todo",
+            agentRequestStatus: undefined,
+            updatedAt: now,
+          });
+          await ctx.db.insert("activityEvents", {
+            brainInstanceId: host.brainInstanceId,
+            entityRef: { entityType: "task", entityId: run.taskId },
+            activityType: "agent_run_failed_task_reset",
+            actorType: "system",
+            timestamp: now,
+            summary: `Run ${args.status}; task returned to Ready for retry: ${task.title}`,
+            metadata: { runId: args.runId, runStatus: args.status, ...(args.errorMessage ? { errorMessage: args.errorMessage } : {}) },
           });
         }
       }
