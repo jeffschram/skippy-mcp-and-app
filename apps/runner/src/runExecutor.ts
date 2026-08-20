@@ -27,6 +27,12 @@ export class RunExecutor {
   private seq = 0;
   private pendingEvents: Array<{ seq: number; type: string; payload?: unknown }> = [];
   private abort = new AbortController();
+  /**
+   * Set when an approval wait exceeded config.approvalTimeoutMs. Recorded so
+   * the run fails with an explicit `approval timed out: <command>` instead of
+   * the opaque teardown message (exit 143) run qx719evfy produced.
+   */
+  private approvalTimedOutCommand: string | undefined;
 
   constructor(
     private config: RunnerConfig,
@@ -103,7 +109,32 @@ export class RunExecutor {
           await plane.requestApproval(run.runId, run.claimToken, approval);
           const decision = await plane.awaitApproval(run.runId, approval.harnessRequestId, {
             signal: this.abort.signal,
+            timeoutMs: config.approvalTimeoutMs,
           });
+          if (decision === "timed_out") {
+            // The explicit approval timeout (config.approvalTimeoutMs). Mark
+            // the approval doc cancelled with a reason, remember the command
+            // for the run's errorMessage, and tear the turn down cleanly.
+            const command =
+              typeof (approval.details as Record<string, unknown> | undefined)?.command === "string"
+                ? String((approval.details as Record<string, unknown>).command)
+                : approval.title;
+            this.approvalTimedOutCommand = command.slice(0, 400);
+            await plane
+              .cancelApproval(
+                run.runId,
+                run.claimToken,
+                approval.harnessRequestId,
+                `approval timed out after ${Math.round(config.approvalTimeoutMs / 60_000)} min without a decision`,
+              )
+              .catch(() => {});
+            this.emit({
+              type: "error",
+              payload: { message: `approval timed out: ${this.approvalTimedOutCommand}`, phase: "approval_timeout" },
+            });
+            this.abort.abort();
+            return decision;
+          }
           if (decision !== "cancelled") {
             // Approval settled; let the harness continue under `running`.
             await plane
@@ -119,6 +150,16 @@ export class RunExecutor {
         await plane.updateRunStatus(run.runId, run.claimToken, "running", {
           externalThreadId: turn.externalThreadId,
         });
+      }
+      if (this.approvalTimedOutCommand) {
+        // Approval-timeout ergonomics: an explicit, greppable failure instead
+        // of the opaque "harness exited with code 143" the teardown produces.
+        await this.flushEvents();
+        await plane.updateRunStatus(run.runId, run.claimToken, "failed", {
+          errorCategory: "approval_timeout",
+          errorMessage: `approval timed out: ${this.approvalTimedOutCommand}`.slice(0, 500),
+        });
+        return;
       }
       if (turn.outcome === "interrupted" || this.abort.signal.aborted) {
         await this.flushEvents();
@@ -192,7 +233,24 @@ export class RunExecutor {
       });
       const publishDecision = await plane.awaitApproval(run.runId, publishRequestId, {
         signal: this.abort.signal,
+        timeoutMs: config.approvalTimeoutMs,
       });
+      if (publishDecision === "timed_out") {
+        await plane
+          .cancelApproval(
+            run.runId,
+            run.claimToken,
+            publishRequestId,
+            `approval timed out after ${Math.round(config.approvalTimeoutMs / 60_000)} min without a decision`,
+          )
+          .catch(() => {});
+        await this.flushEvents();
+        await plane.updateRunStatus(run.runId, run.claimToken, "failed", {
+          errorCategory: "approval_timeout",
+          errorMessage: `approval timed out: push ${worktree.branchName} and open a PR`.slice(0, 500),
+        });
+        return;
+      }
       if (publishDecision !== "accepted") {
         await this.flushEvents();
         await plane.updateRunStatus(

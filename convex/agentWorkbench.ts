@@ -916,6 +916,7 @@ export const updateRunStatus = mutationGeneric({
         if (approval.status === "pending") {
           await ctx.db.patch(approval._id, {
             status: args.status === "interrupted" ? "expired" : "cancelled",
+            reason: `run reached ${args.status} before this approval was decided`,
             updatedAt: now,
           });
         }
@@ -1025,6 +1026,42 @@ export const requestApproval = mutationGeneric({
       await ctx.db.patch(args.runId, { status: "waiting_for_approval", updatedAt: now });
     }
     return { approvalId, status: "pending" };
+  },
+});
+
+/**
+ * Runner-initiated cancellation of a still-pending approval, with an explicit
+ * reason — used when the runner's configured approval timeout expires
+ * (SKIPPY_RUNNER_APPROVAL_TIMEOUT_MS). Idempotent by the same contract as
+ * decisions: a settled approval is never flipped.
+ */
+export const cancelApproval = mutationGeneric({
+  args: {
+    hostToken: v.string(),
+    runId: v.id("agentRuns"),
+    claimToken: v.string(),
+    harnessRequestId: v.string(),
+    reason: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const host = await requireHost(ctx, args.hostToken);
+    await requireClaimedRun(ctx, host, args.runId, args.claimToken);
+    const approval = await ctx.db
+      .query("agentApprovals")
+      .withIndex("by_run_request", (q: any) => q.eq("runId", args.runId).eq("harnessRequestId", args.harnessRequestId))
+      .first();
+    if (!approval) throw new Error("approval not found for run");
+    if (approval.status !== "pending") {
+      return { approvalId: approval._id, status: approval.status };
+    }
+    const now = Date.now();
+    await ctx.db.patch(approval._id, {
+      status: "cancelled",
+      reason: args.reason.slice(0, 500),
+      decidedAt: now,
+      updatedAt: now,
+    });
+    return { approvalId: approval._id, status: "cancelled" };
   },
 });
 

@@ -7,8 +7,11 @@
 #   SKIPPY_CONVEX_URL            required
 #   SKIPPY_RUNNER_HOST_TOKEN     required
 #   SKIPPY_RUNNER_ALLOWED_ROOT   required
+#   SKIPPY_MCP_URL               required (Skippy MCP endpoint, injected into every session)
+#   SKIPPY_MCP_TOKEN             required (bearer token for the Skippy MCP)
 #   SKIPPY_RUNNER_HARNESSES      default: claude
 #   SKIPPY_RUNNER_MAX_CONCURRENCY default: 1
+#   SKIPPY_RUNNER_APPROVAL_TIMEOUT_MS default: 86400000 (24h; 0 = wait forever)
 #
 # The token is written into the plist, which is chmod 600 in the user's own
 # LaunchAgents dir. Note: this runs the daemon as the CURRENT user. The spec's
@@ -27,14 +30,21 @@ NODE_BIN="$(command -v node)"
 : "${SKIPPY_CONVEX_URL:?SKIPPY_CONVEX_URL is required}"
 : "${SKIPPY_RUNNER_HOST_TOKEN:?SKIPPY_RUNNER_HOST_TOKEN is required}"
 : "${SKIPPY_RUNNER_ALLOWED_ROOT:?SKIPPY_RUNNER_ALLOWED_ROOT is required}"
+: "${SKIPPY_MCP_URL:?SKIPPY_MCP_URL is required (Skippy MCP endpoint)}"
+: "${SKIPPY_MCP_TOKEN:?SKIPPY_MCP_TOKEN is required (Skippy MCP bearer token)}"
 SKIPPY_RUNNER_HARNESSES="${SKIPPY_RUNNER_HARNESSES:-claude}"
 SKIPPY_RUNNER_MAX_CONCURRENCY="${SKIPPY_RUNNER_MAX_CONCURRENCY:-1}"
+SKIPPY_RUNNER_APPROVAL_TIMEOUT_MS="${SKIPPY_RUNNER_APPROVAL_TIMEOUT_MS:-}"
 # Optional, chat-only: bypass harness permissions (no approvals, no sandbox).
 SKIPPY_CHAT_BYPASS_PERMISSIONS="${SKIPPY_CHAT_BYPASS_PERMISSIONS:-}"
 
 BYPASS_FRAGMENT=""
 if [ -n "$SKIPPY_CHAT_BYPASS_PERMISSIONS" ]; then
   BYPASS_FRAGMENT="    <key>SKIPPY_CHAT_BYPASS_PERMISSIONS</key><string>$SKIPPY_CHAT_BYPASS_PERMISSIONS</string>"
+fi
+APPROVAL_TIMEOUT_FRAGMENT=""
+if [ -n "$SKIPPY_RUNNER_APPROVAL_TIMEOUT_MS" ]; then
+  APPROVAL_TIMEOUT_FRAGMENT="    <key>SKIPPY_RUNNER_APPROVAL_TIMEOUT_MS</key><string>$SKIPPY_RUNNER_APPROVAL_TIMEOUT_MS</string>"
 fi
 
 if [ ! -f "$RUNNER_MAIN" ]; then
@@ -65,6 +75,9 @@ cat > "$PLIST" <<PLIST_EOF
     <key>SKIPPY_RUNNER_ALLOWED_ROOT</key><string>$SKIPPY_RUNNER_ALLOWED_ROOT</string>
     <key>SKIPPY_RUNNER_HARNESSES</key><string>$SKIPPY_RUNNER_HARNESSES</string>
     <key>SKIPPY_RUNNER_MAX_CONCURRENCY</key><string>$SKIPPY_RUNNER_MAX_CONCURRENCY</string>
+    <key>SKIPPY_MCP_URL</key><string>$SKIPPY_MCP_URL</string>
+    <key>SKIPPY_MCP_TOKEN</key><string>$SKIPPY_MCP_TOKEN</string>
+$APPROVAL_TIMEOUT_FRAGMENT
 $BYPASS_FRAGMENT
   </dict>
   <key>RunAtLoad</key><true/>

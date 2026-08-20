@@ -1507,6 +1507,9 @@ export default defineSchema({
     scope: v.optional(v.union(v.literal("command"), v.literal("turn"), v.literal("session"))),
     decidedByUserId: v.optional(v.id("users")),
     decidedAt: v.optional(v.number()),
+    // Why a non-user settlement happened (e.g. "approval timed out after 1440
+    // min without a decision", "run ended before approval was decided").
+    reason: v.optional(v.string()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })

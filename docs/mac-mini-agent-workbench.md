@@ -179,6 +179,21 @@ Neither adapter's native event shape is the Skippy protocol. The run-event and a
 
 **Claude approval-policy mapping.** The Claude Agent SDK's permission modes and `canUseTool` callback are the levers that implement Skippy's default approval policy: run sessions in `acceptEdits` mode scoped to the worktree (file edits, tests, builds inside the boundary proceed automatically), and use `canUseTool` to intercept everything else — out-of-boundary access, destructive commands, new network destinations, push/PR — converting each into a durable Skippy approval record and returning allow/deny once the user decides. `bypassPermissions` is never used; `plan` mode may back a future read-only analysis feature for General chats.
 
+### Skippy MCP injection (daemon environment)
+
+Every harness session (chat and run, every project) must have the Skippy MCP tools. The runner injects the remote Skippy MCP server **explicitly** from two required daemon environment variables — set them in the launchd environment for `com.skippy.runner`:
+
+- `SKIPPY_MCP_URL` — the remote endpoint, e.g. `https://skippy.jeffschram.dev/api/mcp`
+- `SKIPPY_MCP_TOKEN` — the bearer token (daemon environment only; never committed, never read from `.env.local` by runner code)
+
+The Claude adapter passes these as an explicit `mcpServers` entry on every turn; the codex adapter passes `-c mcp_servers.skippy.url=… -c mcp_servers.skippy.bearer_token_env_var=SKIPPY_MCP_TOKEN` config overrides to `codex exec`. Missing either env var fails the daemon at startup, and a Claude session that still comes up without `mcp__skippy*` tools emits a visible `error` event in the feed.
+
+This deliberately does **not** rely on host-level MCP registration (`claude mcp add -s user …` in `~/.claude.json`): that registration silently disappeared on the runner host on 2026-08-18, leaving sessions with no Skippy tools and no error. `claude mcp add -s user --transport http skippy <url> --header "Authorization: Bearer <token>"` remains the right way to equip **interactive local terminal sessions only**.
+
+### Approval timeout
+
+A run waits at most `SKIPPY_RUNNER_APPROVAL_TIMEOUT_MS` (default 24 hours; `0` = wait forever) for any single approval, including the publish gate. On expiry the pending approval document is settled `cancelled` with an explicit `reason`, and the run fails with `errorMessage: approval timed out: <command>`. This is the only approval timeout in the system — the Convex claim lease renews on heartbeat while a run waits, so nothing else expires a pending approval.
+
 ## User experience
 
 ### Project chat navigation
