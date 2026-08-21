@@ -903,6 +903,9 @@ export const claimNextRun = mutationGeneric({
 
       const project = await ctx.db.get(run.projectId);
       const chat = await ctx.db.get(run.chatId);
+      // Task title rides along so the runner can name the PR after the task
+      // instead of the generic project string (unscannable PR list, #117–#124).
+      const task = run.taskId ? await ctx.db.get(run.taskId) : null;
       // The authorized execution brief and project configuration — nothing more.
       return {
         runId: run._id,
@@ -910,6 +913,7 @@ export const claimNextRun = mutationGeneric({
         harness: run.harness,
         attempt: run.attempt,
         taskId: run.taskId,
+        taskTitle: task?.title,
         chatId: run.chatId,
         externalThreadId: chat?.externalThreadId,
         worktreePath: chat?.worktreePath,
