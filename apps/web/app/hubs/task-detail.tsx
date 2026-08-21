@@ -477,17 +477,30 @@ export function TaskDetailPanel({
         {pr || task.gitBranchName || task.executionState === "in_review" ? (
           <DetailSection title="Pull request">
             {pr ? (
-              <p className="m-0">
+              <p className="m-0 flex items-center gap-2">
                 <a
                   className="inline-flex items-center gap-1.5 text-sm font-bold text-primary no-underline hover:underline"
                   href={task.prUrl}
                   target="_blank"
-                  rel="noreferrer"
+                  rel="noopener noreferrer"
                 >
                   <GitPullRequest size={15} aria-hidden />
                   {pr.label}
                   <ExternalLink size={13} aria-hidden />
                 </a>
+                {pr.status ? (
+                  <Badge
+                    tone={
+                      pr.status === "merged"
+                        ? "green"
+                        : pr.status === "closed"
+                          ? "red"
+                          : "gold"
+                    }
+                  >
+                    {titleCase(pr.status)}
+                  </Badge>
+                ) : null}
               </p>
             ) : task.executionState === "in_review" ? (
               <p className="m-0 text-sm text-muted-foreground">
@@ -498,7 +511,6 @@ export function TaskDetailPanel({
               <p className="m-0 mt-1.5 text-xs text-muted-foreground">
                 Branch:{" "}
                 <span className="font-mono">{task.gitBranchName}</span>
-                {pr?.status ? ` · ${titleCase(pr.status)}` : ""}
               </p>
             ) : null}
           </DetailSection>
