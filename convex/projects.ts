@@ -98,6 +98,9 @@ async function buildBoard(db: any, brainInstanceId: any, projectId: string) {
       lastPrCreatedAt: task.lastPrCreatedAt,
       resultSummary: task.resultSummary,
       resultUrl: task.resultUrl,
+      // Timestamp for the "in review" chat moment: when the run's result
+      // landed, not when the task was last touched.
+      resultRecordedAt: task.resultRecordedAt,
       startedAt: task.startedAt,
       startedBy: task.startedBy,
       completedAt: task.completedAt,

@@ -72,6 +72,26 @@ describe("buildTaskMoments", () => {
     });
   });
 
+  it("carries PR fields on the in_review moment's task for the chat notice", () => {
+    const moments = buildTaskMoments([
+      {
+        ...base,
+        executionState: "in_review",
+        resultRecordedAt: 400,
+        prUrl: "https://github.com/x/y/pull/9",
+        prNumber: 9,
+        prStatus: "open",
+      },
+    ]);
+    const inReview = moments.find((m) => m.state === "in_review");
+    expect(inReview?.timestamp).toBe(400);
+    expect(inReview?.task).toMatchObject({
+      prUrl: "https://github.com/x/y/pull/9",
+      prNumber: 9,
+      prStatus: "open",
+    });
+  });
+
   it("replaces the in_review moment with completed once the task is done", () => {
     const moments = buildTaskMoments([
       {

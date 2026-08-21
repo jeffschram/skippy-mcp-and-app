@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { usePathname } from "next/navigation";
 import { useConvexAuth, useMutation, useQuery } from "convex/react";
-import { CheckCircle2, FilePenLine, FilePlus2, GitPullRequest, ListChecks, MessageCircle, SendHorizontal, Sparkles, TerminalSquare, X } from "lucide-react";
+import { CheckCircle2, ExternalLink, FilePenLine, FilePlus2, GitPullRequest, ListChecks, MessageCircle, SendHorizontal, Sparkles, TerminalSquare, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { api } from "../../lib/skippy-api";
 import { approvalMoments } from "../../lib/approvals";
@@ -59,6 +59,11 @@ const TASK_MOMENT_META: Record<
  * panel streams live narration). An in-progress notice keeps a static pulse
  * dot as its only "running" affordance. Clicking opens the task panel when
  * the surface provides an opener.
+ *
+ * The in-review notice is the owner's cue to act: its centerpiece is a
+ * View PR link out to GitHub (review there, then merge or comment). Anchors
+ * can't nest inside buttons, so when the link is present the open-task
+ * affordance shrinks to the label + title region.
  */
 function TaskMoment({
   task,
@@ -71,23 +76,69 @@ function TaskMoment({
 }) {
   const meta = TASK_MOMENT_META[state] ?? TASK_MOMENT_META.created;
   const Icon = meta.icon;
-  const body = (
-    <>
-      <span className="flex shrink-0 items-center gap-1.5 text-xs font-bold uppercase tracking-[0.08em] text-primary">
-        <Icon size={14} aria-hidden />
-        {meta.label}
-        {state === "in_progress" ? (
-          <span className="size-1.5 animate-pulse rounded-full bg-primary" aria-hidden />
-        ) : null}
-      </span>
-      <span className="min-w-0 flex-1 truncate text-sm font-semibold">{task.title}</span>
-      <span className="shrink-0 rounded-full border border-primary/30 px-2 py-0.5 text-[11px] text-primary">
-        {task.ownerType === "agent" ? "Agent" : "Owner"}
-      </span>
-    </>
+  const prUrl =
+    state === "in_review" && typeof task.prUrl === "string" && task.prUrl
+      ? task.prUrl
+      : undefined;
+  const header = (
+    <span className="flex shrink-0 items-center gap-1.5 text-xs font-bold uppercase tracking-[0.08em] text-primary">
+      <Icon size={14} aria-hidden />
+      {meta.label}
+      {state === "in_progress" ? (
+        <span className="size-1.5 animate-pulse rounded-full bg-primary" aria-hidden />
+      ) : null}
+    </span>
+  );
+  const title = (
+    <span className="min-w-0 flex-1 truncate text-sm font-semibold">{task.title}</span>
+  );
+  const ownerChip = (
+    <span className="shrink-0 rounded-full border border-primary/30 px-2 py-0.5 text-[11px] text-primary">
+      {task.ownerType === "agent" ? "Agent" : "Owner"}
+    </span>
   );
   const surface =
     "my-1 flex w-full items-center gap-2.5 rounded-lg border border-primary/25 bg-primary/[0.04] px-3 py-2 text-left";
+  if (prUrl) {
+    return (
+      <article className={surface}>
+        {onOpen ? (
+          <button
+            type="button"
+            className="flex min-w-0 flex-1 cursor-pointer items-center gap-2.5 text-left"
+            onClick={onOpen}
+            title="Open task details"
+          >
+            {header}
+            {title}
+          </button>
+        ) : (
+          <span className="flex min-w-0 flex-1 items-center gap-2.5">
+            {header}
+            {title}
+          </span>
+        )}
+        <a
+          href={prUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex shrink-0 items-center gap-1 text-xs font-bold text-primary hover:underline"
+          title="Review this pull request on GitHub"
+        >
+          View PR{typeof task.prNumber === "number" ? ` #${task.prNumber}` : ""}
+          <ExternalLink size={12} aria-hidden />
+        </a>
+        {ownerChip}
+      </article>
+    );
+  }
+  const body = (
+    <>
+      {header}
+      {title}
+      {ownerChip}
+    </>
+  );
   if (onOpen) {
     return (
       <button
