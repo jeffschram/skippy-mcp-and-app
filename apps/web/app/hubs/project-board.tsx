@@ -1299,32 +1299,34 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
           >
             <ArrowLeft size={17} aria-hidden />
           </Link>
-          <div className="min-w-0 flex-1 desk:hidden">
+          <div className="min-w-0 flex-1">
             <p className="m-0 truncate font-bold">{board.project.title}</p>
-            <p className="m-0 text-xs text-muted-foreground">
+            <p className="m-0 text-xs text-muted-foreground desk:hidden">
               {board.progress.done}/{board.progress.total} tasks complete
             </p>
           </div>
-          <div className="hidden items-center gap-2 text-xs text-muted-foreground desk:flex">
-            <Sparkles size={14} className="text-primary" aria-hidden />{" "}
-            {board.progress.done}/{board.progress.total} complete
+          <div className="ml-auto flex shrink-0 items-center gap-2">
+            <div className="hidden items-center gap-2 text-xs text-muted-foreground desk:flex">
+              <Sparkles size={14} className="text-primary" aria-hidden />{" "}
+              {board.progress.done}/{board.progress.total} complete
+            </div>
+            {executionConfig?.enabled ? (
+              <Select
+                className="w-[9.5rem] shrink-0"
+                value={taskHarness}
+                onChange={(event) => setTaskHarness(event.target.value as "claude" | "codex")}
+                aria-label="Task harness"
+                title="Harness used when starting agent tasks"
+              >
+                <option value="claude">Tasks: Claude</option>
+                <option value="codex">Tasks: Codex</option>
+              </Select>
+            ) : null}
+            <Button small onClick={openProjectSettings} title="Project settings">
+              <Settings2 size={15} aria-hidden />
+              <span className="hidden desk:inline">Settings</span>
+            </Button>
           </div>
-          {executionConfig?.enabled ? (
-            <Select
-              className="w-[9.5rem] shrink-0"
-              value={taskHarness}
-              onChange={(event) => setTaskHarness(event.target.value as "claude" | "codex")}
-              aria-label="Task harness"
-              title="Harness used when starting agent tasks"
-            >
-              <option value="claude">Tasks: Claude</option>
-              <option value="codex">Tasks: Codex</option>
-            </Select>
-          ) : null}
-          <Button small onClick={openProjectSettings} title="Project settings">
-            <Settings2 size={15} aria-hidden />
-            <span className="hidden desk:inline">Settings</span>
-          </Button>
         </header>
 
         <nav
