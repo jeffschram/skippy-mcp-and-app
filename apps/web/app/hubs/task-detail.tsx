@@ -16,6 +16,7 @@ import {
   TerminalSquare,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { ChatMarkdown, ChatMarkdownInline } from "../../lib/chat-markdown";
 import { api } from "../../lib/skippy-api";
 import {
   summarizeChatActivity,
@@ -365,9 +366,9 @@ export function TaskDetailPanel({
 
         <DetailSection title="Description">
           {task.description ? (
-            <p className="m-0 whitespace-pre-wrap text-sm leading-relaxed">
+            <ChatMarkdown variant="document" className="text-sm leading-relaxed">
               {task.description}
-            </p>
+            </ChatMarkdown>
           ) : (
             <p className="m-0 text-sm text-muted-foreground">No description.</p>
           )}
@@ -412,9 +413,14 @@ export function TaskDetailPanel({
               </div>
             </div>
           ) : task.executionBrief ? (
-            <p className="m-0 whitespace-pre-wrap text-sm leading-relaxed">
+            // Briefs are the most markdown-dense text in the app (## headers,
+            // numbered plans, code spans). The document variant gives them
+            // reading-surface spacing; long content still scrolls with the
+            // panel body, and fenced code scrolls horizontally inside `pre`
+            // without widening the narrow mobile panel.
+            <ChatMarkdown variant="document" className="text-sm leading-relaxed">
               {task.executionBrief}
-            </p>
+            </ChatMarkdown>
           ) : (
             <p className="m-0 text-sm text-muted-foreground">No brief yet.</p>
           )}
@@ -425,7 +431,12 @@ export function TaskDetailPanel({
             {task.acceptanceCriteria?.length ? (
               <ul className="m-0 grid gap-1.5 pl-[18px] text-sm leading-relaxed">
                 {task.acceptanceCriteria.map((criterion: string, index: number) => (
-                  <li key={index}>{criterion}</li>
+                  // Inline-only markdown: code spans, bold, and links render,
+                  // but the panel's own list chrome (this ul/li) stays — the
+                  // renderer never emits its own list markup here.
+                  <li key={index}>
+                    <ChatMarkdownInline>{criterion}</ChatMarkdownInline>
+                  </li>
                 ))}
               </ul>
             ) : (
@@ -457,9 +468,10 @@ export function TaskDetailPanel({
         {task.resultSummary || task.resultUrl ? (
           <DetailSection title="Result">
             {task.resultSummary ? (
-              <p className="m-0 mb-1.5 whitespace-pre-wrap text-sm leading-relaxed">
+              // PR URLs in summaries autolink via GFM and open in a new tab.
+              <ChatMarkdown variant="document" className="mb-1.5 text-sm leading-relaxed">
                 {task.resultSummary}
-              </p>
+              </ChatMarkdown>
             ) : null}
             {task.resultUrl ? (
               <a

@@ -2,11 +2,23 @@
 import { describe, expect, it } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { ChatMarkdown } from "./chat-markdown";
+import { ChatMarkdown, ChatMarkdownInline } from "./chat-markdown";
 
 /** Render a chat message to static HTML the way the transcript does. */
 function render(content: string): string {
   return renderToStaticMarkup(createElement(ChatMarkdown, { children: content }));
+}
+
+/** Render with the roomier document variant, the way the task panel does. */
+function renderDocument(content: string): string {
+  return renderToStaticMarkup(
+    createElement(ChatMarkdown, { children: content, variant: "document" }),
+  );
+}
+
+/** Render inline-only markdown, the way acceptance criteria items do. */
+function renderInline(content: string): string {
+  return renderToStaticMarkup(createElement(ChatMarkdownInline, { children: content }));
 }
 
 describe("ChatMarkdown", () => {
@@ -89,5 +101,90 @@ describe("ChatMarkdown", () => {
     expect(html).toContain("just a normal sentence with 2 * 3 math.");
     expect(html).not.toContain("<em>");
     expect(html).not.toContain("<strong>");
+  });
+});
+
+describe("ChatMarkdown document variant", () => {
+  it("uses roomier spacing than chat while keeping identical structure", () => {
+    const source = "## Plan\n\nFirst paragraph.\n\nSecond paragraph.";
+    const chat = render(source);
+    const doc = renderDocument(source);
+    // Same markup shape either way — only the spacing classes differ.
+    expect(doc).toContain("<h2");
+    expect(doc).toContain("Plan</h2>");
+    expect(chat).toContain('class="my-1 first:mt-0 last:mb-0"');
+    expect(doc).toContain('class="my-2 first:mt-0 last:mb-0"');
+    expect(doc).not.toContain("my-1 first:mt-0");
+  });
+
+  it("sanitizes identically to chat: no raw HTML, no unsafe hrefs", () => {
+    const html = renderDocument("Brief with <script>alert(1)</script> inline.");
+    expect(html).not.toContain("<script");
+    expect(html).toContain("&lt;script&gt;");
+    // Unsafe link protocols are dropped from the rendered anchor.
+    const link = renderDocument("[click](javascript:alert(1))");
+    expect(link).not.toContain('href="javascript:');
+    expect(link).toContain(">click</a>");
+  });
+
+  it("opens links in a new tab, keeps code blocks mono on muted background", () => {
+    const html = renderDocument(
+      "See https://github.com/org/repo/pull/9\n\n```sh\npnpm test\n```",
+    );
+    expect(html).toContain('target="_blank"');
+    expect(html).toContain('rel="noopener noreferrer"');
+    expect(html).toContain("<pre");
+    // Narrow-panel safety: fenced code scrolls horizontally instead of
+    // widening the layout.
+    expect(html).toContain("overflow-x-auto");
+    expect(html).toContain("bg-secondary");
+    expect(html).toContain("font-mono");
+  });
+
+  it("keeps historical plain-text briefs intact, including single newlines", () => {
+    const html = renderDocument("Step one.\nStep two, same paragraph.");
+    expect(html).toContain("Step one.");
+    expect(html).toContain("Step two, same paragraph.");
+    expect(html).toContain("<br/>");
+  });
+});
+
+describe("ChatMarkdownInline", () => {
+  it("renders code spans, bold, and links without any block wrappers", () => {
+    const html = renderInline("Run `pnpm test` and see **green** in [CI](https://ci.example.com)");
+    expect(html).toContain("pnpm test</code>");
+    expect(html).toContain("<strong>green</strong>");
+    expect(html).toContain('href="https://ci.example.com"');
+    expect(html).toContain('target="_blank"');
+    expect(html).toContain('rel="noopener noreferrer"');
+    // No block markup: the caller (e.g. the criteria <li>) owns the chrome.
+    expect(html).not.toContain("<p");
+    expect(html).not.toContain("<ul");
+    expect(html).not.toContain("<li");
+    expect(html).not.toContain("<h");
+  });
+
+  it("unwraps block syntax to plain inline content instead of emitting lists", () => {
+    // A criterion that happens to start with list syntax must not produce
+    // nested list markup inside the panel's own bullet.
+    const html = renderInline("- tests pass with `pnpm test`");
+    expect(html).not.toContain("<ul");
+    expect(html).not.toContain("<li");
+    expect(html).toContain("tests pass");
+    expect(html).toContain("pnpm test</code>");
+  });
+
+  it("keeps plain-text criteria unchanged and never renders raw HTML", () => {
+    const html = renderInline("Panel width stays fixed <b>always</b>");
+    expect(html).toContain("Panel width stays fixed");
+    expect(html).not.toContain("<b>");
+    expect(html).toContain("&lt;b&gt;");
+    expect(html).not.toContain("<em>");
+  });
+
+  it("auto-links bare PR URLs", () => {
+    const html = renderInline("PR merged: https://github.com/org/repo/pull/7");
+    expect(html).toContain('<a href="https://github.com/org/repo/pull/7"');
+    expect(html).toContain('target="_blank"');
   });
 });
