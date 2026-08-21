@@ -95,12 +95,67 @@ describe("project notes pad autosave", () => {
     expect(pad.remoteValue("post-blur remote")).toBe("post-blur remote");
   });
 
-  it("dispose cancels a pending save (unmount mid-debounce)", () => {
+  it("dispose flushes a pending dirty edit exactly once (unmount mid-debounce)", () => {
     const { pad, saves } = setup();
 
+    pad.handleFocus();
     pad.handleChange("about to unmount");
-    pad.dispose();
+    pad.dispose("about to unmount");
+    expect(saves).toEqual(["about to unmount"]);
+
+    // The cancelled debounce must not fire a second save afterwards.
     vi.advanceTimersByTime(PAD_AUTOSAVE_DELAY_MS * 2);
+    expect(saves).toEqual(["about to unmount"]);
+  });
+
+  it("dispose flushes the latest draft, not the value the debounce captured", () => {
+    const { pad, saves } = setup();
+
+    pad.handleChange("first keystro");
+    pad.handleChange("first keystrokes");
+    pad.dispose("first keystrokes");
+
+    expect(saves).toEqual(["first keystrokes"]);
+  });
+
+  it("clean dispose saves nothing", () => {
+    const { pad, saves } = setup("resting value");
+
+    // No pending debounce, value matches persisted state: a no-op unmount.
+    pad.dispose("resting value");
+    vi.advanceTimersByTime(PAD_AUTOSAVE_DELAY_MS * 2);
+    expect(saves).toEqual([]);
+  });
+
+  it("dispose without a pending debounce saves nothing even if handed a dirty value", () => {
+    const { pad, saves } = setup("persisted");
+
+    // Nothing was ever scheduled (e.g. blur already committed and cleared the
+    // timer); dispose must not fire a speculative save of its own.
+    pad.dispose("persisted plus unscheduled text");
+    expect(saves).toEqual([]);
+  });
+
+  it("blur-then-dispose does not double-save", () => {
+    const { pad, saves } = setup();
+
+    pad.handleFocus();
+    pad.handleChange("committed at blu");
+    pad.handleBlur("committed at blur");
+    expect(saves).toEqual(["committed at blur"]);
+
+    pad.dispose("committed at blur");
+    vi.advanceTimersByTime(PAD_AUTOSAVE_DELAY_MS * 2);
+    expect(saves).toEqual(["committed at blur"]);
+  });
+
+  it("dispose skips the flush when the pending value became redundant", () => {
+    const { pad, saves, setSaved } = setup();
+
+    pad.handleChange("same idea");
+    // Another surface persisted identical text meanwhile (last-write-wins).
+    setSaved("same idea");
+    pad.dispose("same idea");
 
     expect(saves).toEqual([]);
   });

@@ -423,20 +423,48 @@ function ProjectNotesPad({ project }: { project: AnyRecord }) {
   const saved = useRef(project.notesPad ?? "");
   saved.current = project.notesPad ?? "";
 
+  // Save status lives entirely in the component so the autosave helper stays
+  // a pure, React-free unit. "error" is sticky until a later save succeeds;
+  // because a failed save never advances `saved`, the draft stays dirty and
+  // the next change/blur naturally retries. The draft is never cleared.
+  const [saveState, setSaveState] = useState<"saved" | "saving" | "error">(
+    "saved",
+  );
+  // Monotonic sequence so an older save settling late can't overwrite the
+  // status of a newer in-flight save.
+  const saveSeq = useRef(0);
+
   const pad = useMemo(
     () =>
       createPadAutosave({
         savedValue: () => saved.current,
-        save: (value) =>
-          void updateNotes({
+        save: (value) => {
+          const seq = ++saveSeq.current;
+          setSaveState("saving");
+          updateNotes({
             projectId: project._id as any,
             notesPad: value,
-          }),
+          }).then(
+            () => {
+              if (seq === saveSeq.current) setSaveState("saved");
+            },
+            () => {
+              // Silent loss is how pad content vanished once (backend function
+              // missing after a partial deploy): surface it instead.
+              if (seq === saveSeq.current) setSaveState("error");
+            },
+          );
+        },
       }),
     [project._id, updateNotes],
   );
 
-  useEffect(() => () => pad.dispose(), [pad]);
+  // Unmount flushes (not cancels) a pending dirty debounce: React does not
+  // reliably fire blur when a focused textarea unmounts (tab switch to Plan,
+  // route change), and cancelling would drop the trailing keystrokes.
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  useEffect(() => () => pad.dispose(draftRef.current), [pad]);
 
   // Focused-editing guard: sync the reactive value only while the pad is idle.
   useEffect(() => {
@@ -465,6 +493,17 @@ function ProjectNotesPad({ project }: { project: AnyRecord }) {
           pad.handleChange(event.target.value);
         }}
       />
+      {saveState === "error" ? (
+        // Persistent but compact: this is a notepad, not a form, so no modal —
+        // just make the failure visible until a retry succeeds.
+        <p
+          role="status"
+          className="mt-2 text-xs font-bold text-muted-foreground"
+        >
+          Couldn&rsquo;t save — your unsaved changes are kept here and will
+          retry on the next edit.
+        </p>
+      ) : null}
     </div>
   );
 }
