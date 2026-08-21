@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useConvexAuth, useMutation, useQuery } from "convex/react";
 import { CheckCircle2, ExternalLink, File as FileIcon, FilePenLine, FilePlus2, GitPullRequest, ListChecks, MessageCircle, Paperclip, SendHorizontal, Sparkles, TerminalSquare, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { ChatMarkdown } from "../../lib/chat-markdown";
 import { api } from "../../lib/skippy-api";
 import { approvalMoments } from "../../lib/approvals";
 import { buildChatTimeline } from "../../lib/chat-timeline";
@@ -188,7 +189,7 @@ function LiveActivity({ events }: { events: AnyRecord[] }) {
   return (
     <div className="grid max-w-[92%] gap-2 self-start">
       {activity.narration ? (
-        <div className="whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">{activity.narration}</div>
+        <ChatMarkdown className="text-sm leading-relaxed text-muted-foreground">{activity.narration}</ChatMarkdown>
       ) : null}
       <div className="grid gap-1 rounded-xl border border-dashed border-primary/30 bg-primary/[0.04] px-3 py-2">
         {activity.plan ? (
@@ -473,15 +474,15 @@ function ChatSurface({
               <div key={item.key} className="flex max-w-[82%] flex-col items-end gap-1.5 self-end">
                 {message.attachments?.length ? <MessageAttachments attachments={message.attachments} /> : null}
                 {message.content ? (
-                  <div className="whitespace-pre-wrap rounded-2xl rounded-br-md bg-primary px-3.5 py-2.5 text-sm leading-relaxed text-primary-foreground">
-                    {message.content}
+                  <div className="rounded-2xl rounded-br-md bg-primary px-3.5 py-2.5 text-sm leading-relaxed text-primary-foreground [&_code]:bg-primary-foreground/15 [&_pre]:border-primary-foreground/20 [&_pre]:bg-primary-foreground/15">
+                    <ChatMarkdown>{message.content}</ChatMarkdown>
                   </div>
                 ) : null}
               </div>
             ) : (
-              <div key={item.key} className="max-w-[92%] self-start whitespace-pre-wrap text-sm leading-relaxed">
-                {message.content}
-              </div>
+              <ChatMarkdown key={item.key} className="max-w-[92%] self-start text-sm leading-relaxed">
+                {message.content ?? ""}
+              </ChatMarkdown>
             );
           })
         )}
