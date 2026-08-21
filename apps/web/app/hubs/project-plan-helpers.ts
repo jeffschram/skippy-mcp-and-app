@@ -45,3 +45,27 @@ export function phaseCompletion(tasks: PhaseTask[]): PhaseCompletion {
 export function completedPhaseSummary(taskCount: number): string {
   return `${taskCount} ${taskCount === 1 ? "task" : "tasks"} · completed`;
 }
+
+/**
+ * Split the Plan's phases into the ones rendered in place (active/empty,
+ * original order preserved) and the fully-completed ones, which the Plan
+ * consolidates into one collapsed "Completed phases" section at the bottom —
+ * mirroring how completed tasks tuck under a details row inside a phase.
+ * Generic over the phase shape so the UI can pass its own records; only the
+ * tasks matter here.
+ */
+export function partitionPhasesByCompletion<Phase>(
+  phases: Phase[],
+  tasksForPhase: (phase: Phase) => PhaseTask[],
+): { activePhases: Phase[]; completedPhases: Phase[] } {
+  const activePhases: Phase[] = [];
+  const completedPhases: Phase[] = [];
+  for (const phase of phases) {
+    if (phaseCompletion(tasksForPhase(phase)) === "complete") {
+      completedPhases.push(phase);
+    } else {
+      activePhases.push(phase);
+    }
+  }
+  return { activePhases, completedPhases };
+}
