@@ -3,8 +3,13 @@
  * on the Mac mini running under a dedicated service account (launchd); see
  * docs/mac-mini-agent-workbench.md → Security model.
  */
+import { execFile } from "node:child_process";
+import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
 
 export interface RunnerConfig {
   /** Convex deployment URL, e.g. https://xxx.convex.cloud */
@@ -58,6 +63,62 @@ export interface RunnerConfig {
    * affected (their approval model, including the publish gate, stays).
    */
   chatBypassPermissions: boolean;
+}
+
+/**
+ * Where `corepack enable` materializes pnpm shims for the runner. Kept under
+ * the service account's home so no plist edit or sudo is ever needed.
+ */
+export const COREPACK_SHIM_DIR = path.join(os.homedir(), ".skippy-runner", "corepack-shims");
+
+/**
+ * Make pnpm (and node's own tooling) resolvable for every child this daemon
+ * spawns — harness sessions, provisioning, verify commands — regardless of
+ * the minimal PATH launchd hands us (the plist ships
+ * PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin, which knows nothing
+ * about nvm-installed node or corepack shims). Root cause of the 2026-08-21
+ * six-gate autopsy: sessions could not resolve pnpm and improvised
+ * (`npx --yes pnpm@8.10.2`, PATH exports), and improvised commands are what
+ * a prefix allowlist cannot anticipate. Fixing PATH in code beats plist
+ * edits: it applies on every start with no launchctl reload ritual.
+ *
+ * Mutates (by default) process.env so the SDK sessions, execFile calls, and
+ * bash -lc verify commands all inherit it. Idempotent.
+ */
+export function extendRunnerPath(env: NodeJS.ProcessEnv = process.env): string {
+  const nodeBinDir = path.dirname(process.execPath); // node, npm, npx, corepack
+  const existing = (env.PATH ?? "").split(path.delimiter);
+  const seen = new Set<string>();
+  const merged = [COREPACK_SHIM_DIR, nodeBinDir, ...existing].filter((entry) => {
+    if (!entry || seen.has(entry)) return false;
+    seen.add(entry);
+    return true;
+  });
+  env.PATH = merged.join(path.delimiter);
+  // Never let corepack hang a headless daemon on an interactive download
+  // confirmation.
+  if (env.COREPACK_ENABLE_DOWNLOAD_PROMPT === undefined) env.COREPACK_ENABLE_DOWNLOAD_PROMPT = "0";
+  return env.PATH;
+}
+
+/**
+ * Materialize corepack's pnpm/yarn shims into COREPACK_SHIM_DIR (already on
+ * PATH via extendRunnerPath) so plain `pnpm typecheck` resolves inside
+ * harness sessions. Best-effort: on failure the runner logs and continues —
+ * provisioning still works via explicit `corepack pnpm …`, and sessions fall
+ * back to the old improvise-and-gate behavior.
+ */
+export async function ensureCorepackShims(): Promise<{ ok: boolean; message: string }> {
+  try {
+    fs.mkdirSync(COREPACK_SHIM_DIR, { recursive: true });
+    await execFileAsync("corepack", ["enable", "--install-directory", COREPACK_SHIM_DIR], {
+      timeout: 60_000,
+    });
+    return { ok: true, message: `corepack shims ready in ${COREPACK_SHIM_DIR}` };
+  } catch (error: unknown) {
+    const detail = error instanceof Error ? error.message : String(error);
+    return { ok: false, message: `corepack enable failed: ${detail}`.slice(0, 400) };
+  }
 }
 
 function required(name: string): string {

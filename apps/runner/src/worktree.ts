@@ -90,6 +90,67 @@ export async function ensureWorktree(options: {
   return { worktreePath, branchName };
 }
 
+export interface ProvisionResult {
+  status: "provisioned" | "skipped" | "failed";
+  message: string;
+  durationMs: number;
+}
+
+const PROVISION_TIMEOUT_MS = 10 * 60 * 1000;
+
+/** Minimal exec surface so tests can stub the package-manager invocation. */
+export type ProvisionExec = (
+  file: string,
+  args: string[],
+  options: { cwd: string; timeout: number; maxBuffer: number; env: NodeJS.ProcessEnv },
+) => Promise<unknown>;
+
+/**
+ * Provision a freshly created worktree before the harness session starts:
+ * `corepack pnpm install` (frozen lockfile when one exists) so node_modules
+ * is present and sessions never improvise package-manager bootstraps
+ * (2026-08-21 six-gate autopsy: bare worktrees are why runs reached for
+ * `npx --yes pnpm@8.10.2` and PATH exports, which a prefix allowlist cannot
+ * anticipate). `corepack` honors the repo's pinned `packageManager` field,
+ * so no version is hardcoded here.
+ *
+ * Never throws: a provisioning failure degrades to the old behavior (the
+ * agent improvises and command gates fire) instead of failing the run.
+ */
+export async function provisionWorktree(
+  worktreePath: string,
+  exec: ProvisionExec = execFileAsync,
+): Promise<ProvisionResult> {
+  const startedAt = Date.now();
+  if (!fs.existsSync(path.join(worktreePath, "package.json"))) {
+    return { status: "skipped", message: "no package.json in worktree; nothing to install", durationMs: 0 };
+  }
+  const hasLockfile = fs.existsSync(path.join(worktreePath, "pnpm-lock.yaml"));
+  const args = ["pnpm", "install", ...(hasLockfile ? ["--frozen-lockfile"] : [])];
+  try {
+    await exec("corepack", args, {
+      cwd: worktreePath,
+      timeout: PROVISION_TIMEOUT_MS,
+      maxBuffer: 20 * 1024 * 1024,
+      // Never let corepack block provisioning on an interactive
+      // "download pnpm@x.y.z?" confirmation under launchd.
+      env: { ...process.env, COREPACK_ENABLE_DOWNLOAD_PROMPT: "0" },
+    });
+    return {
+      status: "provisioned",
+      message: `corepack ${args.join(" ")}`,
+      durationMs: Date.now() - startedAt,
+    };
+  } catch (error: unknown) {
+    const detail = error instanceof Error ? error.message : String(error);
+    return {
+      status: "failed",
+      message: `corepack ${args.join(" ")} failed: ${detail}`.slice(0, 500),
+      durationMs: Date.now() - startedAt,
+    };
+  }
+}
+
 /** True when the worktree has uncommitted or untracked changes. */
 export async function hasUncommittedChanges(worktreePath: string): Promise<boolean> {
   const status = await git(worktreePath, "status", "--porcelain");

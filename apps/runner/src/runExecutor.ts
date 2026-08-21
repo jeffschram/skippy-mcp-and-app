@@ -16,6 +16,7 @@ import {
   diffSummary,
   ensureWorktree,
   hasUncommittedChanges,
+  provisionWorktree,
   pushBranch,
   slugify,
 } from "./worktree.js";
@@ -93,7 +94,27 @@ export class RunExecutor {
         baseBranch: run.baseBranch,
         branchName,
       });
-      this.emit({ type: "status", payload: { phase: "worktree_ready", ...worktree } });
+      // Provision dependencies BEFORE the harness session starts, so runs
+      // never rediscover the environment and improvise package-manager
+      // bootstraps (2026-08-21 six-gate autopsy). A failure degrades
+      // gracefully: the run continues against a bare worktree and any
+      // improvised commands hit the normal approval gates.
+      this.emit({ type: "status", payload: { phase: "provisioning", worktreePath: worktree.worktreePath } });
+      await this.flushEvents(); // install can take minutes; show narration now
+      const provision = await provisionWorktree(worktree.worktreePath);
+      if (provision.status === "failed") {
+        this.emit({ type: "error", payload: { phase: "provisioning", message: provision.message } });
+      }
+      this.emit({
+        type: "status",
+        payload: {
+          phase: "worktree_ready",
+          ...worktree,
+          provisioning: provision.status,
+          provisioningDetail: provision.message,
+          provisioningDurationMs: provision.durationMs,
+        },
+      });
       await plane.updateRunStatus(run.runId, run.claimToken, "running", {
         workingBranch: worktree.branchName,
         worktreePath: worktree.worktreePath,

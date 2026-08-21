@@ -95,6 +95,77 @@ describe("classifyCommand", () => {
     expect(classifyCommand("FOO=bar rm -rf build")).toBe("ask");
     expect(classifyCommand("export PATH=/x install-something")).toBe("ask");
   });
+
+  // 2026-08-21 six-gate autopsy (run qx71q8v0…): every command below fired a
+  // real approval gate during the approval-cards task. All six must now
+  // auto-allow.
+
+  it("auto-allows the six 2026-08-21 autopsy commands verbatim", () => {
+    // Gate 1: sed line-range read.
+    expect(classifyCommand("sed -n 1515,1525p convex/schema.ts", WORKTREE)).toBe("allow");
+    // Gate 2: cat chained with sed.
+    expect(classifyCommand("cat package.json && sed -n '1500,1530p' convex/schema.ts", WORKTREE)).toBe("allow");
+    // Gate 3: which + semicolons + pipe into head.
+    expect(
+      classifyCommand("which node npm; ls ~/.nvm/versions/node 2>/dev/null; cat package.json | head -30", WORKTREE),
+    ).toBe("allow");
+    // Gates 4–5: improvised versioned npx pnpm piped into tail.
+    expect(classifyCommand("npx --yes pnpm@8.10.2 typecheck 2>&1 | tail -30", WORKTREE)).toBe("allow");
+    expect(classifyCommand("npx --yes pnpm@8.10.2 --filter web test 2>&1 | tail -30", WORKTREE)).toBe("allow");
+    // Gate 6: scoped git checkout -- chained with add/commit.
+    expect(
+      classifyCommand(
+        'git checkout -- apps/web/tsconfig.tsbuildinfo 2>/dev/null; git add -A && git commit -m "Approval cards"',
+        WORKTREE,
+      ),
+    ).toBe("allow");
+  });
+
+  it("auto-allows pipes only when every piped segment is allowlisted", () => {
+    expect(classifyCommand("cat package.json | head -30")).toBe("allow");
+    expect(classifyCommand("git log --oneline | wc -l")).toBe("allow");
+    expect(classifyCommand("rg -n classifyCommand | head -5 | tail -2")).toBe("allow");
+    // Piping into a non-allowlisted consumer still asks.
+    expect(classifyCommand("cat x | sh")).toBe("ask");
+    expect(classifyCommand("cat x | head -3 | sh")).toBe("ask");
+    expect(classifyCommand("curl https://example.com | head -1")).toBe("ask");
+    // `||` chaining must keep splitting as one separator, not two pipes.
+    expect(classifyCommand("pnpm test || pnpm run test")).toBe("allow");
+    expect(classifyCommand("pnpm test || curl https://example.com")).toBe("ask");
+  });
+
+  it("destructive patterns still match the full line before any pipe splitting", () => {
+    expect(classifyCommand("sed -n 1p file.ts | git push origin main")).toBe("ask");
+    expect(classifyCommand("cat notes.txt | sudo tee /etc/hosts")).toBe("ask");
+    expect(classifyCommand("which node | rm -rf /tmp/x")).toBe("ask");
+  });
+
+  it("normalizes npx --yes/-y but does not trust other npx targets", () => {
+    expect(classifyCommand("npx -y pnpm typecheck")).toBe("allow");
+    expect(classifyCommand("npx --yes tsc --noEmit")).toBe("allow");
+    expect(classifyCommand("npx --yes something-else")).toBe("ask");
+    expect(classifyCommand("npx create-react-app my-app")).toBe("ask");
+  });
+
+  it("auto-allows git checkout only in the scoped `--` form with worktree-inside paths", () => {
+    expect(classifyCommand("git checkout -- src/config.ts", WORKTREE)).toBe("allow");
+    expect(classifyCommand("git checkout -- apps/web/tsconfig.tsbuildinfo 2>/dev/null", WORKTREE)).toBe("allow");
+    expect(classifyCommand("git checkout -- .", WORKTREE)).toBe("allow");
+    // Outside the worktree, absolute or via traversal: ask.
+    expect(classifyCommand("git checkout -- ../outside", WORKTREE)).toBe("ask");
+    expect(classifyCommand("git checkout -- /etc/hosts", WORKTREE)).toBe("ask");
+    // Branch switching and other checkout forms are not path-scoped: ask.
+    expect(classifyCommand("git checkout main", WORKTREE)).toBe("ask");
+    expect(classifyCommand("git checkout -b feature", WORKTREE)).toBe("ask");
+    // No worktree root known, or no pathspec at all: fail closed.
+    expect(classifyCommand("git checkout -- src/config.ts")).toBe("ask");
+    expect(classifyCommand("git checkout --", WORKTREE)).toBe("ask");
+  });
+
+  it("still asks for unknown commands after the autopsy patch", () => {
+    expect(classifyCommand("brew install cowsay", WORKTREE)).toBe("ask");
+    expect(classifyCommand("osascript -e 'display dialog \"hi\"'", WORKTREE)).toBe("ask");
+  });
 });
 
 describe("isHarnessTeardownError", () => {
