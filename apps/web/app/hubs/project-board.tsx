@@ -1299,7 +1299,7 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
           >
             <ArrowLeft size={17} aria-hidden />
           </Link>
-          <div className="min-w-0 flex-1">
+          <div className="min-w-0 flex-1 desk:hidden">
             <p className="m-0 truncate font-bold">{board.project.title}</p>
             <p className="m-0 text-xs text-muted-foreground">
               {board.progress.done}/{board.progress.total} tasks complete
@@ -1311,6 +1311,7 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
           </div>
           {executionConfig?.enabled ? (
             <Select
+              className="w-[9.5rem] shrink-0"
               value={taskHarness}
               onChange={(event) => setTaskHarness(event.target.value as "claude" | "codex")}
               aria-label="Task harness"
