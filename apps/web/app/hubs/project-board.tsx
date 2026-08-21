@@ -1068,6 +1068,10 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
   const ensurePhases = useMutation(api.projects.ensureProjectPhasesForViewer);
   const setExecState = useMutation(api.projects.setTaskExecutionStateForViewer);
   const executeTask = useMutation(api.agentWorkbench.executeTaskForViewer);
+  const executionConfig = useQuery(
+    api.agentWorkbench.projectExecutionConfigForViewer,
+    viewerReady ? { projectId: projectId as any } : "skip",
+  ) as AnyRecord | null | undefined;
   const updateProject = useMutation(api.projects.updateProjectForViewer);
   const toast = useToast();
   const [view, setView] = useState<ProjectView>("overview");
@@ -1078,6 +1082,7 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
   // Task-row actions track WHICH task is busy so only the clicked row's
   // button disables; the global `busy` stays for the settings dialog.
   const [busyTaskId, setBusyTaskId] = useState<string | null>(null);
+  const [taskHarness, setTaskHarness] = useState<"claude" | "codex">("claude");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [projectTitle, setProjectTitle] = useState("");
   const [projectKind, setProjectKind] = useState("general");
@@ -1090,6 +1095,10 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
   const [assetsFolderPath, setAssetsFolderPath] = useState("");
   const [outputFolderPath, setOutputFolderPath] = useState("");
   const ensured = useRef(false);
+
+  useEffect(() => {
+    if (executionConfig?.preferredHarness) setTaskHarness(executionConfig.preferredHarness);
+  }, [executionConfig?.preferredHarness]);
 
   useEffect(() => {
     if (!board || board.phases?.length || ensured.current) return;
@@ -1241,8 +1250,8 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
             executionState: "ready",
           });
         }
-        await executeTask({ taskId: task._id as any });
-        toast("Task started in the workspace.", "success");
+        await executeTask({ taskId: task._id as any, harness: taskHarness });
+        toast(`Task started with ${taskHarness === "codex" ? "Codex" : "Claude"}.`, "success");
       } else {
         await setExecState({
           taskId: task._id as any,
@@ -1300,6 +1309,17 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
             <Sparkles size={14} className="text-primary" aria-hidden />{" "}
             {board.progress.done}/{board.progress.total} complete
           </div>
+          {executionConfig?.enabled ? (
+            <Select
+              value={taskHarness}
+              onChange={(event) => setTaskHarness(event.target.value as "claude" | "codex")}
+              aria-label="Task harness"
+              title="Harness used when starting agent tasks"
+            >
+              <option value="claude">Tasks: Claude</option>
+              <option value="codex">Tasks: Codex</option>
+            </Select>
+          ) : null}
           <Button small onClick={openProjectSettings} title="Project settings">
             <Settings2 size={15} aria-hidden />
             <span className="hidden desk:inline">Settings</span>
