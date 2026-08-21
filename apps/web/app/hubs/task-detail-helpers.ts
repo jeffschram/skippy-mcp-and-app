@@ -86,6 +86,18 @@ export function criteriaDraftFrom(criteria: string[] | undefined): string {
   return (criteria ?? []).join("\n");
 }
 
+/**
+ * Middle-ellipsis truncation for the header's branch pill: git branch names
+ * front-load their least distinctive part (agent/task-…), so the middle is
+ * the safest place to lose characters.
+ */
+export function truncateMiddle(text: string, max = 28): string {
+  if (max < 2 || text.length <= max) return text;
+  const tail = Math.floor((max - 1) / 2);
+  const head = max - 1 - tail;
+  return `${text.slice(0, head)}…${text.slice(text.length - tail)}`;
+}
+
 /** Link label + raw status for the PR section; null when no PR is recorded. */
 export function prDisplay(
   task: TaskDetailTask,

@@ -1,16 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
-  SETTLED_APPROVAL_VISIBLE_MS,
   approvalDetailText,
   approvalKindLabel,
   approvalMoments,
   approvalStatusChip,
   approvalSummaryLine,
+  approvalsForTask,
   diffStatFileCount,
   firstLineTruncated,
   pendingApprovalCount,
   pendingApprovalsByTask,
-  visibleTaskApprovals,
 } from "./approvals";
 
 const T0 = 1_787_000_000_000;
@@ -178,56 +177,24 @@ describe("pendingApprovalsByTask / pendingApprovalCount", () => {
   });
 });
 
-describe("visibleTaskApprovals", () => {
-  it("shows pending approvals for the task, oldest first", () => {
-    const visible = visibleTaskApprovals(
+describe("approvalsForTask", () => {
+  it("keeps only this task's approvals, oldest first", () => {
+    const forTask = approvalsForTask(
       [
         { _id: "a2", taskId: "t1", status: "pending", createdAt: T0 + 10 },
         { _id: "a1", taskId: "t1", status: "pending", createdAt: T0 },
         { _id: "b1", taskId: "t2", status: "pending", createdAt: T0 },
       ],
       "t1",
-      T0 + 60_000,
     );
-    expect(visible.map((a) => a._id)).toEqual(["a1", "a2"]);
+    expect(forTask.map((a) => a._id)).toEqual(["a1", "a2"]);
   });
 
-  it("keeps a freshly settled approval so the card resolves in place", () => {
-    const visible = visibleTaskApprovals(
-      [
-        {
-          _id: "a1",
-          taskId: "t1",
-          status: "accepted",
-          createdAt: T0,
-          decidedAt: T0 + 1_000,
-        },
-      ],
-      "t1",
-      T0 + 2_000,
-    );
-    expect(visible.map((a) => a._id)).toEqual(["a1"]);
-  });
-
-  it("drops settled approvals after the linger window", () => {
-    const visible = visibleTaskApprovals(
-      [
-        {
-          _id: "a1",
-          taskId: "t1",
-          status: "declined",
-          createdAt: T0,
-          decidedAt: T0 + 1_000,
-        },
-      ],
-      "t1",
-      T0 + 1_000 + SETTLED_APPROVAL_VISIBLE_MS + 1,
-    );
-    expect(visible).toEqual([]);
-  });
-
-  it("orders pending before settled", () => {
-    const visible = visibleTaskApprovals(
+  it("keeps settled approvals in createdAt order (render filters them)", () => {
+    // A settling card must not jump position while it fades out, so the
+    // sort ignores status — the pending/settled split happens at render
+    // (useSettlingApprovals), not here.
+    const forTask = approvalsForTask(
       [
         {
           _id: "done",
@@ -239,9 +206,14 @@ describe("visibleTaskApprovals", () => {
         { _id: "open", taskId: "t1", status: "pending", createdAt: T0 + 100 },
       ],
       "t1",
-      T0 + 1_000,
     );
-    expect(visible.map((a) => a._id)).toEqual(["open", "done"]);
+    expect(forTask.map((a) => a._id)).toEqual(["done", "open"]);
+  });
+
+  it("returns an empty list when the task has no approvals", () => {
+    expect(
+      approvalsForTask([{ _id: "b1", taskId: "t2", status: "pending" }], "t1"),
+    ).toEqual([]);
   });
 });
 

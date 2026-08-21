@@ -22,7 +22,9 @@ type AnyRecord = Record<string, any>;
  * decision buttons); the chat variant is a compact actionable notice at
  * chat typography. Both share this decision path — decideApprovalForViewer,
  * idempotent server-side — so the surfaces can never disagree on behavior.
- * A settled approval renders in place as a chip: the record of the decision.
+ * A settled approval only renders during its brief exit (useSettlingApprovals
+ * keeps it mounted to fade out, chip showing the decision); the durable
+ * record of the decision lives in run/task activity history, not here.
  */
 export function ApprovalCard({
   approval,
