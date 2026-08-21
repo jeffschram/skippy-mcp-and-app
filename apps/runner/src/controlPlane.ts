@@ -17,6 +17,8 @@ export interface ClaimedRun {
   harness: Harness;
   attempt: number;
   taskId?: string;
+  /** Title of the task this run executes; names the PR so the list stays scannable. */
+  taskTitle?: string;
   chatId: string;
   externalThreadId?: string;
   worktreePath?: string;

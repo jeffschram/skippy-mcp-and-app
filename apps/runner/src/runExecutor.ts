@@ -300,7 +300,7 @@ export class RunExecutor {
         prUrl = await createOrUpdatePr({
           worktreePath: worktree.worktreePath,
           baseBranch: run.baseBranch,
-          title: run.project.title ? `Agent: ${run.project.title}` : `Agent work on ${worktree.branchName}`,
+          title: prTitle(run, worktree.branchName),
           body: `${turn.resultText ?? "Automated agent work."}\n\n---\nRun ${run.runId} (attempt ${run.attempt}) via Skippy agent workbench.`,
         });
       } catch (error: unknown) {
@@ -364,6 +364,20 @@ async function runVerifyCommand(
       },
     );
   });
+}
+
+/**
+ * PR title for a published run. Uses the task's title so the GitHub PR list
+ * stays scannable — every run titled with the project string ("Agent: Skippy
+ * MCP and APP", PRs #117–#124) made the list unreadable. Falls back to the
+ * project title for chat-scoped runs without a task, then the branch name.
+ */
+export function prTitle(
+  run: Pick<ClaimedRun, "taskTitle"> & { project: Pick<ClaimedRun["project"], "title"> },
+  branchName: string,
+): string {
+  const title = run.taskTitle?.trim() || run.project.title?.trim();
+  return title ? `Agent: ${title}` : `Agent work on ${branchName}`;
 }
 
 function buildPrompt(run: ClaimedRun): string {
