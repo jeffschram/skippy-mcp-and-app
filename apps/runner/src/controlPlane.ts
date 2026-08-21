@@ -54,6 +54,14 @@ const fns = (anyApi as any).agentWorkbench as Record<string, any>;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const chatFns = (anyApi as any).chats as Record<string, any>;
 
+/** Attachment on the turn's user message: metadata + a short-lived download URL. */
+export interface ChatTurnAttachment {
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  url: string | null;
+}
+
 export interface ClaimedChatTurn {
   turnId: string;
   claimToken: string;
@@ -62,8 +70,11 @@ export interface ClaimedChatTurn {
   externalThreadId?: string;
   scopeContext: string;
   cwd?: string;
+  /** Project assets folder (_library) on this host, when the project is mapped. */
+  assetsPath?: string;
   history: Array<{ role: "user" | "assistant"; content: string }>;
   userContent: string;
+  attachments?: ChatTurnAttachment[];
 }
 
 export class ControlPlane {

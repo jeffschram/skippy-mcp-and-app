@@ -17,12 +17,41 @@
  */
 import { mutationGeneric, queryGeneric } from "convex/server";
 import { v } from "convex/values";
+import { effectiveProjectPaths, validateProjectFileInput } from "@skippy/shared";
 import { requireOwnedBrain } from "./auth";
 import { requireHost } from "./agentWorkbench";
 
 const CHAT_LEASE_MS = 150_000;
 const HISTORY_LIMIT = 20;
 const MAX_MESSAGE_CHARS = 8000;
+/** Max files attachable to a single chat message. */
+const MAX_MESSAGE_ATTACHMENTS = 8;
+
+const attachmentArg = v.object({
+  storageId: v.id("_storage"),
+  fileName: v.string(),
+  mimeType: v.string(),
+  sizeBytes: v.number(),
+});
+
+/** Resolve short-lived download URLs for a message's attachments at read time. */
+async function attachmentsWithUrls(
+  storage: { getUrl(storageId: string): Promise<string | null> },
+  attachments: Array<{ storageId: string; fileName: string; mimeType: string; sizeBytes: number }> | undefined,
+) {
+  if (!attachments?.length) return undefined;
+  const resolved = [];
+  for (const attachment of attachments) {
+    resolved.push({
+      fileName: attachment.fileName,
+      mimeType: attachment.mimeType,
+      sizeBytes: attachment.sizeBytes,
+      // Time-limited URL — resolved fresh on every read, never persisted.
+      url: await storage.getUrl(attachment.storageId),
+    });
+  }
+  return resolved;
+}
 
 const harnessArg = v.union(v.literal("codex"), v.literal("claude"));
 
@@ -181,15 +210,18 @@ export const chatForScopeForViewer = queryGeneric({
       activeTurnStatus: activeTurn?.status ?? null,
       pendingApprovals,
       activeTurnEvents,
-      messages: messages.map((m: any) => ({
-        _id: m._id,
-        role: m.role,
-        content: m.content,
-        status: m.status,
-        error: m.error,
-        createdAt: m.createdAt,
-        completedAt: m.completedAt,
-      })),
+      messages: await Promise.all(
+        messages.map(async (m: any) => ({
+          _id: m._id,
+          role: m.role,
+          content: m.content,
+          attachments: await attachmentsWithUrls(ctx.storage, m.attachments),
+          status: m.status,
+          error: m.error,
+          createdAt: m.createdAt,
+          completedAt: m.completedAt,
+        })),
+      ),
     };
   },
 });
@@ -200,12 +232,27 @@ export const sendChatMessageForViewer = mutationGeneric({
     pageKey: v.optional(v.string()),
     content: v.string(),
     harness: v.optional(harnessArg),
+    // Files already uploaded + registered in the project library by the
+    // composer; referenced here so the message renders them and the runner
+    // can hand them to the harness. Project chats only in v1.
+    attachments: v.optional(v.array(attachmentArg)),
   },
   handler: async (ctx, args) => {
     const { brain } = await requireOwnedBrain(ctx);
     if (!args.projectId && !args.pageKey) throw new Error("projectId or pageKey is required");
     const content = args.content.trim().slice(0, MAX_MESSAGE_CHARS);
-    if (!content) throw new Error("message cannot be empty");
+    const attachments = args.attachments ?? [];
+    if (!content && !attachments.length) throw new Error("message cannot be empty");
+    if (attachments.length) {
+      // v1: attachments ride the project library, so page chats reject them.
+      if (!args.projectId) throw new Error("attachments are only supported in project chats");
+      if (attachments.length > MAX_MESSAGE_ATTACHMENTS) {
+        throw new Error(`too many attachments (max ${MAX_MESSAGE_ATTACHMENTS} per message)`);
+      }
+      // Same size/type gate as the library register path — the composer
+      // pre-checks, but the mutation is the real boundary.
+      for (const attachment of attachments) validateProjectFileInput(attachment);
+    }
 
     const now = Date.now();
     let chat = await findChatForScope(ctx.db, brain._id, args.projectId, args.pageKey);
@@ -243,6 +290,7 @@ export const sendChatMessageForViewer = mutationGeneric({
       chatId,
       role: "user",
       content,
+      ...(attachments.length ? { attachments } : {}),
       status: "complete",
       createdAt: now,
     });
@@ -318,6 +366,9 @@ export const claimNextChatTurn = mutationGeneric({
       // Scope context + working directory for the harness.
       let scopeContext = "";
       let cwd: string | undefined;
+      // Where the runner should materialize message attachments (the
+      // project's _library assets folder on this host's checkout).
+      let assetsPath: string | undefined;
       if (chat.projectId) {
         const project = await ctx.db.get(chat.projectId);
         const config = await ctx.db
@@ -327,6 +378,14 @@ export const claimNextChatTurn = mutationGeneric({
           )
           .first();
         if (config?.hostId === host._id) cwd = config.localPath;
+        if (project) {
+          // Derived from this host's mapped checkout (cwd), honoring an
+          // explicit assetsFolderPath override on the project.
+          assetsPath = effectiveProjectPaths({
+            ...(cwd ? { localPath: cwd } : {}),
+            ...(project.assetsFolderPath ? { assetsFolderPath: project.assetsFolderPath } : {}),
+          }).effectiveAssetsPath;
+        }
         if (project) {
           scopeContext = [
             `The user is chatting from the project "${project.title}" (status: ${project.status}).`,
@@ -384,8 +443,13 @@ export const claimNextChatTurn = mutationGeneric({
         externalThreadId,
         scopeContext,
         cwd,
+        assetsPath,
         history,
         userContent: userMessage?.content ?? "",
+        // Attachment metadata plus short-lived download URLs so the runner
+        // can materialize the files into the project's _library before the
+        // harness turn starts. URLs expire — the runner downloads promptly.
+        attachments: await attachmentsWithUrls(ctx.storage, userMessage?.attachments),
       };
     }
     return null;

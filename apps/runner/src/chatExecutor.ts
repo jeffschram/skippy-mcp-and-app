@@ -8,6 +8,7 @@
  * panel via the chat-turn approval flow.
  */
 import fs from "node:fs";
+import path from "node:path";
 import type { RunnerConfig } from "./config.js";
 import type { ClaimedChatTurn, ControlPlane } from "./controlPlane.js";
 import type { HarnessAdapter, HarnessEvent } from "./harness/types.js";
@@ -71,7 +72,12 @@ export async function executeChatTurn(
       }
     }
 
-    const prompt = buildChatPrompt(turn);
+    // Message attachments: materialize into the project's assets folder
+    // (_library) so the harness can read the actual file contents this turn.
+    // Best-effort — a failed download degrades to a filename mention.
+    const localAttachments = await materializeChatAttachments(turn, config.allowedRoot);
+
+    const prompt = buildChatPrompt(turn, localAttachments);
     const result = await adapter.runTurn({
       prompt,
       worktreePath: cwd,
@@ -117,10 +123,75 @@ export async function executeChatTurn(
   }
 }
 
-function buildChatPrompt(turn: ClaimedChatTurn): string {
+/** A message attachment after the download attempt: local path when it worked. */
+export type MaterializedAttachment = { fileName: string; localPath?: string };
+
+/**
+ * Download the turn's message attachments into the project's assets folder
+ * (_library on this host's checkout). Every failure path degrades silently to
+ * a filename-only mention: no assets folder mapped, path outside the allowed
+ * root, expired/missing URL, or a failed fetch/write — the turn always runs.
+ */
+export async function materializeChatAttachments(
+  turn: Pick<ClaimedChatTurn, "attachments" | "assetsPath">,
+  allowedRoot: string,
+): Promise<MaterializedAttachment[]> {
+  const attachments = turn.attachments ?? [];
+  if (!attachments.length) return [];
+
+  let dir: string | undefined;
+  if (turn.assetsPath) {
+    try {
+      dir = assertInsideAllowedRoot(turn.assetsPath, allowedRoot);
+    } catch {
+      dir = undefined;
+    }
+  }
+
+  const results: MaterializedAttachment[] = [];
+  for (const attachment of attachments) {
+    // basename() guards against a fileName smuggling path segments.
+    const safeName = path.basename(attachment.fileName.trim());
+    if (!dir || !attachment.url || !safeName) {
+      results.push({ fileName: attachment.fileName });
+      continue;
+    }
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+      const target = path.join(dir, safeName);
+      // Skip the download when an identically sized copy is already there
+      // (mirrors the library materialization convention).
+      const existingSize = fs.existsSync(target) ? fs.statSync(target).size : -1;
+      if (existingSize !== attachment.sizeBytes) {
+        const response = await fetch(attachment.url);
+        if (!response.ok) throw new Error(`download failed (HTTP ${response.status})`);
+        fs.writeFileSync(target, Buffer.from(await response.arrayBuffer()));
+      }
+      results.push({ fileName: attachment.fileName, localPath: target });
+    } catch {
+      // Silent skip: the prompt mentions the filename without a local path.
+      results.push({ fileName: attachment.fileName });
+    }
+  }
+  return results;
+}
+
+export function buildChatPrompt(turn: ClaimedChatTurn, attachments: MaterializedAttachment[] = []): string {
+  const attachmentLines = attachments.length
+    ? [
+        "",
+        "The user attached the following file(s) to this message:",
+        ...attachments.map((attachment) =>
+          attachment.localPath
+            ? `- ${attachment.fileName} — saved locally at ${attachment.localPath} (read that file for its contents)`
+            : `- ${attachment.fileName} — stored in the project library (no local copy available this turn)`,
+        ),
+      ]
+    : [];
+
   // Resumed harness threads already hold the conversation — send only the new
   // user message. Fresh threads get the scope preamble plus recent history.
-  if (turn.externalThreadId) return turn.userContent;
+  if (turn.externalThreadId) return [turn.userContent, ...attachmentLines].join("\n");
 
   const lines = [
     "You are the user's Skippy assistant, chatting from the Skippy web app. You have your normal local capabilities (files, commands, tools); use them when they help answer.",
@@ -135,5 +206,6 @@ function buildChatPrompt(turn: ClaimedChatTurn): string {
     lines.push("");
   }
   lines.push(`User: ${turn.userContent}`);
+  lines.push(...attachmentLines);
   return lines.filter((line) => line !== undefined).join("\n");
 }

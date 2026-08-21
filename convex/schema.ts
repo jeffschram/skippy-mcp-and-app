@@ -1380,6 +1380,20 @@ export default defineSchema({
     chatId: v.id("projectChats"),
     role: v.union(v.literal("user"), v.literal("assistant")),
     content: v.string(),
+    // Files dropped/pasted into the chat composer. Each is uploaded through
+    // the project-library flow first (so it is also a projectFiles row) and
+    // referenced here by storageId; download URLs are always resolved at
+    // read time — never persisted. Project chats only in v1.
+    attachments: v.optional(
+      v.array(
+        v.object({
+          storageId: v.id("_storage"),
+          fileName: v.string(),
+          mimeType: v.string(),
+          sizeBytes: v.number(),
+        }),
+      ),
+    ),
     status: v.union(v.literal("complete"), v.literal("pending"), v.literal("error")),
     error: v.optional(v.string()),
     createdAt: v.number(),
