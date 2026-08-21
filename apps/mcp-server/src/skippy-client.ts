@@ -44,6 +44,11 @@ const currentContextForBrainRef = makeFunctionReference<"query">("projects:curre
 const projectBoardForBrainRef = makeFunctionReference<"query">("projects:projectBoardForBrain");
 const updateProjectForBrainRef = makeFunctionReference<"mutation">("projects:updateProjectForBrain");
 const updatePhaseForBrainRef = makeFunctionReference<"mutation">("projects:updatePhaseForBrain");
+const projectNotesForBrainRef = makeFunctionReference<"query">("projects:projectNotesForBrain");
+const updateProjectNotesForBrainRef = makeFunctionReference<"mutation">("projects:updateProjectNotesForBrain");
+const snapshotProjectNotesForBrainRef = makeFunctionReference<"mutation">(
+  "projects:snapshotProjectNotesForBrain",
+);
 const createPhaseForBrainRef = makeFunctionReference<"mutation">("projects:createPhaseForBrain");
 const setTaskPhaseForBrainRef = makeFunctionReference<"mutation">("projects:setTaskPhaseForBrain");
 const planProjectForBrainRef = makeFunctionReference<"action">("planning:planProjectForBrain");
@@ -155,6 +160,12 @@ export function createConvexSkippyClient(convexUrl: string, authToken?: string):
       client.mutation(updateProjectForBrainRef, { brainInstanceId, ...input }),
     updatePhase: (brainInstanceId, input) =>
       client.mutation(updatePhaseForBrainRef, { brainInstanceId, ...input }),
+    getProjectNotes: (brainInstanceId, input) =>
+      client.query(projectNotesForBrainRef, { brainInstanceId, ...input }),
+    updateProjectNotes: (brainInstanceId, input) =>
+      client.mutation(updateProjectNotesForBrainRef, { brainInstanceId, ...input }),
+    snapshotProjectNotes: (brainInstanceId, input) =>
+      client.mutation(snapshotProjectNotesForBrainRef, { brainInstanceId, ...input }),
     createPhase: (brainInstanceId, input) =>
       client.mutation(createPhaseForBrainRef, { brainInstanceId, ...input }),
     setTaskPhase: (brainInstanceId, input) =>

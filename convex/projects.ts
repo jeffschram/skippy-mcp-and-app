@@ -138,6 +138,9 @@ async function buildBoard(db: any, brainInstanceId: any, projectId: string) {
       _id: project._id,
       title: project.title,
       summary: project.summary,
+      // Freeform Notes-tab pad. Empty string (not undefined) so the pad
+      // textarea always has a stable controlled value.
+      notesPad: project.notesPad ?? "",
       status: project.status,
       kind: project.kind ?? "general",
       repoUrl: project.repoUrl,
@@ -973,6 +976,64 @@ export const updatePhaseForViewer = mutationGeneric({
   },
 });
 
+/* ------------------------------------------------------------------ */
+/* Project notes pad                                                  */
+/*                                                                    */
+/* One freeform plain-text pad per project (projects.notesPad) — a    */
+/* notepad, not a document system. Saving overwrites the whole field  */
+/* (last-write-wins is fine for a single-owner pad); history is kept  */
+/* by snapshotting the entire pad at review-session granularity into  */
+/* projectNoteSnapshots, then pruning the live pad.                   */
+/* ------------------------------------------------------------------ */
+
+async function saveProjectNotes(db: any, brainInstanceId: any, projectId: any, notesPad: string) {
+  const project = await db.get(projectId);
+  if (!project || project.brainInstanceId !== brainInstanceId) throw new Error("project not found");
+  // Plain text stored verbatim — no trimming, so leading/trailing blank
+  // lines the owner typed survive the round trip. Empty means pruned.
+  await db.patch(projectId, { notesPad, updatedAt: Date.now() });
+  return { projectId, status: "updated" };
+}
+
+async function snapshotProjectNotes(
+  db: any,
+  brainInstanceId: any,
+  projectId: any,
+  summary: string | undefined,
+  createdBy: "user" | "harness",
+) {
+  const project = await db.get(projectId);
+  if (!project || project.brainInstanceId !== brainInstanceId) throw new Error("project not found");
+  // Snapshot what is STORED, not what the caller believes the pad says:
+  // the snapshot's whole job is to preserve the pad as-is before a prune.
+  const content = project.notesPad ?? "";
+  const snapshotId = await db.insert("projectNoteSnapshots", {
+    brainInstanceId,
+    projectId,
+    content,
+    summary: summary?.trim() || undefined,
+    createdBy,
+    createdAt: Date.now(),
+  });
+  return { snapshotId, projectId, contentLength: content.length, status: "created" };
+}
+
+export const updateProjectNotesForViewer = mutationGeneric({
+  args: { projectId: v.id("projects"), notesPad: v.string() },
+  handler: async (ctx, args) => {
+    const { brain } = await requireOwnedBrain(ctx);
+    return saveProjectNotes(ctx.db, brain._id, args.projectId, args.notesPad);
+  },
+});
+
+export const snapshotProjectNotesForViewer = mutationGeneric({
+  args: { projectId: v.id("projects"), summary: v.optional(v.string()) },
+  handler: async (ctx, args) => {
+    const { brain } = await requireOwnedBrain(ctx);
+    return snapshotProjectNotes(ctx.db, brain._id, args.projectId, args.summary, "user");
+  },
+});
+
 export const reorderTaskInPhaseForViewer = mutationGeneric({
   args: {
     projectId: v.id("projects"),
@@ -1399,6 +1460,48 @@ export const updatePhaseForBrain = mutationGeneric({
     if (args.descriptionMd !== undefined) patch.descriptionMd = args.descriptionMd;
     await db.patch(args.phaseId, patch);
     return { phaseId: args.phaseId, status: "updated" };
+  },
+});
+
+/**
+ * Harness-facing notes pad read: this is what makes the "review my notes"
+ * verb work — the chat harness reads the pad, the owner and assistant fold
+ * items into the Plan, then (with the owner's explicit OK) the harness
+ * snapshots and prunes. Convention, not code-enforced: the harness only
+ * edits the pad at the close of an owner-requested review.
+ */
+export const projectNotesForBrain = queryGeneric({
+  args: { brainInstanceId: v.id("brainInstances"), projectId: v.id("projects") },
+  handler: async ({ db }, args) => {
+    const project = await db.get(args.projectId);
+    if (!project || project.brainInstanceId !== args.brainInstanceId) throw new Error("project not found");
+    return {
+      projectId: args.projectId,
+      projectTitle: project.title,
+      notesPad: project.notesPad ?? "",
+    };
+  },
+});
+
+export const updateProjectNotesForBrain = mutationGeneric({
+  args: {
+    brainInstanceId: v.id("brainInstances"),
+    projectId: v.id("projects"),
+    notesPad: v.string(),
+  },
+  handler: async ({ db }, args) => {
+    return saveProjectNotes(db, args.brainInstanceId, args.projectId, args.notesPad);
+  },
+});
+
+export const snapshotProjectNotesForBrain = mutationGeneric({
+  args: {
+    brainInstanceId: v.id("brainInstances"),
+    projectId: v.id("projects"),
+    summary: v.optional(v.string()),
+  },
+  handler: async ({ db }, args) => {
+    return snapshotProjectNotes(db, args.brainInstanceId, args.projectId, args.summary, "harness");
   },
 });
 

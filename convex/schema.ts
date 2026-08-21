@@ -324,6 +324,11 @@ export default defineSchema({
     brainInstanceId: v.id("brainInstances"),
     title: v.string(),
     summary: v.optional(v.string()),
+    // Freeform per-project notes pad (the Notes tab): ONE always-editable
+    // plain-text field, deliberately NOT `note` entities. Structure lives in
+    // the Plan; history is captured at review-session granularity in
+    // projectNoteSnapshots (same storage shape as phase descriptions).
+    notesPad: v.optional(v.string()),
     ...processingMetadata,
     status: v.union(
       v.literal("idea"),
@@ -833,6 +838,21 @@ export default defineSchema({
   })
     .index("by_brain_project", ["brainInstanceId", "projectId"])
     .index("by_project_order", ["projectId", "orderNum"]),
+
+  // Point-in-time archives of a project's notes pad (projects.notesPad).
+  // Archive-by-snapshot, not by entry: at the close of an owner-requested
+  // notes review the WHOLE pad is preserved here, then the live pad is
+  // pruned. No UI in v1 — snapshots exist in the data, browsable later.
+  projectNoteSnapshots: defineTable({
+    brainInstanceId: v.id("brainInstances"),
+    projectId: v.id("projects"),
+    // Full pad text at snapshot time. Plain text only, like the pad itself.
+    content: v.string(),
+    // Optional one-line description of the review session that produced it.
+    summary: v.optional(v.string()),
+    createdBy: v.union(v.literal("user"), v.literal("harness")),
+    createdAt: v.number(),
+  }).index("by_brain_project", ["brainInstanceId", "projectId"]),
 
   // Cloud-canonical project library backed by Convex file storage. The local
   // `_library` folder (effectiveAssetsPath) is the harness's materialization of
