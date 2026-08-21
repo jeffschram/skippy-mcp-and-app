@@ -1,0 +1,66 @@
+# Deploys Convex functions when function code (or the workspace packages it
+# bundles) lands on main. Exists because the backend was previously deployed
+# by hand (`npx convex dev --once`), and a merge that shipped the frontend
+# without the matching Convex functions silently broke Notes pad saves.
+#
+# Target deployment: the live backend is the *dev* deployment
+# `dev:beloved-curlew-997` (see .env.local locally). `npx convex deploy`
+# derives its target from CONVEX_DEPLOY_KEY, so the repo secret must be a
+# deploy key generated in the Convex dashboard *for that deployment*
+# (Settings -> Deploy keys on dev:beloved-curlew-997). Do NOT use a
+# production-scoped key unless/until the app is promoted to a real prod
+# deployment — that key would deploy the functions somewhere the app isn't
+# pointed at.
+#
+# Required repo secret: CONVEX_DEPLOY_KEY
+#
+# Merge-to-main only, matching the expand-then-merge convention: PR branches
+# never auto-deploy.
+name: Deploy Convex functions
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "convex/**"
+      # convex/ imports @skippy/shared and @skippy/ai, which esbuild bundles
+      # into the deployed functions.
+      - "packages/**"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/convex-deploy.yml"
+
+concurrency:
+  # One deploy at a time; queued pushes collapse to the latest.
+  group: convex-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Enable pnpm via corepack
+        run: |
+          corepack enable
+          corepack prepare pnpm@8.10.2 --activate
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # convex/ resolves @skippy/shared and @skippy/ai through their package
+      # exports (dist/), so they must be built before bundling.
+      - name: Build workspace packages used by convex/
+        run: |
+          pnpm --filter @skippy/shared build
+          pnpm --filter @skippy/ai build
+
+      - name: Deploy Convex functions
+        env:
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
+        run: npx convex deploy --yes

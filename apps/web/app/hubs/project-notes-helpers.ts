@@ -22,8 +22,15 @@ export type PadAutosave = {
    * mid-edit and the remote value must not clobber it).
    */
   remoteValue(value: string): string | null;
-  /** Cancel any pending debounced save (component unmount). */
-  dispose(): void;
+  /**
+   * Call on component unmount with the latest draft. Flush semantics: if a
+   * debounced save is pending and `value` is still dirty, commit it now —
+   * React does not reliably fire blur when a focused textarea unmounts (tab
+   * switch, route change), so cancelling outright would drop the trailing
+   * keystrokes. A clean dispose (no pending debounce) saves nothing, so a
+   * blur commit followed by dispose never double-saves.
+   */
+  dispose(value: string): void;
 };
 
 export function createPadAutosave({
@@ -70,6 +77,13 @@ export function createPadAutosave({
     remoteValue(value: string) {
       return focused ? null : value;
     },
-    dispose: clearTimer,
+    dispose(value: string) {
+      // Only a *pending* debounce flushes. If no timer is armed, either the
+      // draft is clean or a blur/commit already handled it — saving again
+      // here would double-save (or resurrect a stale value).
+      const pending = timer !== null;
+      clearTimer();
+      if (pending && value !== savedValue()) save(value);
+    },
   };
 }
