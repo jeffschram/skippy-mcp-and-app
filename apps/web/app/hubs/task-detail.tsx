@@ -1,18 +1,26 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import {
   ArrowLeft,
   Ban,
   Check,
   ExternalLink,
+  FilePenLine,
   GitPullRequest,
+  ListChecks,
   Pencil,
   Play,
+  Sparkles,
+  TerminalSquare,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { api } from "../../lib/skippy-api";
+import {
+  summarizeChatActivity,
+  type ChatActivityLine,
+} from "../../lib/chat-activity";
 import {
   EXECUTION_COLUMNS,
   executionStateTone,
@@ -52,6 +60,118 @@ function DetailSection({
       <h3 className="mb-2 text-sm">{title}</h3>
       {children}
     </section>
+  );
+}
+
+/** Run statuses where the harness may still emit events. */
+const ACTIVE_RUN_STATUSES = new Set([
+  "queued",
+  "claimed",
+  "preparing",
+  "running",
+  "waiting_for_approval",
+  "verifying",
+  "awaiting_publish_approval",
+  "publishing",
+]);
+
+/** Parked runs are waiting on the owner, not working. */
+const PARKED_RUN_STATUSES = new Set([
+  "waiting_for_approval",
+  "awaiting_publish_approval",
+]);
+
+/** Newest events kept live in the panel; summarization trims further. */
+const RUN_EVENT_TAIL = 80;
+
+function runActivityLineIcon(line: ChatActivityLine) {
+  switch (line.kind) {
+    case "command":
+      return <TerminalSquare size={13} aria-hidden className="mt-0.5 shrink-0" />;
+    case "file_change":
+      return <FilePenLine size={13} aria-hidden className="mt-0.5 shrink-0" />;
+    default:
+      return <Sparkles size={13} aria-hidden className="mt-0.5 shrink-0" />;
+  }
+}
+
+/**
+ * Live narration for an in-progress agent task: latest narration line, a
+ * short tail of recent actions, and plan progress, streaming from the run's
+ * agentRunEvents. The chat shows only compact lifecycle notices; this panel
+ * is where the owner watches the run.
+ *
+ * Mounted by TaskDetailPanel only while the task is in_progress AND
+ * agent-owned (the parent gates via this child so hook order stays stable).
+ * It renders nothing when no run exists or the run has already settled, so
+ * a terminal state cleanly reverts to the panel's result/PR sections.
+ */
+function TaskRunActivity({ taskId }: { taskId: string }) {
+  const viewerReady = useViewerReady();
+  const runInfo = useQuery(
+    api.agentWorkbench.runForTaskForViewer,
+    viewerReady ? { taskId: taskId as any } : "skip",
+  ) as AnyRecord | null | undefined;
+  const run: AnyRecord | undefined = runInfo?.run;
+  const active = Boolean(run && ACTIVE_RUN_STATUSES.has(run.status));
+  // Subscribe to events only while the run can still produce them; the tail
+  // arg keeps long runs from streaming their whole history to the client.
+  const eventsData = useQuery(
+    api.agentWorkbench.runEventsForViewer,
+    active ? { runId: run!._id as any, tail: RUN_EVENT_TAIL } : "skip",
+  ) as AnyRecord | undefined;
+  const events: AnyRecord[] = eventsData?.events ?? [];
+  const activity = useMemo(() => summarizeChatActivity(events, 6), [events]);
+  if (!active) return null;
+  const parked = PARKED_RUN_STATUSES.has(run!.status);
+  return (
+    <DetailSection title="Live activity">
+      <div className="grid gap-2">
+        {activity.narration ? (
+          <p className="m-0 whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">
+            {activity.narration}
+          </p>
+        ) : null}
+        {/* Echoes the chat LiveActivity dashed inner panel. */}
+        <div className="grid gap-1 rounded-xl border border-dashed border-primary/30 bg-primary/[0.04] px-3 py-2">
+          {activity.plan ? (
+            <p className="m-0 flex items-start gap-1.5 text-xs text-muted-foreground">
+              <ListChecks size={13} aria-hidden className="mt-0.5 shrink-0" />
+              <span>
+                {activity.plan.done}/{activity.plan.total}
+                {activity.plan.current ? ` — ${activity.plan.current}` : " done"}
+              </span>
+            </p>
+          ) : null}
+          {activity.lines.map((line, index) => (
+            <p
+              key={`${line.kind}:${index}:${line.text}`}
+              className={cn(
+                "m-0 flex items-start gap-1.5 text-xs",
+                line.kind === "error" ? "text-destructive" : "text-muted-foreground",
+                line.kind === "command" && "font-mono",
+              )}
+            >
+              {runActivityLineIcon(line)}
+              <span className="min-w-0 break-words">
+                {line.kind === "command" ? `$ ${line.text}` : line.text}
+              </span>
+            </p>
+          ))}
+          {parked ? (
+            // A parked run reads "waiting on you" — the approval card above
+            // carries the urgency, so no working pulse here.
+            <p className="m-0 text-xs font-bold text-muted-foreground">
+              Paused — waiting on your approval
+            </p>
+          ) : (
+            <p className="m-0 text-xs font-bold text-primary animate-pulse">
+              Working…
+            </p>
+          )}
+        </div>
+      </div>
+    </DetailSection>
   );
 }
 
@@ -234,6 +354,14 @@ export function TaskDetailPanel({
             ) : null}
           </div>
         </div>
+
+        {task.executionState === "in_progress" && task.ownerType === "agent" ? (
+          // Live run narration: only agent-owned, in-progress tasks can have
+          // a streaming run. Gated here (not with conditional hooks) so the
+          // subscriptions unmount the moment the state flips — no stale
+          // narration once the run settles.
+          <TaskRunActivity taskId={task._id as string} />
+        ) : null}
 
         <DetailSection title="Description">
           {task.description ? (
