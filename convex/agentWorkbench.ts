@@ -655,6 +655,67 @@ export const pendingApprovalsForViewer = queryGeneric({
   },
 });
 
+/**
+ * Approvals for a project's runs, joined with the owning task, for the
+ * approval UI surface (task panel card, chat notice, board indicator).
+ * Includes settled approvals — a decided chat notice stays in the timeline
+ * as the record of the decision — capped so the payload stays bounded.
+ * Read-only join over existing tables; the approval lifecycle itself
+ * (request/decide/cancel) is untouched.
+ */
+export const approvalsForProjectForViewer = queryGeneric({
+  args: { projectId: v.id("projects") },
+  handler: async (ctx, { projectId }) => {
+    const { brain } = await requireOwnedBrain(ctx);
+    // Prefix match on by_brain_status: all runs for the brain, then narrow
+    // to the project. Bounded to the most recent runs so an old, busy
+    // project cannot balloon the payload.
+    const runs = await ctx.db
+      .query("agentRuns")
+      .withIndex("by_brain_status", (q: any) => q.eq("brainInstanceId", brain._id))
+      .collect();
+    const projectRuns = runs
+      .filter((run: any) => run.projectId === projectId)
+      .sort((a: any, b: any) => b.createdAt - a.createdAt)
+      .slice(0, 30);
+    const taskTitles = new Map<string, string | undefined>();
+    const out: any[] = [];
+    for (const run of projectRuns) {
+      if (run.taskId && !taskTitles.has(run.taskId)) {
+        const task = await ctx.db.get(run.taskId);
+        taskTitles.set(run.taskId, task?.title);
+      }
+      const approvals = await ctx.db
+        .query("agentApprovals")
+        .withIndex("by_run", (q: any) => q.eq("runId", run._id))
+        .collect();
+      for (const approval of approvals) {
+        out.push({
+          _id: approval._id,
+          runId: approval.runId,
+          taskId: run.taskId,
+          taskTitle: run.taskId ? taskTitles.get(run.taskId) : undefined,
+          runStatus: run.status,
+          branch: run.workingBranch,
+          verificationSummary: run.verificationSummary,
+          kind: approval.kind,
+          title: approval.title,
+          explanation: approval.explanation,
+          details: approval.details,
+          availableDecisions: approval.availableDecisions ?? ["accepted", "declined"],
+          status: approval.status,
+          decidedAt: approval.decidedAt,
+          reason: approval.reason,
+          createdAt: approval.createdAt,
+          updatedAt: approval.updatedAt,
+        });
+      }
+    }
+    out.sort((a, b) => a.createdAt - b.createdAt);
+    return out.slice(-100);
+  },
+});
+
 export const runForTaskForViewer = queryGeneric({
   args: { taskId: v.id("tasks") },
   handler: async (ctx, { taskId }) => {

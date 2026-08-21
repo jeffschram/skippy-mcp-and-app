@@ -20,10 +20,15 @@ import {
   Plus,
   Rocket,
   Settings2,
+  ShieldAlert,
   Sparkles,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { api } from "../../lib/skippy-api";
+import {
+  pendingApprovalCount,
+  pendingApprovalsByTask,
+} from "../../lib/approvals";
 import { ProjectChatWorkspace } from "../components/chat-panel";
 import {
   Badge,
@@ -214,6 +219,7 @@ function PhaseDescription({ phase }: { phase: AnyRecord }) {
 function TaskRow({
   task,
   busy,
+  pendingApprovals = 0,
   onSelect,
   onStart,
   onComplete,
@@ -222,6 +228,8 @@ function TaskRow({
 }: {
   task: AnyRecord;
   busy: boolean;
+  /** Pending run approvals waiting on the owner for this task. */
+  pendingApprovals?: number;
   onSelect: () => void;
   onStart: () => void;
   onComplete: () => void;
@@ -291,7 +299,15 @@ function TaskRow({
             {task.ownerType === "agent" ? (
               <Badge tone="blue">Agent</Badge>
             ) : null}
-            {inProgress ? <Badge tone="gold">In Progress</Badge> : null}
+            {pendingApprovals > 0 ? (
+              // A waiting run must be discoverable without scrolling chat:
+              // the gate badge outranks the generic "In Progress" state.
+              <Badge tone="gold">
+                <ShieldAlert size={12} aria-hidden /> Needs approval
+              </Badge>
+            ) : inProgress ? (
+              <Badge tone="gold">In Progress</Badge>
+            ) : null}
           </div>
         </div>
         {action ? (
@@ -386,6 +402,7 @@ function PhaseSection({
   phase,
   phaseTasks,
   busyTaskId,
+  approvalsByTask,
   onSelect,
   onStart,
   onComplete,
@@ -395,6 +412,7 @@ function PhaseSection({
   phase: AnyRecord;
   phaseTasks: AnyRecord[];
   busyTaskId: string | null;
+  approvalsByTask: Record<string, number>;
   onSelect: (task: AnyRecord) => void;
   onStart: (task: AnyRecord) => void;
   onComplete: (task: AnyRecord) => void;
@@ -485,6 +503,7 @@ function PhaseSection({
             key={task._id}
             task={task}
             busy={busyTaskId === task._id}
+            pendingApprovals={approvalsByTask[task._id] ?? 0}
             onSelect={() => onSelect(task)}
             onStart={() => onStart(task)}
             onComplete={() => onComplete(task)}
@@ -546,12 +565,14 @@ function PhaseSection({
 function ProjectPlan({
   board,
   busyTaskId,
+  approvalsByTask,
   onSelect,
   onStart,
   onComplete,
 }: {
   board: AnyRecord;
   busyTaskId: string | null;
+  approvalsByTask: Record<string, number>;
   onSelect: (task: AnyRecord) => void;
   onStart: (task: AnyRecord) => void;
   onComplete: (task: AnyRecord) => void;
@@ -590,6 +611,7 @@ function ProjectPlan({
           phase={phase}
           phaseTasks={tasks.filter((task) => task.phaseId === phase._id)}
           busyTaskId={busyTaskId}
+          approvalsByTask={approvalsByTask}
           onSelect={onSelect}
           onStart={onStart}
           onComplete={onComplete}
@@ -618,6 +640,8 @@ function SidePanel({
   view,
   onView,
   busyTaskId,
+  approvalsByTask,
+  pendingApprovalTotal,
   onSelect,
   onStart,
   onComplete,
@@ -626,6 +650,8 @@ function SidePanel({
   view: ProjectView;
   onView: (view: ProjectView) => void;
   busyTaskId: string | null;
+  approvalsByTask: Record<string, number>;
+  pendingApprovalTotal: number;
   onSelect: (task: AnyRecord) => void;
   onStart: (task: AnyRecord) => void;
   onComplete: (task: AnyRecord) => void;
@@ -644,12 +670,20 @@ function SidePanel({
             role="tab"
             aria-selected={view === tab.key}
             className={cn(
-              "border-b-2 border-transparent px-3 py-2.5 text-sm font-bold text-muted-foreground",
+              "inline-flex items-center gap-1.5 border-b-2 border-transparent px-3 py-2.5 text-sm font-bold text-muted-foreground",
               view === tab.key && "border-primary text-foreground",
             )}
             onClick={() => onView(tab.key)}
           >
             {tab.label}
+            {tab.key === "plan" && pendingApprovalTotal > 0 ? (
+              <span
+                className="inline-flex min-w-[18px] items-center justify-center rounded-full bg-gold px-1 text-[11px] font-bold leading-[18px] text-white"
+                title={`${pendingApprovalTotal} pending approval${pendingApprovalTotal === 1 ? "" : "s"}`}
+              >
+                {pendingApprovalTotal}
+              </span>
+            ) : null}
           </button>
         ))}
       </div>
@@ -661,6 +695,7 @@ function SidePanel({
           <ProjectPlan
             board={board}
             busyTaskId={busyTaskId}
+            approvalsByTask={approvalsByTask}
             onSelect={onSelect}
             onStart={onStart}
             onComplete={onComplete}
@@ -682,6 +717,14 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
     api.projects.projectBoardForViewer,
     viewerReady ? { projectId: projectId as any } : "skip",
   ) as AnyRecord | null | undefined;
+  // One reactive approvals feed powers the whole surface: chat notices,
+  // the task panel card, and the board indicators. No polling — Convex
+  // pushes the pending → settled transition to every consumer at once.
+  const approvalsRaw = useQuery(
+    api.agentWorkbench.approvalsForProjectForViewer,
+    viewerReady ? { projectId: projectId as any } : "skip",
+  ) as AnyRecord[] | undefined;
+  const approvals = useMemo(() => approvalsRaw ?? [], [approvalsRaw]);
   const ensurePhases = useMutation(api.projects.ensureProjectPhasesForViewer);
   const setExecState = useMutation(api.projects.setTaskExecutionStateForViewer);
   const executeTask = useMutation(api.agentWorkbench.executeTaskForViewer);
@@ -768,6 +811,14 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
     }
     return moments;
   }, [activeTasks]);
+  const approvalsByTask = useMemo(
+    () => pendingApprovalsByTask(approvals),
+    [approvals],
+  );
+  const pendingApprovalTotal = useMemo(
+    () => pendingApprovalCount(approvals),
+    [approvals],
+  );
 
   if (board === undefined)
     return (
@@ -955,7 +1006,16 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
               )}
               onClick={() => setView(tab.key)}
             >
-              <tab.icon size={16} aria-hidden /> {tab.label}
+              <span className="relative">
+                <tab.icon size={16} aria-hidden />
+                {tab.key === "plan" && pendingApprovalTotal > 0 ? (
+                  <span
+                    className="absolute -right-1.5 -top-1 size-2 rounded-full bg-gold"
+                    aria-label={`${pendingApprovalTotal} pending approvals`}
+                  />
+                ) : null}
+              </span>
+              {tab.label}
             </button>
           ))}
         </nav>
@@ -967,6 +1027,8 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
             <ProjectChatWorkspace
               projectId={projectId}
               taskMoments={taskMoments}
+              runApprovals={approvals}
+              onOpenTask={setSelectedTaskId}
               className="min-h-0 flex-1"
             />
             {selectedTask ? (
@@ -976,6 +1038,7 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                 onBack={() => setSelectedTaskId(null)}
                 onStart={() => void startTask(selectedTask)}
                 onComplete={() => void completeTask(selectedTask)}
+                approvals={approvals}
                 className="absolute inset-0 z-10"
               />
             ) : null}
@@ -985,6 +1048,8 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
             view={view === "chat" ? "overview" : view}
             onView={setView}
             busyTaskId={busyTaskId}
+            approvalsByTask={approvalsByTask}
+            pendingApprovalTotal={pendingApprovalTotal}
             onSelect={(task) => setSelectedTaskId(task._id)}
             onStart={(task) => void startTask(task)}
             onComplete={(task) => void completeTask(task)}
@@ -1001,6 +1066,7 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
               onBack={() => setSelectedTaskId(null)}
               onStart={() => void startTask(selectedTask)}
               onComplete={() => void completeTask(selectedTask)}
+              approvals={approvals}
               className="h-[calc(100dvh-204px)]"
             />
           ) : (
@@ -1009,6 +1075,8 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                 <ProjectChatWorkspace
                   projectId={projectId}
                   taskMoments={taskMoments}
+                  runApprovals={approvals}
+                  onOpenTask={setSelectedTaskId}
                   className="h-[calc(100dvh-204px)]"
                 />
               ) : null}
@@ -1019,6 +1087,7 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                 <ProjectPlan
                   board={board}
                   busyTaskId={busyTaskId}
+                  approvalsByTask={approvalsByTask}
                   onSelect={(task) => setSelectedTaskId(task._id)}
                   onStart={(task) => void startTask(task)}
                   onComplete={(task) => void completeTask(task)}

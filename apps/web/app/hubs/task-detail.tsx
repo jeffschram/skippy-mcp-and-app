@@ -18,7 +18,16 @@ import {
   executionStateTone,
   titleCase,
 } from "../../lib/display";
-import { Badge, Button, Field, Select, TextArea, useToast } from "../components";
+import {
+  ApprovalCard,
+  Badge,
+  Button,
+  Field,
+  Select,
+  TextArea,
+  useToast,
+} from "../components";
+import { visibleTaskApprovals } from "../../lib/approvals";
 import { useViewerReady } from "./use-viewer";
 import {
   canAbandon,
@@ -60,6 +69,7 @@ export function TaskDetailPanel({
   onBack,
   onStart,
   onComplete,
+  approvals,
   className,
 }: {
   task: AnyRecord;
@@ -67,6 +77,8 @@ export function TaskDetailPanel({
   onBack: () => void;
   onStart: () => void;
   onComplete: () => void;
+  /** Run approvals for the project (approvalsForProjectForViewer). */
+  approvals?: AnyRecord[] | undefined;
   className?: string | undefined;
 }) {
   const viewerReady = useViewerReady();
@@ -104,6 +116,13 @@ export function TaskDetailPanel({
   const action = primaryTaskAction(task);
   const pr = prDisplay(task);
   const dependencies: AnyRecord[] = detail?.dependencies ?? [];
+  // Pending gates for this task's run, plus recently settled ones so a
+  // decision resolves in place instead of the card vanishing mid-click.
+  const taskApprovals = visibleTaskApprovals(
+    approvals ?? [],
+    task._id as string,
+    Date.now(),
+  );
 
   const startEditingBrief = () => {
     setBriefDraft(task.executionBrief ?? "");
@@ -184,6 +203,20 @@ export function TaskDetailPanel({
       </header>
 
       <div className="min-h-0 flex-1 space-y-6 overflow-y-auto p-5 desk:p-6">
+        {taskApprovals.length ? (
+          // A parked run reads "waiting on you", not "working": while an
+          // approval is pending this card sits above everything else in the
+          // panel, taking visual precedence over run narration.
+          <div className="grid gap-3">
+            {taskApprovals.map((approval) => (
+              <ApprovalCard
+                key={approval._id}
+                approval={approval}
+                variant="panel"
+              />
+            ))}
+          </div>
+        ) : null}
         <div>
           <h2 className="m-0 text-xl leading-snug">{task.title}</h2>
           <div className="mt-2 flex flex-wrap items-center gap-1.5">

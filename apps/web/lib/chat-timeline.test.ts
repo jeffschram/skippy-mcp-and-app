@@ -77,4 +77,48 @@ describe("buildChatTimeline", () => {
     );
     expect(keys(items)).toEqual(["task:t1:completed", "message:m1"]);
   });
+
+  it("interleaves approval notices at their request time", () => {
+    const items = buildChatTimeline(
+      [
+        { _id: "m1", role: "user", createdAt: T0 },
+        { _id: "m2", role: "user", createdAt: T0 + 60_000 },
+      ],
+      [{ key: "task:t1:started", timestamp: T0 + 1_000 }],
+      [
+        {
+          key: "approval:a1",
+          timestamp: T0 + 30_000,
+          approval: { _id: "a1", status: "pending" },
+        },
+      ],
+    );
+    expect(keys(items)).toEqual([
+      "message:m1",
+      "task:t1:started",
+      "approval:a1",
+      "message:m2",
+    ]);
+  });
+
+  it("keeps a settled approval notice in place as the record of the decision", () => {
+    // Settling flips status but not the moment's timestamp, so the notice
+    // must not move or disappear from the feed.
+    const pending = buildChatTimeline(
+      [{ _id: "m1", role: "user", createdAt: T0 }],
+      [],
+      [{ key: "approval:a1", timestamp: T0 + 1_000, approval: { _id: "a1", status: "pending" } }],
+    );
+    const settled = buildChatTimeline(
+      [{ _id: "m1", role: "user", createdAt: T0 }],
+      [],
+      [{ key: "approval:a1", timestamp: T0 + 1_000, approval: { _id: "a1", status: "accepted" } }],
+    );
+    expect(keys(settled)).toEqual(keys(pending));
+  });
+
+  it("builds without an approvals argument (page-scope chats)", () => {
+    const items = buildChatTimeline([{ _id: "m1", role: "user", createdAt: T0 }], []);
+    expect(keys(items)).toEqual(["message:m1"]);
+  });
 });

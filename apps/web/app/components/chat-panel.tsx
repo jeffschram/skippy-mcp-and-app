@@ -6,8 +6,10 @@ import { useConvexAuth, useMutation, useQuery } from "convex/react";
 import { CheckCircle2, FilePenLine, ListChecks, MessageCircle, SendHorizontal, Sparkles, TerminalSquare, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { api } from "../../lib/skippy-api";
+import { approvalMoments } from "../../lib/approvals";
 import { buildChatTimeline } from "../../lib/chat-timeline";
 import { summarizeChatActivity, type ChatActivityLine } from "../../lib/chat-activity";
+import { ApprovalCard } from "./approval-card";
 
 type AnyRecord = Record<string, any>;
 
@@ -127,11 +129,17 @@ function ChatSurface({
   className,
   header,
   taskMoments,
+  runApprovals,
+  onOpenTask,
 }: {
   scope: ChatScope;
   className?: string | undefined;
   header?: ReactNode | undefined;
   taskMoments?: AnyRecord[] | undefined;
+  /** Run approvals for the project scope (approvalsForProjectForViewer). */
+  runApprovals?: AnyRecord[] | undefined;
+  /** Opens the task detail panel for full approval detail. */
+  onOpenTask?: ((taskId: string) => void) | undefined;
 }) {
   const { isAuthenticated } = useConvexAuth();
   const [draft, setDraft] = useState("");
@@ -141,14 +149,13 @@ function ChatSurface({
   const queryArgs = scope.kind === "project" ? { projectId: scope.projectId as any } : { pageKey: scope.pageKey };
   const data = useQuery(api.chats.chatForScopeForViewer, isAuthenticated ? queryArgs : "skip") as AnyRecord | undefined;
   const sendMessage = useMutation(api.chats.sendChatMessageForViewer);
-  const decideApproval = useMutation(api.agentWorkbench.decideApprovalForViewer);
   const messages: AnyRecord[] = data?.messages ?? [];
   const pendingApprovals: AnyRecord[] = data?.pendingApprovals ?? [];
   const activeTurnEvents: AnyRecord[] = data?.activeTurnEvents ?? [];
   const boundHarness: string | undefined = data?.chat?.harness;
   const timelineItems = useMemo(
-    () => buildChatTimeline(messages, taskMoments),
-    [messages, taskMoments],
+    () => buildChatTimeline(messages, taskMoments, approvalMoments(runApprovals ?? [])),
+    [messages, taskMoments, runApprovals],
   );
   const lastTimelineItem = timelineItems[timelineItems.length - 1];
 
@@ -226,6 +233,25 @@ function ChatSurface({
                 />
               );
             }
+            if (item.kind === "approval") {
+              // Compact actionable notice: chat notifies, the panel holds
+              // the detail — but a parked run needs the owner even while
+              // they're chatting, so the decision buttons live inline.
+              const approval = item.moment.approval;
+              return (
+                <ApprovalCard
+                  key={item.key}
+                  approval={approval}
+                  variant="chat"
+                  className="my-1"
+                  onOpenTask={
+                    onOpenTask && approval.taskId
+                      ? () => onOpenTask(approval.taskId)
+                      : undefined
+                  }
+                />
+              );
+            }
             const message = item.message;
             if (message.role === "assistant" && message.status === "pending") {
               return <LiveActivity key={item.key} events={activeTurnEvents} />;
@@ -247,15 +273,12 @@ function ChatSurface({
       </div>
 
       {pendingApprovals.length ? (
+        // Conversational (chat-turn) approvals: same compact card and
+        // decision path as run approvals, docked above the composer because
+        // they gate the in-flight reply rather than a project task.
         <div className="grid gap-2 border-t bg-secondary px-4 py-3">
           {pendingApprovals.map((approval) => (
-            <div key={approval._id} className="grid gap-2 rounded-xl border border-gold p-3">
-              <p className="m-0 text-sm font-bold">{approval.title}</p>
-              <div className="flex gap-2">
-                <button type="button" className="rounded-lg bg-primary px-3 py-1.5 text-xs font-bold text-primary-foreground" onClick={() => void decideApproval({ approvalId: approval._id, decision: "accepted" } as any)}>Approve</button>
-                <button type="button" className="rounded-lg border px-3 py-1.5 text-xs font-bold" onClick={() => void decideApproval({ approvalId: approval._id, decision: "declined" } as any)}>Decline</button>
-              </div>
-            </div>
+            <ApprovalCard key={approval._id} approval={approval} variant="chat" />
           ))}
         </div>
       ) : null}
@@ -285,16 +308,22 @@ function ChatSurface({
 export function ProjectChatWorkspace({
   projectId,
   taskMoments,
+  runApprovals,
+  onOpenTask,
   className,
 }: {
   projectId: string;
   taskMoments?: AnyRecord[] | undefined;
+  runApprovals?: AnyRecord[] | undefined;
+  onOpenTask?: ((taskId: string) => void) | undefined;
   className?: string | undefined;
 }) {
   return (
     <ChatSurface
       scope={{ kind: "project", projectId, label: "Project" }}
       taskMoments={taskMoments}
+      runApprovals={runApprovals}
+      onOpenTask={onOpenTask}
       className={className}
     />
   );
