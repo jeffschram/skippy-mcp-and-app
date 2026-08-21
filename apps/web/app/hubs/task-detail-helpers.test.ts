@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   canAbandon,
+  canConfirmCloseout,
   canEditBrief,
   criteriaDraftFrom,
   parseCriteria,
@@ -100,6 +101,34 @@ describe("parseCriteria", () => {
     const criteria = ["Tests pass", "Feature renders"];
     expect(parseCriteria(criteriaDraftFrom(criteria))).toEqual(criteria);
     expect(criteriaDraftFrom(undefined)).toBe("");
+  });
+});
+
+describe("canConfirmCloseout", () => {
+  it("offers close-out for an in_review task with a PR", () => {
+    expect(
+      canConfirmCloseout(task({ executionState: "in_review", prUrl: "https://github.com/x/y/pull/7" })),
+    ).toBe(true);
+  });
+
+  it("does not require the stored prStatus to be merged (it lags GitHub)", () => {
+    expect(
+      canConfirmCloseout(
+        task({ executionState: "in_review", prUrl: "https://github.com/x/y/pull/7", prStatus: "open" }),
+      ),
+    ).toBe(true);
+  });
+
+  it("requires a recorded PR", () => {
+    expect(canConfirmCloseout(task({ executionState: "in_review" }))).toBe(false);
+  });
+
+  it("only applies to in_review tasks", () => {
+    for (const state of ["ready", "in_progress", "done", "cancelled"]) {
+      expect(
+        canConfirmCloseout(task({ executionState: state, prUrl: "https://github.com/x/y/pull/7" })),
+      ).toBe(false);
+    }
   });
 });
 

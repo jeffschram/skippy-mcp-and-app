@@ -1553,6 +1553,64 @@ export default defineSchema({
     .index("by_chat_turn_request", ["chatTurnId", "harnessRequestId"])
     .index("by_brain_status", ["brainInstanceId", "status"]),
 
+  // Host-executed maintenance jobs: deterministic scripted rituals the runner
+  // claims like runs/chat turns (same host-token + claim-token + lease model)
+  // but executes as a checklist — no LLM session. First kind:
+  // post_merge_closeout, the post-merge ritual (verify merged → pull main →
+  // conditional runner rebuild + deferred restart → worktree/branch cleanup →
+  // mark task done with prStatus merged). Step progress lives inline on the
+  // job (bounded, fixed checklist) so the task panel renders it reactively; a
+  // failed step leaves the task in_review with the error visible.
+  maintenanceJobs: defineTable({
+    brainInstanceId: v.id("brainInstances"),
+    kind: v.literal("post_merge_closeout"),
+    taskId: v.id("tasks"),
+    projectId: v.id("projects"),
+    hostId: v.optional(v.id("agentHosts")),
+    status: v.union(
+      v.literal("queued"),
+      v.literal("claimed"),
+      v.literal("running"),
+      v.literal("completed"),
+      v.literal("failed"),
+      v.literal("cancelled"),
+    ),
+    claimToken: v.optional(v.string()),
+    leaseExpiresAt: v.optional(v.number()),
+    // Snapshot of the PR/branch facts the ritual operates on, taken at
+    // enqueue time from the task.
+    prUrl: v.optional(v.string()),
+    prNumber: v.optional(v.number()),
+    gitBranchName: v.optional(v.string()),
+    baseBranch: v.string(),
+    steps: v.array(
+      v.object({
+        key: v.string(),
+        label: v.string(),
+        status: v.union(
+          v.literal("pending"),
+          v.literal("running"),
+          v.literal("ok"),
+          v.literal("failed"),
+          v.literal("skipped"),
+        ),
+        detail: v.optional(v.string()),
+      }),
+    ),
+    // Safe (redacted) message only — never raw command stderr dumps.
+    errorMessage: v.optional(v.string()),
+    resultSummary: v.optional(v.string()),
+    requestedBy: v.optional(v.string()),
+    queuedAt: v.number(),
+    claimedAt: v.optional(v.number()),
+    completedAt: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_brain_status", ["brainInstanceId", "status"])
+    .index("by_brain_task", ["brainInstanceId", "taskId"])
+    .index("by_host", ["hostId"]),
+
   aiProcessingRuns: defineTable({
     brainInstanceId: v.id("brainInstances"),
     provider: v.string(),

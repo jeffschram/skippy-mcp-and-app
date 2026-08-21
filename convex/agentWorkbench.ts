@@ -13,6 +13,7 @@
 import { mutationGeneric, queryGeneric } from "convex/server";
 import { v } from "convex/values";
 import { requireOwnedBrain } from "./auth";
+import { applyTaskResult } from "./projects";
 
 /* ------------------------------------------------------------------ */
 /* Constants                                                          */
@@ -803,6 +804,7 @@ export const hostHeartbeat = mutationGeneric({
     hostToken: v.string(),
     activeRunIds: v.optional(v.array(v.id("agentRuns"))),
     activeChatTurnIds: v.optional(v.array(v.id("chatTurns"))),
+    activeMaintenanceJobIds: v.optional(v.array(v.id("maintenanceJobs"))),
   },
   handler: async (ctx, args) => {
     const host = await requireHost(ctx, args.hostToken);
@@ -819,6 +821,12 @@ export const hostHeartbeat = mutationGeneric({
       const turn = await ctx.db.get(turnId);
       if (turn && turn.hostId === host._id && (turn.status === "claimed" || turn.status === "running")) {
         await ctx.db.patch(turnId, { leaseExpiresAt: now + RUN_LEASE_MS, updatedAt: now });
+      }
+    }
+    for (const jobId of args.activeMaintenanceJobIds ?? []) {
+      const job = await ctx.db.get(jobId);
+      if (job && job.hostId === host._id && (job.status === "claimed" || job.status === "running")) {
+        await ctx.db.patch(jobId, { leaseExpiresAt: now + RUN_LEASE_MS, updatedAt: now });
       }
     }
     return { draining: host.draining ?? false };
@@ -1277,6 +1285,372 @@ export const hostActiveRuns = queryGeneric({
         worktreePath: run.worktreePath,
         workingBranch: run.workingBranch,
         leaseExpiresAt: run.leaseExpiresAt,
+      }));
+  },
+});
+
+/* ------------------------------------------------------------------ */
+/* Maintenance jobs: post-merge close-out                             */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The post-merge close-out ritual as a fixed, deterministic checklist
+ * (previously performed manually in chat for PRs #116–#124). The server
+ * seeds this list at enqueue time so the task panel can render the whole
+ * ritual as pending immediately; the runner updates step statuses by key.
+ * Convex deploy is a skipped step by design: the convex-deploy.yml GitHub
+ * Action owns deployment on merge to main.
+ */
+export const CLOSEOUT_STEPS: ReadonlyArray<{ key: string; label: string }> = [
+  { key: "verify_merged", label: "Verify the PR is merged" },
+  { key: "pull_main", label: "Pull latest main in the canonical checkout" },
+  { key: "convex_deploy", label: "Convex deploy" },
+  { key: "runner_rebuild", label: "Rebuild runner if it changed" },
+  { key: "cleanup", label: "Remove worktree and delete agent branch" },
+  { key: "finalize", label: "Mark task done (PR merged)" },
+];
+
+const CLOSEOUT_ACTIVE_STATUSES = ["queued", "claimed", "running"] as const;
+
+const maintenanceStepsArg = v.array(
+  v.object({
+    key: v.string(),
+    label: v.string(),
+    status: v.union(
+      v.literal("pending"),
+      v.literal("running"),
+      v.literal("ok"),
+      v.literal("failed"),
+      v.literal("skipped"),
+    ),
+    detail: v.optional(v.string()),
+  }),
+);
+
+/** Host must own the job and present the claim token minted at claim time —
+ * same contract as requireClaimedRun. */
+async function requireClaimedJob(ctx: any, host: any, jobId: string, claimToken: string) {
+  const job = await ctx.db.get(jobId);
+  if (!job || job.brainInstanceId !== host.brainInstanceId) {
+    throw new Error("maintenance job not found");
+  }
+  if (job.hostId !== host._id || !job.claimToken || job.claimToken !== claimToken) {
+    throw new Error("maintenance job is not claimed by this host");
+  }
+  return job;
+}
+
+/**
+ * Shared enqueue path for the panel button and the chat harness — one backend
+ * job, two entry points, so the two close-out surfaces cannot drift (mirrors
+ * queueTaskExecution). Validation is deliberately light on merge state: the
+ * stored prStatus lags reality (the merge happens on GitHub), so the RUNNER
+ * verifies the PR is actually merged at execution time via gh and refuses
+ * politely if not.
+ */
+async function queueCloseout(
+  ctx: any,
+  brainId: any,
+  opts: {
+    taskId: any;
+    actor: { actorType: "user" | "harness"; actorId?: string; requestedBy?: string };
+  },
+) {
+  const task = await ctx.db.get(opts.taskId);
+  if (!task || task.brainInstanceId !== brainId) throw new Error("task not found");
+  if ((task.executionState ?? "") !== "in_review") {
+    throw new Error("only in_review tasks can be closed out");
+  }
+  if (!task.prUrl) throw new Error("task has no pull request recorded; nothing to close out");
+
+  const projectId = await projectIdForTask(ctx.db, brainId, opts.taskId);
+  if (!projectId) throw new Error("task is not linked to a project");
+  const project = await ctx.db.get(projectId);
+  if (!project) throw new Error("project not found");
+  const config = await ctx.db
+    .query("projectExecutionConfigs")
+    .withIndex("by_brain_project", (q: any) => q.eq("brainInstanceId", brainId).eq("projectId", projectId))
+    .first();
+  if (!config || !config.enabled) {
+    throw new Error("project has no enabled execution host mapping");
+  }
+
+  // Duplicate close-out request: return the existing active job rather than
+  // queueing a competing one.
+  const jobs = await ctx.db
+    .query("maintenanceJobs")
+    .withIndex("by_brain_task", (q: any) => q.eq("brainInstanceId", brainId).eq("taskId", opts.taskId))
+    .collect();
+  const active = jobs.find((job: any) => (CLOSEOUT_ACTIVE_STATUSES as readonly string[]).includes(job.status));
+  if (active) return { jobId: active._id, status: active.status, existing: true };
+
+  const now = Date.now();
+  const jobId = await ctx.db.insert("maintenanceJobs", {
+    brainInstanceId: brainId,
+    kind: "post_merge_closeout",
+    taskId: opts.taskId,
+    projectId,
+    status: "queued",
+    prUrl: task.prUrl,
+    ...(task.prNumber !== undefined ? { prNumber: task.prNumber } : {}),
+    ...(task.gitBranchName ? { gitBranchName: task.gitBranchName } : {}),
+    baseBranch: project.defaultBaseBranch ?? "main",
+    steps: CLOSEOUT_STEPS.map((step) => ({ ...step, status: "pending" })),
+    ...(opts.actor.requestedBy ? { requestedBy: opts.actor.requestedBy } : {}),
+    queuedAt: now,
+    createdAt: now,
+    updatedAt: now,
+  });
+  await ctx.db.insert("activityEvents", {
+    brainInstanceId: brainId,
+    entityRef: { entityType: "task", entityId: opts.taskId },
+    activityType: "task_closeout_queued",
+    actorType: opts.actor.actorType,
+    actorId: opts.actor.actorId,
+    timestamp: now,
+    summary: `Post-merge close-out queued: ${task.title}`,
+    metadata: { jobId, prUrl: task.prUrl },
+  });
+  return { jobId, status: "queued", existing: false };
+}
+
+/** The task panel's "Confirm merge & close out" button. */
+export const enqueueCloseoutForViewer = mutationGeneric({
+  args: { taskId: v.id("tasks") },
+  handler: async (ctx, args) => {
+    const { user, brain } = await requireOwnedBrain(ctx);
+    return queueCloseout(ctx, brain._id, {
+      taskId: args.taskId,
+      actor: { actorType: "user", actorId: user._id, requestedBy: user.displayName ?? user.email },
+    });
+  },
+});
+
+/**
+ * Host-authenticated close-out for the chat path — the owner says "close out
+ * task X" in chat and the harness queues the SAME job the button does (same
+ * consent convention as executeTaskForBrain, same host-token credential).
+ */
+export const enqueueCloseoutForBrain = mutationGeneric({
+  args: {
+    hostToken: v.string(),
+    taskId: v.id("tasks"),
+    actorId: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const host = await requireHost(ctx, args.hostToken);
+    const actorId = args.actorId ?? "chat-harness";
+    return queueCloseout(ctx, host.brainInstanceId, {
+      taskId: args.taskId,
+      actor: { actorType: "harness", actorId, requestedBy: actorId },
+    });
+  },
+});
+
+/** Latest close-out job for a task, for the panel's progress/steps view. */
+export const closeoutJobForTaskForViewer = queryGeneric({
+  args: { taskId: v.id("tasks") },
+  handler: async (ctx, { taskId }) => {
+    const { brain } = await requireOwnedBrain(ctx);
+    const jobs = await ctx.db
+      .query("maintenanceJobs")
+      .withIndex("by_brain_task", (q: any) => q.eq("brainInstanceId", brain._id).eq("taskId", taskId))
+      .collect();
+    if (!jobs.length) return null;
+    jobs.sort((a: any, b: any) => b.createdAt - a.createdAt);
+    const job = jobs[0];
+    return {
+      _id: job._id,
+      kind: job.kind,
+      status: job.status,
+      steps: job.steps,
+      prUrl: job.prUrl,
+      prNumber: job.prNumber,
+      gitBranchName: job.gitBranchName,
+      errorMessage: job.errorMessage,
+      resultSummary: job.resultSummary,
+      queuedAt: job.queuedAt,
+      completedAt: job.completedAt,
+      updatedAt: job.updatedAt,
+    };
+  },
+});
+
+/**
+ * Atomic claim for the oldest queued maintenance job whose project maps to
+ * this host — the runs/chat-turns claim pattern with a fresh claim token and
+ * lease. Concurrency is enforced runner-side (one job at a time); jobs are
+ * lightweight scripted work, not harness sessions.
+ */
+export const claimNextMaintenanceJob = mutationGeneric({
+  args: { hostToken: v.string() },
+  handler: async (ctx, { hostToken }) => {
+    const host = await requireHost(ctx, hostToken);
+    if (host.draining) return null;
+    const now = Date.now();
+    const queued = await ctx.db
+      .query("maintenanceJobs")
+      .withIndex("by_brain_status", (q: any) =>
+        q.eq("brainInstanceId", host.brainInstanceId).eq("status", "queued"),
+      )
+      .collect();
+    queued.sort((a: any, b: any) => a.queuedAt - b.queuedAt);
+    for (const job of queued) {
+      // The job's project must map to THIS host and be enabled.
+      const config = await ctx.db
+        .query("projectExecutionConfigs")
+        .withIndex("by_brain_project", (q: any) =>
+          q.eq("brainInstanceId", host.brainInstanceId).eq("projectId", job.projectId),
+        )
+        .first();
+      if (!config || !config.enabled || config.hostId !== host._id) continue;
+
+      const claimToken = makeToken("skippyclaim");
+      await ctx.db.patch(job._id, {
+        status: "claimed",
+        hostId: host._id,
+        claimToken,
+        leaseExpiresAt: now + RUN_LEASE_MS,
+        claimedAt: now,
+        updatedAt: now,
+      });
+      await ctx.db.patch(host._id, { lastClaimAt: now, updatedAt: now });
+
+      const task = await ctx.db.get(job.taskId);
+      const project = await ctx.db.get(job.projectId);
+      return {
+        jobId: job._id,
+        claimToken,
+        kind: job.kind,
+        taskId: job.taskId,
+        taskTitle: task?.title,
+        prUrl: job.prUrl,
+        prNumber: job.prNumber,
+        gitBranchName: job.gitBranchName ?? task?.gitBranchName,
+        baseBranch: job.baseBranch,
+        steps: job.steps,
+        project: {
+          _id: job.projectId,
+          title: project?.title,
+          localPath: config.localPath,
+        },
+      };
+    }
+    return null;
+  },
+});
+
+/** Legal maintenance-job transitions the host may report. Self-transition on
+ * `running` is the step-progress update path. */
+const MAINTENANCE_REPORTABLE_TRANSITIONS: Record<string, string[]> = {
+  running: ["claimed", "running"],
+  completed: ["claimed", "running"],
+  failed: ["claimed", "running"],
+};
+
+/**
+ * Runner progress/result reporting for a claimed maintenance job. Step
+ * updates ride along on the same mutation as status changes. On `completed`
+ * the task is marked done with prStatus "merged" through applyTaskResult —
+ * the exact recordTaskResult semantics the chat ritual used. On `failed`
+ * the task is left untouched (in_review) with the error visible on the job:
+ * a failed step never leaves a silent half-done state.
+ */
+export const updateMaintenanceJob = mutationGeneric({
+  args: {
+    hostToken: v.string(),
+    jobId: v.id("maintenanceJobs"),
+    claimToken: v.string(),
+    status: v.optional(v.union(v.literal("running"), v.literal("completed"), v.literal("failed"))),
+    steps: v.optional(maintenanceStepsArg),
+    errorMessage: v.optional(v.string()),
+    resultSummary: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const host = await requireHost(ctx, args.hostToken);
+    const job = await requireClaimedJob(ctx, host, args.jobId, args.claimToken);
+    if (job.status === "completed" || job.status === "failed" || job.status === "cancelled") {
+      // Idempotent from the runner's perspective: a retried terminal report
+      // never re-runs completion side effects.
+      return { jobId: args.jobId, status: job.status };
+    }
+    if (args.status) {
+      const allowedFrom = MAINTENANCE_REPORTABLE_TRANSITIONS[args.status];
+      if (!allowedFrom || !allowedFrom.includes(job.status)) {
+        throw new Error(`illegal maintenance job transition ${job.status} -> ${args.status}`);
+      }
+    }
+    const now = Date.now();
+    const terminal = args.status === "completed" || args.status === "failed";
+    const patch: Record<string, unknown> = {
+      updatedAt: now,
+      leaseExpiresAt: now + RUN_LEASE_MS,
+    };
+    if (args.status) patch.status = args.status;
+    if (args.steps !== undefined) patch.steps = args.steps;
+    if (args.errorMessage !== undefined) patch.errorMessage = args.errorMessage.slice(0, 1000);
+    if (args.resultSummary !== undefined) patch.resultSummary = args.resultSummary.slice(0, 2000);
+    if (terminal) patch.completedAt = now;
+    await ctx.db.patch(args.jobId, patch);
+
+    const task = await ctx.db.get(job.taskId);
+    if (args.status === "completed") {
+      // Close the task out exactly the way the chat ritual did.
+      await applyTaskResult(
+        ctx.db,
+        host.brainInstanceId,
+        { taskId: job.taskId, markDone: true, prStatus: "merged" },
+        { actorType: "harness", actorId: `runner-closeout:${host.hostKey}` },
+      );
+      await ctx.db.insert("activityEvents", {
+        brainInstanceId: host.brainInstanceId,
+        entityRef: { entityType: "task", entityId: job.taskId },
+        activityType: "task_closeout_completed",
+        actorType: "harness",
+        actorId: `runner-closeout:${host.hostKey}`,
+        timestamp: now,
+        summary: `Post-merge close-out completed: ${task?.title ?? job.taskId}`,
+        metadata: { jobId: args.jobId, prUrl: job.prUrl },
+      });
+    } else if (args.status === "failed") {
+      await ctx.db.insert("activityEvents", {
+        brainInstanceId: host.brainInstanceId,
+        entityRef: { entityType: "task", entityId: job.taskId },
+        activityType: "task_closeout_failed",
+        actorType: "harness",
+        actorId: `runner-closeout:${host.hostKey}`,
+        timestamp: now,
+        summary: `Post-merge close-out failed: ${task?.title ?? job.taskId}`,
+        metadata: {
+          jobId: args.jobId,
+          prUrl: job.prUrl,
+          ...(args.errorMessage ? { errorMessage: args.errorMessage.slice(0, 500) } : {}),
+        },
+      });
+    }
+    return { jobId: args.jobId, status: args.status ?? job.status };
+  },
+});
+
+/** Maintenance jobs this host owns that are still active — startup
+ * reconciliation after a restart (mirror of hostActiveRuns). */
+export const hostActiveMaintenanceJobs = queryGeneric({
+  args: { hostToken: v.string() },
+  handler: async (ctx, { hostToken }) => {
+    const host = await requireHost(ctx, hostToken);
+    const jobs = await ctx.db
+      .query("maintenanceJobs")
+      .withIndex("by_host", (q: any) => q.eq("hostId", host._id))
+      .collect();
+    return jobs
+      .filter((job: any) => job.status === "claimed" || job.status === "running")
+      .map((job: any) => ({
+        jobId: job._id,
+        status: job.status,
+        kind: job.kind,
+        claimToken: job.claimToken,
+        taskId: job.taskId,
+        leaseExpiresAt: job.leaseExpiresAt,
       }));
   },
 });

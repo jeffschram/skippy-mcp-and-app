@@ -447,7 +447,10 @@ async function moveTaskToProject(
   return { taskId, fromProjectId, toProjectId, relationshipId };
 }
 
-async function applyTaskResult(
+// Exported for the agent workbench: the post-merge close-out job records its
+// terminal result through this exact path so button-driven and chat-driven
+// close-outs share recordTaskResult semantics (markDone + prStatus merged).
+export async function applyTaskResult(
   db: any,
   brainInstanceId: any,
   args: {

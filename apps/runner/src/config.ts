@@ -56,6 +56,13 @@ export interface RunnerConfig {
    * environment only — never committed, never read from .env.local. */
   skippyMcpToken: string;
   /**
+   * launchd service label for the runner itself, used by the post-merge
+   * close-out job to schedule its deferred `launchctl kickstart -k` restart
+   * (SKIPPY_RUNNER_LAUNCHD_LABEL). The restart is detached + delayed because
+   * the close-out executor runs inside this very process.
+   */
+  launchdLabel: string;
+  /**
    * Chat turns only: run the harness with permissions bypassed
    * (--dangerously-skip-permissions / --dangerously-bypass-approvals-and-sandbox).
    * No approval cards, no sandbox — every action executes immediately as this
@@ -145,6 +152,7 @@ export function loadConfig(): RunnerConfig {
     heartbeatIntervalMs: 30_000,
     claimPollIntervalMs: 5_000,
     approvalTimeoutMs: Number(process.env.SKIPPY_RUNNER_APPROVAL_TIMEOUT_MS ?? String(24 * 60 * 60 * 1000)),
+    launchdLabel: process.env.SKIPPY_RUNNER_LAUNCHD_LABEL ?? "com.skippy.runner",
     skippyMcpUrl: required("SKIPPY_MCP_URL"),
     skippyMcpToken: required("SKIPPY_MCP_TOKEN"),
     chatBypassPermissions: ["1", "true"].includes(process.env.SKIPPY_CHAT_BYPASS_PERMISSIONS ?? ""),
