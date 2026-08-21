@@ -1,12 +1,34 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
+import {
+  DndContext,
+  DragOverlay,
+  KeyboardSensor,
+  MouseSensor,
+  TouchSensor,
+  closestCorners,
+  useDroppable,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+  type DragOverEvent,
+  type DragStartEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import {
   ArrowLeft,
   Archive,
   ArchiveRestore,
+  Bot,
   Check,
   CheckCircle2,
   ExternalLink,
@@ -50,6 +72,14 @@ import {
   partitionPhasesByCompletion,
   phaseCompletion,
 } from "./project-plan-helpers";
+import {
+  dropPlacement,
+  listsEqual,
+  phaseDropId,
+  projectDragEnd,
+  projectDragOver,
+  type PhaseList,
+} from "./project-board-dnd";
 import { createPadAutosave } from "./project-notes-helpers";
 import { ProjectLibrarySection } from "./project-library";
 import { TaskDetailPanel } from "./task-detail";
@@ -229,8 +259,9 @@ function TaskRow({
   onSelect,
   onStart,
   onComplete,
-  onDragStart,
-  onDrop,
+  handleRef,
+  handleProps,
+  overlay = false,
 }: {
   task: AnyRecord;
   busy: boolean;
@@ -239,15 +270,18 @@ function TaskRow({
   onSelect: () => void;
   onStart: () => void;
   onComplete: () => void;
-  onDragStart: (event: DragEvent<HTMLElement>) => void;
-  onDrop: (event: DragEvent<HTMLElement>) => void;
+  /** dnd-kit activator ref — drags start from the grip, not the whole row. */
+  handleRef?: (node: HTMLElement | null) => void;
+  handleProps?: Record<string, unknown>;
+  /** Rendered inside a DragOverlay: presentation only, floating above. */
+  overlay?: boolean;
 }) {
   const state = displayState(task);
   const completed = state === "Completed";
   const inProgress = state === "In Progress";
   // Every actionable row carries its own start affordance; owner tasks that
   // are underway swap it for a complete affordance. Agent tasks in progress
-  // show only the badge (the workspace run owns their lifecycle).
+  // rely on the in-progress accent (the workspace run owns their lifecycle).
   const action = !inProgress
     ? {
         icon: Play,
@@ -261,18 +295,9 @@ function TaskRow({
   if (completed) {
     return (
       <article
-        draggable
-        onDragStart={onDragStart}
-        onDragOver={(event) => event.preventDefault()}
-        onDrop={onDrop}
         onClick={onSelect}
         className="flex cursor-pointer items-center gap-2 rounded-lg border border-transparent px-2 py-2 text-sm text-muted-foreground hover:border-border"
       >
-        <GripVertical
-          className="cursor-grab opacity-35"
-          size={15}
-          aria-hidden
-        />
         <CheckCircle2 className="text-green" size={16} aria-hidden />
         <span className="min-w-0 flex-1 whitespace-normal break-words text-[13px] leading-snug line-through decoration-border">
           {task.title}
@@ -284,35 +309,55 @@ function TaskRow({
 
   return (
     <article
-      draggable
-      onDragStart={onDragStart}
-      onDragOver={(event) => event.preventDefault()}
-      onDrop={onDrop}
       onClick={onSelect}
-      className="cursor-pointer rounded-xl border border-border bg-background/40 p-3 transition-colors hover:border-primary/45"
+      className={cn(
+        // overflow-hidden clips the in-progress shimmer bar to the rounded
+        // corners; `relative` anchors it to the row's bottom edge.
+        "relative cursor-pointer overflow-hidden rounded-xl border bg-background/40 p-3 transition-colors",
+        inProgress
+          ? "border-gold/50 hover:border-gold/75"
+          : "border-border hover:border-primary/45",
+        overlay && "shadow-lg",
+      )}
     >
       <div className="flex items-start gap-2.5">
-        <GripVertical
-          className="mt-1 cursor-grab text-muted-foreground/55"
-          size={16}
-          aria-hidden
-        />
+        {/* touch-none lets the TouchSensor own the gesture: without it the
+            page scrolls instead of dragging on mobile. */}
+        <button
+          type="button"
+          ref={handleRef}
+          {...handleProps}
+          aria-label={`Reorder ${task.title}`}
+          onClick={(event) => event.stopPropagation()}
+          className="-m-1 mt-0 grid size-7 shrink-0 cursor-grab touch-none place-items-center rounded text-muted-foreground/55 hover:text-foreground active:cursor-grabbing"
+        >
+          <GripVertical size={16} aria-hidden />
+        </button>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
+            {task.ownerType === "agent" ? (
+              // Icon instead of a text badge: agent ownership is ambient
+              // metadata, not something to read on every row.
+              <span
+                title="Agent task"
+                className="grid size-5 shrink-0 place-items-center rounded-full bg-primary/15 text-primary"
+              >
+                <Bot size={13} aria-hidden />
+                <span className="sr-only">Agent task</span>
+              </span>
+            ) : null}
             <h3 className="m-0 min-w-0 flex-[1_1_180px] whitespace-normal break-words text-[13px] font-semibold leading-snug">
               {task.title}
             </h3>
-            {task.ownerType === "agent" ? (
-              <Badge tone="blue">Agent</Badge>
-            ) : null}
             {pendingApprovals > 0 ? (
               // A waiting run must be discoverable without scrolling chat:
-              // the gate badge outranks the generic "In Progress" state.
+              // the gate badge outranks the generic in-progress accent.
               <Badge tone="gold">
                 <ShieldAlert size={12} aria-hidden /> Needs approval
               </Badge>
-            ) : inProgress ? (
-              <Badge tone="gold">In Progress</Badge>
+            ) : null}
+            {inProgress ? (
+              <span className="sr-only">In progress</span>
             ) : null}
           </div>
         </div>
@@ -338,7 +383,68 @@ function TaskRow({
           </button>
         ) : null}
       </div>
+      {inProgress ? (
+        // The pre-v2 board marked in-progress work with an animated gradient
+        // progress bar; this shimmer strip is the same idea at 2px. The CSS
+        // class swaps to a static bar under prefers-reduced-motion.
+        <span
+          aria-hidden
+          className="task-progress-shimmer absolute inset-x-0 bottom-0 h-0.5"
+        />
+      ) : null}
     </article>
+  );
+}
+
+/**
+ * Sortable wrapper for an open task row. The wrapper div carries dnd-kit's
+ * transform/transition; the grip inside TaskRow is the activator so taps and
+ * scrolls on the row body never start a drag (mobile matters here). While a
+ * row is dragged, the in-place copy dims and the DragOverlay clone follows
+ * the pointer.
+ */
+function SortableTaskRow({
+  task,
+  busy,
+  pendingApprovals = 0,
+  onSelect,
+  onStart,
+  onComplete,
+}: {
+  task: AnyRecord;
+  busy: boolean;
+  pendingApprovals?: number;
+  onSelect: () => void;
+  onStart: () => void;
+  onComplete: () => void;
+}) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    setActivatorNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: task._id as string });
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
+      className={cn(isDragging && "opacity-40")}
+    >
+      <TaskRow
+        task={task}
+        busy={busy}
+        pendingApprovals={pendingApprovals}
+        onSelect={onSelect}
+        onStart={onStart}
+        onComplete={onComplete}
+        handleRef={setActivatorNodeRef}
+        handleProps={{ ...attributes, ...listeners }}
+      />
+    </div>
   );
 }
 
@@ -512,24 +618,27 @@ function ProjectNotesPad({ project }: { project: AnyRecord }) {
 function PhaseSection({
   phase,
   phaseTasks,
+  sortedIncompleteTasks,
   busyTaskId,
   approvalsByTask,
   onSelect,
   onStart,
   onComplete,
-  setDraggingId,
-  moveBefore,
 }: {
   phase: AnyRecord;
   phaseTasks: AnyRecord[];
+  /** Open tasks in render order — projected mid-drag by ProjectPlan. */
+  sortedIncompleteTasks: AnyRecord[];
   busyTaskId: string | null;
   approvalsByTask: Record<string, number>;
   onSelect: (task: AnyRecord) => void;
   onStart: (task: AnyRecord) => void;
   onComplete: (task: AnyRecord) => void;
-  setDraggingId: (taskId: string | null) => void;
-  moveBefore: (phaseId: string, beforeTaskId?: string) => Promise<void>;
 }) {
+  // The phase's task list is a droppable of its own so a task can be dropped
+  // into a phase with no open rows (dnd-kit's multiple-lists pattern). Called
+  // before the collapsed-phase early return to keep hook order stable.
+  const { setNodeRef, isOver } = useDroppable({ id: phaseDropId(phase._id) });
   const completion = phaseCompletion(phaseTasks);
   // A completed phase (rendered inside the Plan's bottom "Completed phases"
   // section) defaults to its compact collapsed row. "expanded" only matters
@@ -539,9 +648,6 @@ function PhaseSection({
   const [expanded, setExpanded] = useState(false);
   const completedTasks = phaseTasks.filter(
     (task) => displayState(task) === "Completed",
-  );
-  const incompleteTasks = phaseTasks.filter(
-    (task) => displayState(task) !== "Completed",
   );
   const completeCount = completedTasks.length;
 
@@ -603,38 +709,35 @@ function PhaseSection({
         )}
       </div>
       <PhaseDescription phase={phase} />
-      <div className="mt-2 grid gap-2">
-        {incompleteTasks.map((task) => (
-          <TaskRow
-            key={task._id}
-            task={task}
-            busy={busyTaskId === task._id}
-            pendingApprovals={approvalsByTask[task._id] ?? 0}
-            onSelect={() => onSelect(task)}
-            onStart={() => onStart(task)}
-            onComplete={() => onComplete(task)}
-            onDragStart={(event) => {
-              setDraggingId(task._id);
-              event.dataTransfer.effectAllowed = "move";
-              event.dataTransfer.setData("text/plain", task._id);
-            }}
-            onDrop={(event) => {
-              event.preventDefault();
-              void moveBefore(phase._id, task._id);
-            }}
-          />
-        ))}
-        <button
-          type="button"
-          className="flex min-h-10 items-center justify-center rounded-lg border border-dashed text-xs font-bold text-muted-foreground hover:border-primary hover:text-primary"
-          onDragOver={(event) => event.preventDefault()}
-          onDrop={(event) => {
-            event.preventDefault();
-            void moveBefore(phase._id);
-          }}
+      <div
+        ref={setNodeRef}
+        className={cn(
+          "mt-2 grid gap-2",
+          // A phase with no open rows keeps a slim invisible landing strip;
+          // it lights up only while a dragged task hovers it. This replaces
+          // the old always-visible "drop here" target areas — row gaps from
+          // dnd-kit are the drop indicators everywhere else.
+          sortedIncompleteTasks.length === 0 &&
+            "min-h-10 rounded-lg border border-dashed border-transparent",
+          sortedIncompleteTasks.length === 0 && isOver && "border-primary/60",
+        )}
+      >
+        <SortableContext
+          items={sortedIncompleteTasks.map((task) => task._id as string)}
+          strategy={verticalListSortingStrategy}
         >
-          Drop here to move to the end of this phase
-        </button>
+          {sortedIncompleteTasks.map((task) => (
+            <SortableTaskRow
+              key={task._id}
+              task={task}
+              busy={busyTaskId === task._id}
+              pendingApprovals={approvalsByTask[task._id] ?? 0}
+              onSelect={() => onSelect(task)}
+              onStart={() => onStart(task)}
+              onComplete={() => onComplete(task)}
+            />
+          ))}
+        </SortableContext>
         {completedTasks.length ? (
           <details className="mt-2 rounded-xl border bg-background/30 px-3 py-2">
             <summary className="cursor-pointer text-xs font-bold text-muted-foreground">
@@ -649,15 +752,6 @@ function PhaseSection({
                   onSelect={() => onSelect(task)}
                   onStart={() => onStart(task)}
                   onComplete={() => onComplete(task)}
-                  onDragStart={(event) => {
-                    setDraggingId(task._id);
-                    event.dataTransfer.effectAllowed = "move";
-                    event.dataTransfer.setData("text/plain", task._id);
-                  }}
-                  onDrop={(event) => {
-                    event.preventDefault();
-                    void moveBefore(phase._id, task._id);
-                  }}
                 />
               ))}
             </div>
@@ -686,7 +780,6 @@ function ProjectPlan({
   const createPhase = useMutation(api.projects.createPhaseForViewer);
   const reorderTask = useMutation(api.projects.reorderTaskInPhaseForViewer);
   const toast = useToast();
-  const [draggingId, setDraggingId] = useState<string | null>(null);
   const tasks: AnyRecord[] = board.tasks ?? [];
   const phases: AnyRecord[] = board.phases ?? [];
   const tasksForPhase = (phase: AnyRecord) =>
@@ -699,81 +792,185 @@ function ProjectPlan({
     tasksForPhase,
   );
 
-  const moveBefore = async (phaseId: string, beforeTaskId?: string) => {
-    if (!draggingId || draggingId === beforeTaskId) return;
-    try {
-      await reorderTask({
-        projectId: board.project._id as any,
-        phaseId: phaseId as any,
-        taskId: draggingId as any,
-        ...(beforeTaskId ? { beforeTaskId: beforeTaskId as any } : {}),
-      });
-    } catch (error) {
-      toast(
-        error instanceof Error ? error.message : "Could not reorder task",
-        "error",
-      );
-    } finally {
-      setDraggingId(null);
+  // Drag starts from the row grips only. The mouse needs a small distance
+  // threshold so plain clicks still open the detail panel; touch needs a
+  // hold delay so scrolling the Plan never turns into an accidental drag.
+  // Keyboard sorting comes for free via the focusable grip buttons.
+  const sensors = useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(TouchSensor, {
+      activationConstraint: { delay: 200, tolerance: 6 },
+    }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+
+  const taskById = useMemo(
+    () => new Map(tasks.map((task) => [task._id as string, task])),
+    [tasks],
+  );
+  // Baseline arrangement: open (non-completed) task ids per phase, in the
+  // board's orderIndex order. Completed tasks live in each phase's collapsed
+  // details section and are not sortable.
+  const baseLists: PhaseList[] = useMemo(
+    () =>
+      phases.map((phase) => ({
+        phaseId: phase._id as string,
+        taskIds: tasks
+          .filter(
+            (task) =>
+              task.phaseId === phase._id &&
+              displayState(task) !== "Completed",
+          )
+          .map((task) => task._id as string),
+      })),
+    [phases, tasks],
+  );
+  // While a drag is live (and until its mutation settles), render from the
+  // projected arrangement instead of the server's — this is what makes rows
+  // visibly part while dragging and prevents a snap-back before Convex
+  // pushes the reordered board.
+  const [dragLists, setDragLists] = useState<PhaseList[] | null>(null);
+  const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
+  const renderLists = dragLists ?? baseLists;
+  const sortedIncompleteFor = (phase: AnyRecord): AnyRecord[] => {
+    const list = renderLists.find((entry) => entry.phaseId === phase._id);
+    return (list?.taskIds ?? [])
+      .map((taskId) => taskById.get(taskId))
+      .filter(Boolean) as AnyRecord[];
+  };
+  const activeTask = activeTaskId ? taskById.get(activeTaskId) : null;
+
+  const handleDragStart = ({ active }: DragStartEvent) => {
+    setActiveTaskId(String(active.id));
+    setDragLists(baseLists);
+  };
+
+  const handleDragOver = ({ active, over }: DragOverEvent) => {
+    if (!over) return;
+    setDragLists((current) => {
+      const lists = current ?? baseLists;
+      return projectDragOver(lists, String(active.id), String(over.id)) ?? current;
+    });
+  };
+
+  const handleDragCancel = () => {
+    setActiveTaskId(null);
+    setDragLists(null);
+  };
+
+  const handleDragEnd = ({ active, over }: DragEndEvent) => {
+    setActiveTaskId(null);
+    if (!over) {
+      setDragLists(null);
+      return;
     }
+    const lists = dragLists ?? baseLists;
+    const finalLists = projectDragEnd(lists, String(active.id), String(over.id));
+    const placement = dropPlacement(finalLists, String(active.id));
+    if (!placement || listsEqual(finalLists, baseLists)) {
+      setDragLists(null);
+      return;
+    }
+    // Hold the projection through the mutation round-trip, then hand back to
+    // the reactive board (which now reflects the new order).
+    setDragLists(finalLists);
+    void (async () => {
+      try {
+        await reorderTask({
+          projectId: board.project._id as any,
+          phaseId: placement.phaseId as any,
+          taskId: active.id as any,
+          ...(placement.beforeTaskId
+            ? { beforeTaskId: placement.beforeTaskId as any }
+            : {}),
+        });
+      } catch (error) {
+        toast(
+          error instanceof Error ? error.message : "Could not reorder task",
+          "error",
+        );
+      } finally {
+        setDragLists(null);
+      }
+    })();
   };
 
   return (
-    <div className="space-y-5 p-4 desk:p-5">
-      {activePhases.map((phase) => (
-        <PhaseSection
-          key={phase._id}
-          phase={phase}
-          phaseTasks={tasksForPhase(phase)}
-          busyTaskId={busyTaskId}
-          approvalsByTask={approvalsByTask}
-          onSelect={onSelect}
-          onStart={onStart}
-          onComplete={onComplete}
-          setDraggingId={setDraggingId}
-          moveBefore={moveBefore}
-        />
-      ))}
+    <DndContext
+      sensors={sensors}
+      collisionDetection={closestCorners}
+      onDragStart={handleDragStart}
+      onDragOver={handleDragOver}
+      onDragEnd={handleDragEnd}
+      onDragCancel={handleDragCancel}
+    >
+      <div className="space-y-5 p-4 desk:p-5">
+        {activePhases.map((phase) => (
+          <PhaseSection
+            key={phase._id}
+            phase={phase}
+            phaseTasks={tasksForPhase(phase)}
+            sortedIncompleteTasks={sortedIncompleteFor(phase)}
+            busyTaskId={busyTaskId}
+            approvalsByTask={approvalsByTask}
+            onSelect={onSelect}
+            onStart={onStart}
+            onComplete={onComplete}
+          />
+        ))}
 
-      <Button
-        className="w-full border-dashed"
-        onClick={() =>
-          void createPhase({
-            projectId: board.project._id as any,
-            title: `Phase ${phases.length + 1}`,
-          })
-        }
-      >
-        <Plus size={15} aria-hidden /> Add phase
-      </Button>
+        <Button
+          className="w-full border-dashed"
+          onClick={() =>
+            void createPhase({
+              projectId: board.project._id as any,
+              title: `Phase ${phases.length + 1}`,
+            })
+          }
+        >
+          <Plus size={15} aria-hidden /> Add phase
+        </Button>
 
-      {completedPhases.length ? (
-        // Same treatment as completed tasks inside a phase: one unobtrusive
-        // details row, closed by default. <details> keeps its children
-        // mounted while closed, so expanding never remounts the phase rows.
-        <details className="rounded-xl border bg-background/30 px-3 py-2">
-          <summary className="cursor-pointer text-xs font-bold text-muted-foreground">
-            Completed phases ({completedPhases.length})
-          </summary>
-          <div className="mt-2 grid gap-2 border-t pt-2">
-            {completedPhases.map((phase) => (
-              <PhaseSection
-                key={phase._id}
-                phase={phase}
-                phaseTasks={tasksForPhase(phase)}
-                busyTaskId={busyTaskId}
-                approvalsByTask={approvalsByTask}
-                onSelect={onSelect}
-                onStart={onStart}
-                onComplete={onComplete}
-                setDraggingId={setDraggingId}
-                moveBefore={moveBefore}
-              />
-            ))}
-          </div>
-        </details>
-      ) : null}
-    </div>
+        {completedPhases.length ? (
+          // Same treatment as completed tasks inside a phase: one unobtrusive
+          // details row, closed by default. <details> keeps its children
+          // mounted while closed, so expanding never remounts the phase rows.
+          <details className="rounded-xl border bg-background/30 px-3 py-2">
+            <summary className="cursor-pointer text-xs font-bold text-muted-foreground">
+              Completed phases ({completedPhases.length})
+            </summary>
+            <div className="mt-2 grid gap-2 border-t pt-2">
+              {completedPhases.map((phase) => (
+                <PhaseSection
+                  key={phase._id}
+                  phase={phase}
+                  phaseTasks={tasksForPhase(phase)}
+                  sortedIncompleteTasks={sortedIncompleteFor(phase)}
+                  busyTaskId={busyTaskId}
+                  approvalsByTask={approvalsByTask}
+                  onSelect={onSelect}
+                  onStart={onStart}
+                  onComplete={onComplete}
+                />
+              ))}
+            </div>
+          </details>
+        ) : null}
+      </div>
+      <DragOverlay>
+        {activeTask ? (
+          <TaskRow
+            task={activeTask}
+            busy={false}
+            pendingApprovals={approvalsByTask[activeTask._id] ?? 0}
+            onSelect={() => {}}
+            onStart={() => {}}
+            onComplete={() => {}}
+            overlay
+          />
+        ) : null}
+      </DragOverlay>
+    </DndContext>
   );
 }
 
