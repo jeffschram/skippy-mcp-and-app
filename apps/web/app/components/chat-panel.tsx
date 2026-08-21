@@ -1,6 +1,6 @@
 "use client";
 
-import { useLayoutEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from "react";
 import { usePathname } from "next/navigation";
 import { useConvexAuth, useMutation, useQuery } from "convex/react";
 import { ArrowDown, CheckCircle2, ExternalLink, File as FileIcon, FilePenLine, FilePlus2, GitPullRequest, ListChecks, MessageCircle, Paperclip, SendHorizontal, Sparkles, TerminalSquare, X } from "lucide-react";
@@ -289,10 +289,24 @@ function ChatSurface({
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [pickedHarness, setPickedHarness] = useState<"claude" | "codex">("claude");
+  const harnessWasPicked = useRef(false);
   const messagesRef = useRef<HTMLDivElement | null>(null);
   const queryArgs = scope.kind === "project" ? { projectId: scope.projectId as any } : { pageKey: scope.pageKey };
   const data = useQuery(api.chats.chatForScopeForViewer, isAuthenticated ? queryArgs : "skip") as AnyRecord | undefined;
+  const executionConfig = useQuery(
+    api.agentWorkbench.projectExecutionConfigForViewer,
+    isAuthenticated && scope.kind === "project" ? { projectId: scope.projectId as any } : "skip",
+  ) as AnyRecord | null | undefined;
   const sendMessage = useMutation(api.chats.sendChatMessageForViewer);
+  const startNewChat = useMutation(api.chats.startNewChatForViewer);
+
+  // A project's Settings mapping is the initial choice, but remains
+  // overridable until the first message permanently binds the conversation.
+  useEffect(() => {
+    if (!harnessWasPicked.current && executionConfig?.preferredHarness) {
+      setPickedHarness(executionConfig.preferredHarness);
+    }
+  }, [executionConfig?.preferredHarness]);
 
   // Attachments ride the project library (upload → register → reference), so
   // the affordance exists for project chats only in v1 — page chats hide it.
@@ -339,6 +353,24 @@ function ChatSurface({
   const pendingApprovals: AnyRecord[] = data?.pendingApprovals ?? [];
   const activeTurnEvents: AnyRecord[] = data?.activeTurnEvents ?? [];
   const boundHarness: string | undefined = data?.chat?.harness;
+
+  const chooseHarness = async (next: "claude" | "codex") => {
+    harnessWasPicked.current = true;
+    if (!boundHarness) {
+      setPickedHarness(next);
+      return;
+    }
+    if (next === boundHarness) return;
+    const label = next === "codex" ? "Codex" : "Claude";
+    if (!window.confirm(`Start a new ${label} conversation? Your current transcript will be preserved.`)) return;
+    try {
+      await startNewChat({ ...queryArgs, harness: next } as any);
+      setPickedHarness(next);
+      toast(`New ${label} conversation started.`, "success");
+    } catch (error) {
+      toast(error instanceof Error ? error.message : "Could not switch assistants", "error");
+    }
+  };
   // Settled run approvals leave the transcript (after a brief exit): the
   // notice is not the durable record of the decision — the run/task activity
   // history is. Filtering happens here at render; the query keeps returning
@@ -456,19 +488,35 @@ function ChatSurface({
               {data?.chat?.title ?? scope.label}{boundHarness ? ` · ${boundHarness}` : ""}
             </p>
           </div>
-          {!boundHarness ? (
-            <select
-              className="rounded-lg border bg-card px-2 py-1.5 text-xs"
-              value={pickedHarness}
-              onChange={(event) => setPickedHarness(event.target.value as "claude" | "codex")}
-              aria-label="Assistant"
-            >
-              <option value="claude">Claude</option>
-              <option value="codex">Codex</option>
-            </select>
-          ) : null}
+          <select
+            className="rounded-lg border bg-card px-2 py-1.5 text-xs"
+            value={boundHarness ?? pickedHarness}
+            onChange={(event) => void chooseHarness(event.target.value as "claude" | "codex")}
+            aria-label="Assistant"
+            title={boundHarness ? "Changing assistant starts a new conversation" : "Choose assistant"}
+          >
+            <option value="claude">Claude</option>
+            <option value="codex">Codex</option>
+          </select>
         </header>
       )}
+      {header ? (
+        <div className="flex items-center justify-end gap-2 border-b bg-card px-4 py-2">
+          <label htmlFor={`chat-harness-${chatKey}`} className="text-xs text-muted-foreground">
+            Assistant
+          </label>
+          <select
+            id={`chat-harness-${chatKey}`}
+            className="rounded-lg border bg-background px-2 py-1.5 text-xs"
+            value={boundHarness ?? pickedHarness}
+            onChange={(event) => void chooseHarness(event.target.value as "claude" | "codex")}
+            title={boundHarness ? "Changing assistant starts a new conversation" : "Choose assistant"}
+          >
+            <option value="claude">Claude</option>
+            <option value="codex">Codex</option>
+          </select>
+        </div>
+      ) : null}
 
       <div className="relative flex min-h-0 flex-1">
       <div className="flex flex-1 flex-col gap-3 overflow-y-auto px-4 py-5 desk:px-6" ref={messagesRef} onScroll={handleTranscriptScroll}>
