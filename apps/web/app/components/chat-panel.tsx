@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from "react";
 import { usePathname } from "next/navigation";
 import { useConvexAuth, useMutation, useQuery } from "convex/react";
-import { CheckCircle2, ExternalLink, FilePenLine, FilePlus2, GitPullRequest, ListChecks, MessageCircle, SendHorizontal, Sparkles, TerminalSquare, X } from "lucide-react";
+import { CheckCircle2, ExternalLink, File as FileIcon, FilePenLine, FilePlus2, GitPullRequest, ListChecks, MessageCircle, Paperclip, SendHorizontal, Sparkles, TerminalSquare, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { api } from "../../lib/skippy-api";
 import { approvalMoments } from "../../lib/approvals";
@@ -11,6 +11,15 @@ import { buildChatTimeline } from "../../lib/chat-timeline";
 import { summarizeChatActivity, type ChatActivityLine } from "../../lib/chat-activity";
 import type { TaskMomentState } from "../../lib/task-moments";
 import { ApprovalCard } from "./approval-card";
+import { Spinner } from "./ui";
+import { useToast } from "./widgets";
+import { useProjectFileUploader, type UploadedProjectFile } from "../hubs/project-library";
+import {
+  PROJECT_FILE_ACCEPT,
+  checkProjectFile,
+  formatFileSize,
+  iconKindForMimeType,
+} from "../hubs/project-library-helpers";
 
 type AnyRecord = Record<string, any>;
 
@@ -210,6 +219,52 @@ function LiveActivity({ events }: { events: AnyRecord[] }) {
   );
 }
 
+/** Non-image attachment chip: icon + name + size, downloadable while the URL lives. */
+function AttachmentChip({ attachment }: { attachment: AnyRecord }) {
+  const body = (
+    <>
+      <FileIcon size={14} aria-hidden className="shrink-0 text-muted-foreground" />
+      <span className="min-w-0 truncate font-semibold">{attachment.fileName}</span>
+      <span className="shrink-0 text-muted-foreground">{formatFileSize(attachment.sizeBytes)}</span>
+    </>
+  );
+  const chipClass =
+    "flex max-w-60 items-center gap-1.5 rounded-lg border bg-secondary px-2.5 py-1.5 text-xs text-foreground";
+  if (attachment.url) {
+    return (
+      <a className={cn(chipClass, "no-underline hover:border-primary")} href={attachment.url} target="_blank" rel="noreferrer" title={`Download ${attachment.fileName}`}>
+        {body}
+      </a>
+    );
+  }
+  return <span className={chipClass}>{body}</span>;
+}
+
+/** Message attachments: images render inline, other files as name/size chips. */
+function MessageAttachments({ attachments }: { attachments: AnyRecord[] }) {
+  return (
+    <div className="flex flex-wrap justify-end gap-1.5">
+      {attachments.map((attachment, index) => {
+        const key = `${attachment.fileName}:${index}`;
+        if (iconKindForMimeType(attachment.mimeType) === "image" && attachment.url) {
+          return (
+            <a key={key} href={attachment.url} target="_blank" rel="noreferrer" title={attachment.fileName}>
+              {/* eslint-disable-next-line @next/next/no-img-element -- ephemeral storage URL, not optimizable */}
+              <img
+                src={attachment.url}
+                alt={attachment.fileName}
+                loading="lazy"
+                className="max-h-48 max-w-full rounded-xl border object-cover"
+              />
+            </a>
+          );
+        }
+        return <AttachmentChip key={key} attachment={attachment} />;
+      })}
+    </div>
+  );
+}
+
 function ChatSurface({
   scope,
   className,
@@ -235,6 +290,48 @@ function ChatSurface({
   const queryArgs = scope.kind === "project" ? { projectId: scope.projectId as any } : { pageKey: scope.pageKey };
   const data = useQuery(api.chats.chatForScopeForViewer, isAuthenticated ? queryArgs : "skip") as AnyRecord | undefined;
   const sendMessage = useMutation(api.chats.sendChatMessageForViewer);
+
+  // Attachments ride the project library (upload → register → reference), so
+  // the affordance exists for project chats only in v1 — page chats hide it.
+  const canAttach = scope.kind === "project";
+  const toast = useToast();
+  const { uploadFiles } = useProjectFileUploader(scope.kind === "project" ? scope.projectId : "");
+  const [attachments, setAttachments] = useState<UploadedProjectFile[]>([]);
+  const [uploadingCount, setUploadingCount] = useState(0);
+  const [dragOver, setDragOver] = useState(false);
+  const attachInputRef = useRef<HTMLInputElement | null>(null);
+
+  const addFiles = async (files: File[]) => {
+    if (!canAttach || !files.length) return;
+    // Friendly pre-check: the library's shared size/type limits, surfaced as
+    // toasts (the chat doesn't render the library's inline status list).
+    const accepted: File[] = [];
+    for (const file of files) {
+      const check = checkProjectFile({ fileName: file.name, mimeType: file.type, sizeBytes: file.size });
+      if (!check.ok) toast(`Can't attach ${file.name || "this file"}: ${check.reason}`, "error");
+      else accepted.push(file);
+    }
+    if (!accepted.length) return;
+    setUploadingCount((count) => count + accepted.length);
+    try {
+      const { uploaded } = await uploadFiles(accepted, undefined, { note: "chat attachment" });
+      if (uploaded.length) setAttachments((current) => [...current, ...uploaded]);
+    } finally {
+      setUploadingCount((count) => count - accepted.length);
+    }
+  };
+
+  const handleDragOver = (event: DragEvent) => {
+    if (!canAttach || !event.dataTransfer?.types?.includes("Files")) return;
+    event.preventDefault();
+    setDragOver(true);
+  };
+  const handleDrop = (event: DragEvent) => {
+    if (!canAttach) return;
+    event.preventDefault();
+    setDragOver(false);
+    void addFiles(Array.from(event.dataTransfer?.files ?? []));
+  };
   const messages: AnyRecord[] = data?.messages ?? [];
   const pendingApprovals: AnyRecord[] = data?.pendingApprovals ?? [];
   const activeTurnEvents: AnyRecord[] = data?.activeTurnEvents ?? [];
@@ -261,13 +358,21 @@ function ChatSurface({
 
   const send = async () => {
     const content = draft.trim();
-    if (!content || sending) return;
+    if ((!content && !attachments.length) || sending || uploadingCount > 0) return;
     setSending(true);
     setDraft("");
+    const sentAttachments = attachments;
+    setAttachments([]);
     try {
-      await sendMessage({ ...queryArgs, content, harness: boundHarness ?? pickedHarness } as any);
+      await sendMessage({
+        ...queryArgs,
+        content,
+        harness: boundHarness ?? pickedHarness,
+        ...(sentAttachments.length ? { attachments: sentAttachments } : {}),
+      } as any);
     } catch (error) {
       setDraft(content);
+      setAttachments(sentAttachments);
       console.error("chat send failed", error);
     } finally {
       setSending(false);
@@ -275,7 +380,20 @@ function ChatSurface({
   };
 
   return (
-    <section className={cn("flex min-h-0 flex-col overflow-hidden bg-background", className)} aria-label="Skippy chat">
+    <section
+      className={cn("relative flex min-h-0 flex-col overflow-hidden bg-background", className)}
+      aria-label="Skippy chat"
+      onDragOver={handleDragOver}
+      onDragLeave={() => setDragOver(false)}
+      onDrop={handleDrop}
+    >
+      {dragOver ? (
+        <div className="pointer-events-none absolute inset-0 z-10 grid place-items-center rounded-[inherit] border-2 border-dashed border-primary bg-primary/10">
+          <p className="m-0 flex items-center gap-2 text-sm font-bold text-primary">
+            <Paperclip size={16} aria-hidden /> Drop files to attach
+          </p>
+        </div>
+      ) : null}
       {header ?? (
         <header className="flex min-h-14 items-center gap-2 border-b px-4">
           <MessageCircle size={17} aria-hidden />
@@ -352,8 +470,13 @@ function ChatSurface({
               return <div key={item.key} className="max-w-[88%] self-start text-sm text-destructive">{message.error ?? "Reply failed."}</div>;
             }
             return message.role === "user" ? (
-              <div key={item.key} className="max-w-[82%] self-end whitespace-pre-wrap rounded-2xl rounded-br-md bg-primary px-3.5 py-2.5 text-sm leading-relaxed text-primary-foreground">
-                {message.content}
+              <div key={item.key} className="flex max-w-[82%] flex-col items-end gap-1.5 self-end">
+                {message.attachments?.length ? <MessageAttachments attachments={message.attachments} /> : null}
+                {message.content ? (
+                  <div className="whitespace-pre-wrap rounded-2xl rounded-br-md bg-primary px-3.5 py-2.5 text-sm leading-relaxed text-primary-foreground">
+                    {message.content}
+                  </div>
+                ) : null}
               </div>
             ) : (
               <div key={item.key} className="max-w-[92%] self-start whitespace-pre-wrap text-sm leading-relaxed">
@@ -375,7 +498,59 @@ function ChatSurface({
         </div>
       ) : null}
 
+      {canAttach && (attachments.length > 0 || uploadingCount > 0) ? (
+        <div className="flex flex-wrap items-center gap-1.5 border-t bg-card px-3 pt-3 desk:px-4">
+          {attachments.map((attachment, index) => (
+            <span
+              key={`${attachment.storageId}:${index}`}
+              className="flex max-w-60 items-center gap-1.5 rounded-lg border bg-secondary px-2.5 py-1.5 text-xs"
+            >
+              <FileIcon size={14} aria-hidden className="shrink-0 text-muted-foreground" />
+              <span className="min-w-0 truncate font-semibold">{attachment.fileName}</span>
+              <span className="shrink-0 text-muted-foreground">{formatFileSize(attachment.sizeBytes)}</span>
+              <button
+                type="button"
+                className="grid shrink-0 place-items-center rounded hover:bg-border"
+                aria-label={`Remove ${attachment.fileName}`}
+                onClick={() => setAttachments((current) => current.filter((_, i) => i !== index))}
+              >
+                <X size={12} aria-hidden />
+              </button>
+            </span>
+          ))}
+          {uploadingCount > 0 ? (
+            <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <Spinner /> Uploading…
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+
       <div className="flex items-end gap-2 border-t bg-card p-3 desk:p-4">
+        {canAttach ? (
+          <>
+            <input
+              ref={attachInputRef}
+              type="file"
+              multiple
+              accept={PROJECT_FILE_ACCEPT}
+              style={{ display: "none" }}
+              onChange={(event) => {
+                void addFiles(Array.from(event.target.files ?? []));
+                event.target.value = "";
+              }}
+            />
+            <button
+              type="button"
+              className="grid size-11 shrink-0 place-items-center rounded-xl border text-muted-foreground hover:text-foreground"
+              onClick={() => attachInputRef.current?.click()}
+              aria-label="Attach files"
+              title="Attach files"
+            >
+              <Paperclip size={17} aria-hidden />
+            </button>
+          </>
+        ) : null}
         <textarea
           className="min-h-11 max-h-32 flex-1 resize-none rounded-xl border bg-background px-3 py-2.5 text-sm"
           value={draft}
@@ -388,8 +563,16 @@ function ChatSurface({
               void send();
             }
           }}
+          onPaste={(event) => {
+            if (!canAttach) return;
+            const files = Array.from(event.clipboardData?.files ?? []);
+            if (files.length) {
+              event.preventDefault();
+              void addFiles(files);
+            }
+          }}
         />
-        <button type="button" className="grid size-11 place-items-center rounded-xl bg-primary text-primary-foreground disabled:opacity-50" disabled={!draft.trim() || sending} onClick={() => void send()} aria-label="Send message">
+        <button type="button" className="grid size-11 place-items-center rounded-xl bg-primary text-primary-foreground disabled:opacity-50" disabled={(!draft.trim() && !attachments.length) || sending || uploadingCount > 0} onClick={() => void send()} aria-label="Send message">
           <SendHorizontal size={17} aria-hidden />
         </button>
       </div>
