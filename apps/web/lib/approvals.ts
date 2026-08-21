@@ -161,38 +161,29 @@ export function pendingApprovalCount(approvals: AnyRecord[]): number {
   return approvals.filter((approval) => approval.status === "pending").length;
 }
 
-/** How long a settled card lingers in the task panel before disappearing. */
-export const SETTLED_APPROVAL_VISIBLE_MS = 5 * 60 * 1000;
-
 /**
- * Approvals the task panel should render: everything pending for this task,
- * plus recently settled ones so a decision resolves in place (chip) instead
- * of the card vanishing under the owner's cursor. Pending first, newest last
- * within each group.
+ * All run approvals for one task, oldest first. The query intentionally
+ * returns settled approvals too (history may want them later); live surfaces
+ * filter to pending at render via useSettlingApprovals — settled cards
+ * disappear (owner decision superseding PR #117's lingering chips), with the
+ * durable record living in run/task activity history.
  */
-export function visibleTaskApprovals(
+export function approvalsForTask(
   approvals: AnyRecord[],
   taskId: string,
-  now: number,
 ): AnyRecord[] {
-  const forTask = approvals.filter((approval) => approval.taskId === taskId);
-  const pending = forTask.filter((approval) => approval.status === "pending");
-  const settled = forTask.filter((approval) => {
-    if (approval.status === "pending") return false;
-    const settledAt = Number(
-      approval.decidedAt ?? approval.updatedAt ?? approval.createdAt ?? 0,
+  return approvals
+    .filter((approval) => approval.taskId === taskId)
+    .sort(
+      (a, b) => Number(a.createdAt ?? 0) - Number(b.createdAt ?? 0),
     );
-    return now - settledAt <= SETTLED_APPROVAL_VISIBLE_MS;
-  });
-  const byCreated = (a: AnyRecord, b: AnyRecord) =>
-    Number(a.createdAt ?? 0) - Number(b.createdAt ?? 0);
-  return [...pending.sort(byCreated), ...settled.sort(byCreated)];
 }
 
 /**
  * Chat timeline moments for run approvals: one per approval, pinned at its
- * request time. Settled approvals keep their moment — the notice stays in
- * the timeline as the record of the decision.
+ * request time. Callers filter settled approvals out first (see
+ * useSettlingApprovals) — a decided approval leaves the transcript; its
+ * durable record is the run/task activity history, not the conversation.
  */
 export function approvalMoments(approvals: AnyRecord[]): AnyRecord[] {
   return approvals.map((approval) => ({

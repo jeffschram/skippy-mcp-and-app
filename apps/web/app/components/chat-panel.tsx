@@ -13,6 +13,7 @@ import { buildChatTimeline } from "../../lib/chat-timeline";
 import { summarizeChatActivity, type ChatActivityLine } from "../../lib/chat-activity";
 import type { TaskMomentState } from "../../lib/task-moments";
 import { ApprovalCard } from "./approval-card";
+import { useSettlingApprovals } from "./use-settling-approvals";
 import { Spinner } from "./ui";
 import { useToast } from "./widgets";
 import { useProjectFileUploader, type UploadedProjectFile } from "../hubs/project-library";
@@ -338,9 +339,15 @@ function ChatSurface({
   const pendingApprovals: AnyRecord[] = data?.pendingApprovals ?? [];
   const activeTurnEvents: AnyRecord[] = data?.activeTurnEvents ?? [];
   const boundHarness: string | undefined = data?.chat?.harness;
+  // Settled run approvals leave the transcript (after a brief exit): the
+  // notice is not the durable record of the decision — the run/task activity
+  // history is. Filtering happens here at render; the query keeps returning
+  // settled approvals.
+  const { approvals: liveRunApprovals, leavingIds: leavingApprovalIds } =
+    useSettlingApprovals(runApprovals ?? []);
   const timelineItems = useMemo(
-    () => buildChatTimeline(messages, taskMoments, approvalMoments(runApprovals ?? [])),
-    [messages, taskMoments, runApprovals],
+    () => buildChatTimeline(messages, taskMoments, approvalMoments(liveRunApprovals)),
+    [messages, taskMoments, liveRunApprovals],
   );
   const lastTimelineItem = timelineItems[timelineItems.length - 1];
 
@@ -494,13 +501,18 @@ function ChatSurface({
               // Compact actionable notice: chat notifies, the panel holds
               // the detail — but a parked run needs the owner even while
               // they're chatting, so the decision buttons live inline.
+              // Once decided, the notice fades out of the transcript.
               const approval = item.moment.approval;
               return (
                 <ApprovalCard
                   key={item.key}
                   approval={approval}
                   variant="chat"
-                  className="my-1"
+                  className={cn(
+                    "my-1",
+                    leavingApprovalIds.has(String(approval._id)) &&
+                      "animate-approval-settle motion-reduce:animate-none",
+                  )}
                   onOpenTask={
                     onOpenTask && approval.taskId
                       ? () => onOpenTask(approval.taskId)

@@ -101,6 +101,17 @@
      `wide` gates page-level multi-column grids, `desk` gates the sidebar shell. */
   --breakpoint-wide: 821px;
   --breakpoint-desk: 881px;
+
+  /* Brief exit for a just-decided approval card before it unmounts
+     (see useSettlingApprovals). Consumers pair the utility with
+     motion-reduce:animate-none. */
+  --animate-approval-settle: approval-settle 0.35s ease-out forwards;
+  @keyframes approval-settle {
+    to {
+      opacity: 0;
+      transform: translateY(-3px) scale(0.98);
+    }
+  }
 }
 
 @layer base {

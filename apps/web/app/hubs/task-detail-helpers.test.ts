@@ -6,6 +6,7 @@ import {
   parseCriteria,
   prDisplay,
   primaryTaskAction,
+  truncateMiddle,
   type TaskDetailTask,
 } from "./task-detail-helpers";
 
@@ -117,5 +118,29 @@ describe("prDisplay", () => {
     expect(prDisplay(task({ prUrl: "https://github.com/x/y/pull/7" }))).toEqual({
       label: "Open pull request",
     });
+  });
+});
+
+describe("truncateMiddle", () => {
+  it("leaves short text untouched", () => {
+    expect(truncateMiddle("agent/task-fix", 28)).toBe("agent/task-fix");
+  });
+
+  it("keeps head and tail around a middle ellipsis at the max length", () => {
+    const branch = "agent/task-ph8cwyem-skippy-mcp-and-app";
+    const out = truncateMiddle(branch, 28);
+    expect(out.length).toBe(28);
+    expect(out).toContain("…");
+    expect(out.startsWith("agent/task-ph8")).toBe(true);
+    expect(out.endsWith("-mcp-and-app")).toBe(true);
+  });
+
+  it("returns exactly-max text unchanged", () => {
+    const text = "x".repeat(28);
+    expect(truncateMiddle(text, 28)).toBe(text);
+  });
+
+  it("ignores degenerate max values", () => {
+    expect(truncateMiddle("abcdef", 1)).toBe("abcdef");
   });
 });

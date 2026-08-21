@@ -8,6 +8,7 @@ import {
   Check,
   ExternalLink,
   FilePenLine,
+  GitBranch,
   GitPullRequest,
   ListChecks,
   Pencil,
@@ -34,9 +35,10 @@ import {
   Field,
   Select,
   TextArea,
+  useSettlingApprovals,
   useToast,
 } from "../components";
-import { visibleTaskApprovals } from "../../lib/approvals";
+import { approvalsForTask } from "../../lib/approvals";
 import { useViewerReady } from "./use-viewer";
 import {
   canAbandon,
@@ -45,6 +47,7 @@ import {
   parseCriteria,
   prDisplay,
   primaryTaskAction,
+  truncateMiddle,
 } from "./task-detail-helpers";
 
 type AnyRecord = Record<string, any>;
@@ -160,7 +163,7 @@ function TaskRunActivity({ taskId }: { taskId: string }) {
             </p>
           ))}
           {parked ? (
-            // A parked run reads "waiting on you" — the approval card above
+            // A parked run reads "waiting on you" — the approval card below
             // carries the urgency, so no working pulse here.
             <p className="m-0 text-xs font-bold text-muted-foreground">
               Paused — waiting on your approval
@@ -237,13 +240,15 @@ export function TaskDetailPanel({
   const action = primaryTaskAction(task);
   const pr = prDisplay(task);
   const dependencies: AnyRecord[] = detail?.dependencies ?? [];
-  // Pending gates for this task's run, plus recently settled ones so a
-  // decision resolves in place instead of the card vanishing mid-click.
-  const taskApprovals = visibleTaskApprovals(
-    approvals ?? [],
-    task._id as string,
-    Date.now(),
+  // Pending gates for this task's run. Settled approvals are filtered out at
+  // render (the query still returns them): a decided card fades out and is
+  // gone — its durable record is the run/task activity history.
+  const forTask = useMemo(
+    () => approvalsForTask(approvals ?? [], task._id as string),
+    [approvals, task._id],
   );
+  const { approvals: taskApprovals, leavingIds } =
+    useSettlingApprovals(forTask);
 
   const startEditingBrief = () => {
     setBriefDraft(task.executionBrief ?? "");
@@ -324,44 +329,100 @@ export function TaskDetailPanel({
       </header>
 
       <div className="min-h-0 flex-1 space-y-6 overflow-y-auto p-5 desk:p-6">
+        <div>
+          <h2 className="m-0 text-xl leading-snug">{task.title}</h2>
+          {/* One meta row: status pills on the left, PR facts (link, status
+              chip, branch) pushed right when space allows — on narrow panels
+              the right group wraps to its own line and left-aligns. */}
+          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <Badge tone={executionStateTone(task.executionState)} dot>
+                {titleCase(task.executionState)}
+              </Badge>
+              {task.kind ? <Badge tone="neutral">{task.kind}</Badge> : null}
+              <Badge tone={task.ownerType === "agent" ? "blue" : "gold"}>
+                {task.ownerType === "agent" ? "Agent" : "Owner"}
+              </Badge>
+              {task.agentRequestStatus === "requested" ? (
+                <Badge tone="blue">
+                  Queued{task.requestedHarness ? ` for ${task.requestedHarness}` : ""}
+                </Badge>
+              ) : null}
+            </div>
+            {pr || task.gitBranchName ? (
+              <div className="ml-auto flex min-w-0 flex-wrap items-center gap-1.5">
+                {pr ? (
+                  <>
+                    <a
+                      className="inline-flex items-center gap-1 text-sm font-bold text-primary no-underline hover:underline"
+                      href={task.prUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      <GitPullRequest size={14} aria-hidden />
+                      {pr.label}
+                      <ExternalLink size={12} aria-hidden />
+                    </a>
+                    {pr.status ? (
+                      <Badge
+                        tone={
+                          pr.status === "merged"
+                            ? "green"
+                            : pr.status === "closed"
+                              ? "red"
+                              : "gold"
+                        }
+                      >
+                        {titleCase(pr.status)}
+                      </Badge>
+                    ) : null}
+                  </>
+                ) : task.executionState === "in_review" ? (
+                  <span className="text-xs text-muted-foreground">
+                    PR pending
+                  </span>
+                ) : null}
+                {task.gitBranchName ? (
+                  <span
+                    className="inline-flex items-center gap-1 font-mono text-xs text-muted-foreground"
+                    title={task.gitBranchName}
+                  >
+                    <GitBranch size={12} aria-hidden className="shrink-0" />
+                    {truncateMiddle(task.gitBranchName)}
+                  </span>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+        </div>
+
+        {task.executionState === "in_progress" && task.ownerType === "agent" ? (
+          // Live run narration sits directly under the header, above the
+          // description/brief content. Only agent-owned, in-progress tasks
+          // can have a streaming run; gated here (not with conditional hooks)
+          // so the subscriptions unmount the moment the state flips — no
+          // stale narration once the run settles.
+          <TaskRunActivity taskId={task._id as string} />
+        ) : null}
+
         {taskApprovals.length ? (
-          // A parked run reads "waiting on you", not "working": while an
-          // approval is pending this card sits above everything else in the
-          // panel, taking visual precedence over run narration.
+          // Approval cards live under the narration. Precedence is prominence
+          // within this stack — the card is visually hot (gold), the narration
+          // quiet — not position above it (adjusts the PR #117/#118 rule).
+          // A decided card plays a brief exit and disappears for good.
           <div className="grid gap-3">
             {taskApprovals.map((approval) => (
               <ApprovalCard
                 key={approval._id}
                 approval={approval}
                 variant="panel"
+                className={cn(
+                  leavingIds.has(String(approval._id)) &&
+                    "animate-approval-settle motion-reduce:animate-none",
+                )}
               />
             ))}
           </div>
-        ) : null}
-        <div>
-          <h2 className="m-0 text-xl leading-snug">{task.title}</h2>
-          <div className="mt-2 flex flex-wrap items-center gap-1.5">
-            <Badge tone={executionStateTone(task.executionState)} dot>
-              {titleCase(task.executionState)}
-            </Badge>
-            {task.kind ? <Badge tone="neutral">{task.kind}</Badge> : null}
-            <Badge tone={task.ownerType === "agent" ? "blue" : "gold"}>
-              {task.ownerType === "agent" ? "Agent" : "Owner"}
-            </Badge>
-            {task.agentRequestStatus === "requested" ? (
-              <Badge tone="blue">
-                Queued{task.requestedHarness ? ` for ${task.requestedHarness}` : ""}
-              </Badge>
-            ) : null}
-          </div>
-        </div>
-
-        {task.executionState === "in_progress" && task.ownerType === "agent" ? (
-          // Live run narration: only agent-owned, in-progress tasks can have
-          // a streaming run. Gated here (not with conditional hooks) so the
-          // subscriptions unmount the moment the state flips — no stale
-          // narration once the run settles.
-          <TaskRunActivity taskId={task._id as string} />
         ) : null}
 
         <DetailSection title="Description">
@@ -482,48 +543,6 @@ export function TaskDetailPanel({
               >
                 {task.resultUrl}
               </a>
-            ) : null}
-          </DetailSection>
-        ) : null}
-
-        {pr || task.gitBranchName || task.executionState === "in_review" ? (
-          <DetailSection title="Pull request">
-            {pr ? (
-              <p className="m-0 flex items-center gap-2">
-                <a
-                  className="inline-flex items-center gap-1.5 text-sm font-bold text-primary no-underline hover:underline"
-                  href={task.prUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  <GitPullRequest size={15} aria-hidden />
-                  {pr.label}
-                  <ExternalLink size={13} aria-hidden />
-                </a>
-                {pr.status ? (
-                  <Badge
-                    tone={
-                      pr.status === "merged"
-                        ? "green"
-                        : pr.status === "closed"
-                          ? "red"
-                          : "gold"
-                    }
-                  >
-                    {titleCase(pr.status)}
-                  </Badge>
-                ) : null}
-              </p>
-            ) : task.executionState === "in_review" ? (
-              <p className="m-0 text-sm text-muted-foreground">
-                PR pending or not recorded yet.
-              </p>
-            ) : null}
-            {task.gitBranchName ? (
-              <p className="m-0 mt-1.5 text-xs text-muted-foreground">
-                Branch:{" "}
-                <span className="font-mono">{task.gitBranchName}</span>
-              </p>
             ) : null}
           </DetailSection>
         ) : null}
