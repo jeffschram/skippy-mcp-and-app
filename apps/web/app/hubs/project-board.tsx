@@ -47,6 +47,7 @@ import {
 import { LiveGate } from "../live-auth";
 import {
   completedPhaseSummary,
+  partitionPhasesByCompletion,
   phaseCompletion,
 } from "./project-plan-helpers";
 import { createPadAutosave } from "./project-notes-helpers";
@@ -530,10 +531,11 @@ function PhaseSection({
   moveBefore: (phaseId: string, beforeTaskId?: string) => Promise<void>;
 }) {
   const completion = phaseCompletion(phaseTasks);
-  // Completed phases default collapsed so live work sits above the fold.
-  // "expanded" only matters while the phase is complete; a reopened or new
-  // task flips `completion` to "active" and the full rendering returns on
-  // its own, no state reset needed.
+  // A completed phase (rendered inside the Plan's bottom "Completed phases"
+  // section) defaults to its compact collapsed row. "expanded" only matters
+  // while the phase is complete; a reopened or new task flips `completion`
+  // to "active" and the full rendering returns on its own, no state reset
+  // needed.
   const [expanded, setExpanded] = useState(false);
   const completedTasks = phaseTasks.filter(
     (task) => displayState(task) === "Completed",
@@ -553,9 +555,6 @@ function PhaseSection({
           className="flex w-full items-center justify-between gap-3 rounded-xl border border-transparent px-2 pt-2 pb-2 text-left hover:border-border"
         >
           <div className="min-w-0 flex-1">
-            <p className="mb-1 text-[11px] font-bold uppercase tracking-[0.08em] text-muted-foreground">
-              Phase {phase.orderNum + 1}
-            </p>
             {/* Keep the h2 typography of PhaseTitle so the collapsed row
                 still scans as part of the plan document. */}
             <h2 className="m-0 flex items-center gap-2 text-xl">
@@ -581,9 +580,6 @@ function PhaseSection({
     <section>
       <div className="flex items-start justify-between gap-3 pt-2 mb-2">
         <div className="min-w-0 flex-1">
-          <p className="mb-1 text-[11px] font-bold uppercase tracking-[0.08em] text-muted-foreground">
-            Phase {phase.orderNum + 1}
-          </p>
           <PhaseTitle phase={phase} />
         </div>
         {completion === "complete" ? (
@@ -693,6 +689,15 @@ function ProjectPlan({
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const tasks: AnyRecord[] = board.tasks ?? [];
   const phases: AnyRecord[] = board.phases ?? [];
+  const tasksForPhase = (phase: AnyRecord) =>
+    tasks.filter((task) => task.phaseId === phase._id);
+  // Fully-completed phases sink into one collapsed section at the bottom so
+  // the top of the Plan is only live work; reopening a task flips its phase
+  // back to "active" and it returns to its original slot automatically.
+  const { activePhases, completedPhases } = partitionPhasesByCompletion(
+    phases,
+    tasksForPhase,
+  );
 
   const moveBefore = async (phaseId: string, beforeTaskId?: string) => {
     if (!draggingId || draggingId === beforeTaskId) return;
@@ -715,11 +720,11 @@ function ProjectPlan({
 
   return (
     <div className="space-y-5 p-4 desk:p-5">
-      {phases.map((phase) => (
+      {activePhases.map((phase) => (
         <PhaseSection
           key={phase._id}
           phase={phase}
-          phaseTasks={tasks.filter((task) => task.phaseId === phase._id)}
+          phaseTasks={tasksForPhase(phase)}
           busyTaskId={busyTaskId}
           approvalsByTask={approvalsByTask}
           onSelect={onSelect}
@@ -741,6 +746,33 @@ function ProjectPlan({
       >
         <Plus size={15} aria-hidden /> Add phase
       </Button>
+
+      {completedPhases.length ? (
+        // Same treatment as completed tasks inside a phase: one unobtrusive
+        // details row, closed by default. <details> keeps its children
+        // mounted while closed, so expanding never remounts the phase rows.
+        <details className="rounded-xl border bg-background/30 px-3 py-2">
+          <summary className="cursor-pointer text-xs font-bold text-muted-foreground">
+            Completed phases ({completedPhases.length})
+          </summary>
+          <div className="mt-2 grid gap-2 border-t pt-2">
+            {completedPhases.map((phase) => (
+              <PhaseSection
+                key={phase._id}
+                phase={phase}
+                phaseTasks={tasksForPhase(phase)}
+                busyTaskId={busyTaskId}
+                approvalsByTask={approvalsByTask}
+                onSelect={onSelect}
+                onStart={onStart}
+                onComplete={onComplete}
+                setDraggingId={setDraggingId}
+                moveBefore={moveBefore}
+              />
+            ))}
+          </div>
+        </details>
+      ) : null}
     </div>
   );
 }
