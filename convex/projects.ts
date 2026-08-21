@@ -7,6 +7,7 @@ import {
   dependencyTaskIds,
   dependencyTaskIdsByTask,
 } from "./taskExecution";
+import { phaseAppendOrderIndex } from "./taskOrder";
 
 /* ------------------------------------------------------------------ */
 /* Helpers                                                            */
@@ -768,6 +769,10 @@ export const createTaskProposalForViewer = mutationGeneric({
     phases.sort((a: any, b: any) => a.orderNum - b.orderNum);
 
     const now = Date.now();
+    // Default placement: append to the END of the target phase. Same-millisecond
+    // timestamp orderIndexes could collide, leaving relative order undefined.
+    const phaseId = phases[0]?._id;
+    const orderIndex = phaseId ? await phaseAppendOrderIndex(ctx.db, brain._id, phaseId) : now;
     const taskId = await ctx.db.insert("tasks", {
       brainInstanceId: brain._id,
       title,
@@ -777,8 +782,8 @@ export const createTaskProposalForViewer = mutationGeneric({
       processingState: "accepted",
       kind: args.kind ?? "coding",
       executionState: "proposed",
-      orderIndex: now,
-      phaseId: phases[0]?._id,
+      orderIndex,
+      phaseId,
       createdAt: now,
       updatedAt: now,
     });
@@ -910,11 +915,21 @@ export const ensureProjectPhasesForViewer = mutationGeneric({
       updatedAt: now,
     });
 
+    // Backfill phase-less tasks (ingested tasks, pre-Plan tasks) into the new
+    // phase with sequential orderIndex values: without them every backfilled
+    // task read back as `orderIndex ?? 0` and collided at position 0.
+    const backfill: any[] = [];
     for (const taskId of await projectTaskIds(ctx.db, brain._id, args.projectId)) {
       const task = await ctx.db.get(taskId as any);
       if (task && task.brainInstanceId === brain._id && !task.phaseId) {
-        await ctx.db.patch(task._id, { phaseId, updatedAt: now });
+        backfill.push(task);
       }
+    }
+    backfill.sort(
+      (a, b) => (a.orderIndex ?? 0) - (b.orderIndex ?? 0) || (a.createdAt ?? 0) - (b.createdAt ?? 0),
+    );
+    for (let index = 0; index < backfill.length; index += 1) {
+      await ctx.db.patch(backfill[index]._id, { phaseId, orderIndex: index, updatedAt: now });
     }
     return { phaseId };
   },

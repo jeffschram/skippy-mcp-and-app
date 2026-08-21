@@ -19,6 +19,7 @@ import {
 } from "@skippy/shared";
 import { requireOwnedBrain } from "./auth";
 import { advanceDependentsAfterDone } from "./taskExecution";
+import { phaseAppendOrderIndex } from "./taskOrder";
 
 const entityType = v.union(
   v.literal("goal"),
@@ -3978,9 +3979,19 @@ export const createTaskDirect = mutationGeneric({
       const duplicatePatch = mergeDuplicateEntityPatch("task", duplicateTask, normalizedPayload, now);
       // A duplicate create is still an explicit request to have the task in
       // the Plan: adopt the resolved phase when the existing task has none
-      // (or the caller explicitly targeted one).
+      // (or the caller explicitly targeted one). A task newly entering a
+      // phase appends to the end of it — its stale orderIndex would
+      // otherwise collide with (or jump above) the phase's existing tasks.
       if (resolvedPhaseId && (args.phaseId || !duplicateTask.phaseId)) {
         (duplicatePatch as Record<string, unknown>).phaseId = resolvedPhaseId;
+        if (duplicateTask.phaseId !== resolvedPhaseId) {
+          (duplicatePatch as Record<string, unknown>).orderIndex = await phaseAppendOrderIndex(
+            db,
+            args.brainInstanceId,
+            resolvedPhaseId,
+            duplicateTask._id,
+          );
+        }
       }
       await db.patch(duplicateTask._id, duplicatePatch);
 
@@ -4036,6 +4047,12 @@ export const createTaskDirect = mutationGeneric({
       };
     }
 
+    // Default placement: append to the END of the target phase. Without an
+    // explicit orderIndex every new task read back as `orderIndex ?? 0`, so
+    // two sequential creates collided at position 0 above older tasks.
+    const orderIndex = resolvedPhaseId
+      ? await phaseAppendOrderIndex(db, args.brainInstanceId, resolvedPhaseId)
+      : undefined;
     const taskId = await db.insert("tasks", {
       brainInstanceId: args.brainInstanceId,
       title: normalizedTitle,
@@ -4047,6 +4064,7 @@ export const createTaskDirect = mutationGeneric({
       dueAt: args.dueAt,
       priorityReason: args.priorityReason,
       phaseId: resolvedPhaseId,
+      orderIndex,
       processingState: "accepted",
       createdAt: now,
       updatedAt: now,

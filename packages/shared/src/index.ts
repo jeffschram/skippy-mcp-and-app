@@ -2828,3 +2828,20 @@ export function orderIndexBetween(prev: number | undefined, next: number | undef
   const mid = prev + (next - prev) / 2;
   return mid > prev && mid < next ? mid : undefined;
 }
+
+/**
+ * orderIndex for a task appended to the END of a bucket — the DEFAULT
+ * placement for newly created tasks landing in a phase. Computed from the
+ * siblings' current max orderIndex so sequential creates get strictly
+ * increasing values after existing tasks (never colliding at 0); an empty
+ * phase starts at 0. Missing sibling values are treated as 0, matching how
+ * readers sort (`orderIndex ?? 0`).
+ */
+export function appendOrderIndex(siblingOrderIndexes: Array<number | undefined>): number {
+  let max: number | undefined;
+  for (const value of siblingOrderIndexes) {
+    const orderIndex = value ?? 0;
+    if (max === undefined || orderIndex > max) max = orderIndex;
+  }
+  return orderIndexBetween(max, undefined) ?? 0;
+}
