@@ -38,6 +38,10 @@ import {
   useToast,
 } from "../components";
 import { LiveGate } from "../live-auth";
+import {
+  completedPhaseSummary,
+  phaseCompletion,
+} from "./project-plan-helpers";
 import { ProjectLibrarySection } from "./project-library";
 import { TaskDetailPanel } from "./task-detail";
 import { useViewerReady } from "./use-viewer";
@@ -378,6 +382,167 @@ function ProjectOverview({ project }: { project: AnyRecord }) {
   );
 }
 
+function PhaseSection({
+  phase,
+  phaseTasks,
+  busyTaskId,
+  onSelect,
+  onStart,
+  onComplete,
+  setDraggingId,
+  moveBefore,
+}: {
+  phase: AnyRecord;
+  phaseTasks: AnyRecord[];
+  busyTaskId: string | null;
+  onSelect: (task: AnyRecord) => void;
+  onStart: (task: AnyRecord) => void;
+  onComplete: (task: AnyRecord) => void;
+  setDraggingId: (taskId: string | null) => void;
+  moveBefore: (phaseId: string, beforeTaskId?: string) => Promise<void>;
+}) {
+  const completion = phaseCompletion(phaseTasks);
+  // Completed phases default collapsed so live work sits above the fold.
+  // "expanded" only matters while the phase is complete; a reopened or new
+  // task flips `completion` to "active" and the full rendering returns on
+  // its own, no state reset needed.
+  const [expanded, setExpanded] = useState(false);
+  const completedTasks = phaseTasks.filter(
+    (task) => displayState(task) === "Completed",
+  );
+  const incompleteTasks = phaseTasks.filter(
+    (task) => displayState(task) !== "Completed",
+  );
+  const completeCount = completedTasks.length;
+
+  if (completion === "complete" && !expanded) {
+    return (
+      <section>
+        <button
+          type="button"
+          aria-expanded={false}
+          onClick={() => setExpanded(true)}
+          className="flex w-full items-center justify-between gap-3 rounded-xl border border-transparent px-2 pt-2 pb-2 text-left hover:border-border"
+        >
+          <div className="min-w-0 flex-1">
+            <p className="mb-1 text-[11px] font-bold uppercase tracking-[0.08em] text-muted-foreground">
+              Phase {phase.orderNum + 1}
+            </p>
+            {/* Keep the h2 typography of PhaseTitle so the collapsed row
+                still scans as part of the plan document. */}
+            <h2 className="m-0 flex items-center gap-2 text-xl">
+              <CheckCircle2
+                className="shrink-0 text-green"
+                size={18}
+                aria-hidden
+              />
+              <span className="min-w-0 flex-1 truncate font-heading text-xl font-medium leading-snug">
+                {phase.title}
+              </span>
+            </h2>
+          </div>
+          <span className="shrink-0 text-xs text-muted-foreground">
+            {completedPhaseSummary(phaseTasks.length)}
+          </span>
+        </button>
+      </section>
+    );
+  }
+
+  return (
+    <section>
+      <div className="flex items-start justify-between gap-3 pt-2 mb-2">
+        <div className="min-w-0 flex-1">
+          <p className="mb-1 text-[11px] font-bold uppercase tracking-[0.08em] text-muted-foreground">
+            Phase {phase.orderNum + 1}
+          </p>
+          <PhaseTitle phase={phase} />
+        </div>
+        {completion === "complete" ? (
+          // The title stays an editable textarea while expanded, so the
+          // collapse affordance lives beside it instead of on the whole
+          // header (a header-wide click target would swallow edit clicks).
+          <button
+            type="button"
+            aria-expanded
+            title="Collapse completed phase"
+            onClick={() => setExpanded(false)}
+            className="mt-1 flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+          >
+            <CheckCircle2 className="text-green" size={14} aria-hidden />
+            {completedPhaseSummary(phaseTasks.length)}
+          </button>
+        ) : (
+          <span className="mt-1 text-xs text-muted-foreground">
+            {completeCount}/{phaseTasks.length}
+          </span>
+        )}
+      </div>
+      <PhaseDescription phase={phase} />
+      <div className="mt-2 grid gap-2">
+        {incompleteTasks.map((task) => (
+          <TaskRow
+            key={task._id}
+            task={task}
+            busy={busyTaskId === task._id}
+            onSelect={() => onSelect(task)}
+            onStart={() => onStart(task)}
+            onComplete={() => onComplete(task)}
+            onDragStart={(event) => {
+              setDraggingId(task._id);
+              event.dataTransfer.effectAllowed = "move";
+              event.dataTransfer.setData("text/plain", task._id);
+            }}
+            onDrop={(event) => {
+              event.preventDefault();
+              void moveBefore(phase._id, task._id);
+            }}
+          />
+        ))}
+        <button
+          type="button"
+          className="flex min-h-10 items-center justify-center rounded-lg border border-dashed text-xs font-bold text-muted-foreground hover:border-primary hover:text-primary"
+          onDragOver={(event) => event.preventDefault()}
+          onDrop={(event) => {
+            event.preventDefault();
+            void moveBefore(phase._id);
+          }}
+        >
+          Drop here to move to the end of this phase
+        </button>
+        {completedTasks.length ? (
+          <details className="mt-2 rounded-xl border bg-background/30 px-3 py-2">
+            <summary className="cursor-pointer text-xs font-bold text-muted-foreground">
+              Completed ({completedTasks.length})
+            </summary>
+            <div className="mt-2 grid gap-1 border-t pt-2">
+              {completedTasks.map((task) => (
+                <TaskRow
+                  key={task._id}
+                  task={task}
+                  busy={busyTaskId === task._id}
+                  onSelect={() => onSelect(task)}
+                  onStart={() => onStart(task)}
+                  onComplete={() => onComplete(task)}
+                  onDragStart={(event) => {
+                    setDraggingId(task._id);
+                    event.dataTransfer.effectAllowed = "move";
+                    event.dataTransfer.setData("text/plain", task._id);
+                  }}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    void moveBefore(phase._id, task._id);
+                  }}
+                />
+              ))}
+            </div>
+          </details>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
 function ProjectPlan({
   board,
   busyTaskId,
@@ -419,92 +584,19 @@ function ProjectPlan({
 
   return (
     <div className="space-y-5 p-4 desk:p-5">
-      {phases.map((phase) => {
-        const phaseTasks = tasks.filter((task) => task.phaseId === phase._id);
-        const completedTasks = phaseTasks.filter(
-          (task) => displayState(task) === "Completed",
-        );
-        const incompleteTasks = phaseTasks.filter(
-          (task) => displayState(task) !== "Completed",
-        );
-        const completeCount = completedTasks.length;
-        return (
-          <section key={phase._id}>
-            <div className="flex items-start justify-between gap-3 pt-2 mb-2">
-              <div className="min-w-0 flex-1">
-                <p className="mb-1 text-[11px] font-bold uppercase tracking-[0.08em] text-muted-foreground">
-                  Phase {phase.orderNum + 1}
-                </p>
-                <PhaseTitle phase={phase} />
-              </div>
-              <span className="mt-1 text-xs text-muted-foreground">
-                {completeCount}/{phaseTasks.length}
-              </span>
-            </div>
-            <PhaseDescription phase={phase} />
-            <div className="mt-2 grid gap-2">
-              {incompleteTasks.map((task) => (
-                <TaskRow
-                  key={task._id}
-                  task={task}
-                  busy={busyTaskId === task._id}
-                  onSelect={() => onSelect(task)}
-                  onStart={() => onStart(task)}
-                  onComplete={() => onComplete(task)}
-                  onDragStart={(event) => {
-                    setDraggingId(task._id);
-                    event.dataTransfer.effectAllowed = "move";
-                    event.dataTransfer.setData("text/plain", task._id);
-                  }}
-                  onDrop={(event) => {
-                    event.preventDefault();
-                    void moveBefore(phase._id, task._id);
-                  }}
-                />
-              ))}
-              <button
-                type="button"
-                className="flex min-h-10 items-center justify-center rounded-lg border border-dashed text-xs font-bold text-muted-foreground hover:border-primary hover:text-primary"
-                onDragOver={(event) => event.preventDefault()}
-                onDrop={(event) => {
-                  event.preventDefault();
-                  void moveBefore(phase._id);
-                }}
-              >
-                Drop here to move to the end of this phase
-              </button>
-              {completedTasks.length ? (
-                <details className="mt-2 rounded-xl border bg-background/30 px-3 py-2">
-                  <summary className="cursor-pointer text-xs font-bold text-muted-foreground">
-                    Completed ({completedTasks.length})
-                  </summary>
-                  <div className="mt-2 grid gap-1 border-t pt-2">
-                    {completedTasks.map((task) => (
-                      <TaskRow
-                        key={task._id}
-                        task={task}
-                        busy={busyTaskId === task._id}
-                        onSelect={() => onSelect(task)}
-                        onStart={() => onStart(task)}
-                        onComplete={() => onComplete(task)}
-                        onDragStart={(event) => {
-                          setDraggingId(task._id);
-                          event.dataTransfer.effectAllowed = "move";
-                          event.dataTransfer.setData("text/plain", task._id);
-                        }}
-                        onDrop={(event) => {
-                          event.preventDefault();
-                          void moveBefore(phase._id, task._id);
-                        }}
-                      />
-                    ))}
-                  </div>
-                </details>
-              ) : null}
-            </div>
-          </section>
-        );
-      })}
+      {phases.map((phase) => (
+        <PhaseSection
+          key={phase._id}
+          phase={phase}
+          phaseTasks={tasks.filter((task) => task.phaseId === phase._id)}
+          busyTaskId={busyTaskId}
+          onSelect={onSelect}
+          onStart={onStart}
+          onComplete={onComplete}
+          setDraggingId={setDraggingId}
+          moveBefore={moveBefore}
+        />
+      ))}
 
       <Button
         className="w-full border-dashed"
