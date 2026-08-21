@@ -163,3 +163,38 @@
     line-height: 1.5;
   }
 }
+
+/* Animated accent for in-progress task rows on the project board. The
+ * pre-v2 board marked running work with an animated gradient progress bar;
+ * this is the same spirit as a 2px shimmer strip pinned to the row's bottom
+ * edge. Reduced-motion users get a static gold bar instead. */
+@keyframes task-shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+.task-progress-shimmer {
+  background-color: transparent;
+  background-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--gold) 30%,
+    #d9a552 50%,
+    var(--gold) 70%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: task-shimmer 2.4s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .task-progress-shimmer {
+    animation: none;
+    background-image: none;
+    background-color: var(--gold);
+  }
+}
