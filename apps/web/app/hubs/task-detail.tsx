@@ -6,15 +6,20 @@ import {
   ArrowLeft,
   Ban,
   Check,
+  Circle,
   ExternalLink,
   FilePenLine,
   GitBranch,
+  GitMerge,
   GitPullRequest,
   ListChecks,
+  Loader2,
+  Minus,
   Pencil,
   Play,
   Sparkles,
   TerminalSquare,
+  X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ChatMarkdown, ChatMarkdownInline } from "../../lib/chat-markdown";
@@ -42,6 +47,7 @@ import { approvalsForTask } from "../../lib/approvals";
 import { useViewerReady } from "./use-viewer";
 import {
   canAbandon,
+  canConfirmCloseout,
   canEditBrief,
   criteriaDraftFrom,
   parseCriteria,
@@ -174,6 +180,120 @@ function TaskRunActivity({ taskId }: { taskId: string }) {
             </p>
           )}
         </div>
+      </div>
+    </DetailSection>
+  );
+}
+
+/** Close-out job statuses where the ritual is queued or moving. */
+const CLOSEOUT_ACTIVE_STATUSES = new Set(["queued", "claimed", "running"]);
+
+function closeoutStepIcon(status: string) {
+  switch (status) {
+    case "ok":
+      return <Check size={13} aria-hidden className="mt-0.5 shrink-0 text-primary" />;
+    case "failed":
+      return <X size={13} aria-hidden className="mt-0.5 shrink-0 text-destructive" />;
+    case "running":
+      return <Loader2 size={13} aria-hidden className="mt-0.5 shrink-0 animate-spin text-primary" />;
+    case "skipped":
+      return <Minus size={13} aria-hidden className="mt-0.5 shrink-0 text-muted-foreground" />;
+    default:
+      return <Circle size={13} aria-hidden className="mt-0.5 shrink-0 text-muted-foreground/50" />;
+  }
+}
+
+/**
+ * Post-merge close-out surface for an in_review task with a PR: the
+ * "Confirm merge & close out" button enqueues the host-executed maintenance
+ * job (the scripted ritual: verify merged → pull main → conditional runner
+ * rebuild + deferred restart → worktree/branch cleanup → mark done with
+ * prStatus merged), and the job's checklist streams back here step by step
+ * like run narration. A failed job leaves the task in_review with the error
+ * visible and offers a retry; a completed job flips the task to done, which
+ * unmounts this section via the parent's in_review gate.
+ *
+ * The button shows regardless of the stored prStatus (which lags the actual
+ * merge on GitHub) — the RUNNER verifies the real merge state via gh and
+ * refuses politely when the PR is still open.
+ */
+function TaskCloseout({ taskId }: { taskId: string }) {
+  const viewerReady = useViewerReady();
+  const job = useQuery(
+    api.agentWorkbench.closeoutJobForTaskForViewer,
+    viewerReady ? { taskId: taskId as any } : "skip",
+  ) as AnyRecord | null | undefined;
+  const enqueueCloseout = useMutation(api.agentWorkbench.enqueueCloseoutForViewer);
+  const toast = useToast();
+  const [submitting, setSubmitting] = useState(false);
+
+  const active = Boolean(job && CLOSEOUT_ACTIVE_STATUSES.has(job.status));
+  const failed = job?.status === "failed";
+  // Steps show while the ritual runs or after it failed. A stale completed
+  // job (task back in review after a new attempt) renders the button only.
+  const steps: AnyRecord[] = active || failed ? (job?.steps ?? []) : [];
+
+  const confirm = async () => {
+    setSubmitting(true);
+    try {
+      await enqueueCloseout({ taskId: taskId as any });
+      toast("Close-out queued — the runner will verify the merge and clean up.", "success");
+    } catch (error) {
+      toast(
+        error instanceof Error ? error.message : "Could not queue close-out",
+        "error",
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <DetailSection title="Merge close-out">
+      <div className="grid gap-2">
+        {steps.length ? (
+          // Echoes the live-activity dashed panel so close-out progress reads
+          // like run narration.
+          <div className="grid gap-1 rounded-xl border border-dashed border-primary/30 bg-primary/[0.04] px-3 py-2">
+            {steps.map((step) => (
+              <p
+                key={step.key}
+                className={cn(
+                  "m-0 flex items-start gap-1.5 text-xs",
+                  step.status === "failed" ? "text-destructive" : "text-muted-foreground",
+                )}
+              >
+                {closeoutStepIcon(step.status)}
+                <span className="min-w-0 break-words">
+                  {step.label}
+                  {step.detail ? (
+                    <span className="text-muted-foreground/80"> — {step.detail}</span>
+                  ) : null}
+                </span>
+              </p>
+            ))}
+            {active ? (
+              <p className="m-0 text-xs font-bold text-primary animate-pulse">
+                {job?.status === "queued" ? "Waiting for the runner…" : "Closing out…"}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+        {failed && job?.errorMessage ? (
+          <p className="m-0 text-xs font-bold text-destructive">{job.errorMessage}</p>
+        ) : null}
+        {!active ? (
+          <div>
+            <Button variant="primary" disabled={submitting} onClick={() => void confirm()}>
+              <GitMerge size={15} aria-hidden />
+              {failed ? "Retry close-out" : "Confirm merge & close out"}
+            </Button>
+            <p className="mb-0 mt-1.5 text-xs text-muted-foreground">
+              Verifies the PR is merged, pulls main, rebuilds the runner if it
+              changed, removes the worktree, and marks the task done.
+            </p>
+          </div>
+        ) : null}
       </div>
     </DetailSection>
   );
@@ -403,6 +523,14 @@ export function TaskDetailPanel({
           // so the subscriptions unmount the moment the state flips — no
           // stale narration once the run settles.
           <TaskRunActivity taskId={task._id as string} />
+        ) : null}
+
+        {canConfirmCloseout(task) ? (
+          // Post-merge close-out: gated by the parent (same hook-order
+          // convention as TaskRunActivity) so the subscription unmounts the
+          // moment the task leaves in_review — completion flips the task to
+          // done and this section disappears with it.
+          <TaskCloseout taskId={task._id as string} />
         ) : null}
 
         {taskApprovals.length ? (

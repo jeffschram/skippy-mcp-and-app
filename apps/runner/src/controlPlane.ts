@@ -37,6 +37,29 @@ export interface ControlState {
   approvals: Array<{ _id: string; harnessRequestId: string; status: string; decidedAt?: number }>;
 }
 
+/** One checklist entry of a maintenance job (post-merge close-out). */
+export interface MaintenanceStep {
+  key: string;
+  label: string;
+  status: "pending" | "running" | "ok" | "failed" | "skipped";
+  detail?: string;
+}
+
+/** Claim payload for a host-executed maintenance job (scripted, no harness). */
+export interface ClaimedMaintenanceJob {
+  jobId: string;
+  claimToken: string;
+  kind: "post_merge_closeout";
+  taskId: string;
+  taskTitle?: string;
+  prUrl?: string;
+  prNumber?: number;
+  gitBranchName?: string;
+  baseBranch: string;
+  steps: MaintenanceStep[];
+  project: { _id: string; title?: string; localPath: string };
+}
+
 export type ReportableStatus =
   | "preparing"
   | "running"
@@ -92,11 +115,16 @@ export class ControlPlane {
     return this.client.mutation(fns.registerHost, { hostToken: this.hostToken, ...args });
   }
 
-  heartbeat(activeRunIds: string[], activeChatTurnIds: string[] = []): Promise<{ draining: boolean }> {
+  heartbeat(
+    activeRunIds: string[],
+    activeChatTurnIds: string[] = [],
+    activeMaintenanceJobIds: string[] = [],
+  ): Promise<{ draining: boolean }> {
     return this.client.mutation(fns.hostHeartbeat, {
       hostToken: this.hostToken,
       activeRunIds,
       activeChatTurnIds,
+      activeMaintenanceJobIds,
     });
   }
 
@@ -182,6 +210,45 @@ export class ControlPlane {
       harnessRequestId,
       reason,
     });
+  }
+
+  /* ---- Maintenance jobs (post-merge close-out) ---- */
+
+  claimNextMaintenanceJob(): Promise<ClaimedMaintenanceJob | null> {
+    return this.client.mutation(fns.claimNextMaintenanceJob, { hostToken: this.hostToken });
+  }
+
+  updateMaintenanceJob(
+    jobId: string,
+    claimToken: string,
+    patch: {
+      status?: "running" | "completed" | "failed";
+      steps?: MaintenanceStep[];
+      errorMessage?: string;
+      resultSummary?: string;
+    } = {},
+  ): Promise<{ jobId: string; status: string }> {
+    const payload: Record<string, unknown> = { hostToken: this.hostToken, jobId, claimToken };
+    if (patch.status !== undefined) payload.status = patch.status;
+    if (patch.steps !== undefined) {
+      // Convex rejects explicit `undefined` values inside nested objects, so
+      // strip absent details rather than sending `detail: undefined`.
+      payload.steps = patch.steps.map((step) => ({
+        key: step.key,
+        label: step.label,
+        status: step.status,
+        ...(step.detail !== undefined ? { detail: step.detail } : {}),
+      }));
+    }
+    if (patch.errorMessage !== undefined) payload.errorMessage = patch.errorMessage;
+    if (patch.resultSummary !== undefined) payload.resultSummary = patch.resultSummary;
+    return this.client.mutation(fns.updateMaintenanceJob, payload);
+  }
+
+  hostActiveMaintenanceJobs(): Promise<
+    Array<{ jobId: string; status: string; kind: string; claimToken?: string; taskId: string }>
+  > {
+    return this.client.query(fns.hostActiveMaintenanceJobs, { hostToken: this.hostToken });
   }
 
   /* ---- Conversational chat turns (local-harness chat) ---- */

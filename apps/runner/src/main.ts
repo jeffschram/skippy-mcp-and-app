@@ -9,7 +9,13 @@
  */
 import os from "node:os";
 import { ensureCorepackShims, extendRunnerPath, loadConfig } from "./config.js";
-import { ControlPlane, type ClaimedChatTurn, type ClaimedRun } from "./controlPlane.js";
+import {
+  ControlPlane,
+  type ClaimedChatTurn,
+  type ClaimedMaintenanceJob,
+  type ClaimedRun,
+} from "./controlPlane.js";
+import { executeCloseoutJob } from "./closeoutExecutor.js";
 import { ClaudeAdapter } from "./harness/claude.js";
 import { CodexAdapter } from "./harness/codex.js";
 import { isHarnessTeardownError } from "./harness/teardownErrors.js";
@@ -97,12 +103,13 @@ async function main() {
 
   const activeRuns = new Map<string, Promise<void>>();
   const activeChatTurns = new Map<string, Promise<void>>();
+  const activeMaintenanceJobs = new Map<string, Promise<void>>();
   let draining = false;
   let stopping = false;
 
   const heartbeatTimer = setInterval(() => {
     void plane
-      .heartbeat([...activeRuns.keys()], [...activeChatTurns.keys()])
+      .heartbeat([...activeRuns.keys()], [...activeChatTurns.keys()], [...activeMaintenanceJobs.keys()])
       .then((res) => {
         draining = res.draining;
       })
@@ -127,6 +134,26 @@ async function main() {
     }
   } catch (error) {
     log("startup reconciliation failed", { error: String(error) });
+  }
+
+  // Maintenance-job reconciliation: a close-out interrupted by a restart is
+  // marked failed (task stays in_review, error visible) — the ritual is cheap
+  // to re-run from the task panel, and a healthy close-out schedules its own
+  // restart only AFTER reporting completed, so orphans are genuine failures.
+  try {
+    const orphanJobs = await plane.hostActiveMaintenanceJobs();
+    for (const orphan of orphanJobs) {
+      if (!orphan.claimToken) continue;
+      log("marking orphaned maintenance job failed", { jobId: orphan.jobId, status: orphan.status });
+      await plane
+        .updateMaintenanceJob(orphan.jobId, orphan.claimToken, {
+          status: "failed",
+          errorMessage: "Runner restarted while this close-out was in flight. Run close-out again from the task panel.",
+        })
+        .catch((error) => log("maintenance reconciliation failed", { jobId: orphan.jobId, error: String(error) }));
+    }
+  } catch (error) {
+    log("maintenance reconciliation failed", { error: String(error) });
   }
 
   const startRun = (claimed: ClaimedRun) => {
@@ -182,13 +209,40 @@ async function main() {
       .catch((error) => log("chat claim failed", { error: String(error) }));
   }, 2_000);
 
+  // Maintenance jobs (post-merge close-out): deterministic scripted work,
+  // one at a time, independent of run/chat concurrency — a close-out is a
+  // few git/gh commands, not a harness session.
+  const startMaintenanceJob = (job: ClaimedMaintenanceJob) => {
+    log("claimed maintenance job", { jobId: job.jobId, kind: job.kind, task: job.taskTitle });
+    const promise = executeCloseoutJob(config, plane, job)
+      .catch((error) => log("maintenance job crashed", { jobId: job.jobId, error: String(error) }))
+      .finally(() => {
+        activeMaintenanceJobs.delete(job.jobId);
+        log("maintenance job finished", { jobId: job.jobId });
+      });
+    activeMaintenanceJobs.set(job.jobId, promise);
+  };
+  const maintenanceClaimTimer = setInterval(() => {
+    if (stopping || draining) return;
+    if (activeMaintenanceJobs.size >= 1) return;
+    void plane
+      .claimNextMaintenanceJob()
+      .then((job) => {
+        if (job) startMaintenanceJob(job);
+      })
+      .catch((error) => log("maintenance claim failed", { error: String(error) }));
+  }, config.claimPollIntervalMs);
+
   const shutdown = async (signalName: string) => {
     if (stopping) return;
     stopping = true;
-    log(`received ${signalName}; waiting for ${activeRuns.size} run(s) + ${activeChatTurns.size} chat turn(s)`);
+    log(
+      `received ${signalName}; waiting for ${activeRuns.size} run(s) + ${activeChatTurns.size} chat turn(s) + ${activeMaintenanceJobs.size} maintenance job(s)`,
+    );
     clearInterval(claimTimer);
     clearInterval(chatClaimTimer);
-    await Promise.allSettled([...activeRuns.values(), ...activeChatTurns.values()]);
+    clearInterval(maintenanceClaimTimer);
+    await Promise.allSettled([...activeRuns.values(), ...activeChatTurns.values(), ...activeMaintenanceJobs.values()]);
     clearInterval(heartbeatTimer);
     process.exit(0);
   };

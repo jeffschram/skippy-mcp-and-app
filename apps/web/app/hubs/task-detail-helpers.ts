@@ -98,6 +98,17 @@ export function truncateMiddle(text: string, max = 28): string {
   return `${text.slice(0, head)}…${text.slice(text.length - tail)}`;
 }
 
+/**
+ * Whether the panel should offer the post-merge close-out surface: an
+ * in_review task with a PR recorded. Deliberately NOT gated on the stored
+ * prStatus being "merged" — the merge happens on GitHub and the stored status
+ * lags reality; the backend job verifies the actual merge state via gh at
+ * execution time and refuses politely when the PR is still open.
+ */
+export function canConfirmCloseout(task: TaskDetailTask): boolean {
+  return task.executionState === "in_review" && Boolean(task.prUrl);
+}
+
 /** Link label + raw status for the PR section; null when no PR is recorded. */
 export function prDisplay(
   task: TaskDetailTask,
