@@ -95,6 +95,7 @@ const skippyInstructions = [
   "Use pending actions only for external side effects that need separate approval/execution. Do not send email, edit calendars, or mark source systems changed through Skippy.",
   "Use capture_thought, record_memory, record_decision, and record_principle for durable second-brain memory. Include source refs, related entity refs, confidence, captureReason/rubricDecision, and reviewBehavior when available.",
   "On a project page, use get_project_plan to understand phases and ordered tasks. Use update_project for the Overview description and links, and update_phase for a phase title or Markdown description when the user asks chat to change them.",
+  "Each project also has a freeform plain-text Notes pad (the Notes tab) where the owner dumps unstructured thoughts. When the owner asks to review their notes, call get_project_notes, help fold actionable ideas into the Plan, then — only with the owner's explicit OK — call snapshot_project_notes to preserve the pad and update_project_notes to prune the processed text. Never edit the pad outside an owner-requested review.",
   "Use submit_memory_review_candidate when a possible memory is useful but uncertain. Do not queue transient alerts (balance notifications, promo deadlines, ToS notices); skip them or record directly with expiry context. Use list_memory/get_context_bundle/get_memory_detail before adding likely duplicates or answering from memory, and link_memory to attach memories to accepted entities.",
   "Use list_interview_templates/start_interview/get_interview/answer_interview_question/complete_interview/archive_interview to run guided second-brain interviews inside the harness chat. Ask one question at a time in chat, using the assistantDisplayName returned by Skippy.",
   "During scheduled or batch source-ingestion runs, also drain the Home quick-capture inbox in addition to external sources: call list_quick_captures for pending captures the owner dropped on the home page, turn useful ones into Skippy objects with the ingestion tools (ingest_object etc.), then call mark_quick_capture_handled with 'processed' or 'discarded' for each. Hold-intent captures are private device-to-device transfers: they are never returned by list_quick_captures and must never be ingested.",
@@ -1909,6 +1910,65 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
       toolResult(
         await tools.updatePhase(
           stripUndefined(args) as Parameters<typeof tools.updatePhase>[0],
+        ),
+      ),
+  );
+
+  server.registerTool(
+    "get_project_notes",
+    {
+      title: "Read a project's Notes pad",
+      description:
+        "Read-only. Returns the project's freeform Notes pad: one plain-text field where the owner dumps unstructured thoughts (often from phone). Use this when the owner asks to review their notes — read the pad, then fold actionable ideas into the Plan together in chat. Call get_current_context first when the user says 'this project'.",
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: z.object({ projectId: z.string().describe("Accepted project ID.") }),
+    },
+    async (args) => toolResult(await tools.getProjectNotes(stripUndefined(args) as { projectId: string })),
+  );
+
+  server.registerTool(
+    "update_project_notes",
+    {
+      title: "Overwrite a project's Notes pad",
+      description:
+        "Replace the project's Notes pad with new plain text (the FULL pad content, stored verbatim; an empty string clears the pad). The pad is the owner's freeform space: by convention the harness only edits it at the close of an owner-requested notes review, and only after snapshot_project_notes has preserved the current pad. Plain text only — no markdown rendering, no entry structure.",
+      annotations: { destructiveHint: true, idempotentHint: true, openWorldHint: false },
+      inputSchema: z.object({
+        projectId: z.string().describe("Accepted project ID."),
+        notesPad: z
+          .string()
+          .describe(
+            "Full replacement pad text (last-write-wins). Usually the pruned remainder after a review; empty string clears the pad.",
+          ),
+      }),
+    },
+    async (args) =>
+      toolResult(
+        await tools.updateProjectNotes(
+          stripUndefined(args) as Parameters<typeof tools.updateProjectNotes>[0],
+        ),
+      ),
+  );
+
+  server.registerTool(
+    "snapshot_project_notes",
+    {
+      title: "Snapshot a project's Notes pad",
+      description:
+        "Preserve the project's currently stored Notes pad as a timestamped snapshot (content + optional review summary). Use at the close of an owner-requested notes review, with the owner's explicit OK: snapshot first, then update_project_notes to prune the processed text from the live pad — the snapshot captures what is stored, so nothing is lost by the prune.",
+      annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      inputSchema: z.object({
+        projectId: z.string().describe("Accepted project ID."),
+        summary: z
+          .string()
+          .optional()
+          .describe("Optional one-line summary of the review session that produced this snapshot."),
+      }),
+    },
+    async (args) =>
+      toolResult(
+        await tools.snapshotProjectNotes(
+          stripUndefined(args) as Parameters<typeof tools.snapshotProjectNotes>[0],
         ),
       ),
   );

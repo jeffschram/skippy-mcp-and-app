@@ -57,6 +57,21 @@ function createFakeClient(overrides: Partial<SkippyClient> = {}): SkippyClient {
     getProjectPlan: async () => ({ project: { _id: "project_123", title: "Demo" }, phases: [], tasks: [] }),
     updateProject: async (_brainInstanceId, input) => ({ ...input, status: "updated" }),
     updatePhase: async (_brainInstanceId, input) => ({ ...input, status: "updated" }),
+    getProjectNotes: async (_brainInstanceId, input) => ({
+      projectId: input.projectId,
+      projectTitle: "Demo",
+      notesPad: "loose thought one\n\nloose thought two",
+    }),
+    updateProjectNotes: async (_brainInstanceId, input) => ({
+      projectId: input.projectId,
+      status: "updated",
+    }),
+    snapshotProjectNotes: async (_brainInstanceId, input) => ({
+      snapshotId: "snapshot_123",
+      projectId: input.projectId,
+      contentLength: 34,
+      status: "created",
+    }),
     setTaskPhase: async (_brainInstanceId, input) => ({ ...input, phaseTitle: "Phase 1", orderIndex: 5, status: "updated" }),
     createPhase: async (_brainInstanceId, input) => ({
       phaseId: "phase_new",
@@ -1106,6 +1121,88 @@ describe("Skippy MCP manifest", () => {
         title: "Phase 3",
         status: "created",
       });
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
+  it("supports the notes review flow: read, snapshot, then prune the pad", async () => {
+    const calls: Array<{ name: string; brainInstanceId: string; input: any }> = [];
+    const server = createMcpServer(
+      createFakeClient({
+        getProjectNotes: async (brainInstanceId, input) => {
+          calls.push({ name: "getProjectNotes", brainInstanceId, input });
+          return { projectId: input.projectId, projectTitle: "Demo", notesPad: "raw idea\n\nkeep me" };
+        },
+        snapshotProjectNotes: async (brainInstanceId, input) => {
+          calls.push({ name: "snapshotProjectNotes", brainInstanceId, input });
+          return { snapshotId: "snapshot_123", projectId: input.projectId, contentLength: 18, status: "created" };
+        },
+        updateProjectNotes: async (brainInstanceId, input) => {
+          calls.push({ name: "updateProjectNotes", brainInstanceId, input });
+          return { projectId: input.projectId, status: "updated" };
+        },
+      }),
+      "brain_123",
+    );
+    const client = new Client({ name: "project-notes-test", version: "0.1.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    try {
+      await server.connect(serverTransport);
+      await client.connect(clientTransport);
+
+      const { tools } = await client.listTools();
+      // The pad read is safe; the pad write is flagged destructive so
+      // harnesses treat overwrites with the caution the convention demands.
+      expect(tools.find((tool) => tool.name === "get_project_notes")?.annotations?.readOnlyHint).toBe(true);
+      expect(
+        tools.find((tool) => tool.name === "update_project_notes")?.annotations?.destructiveHint,
+      ).toBe(true);
+      // The tool contract has to teach the review convention: snapshot with
+      // the owner's OK before any prune.
+      const updateDescription = tools.find((tool) => tool.name === "update_project_notes")?.description ?? "";
+      expect(updateDescription).toContain("owner-requested notes review");
+      const snapshotDescription =
+        tools.find((tool) => tool.name === "snapshot_project_notes")?.description ?? "";
+      expect(snapshotDescription).toContain("owner's explicit OK");
+
+      const readResult = await client.callTool({
+        name: "get_project_notes",
+        arguments: { projectId: "project_123" },
+      });
+      expect(textResult(readResult)).toMatchObject({
+        projectId: "project_123",
+        notesPad: "raw idea\n\nkeep me",
+      });
+
+      const snapshotResult = await client.callTool({
+        name: "snapshot_project_notes",
+        arguments: { projectId: "project_123", summary: "Folded ideas into Plan" },
+      });
+      expect(textResult(snapshotResult)).toMatchObject({ snapshotId: "snapshot_123", status: "created" });
+
+      const pruneResult = await client.callTool({
+        name: "update_project_notes",
+        arguments: { projectId: "project_123", notesPad: "keep me" },
+      });
+      expect(textResult(pruneResult)).toMatchObject({ projectId: "project_123", status: "updated" });
+
+      expect(calls).toEqual([
+        { name: "getProjectNotes", brainInstanceId: "brain_123", input: { projectId: "project_123" } },
+        {
+          name: "snapshotProjectNotes",
+          brainInstanceId: "brain_123",
+          input: { projectId: "project_123", summary: "Folded ideas into Plan" },
+        },
+        {
+          name: "updateProjectNotes",
+          brainInstanceId: "brain_123",
+          // Verbatim pass-through: the pad text is never trimmed or normalized.
+          input: { projectId: "project_123", notesPad: "keep me" },
+        },
+      ]);
     } finally {
       await client.close();
       await server.close();

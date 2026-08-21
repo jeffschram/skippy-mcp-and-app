@@ -201,6 +201,15 @@ export type SkippyClient = {
     brainInstanceId: string,
     input: { phaseId: string; title?: string; descriptionMd?: string },
   ): Promise<unknown>;
+  getProjectNotes(brainInstanceId: string, input: { projectId: string }): Promise<unknown>;
+  updateProjectNotes(
+    brainInstanceId: string,
+    input: { projectId: string; notesPad: string },
+  ): Promise<unknown>;
+  snapshotProjectNotes(
+    brainInstanceId: string,
+    input: { projectId: string; summary?: string },
+  ): Promise<unknown>;
   createPhase(
     brainInstanceId: string,
     input: { projectId: string; title: string; descriptionMd?: string; actorId?: string },
@@ -1245,6 +1254,20 @@ export function createSkippyToolHandlers(client: SkippyClient, brainInstanceId: 
 
     async updatePhase(input: { phaseId: string; title?: string; descriptionMd?: string }) {
       return await client.updatePhase(brainInstanceId, input);
+    },
+
+    async getProjectNotes(input: { projectId: string }) {
+      return await client.getProjectNotes(brainInstanceId, input);
+    },
+
+    async updateProjectNotes(input: { projectId: string; notesPad: string }) {
+      // Stored verbatim — no trimming or normalization. The pad is the
+      // owner's formless space; blank lines are content.
+      return await client.updateProjectNotes(brainInstanceId, input);
+    },
+
+    async snapshotProjectNotes(input: { projectId: string; summary?: string }) {
+      return await client.snapshotProjectNotes(brainInstanceId, input);
     },
 
     async createPhase(input: { projectId: string; title: string; descriptionMd?: string }) {

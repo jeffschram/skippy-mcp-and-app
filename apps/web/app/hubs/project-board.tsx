@@ -22,6 +22,7 @@ import {
   Settings2,
   ShieldAlert,
   Sparkles,
+  StickyNote,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { api } from "../../lib/skippy-api";
@@ -48,16 +49,18 @@ import {
   completedPhaseSummary,
   phaseCompletion,
 } from "./project-plan-helpers";
+import { createPadAutosave } from "./project-notes-helpers";
 import { ProjectLibrarySection } from "./project-library";
 import { TaskDetailPanel } from "./task-detail";
 import { useViewerReady } from "./use-viewer";
 
 type AnyRecord = Record<string, any>;
-type ProjectView = "chat" | "overview" | "plan" | "library";
+type ProjectView = "chat" | "overview" | "plan" | "notes" | "library";
 
 const panelTabs: Array<{ key: Exclude<ProjectView, "chat">; label: string }> = [
   { key: "overview", label: "Overview" },
   { key: "plan", label: "Plan" },
+  { key: "notes", label: "Notes" },
   { key: "library", label: "Library" },
 ];
 
@@ -69,6 +72,7 @@ const mobileTabs: Array<{
   { key: "chat", label: "Chat", icon: MessageCircle },
   { key: "overview", label: "Overview", icon: FileText },
   { key: "plan", label: "Plan", icon: ListChecks },
+  { key: "notes", label: "Notes", icon: StickyNote },
   { key: "library", label: "Library", icon: Link2 },
 ];
 
@@ -399,6 +403,72 @@ function ProjectOverview({ project }: { project: AnyRecord }) {
   );
 }
 
+/**
+ * The Notes tab: one freeform, always-editable plain-text pad per project —
+ * a notepad, not a document system. Thinking is editing, so this is a single
+ * textarea the owner can rewrite/merge/reorder freely, not a stack of note
+ * entries. Structure belongs in the Plan; history is captured by whole-pad
+ * snapshots at review time (no UI here in v1). Same document treatment as
+ * PhaseDescription: borderless, autosized, debounced autosave + blur commit,
+ * and a focused-editing guard so a remote update (e.g. the same pad open on
+ * another device) never clobbers an in-focus edit. Last-write-wins is fine
+ * for a single-owner pad.
+ */
+function ProjectNotesPad({ project }: { project: AnyRecord }) {
+  const updateNotes = useMutation(api.projects.updateProjectNotesForViewer);
+  const [draft, setDraft] = useState(project.notesPad ?? "");
+  const field = useRef<HTMLTextAreaElement | null>(null);
+  // Read lazily by the autosave controller so dirty-checks always compare
+  // against the freshest persisted value, not the value at mount time.
+  const saved = useRef(project.notesPad ?? "");
+  saved.current = project.notesPad ?? "";
+
+  const pad = useMemo(
+    () =>
+      createPadAutosave({
+        savedValue: () => saved.current,
+        save: (value) =>
+          void updateNotes({
+            projectId: project._id as any,
+            notesPad: value,
+          }),
+      }),
+    [project._id, updateNotes],
+  );
+
+  useEffect(() => () => pad.dispose(), [pad]);
+
+  // Focused-editing guard: sync the reactive value only while the pad is idle.
+  useEffect(() => {
+    const next = pad.remoteValue(project.notesPad ?? "");
+    if (next !== null) setDraft(next);
+  }, [pad, project.notesPad]);
+
+  useEffect(() => {
+    autosizeTextArea(field.current);
+  }, [draft]);
+
+  return (
+    <div className="p-4 desk:p-6">
+      <textarea
+        ref={field}
+        // min-h keeps a big tap target on an empty pad (this is the primary
+        // phone capture surface); autosize takes over as content grows.
+        className="block min-h-[50dvh] w-full resize-none overflow-hidden border-0 bg-transparent p-0 text-[15px] leading-relaxed text-foreground placeholder:text-muted-foreground/55 focus:outline-none"
+        aria-label="Project notes"
+        placeholder="Drop thoughts here…"
+        value={draft}
+        onFocus={() => pad.handleFocus()}
+        onBlur={(event) => pad.handleBlur(event.currentTarget.value)}
+        onChange={(event) => {
+          setDraft(event.target.value);
+          pad.handleChange(event.target.value);
+        }}
+      />
+    </div>
+  );
+}
+
 function PhaseSection({
   phase,
   phaseTasks,
@@ -702,6 +772,7 @@ function SidePanel({
             onComplete={onComplete}
           />
         ) : null}
+        {view === "notes" ? <ProjectNotesPad project={board.project} /> : null}
         {view === "library" ? (
           <div className="p-4">
             <ProjectLibrarySection projectId={board.project._id} alwaysOpen />
@@ -968,7 +1039,7 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
         </header>
 
         <nav
-          className="grid grid-cols-4 border-b bg-card desk:hidden"
+          className="grid grid-cols-5 border-b bg-card desk:hidden"
           aria-label="Project views"
         >
           {mobileTabs.map((tab) => (
@@ -1067,6 +1138,9 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                   onStart={(task) => void startTask(task)}
                   onComplete={(task) => void completeTask(task)}
                 />
+              ) : null}
+              {view === "notes" ? (
+                <ProjectNotesPad project={board.project} />
               ) : null}
               {view === "library" ? (
                 <div className="p-4">
