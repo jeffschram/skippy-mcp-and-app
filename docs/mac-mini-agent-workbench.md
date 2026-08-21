@@ -468,6 +468,13 @@ Approvals, cancellation, interruption, and user follow-up messages are written t
 - Detect uncommitted or unpushed changes before cleanup.
 - Prefer recoverable archival over automatic deletion.
 
+### Worktree provisioning (2026-08-21)
+
+- After creating a worktree, the runner runs `corepack pnpm install` (frozen lockfile when one exists) with the worktree as cwd before the harness session starts, emitting `provisioning` / `worktree_ready` status events. A provisioning failure degrades gracefully (the run continues against a bare worktree); it never fails the run.
+- On startup the runner extends its own process PATH with node's bin directory and a corepack shim directory (`~/.skippy-runner/corepack-shims`, materialized via `corepack enable`), so plain `pnpm` resolves in harness sessions without plist edits or PATH improvisation.
+- Task briefs can therefore just say `pnpm typecheck` / `pnpm --filter web test` — both allowlisted — instead of bootstrap incantations like `npx --yes pnpm@…` or `corepack pnpm …`.
+- After merging runner changes, rebuild and restart: `pnpm --filter @skippy/runner build`, then `launchctl kickstart -k gui/$(id -u)/com.skippy.runner`.
+
 ### Publishing
 
 - Do not push directly to the default branch.

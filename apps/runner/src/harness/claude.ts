@@ -36,6 +36,15 @@ const AUTO_ALLOWED_COMMAND_PREFIXES = [
   "grep",
   "rg",
   "find",
+  // Read-only text tooling (2026-08-21 six-gate autopsy: `sed -n`, `which`,
+  // and pipe tails each fired a gate). `sed` can write files in-place, but
+  // only inside the worktree the session already edits freely under
+  // acceptEdits — the same trust boundary as the Edit tool.
+  "sed",
+  "which",
+  "head",
+  "tail",
+  "wc",
   "node",
   "npm test",
   "npm run",
@@ -47,6 +56,10 @@ const AUTO_ALLOWED_COMMAND_PREFIXES = [
   "pnpm --filter",
   "pnpm -r",
   "corepack pnpm",
+  // Worktree provisioning tooling (used by the runner itself; sessions may
+  // echo it when node_modules is missing).
+  "corepack enable",
+  "corepack prepare",
   "npx pnpm",
   "npx tsc",
   "npx vitest",
@@ -83,6 +96,24 @@ function stripEnvAssignments(segment: string): string {
 }
 
 /**
+ * Normalize `npx` flag prefixes so `npx --yes pnpm@8.10.2 typecheck`
+ * prefix-matches the existing `npx pnpm` intent (2026-08-21 autopsy gates
+ * 4–5: improvised versioned invocations in an unprovisioned worktree).
+ * Only the inert confirmation flags `--yes`/`-y` are stripped; anything else
+ * after `npx` still has to match a prefix on its own.
+ */
+function normalizeNpx(segment: string): string {
+  if (!/^npx\s/.test(segment)) return segment;
+  let rest = segment.replace(/^npx\s+/, "");
+  for (;;) {
+    const next = rest.replace(/^(?:--yes|-y)\s+/, "");
+    if (next === rest) break;
+    rest = next;
+  }
+  return `npx ${rest}`;
+}
+
+/**
  * `git restore` is allowed only when scoped: every non-flag argument must be
  * a path that resolves inside the worktree. Fails closed when no worktree
  * root is known or no path argument is given.
@@ -97,28 +128,53 @@ function gitRestoreAllowed(segment: string, worktreePath: string | undefined): b
   return pathArgs.every((candidate) => pathInside(candidate, worktreePath));
 }
 
+/**
+ * `git checkout` is allowed ONLY in its scoped path-restore form
+ * (`git checkout -- <paths>`), mirroring gitRestoreAllowed: every path after
+ * `--` must resolve inside the worktree. Branch switching, `-b`, and every
+ * other checkout form still ask. Fails closed without a worktree root or
+ * without paths (2026-08-21 autopsy gate 6).
+ */
+function gitCheckoutAllowed(segment: string, worktreePath: string | undefined): boolean {
+  if (!worktreePath) return false;
+  const tokens = segment.split(/\s+/).slice(2); // drop "git checkout"
+  if (tokens[0] !== "--") return false;
+  const pathArgs = tokens
+    .slice(1)
+    .map((token) => token.replace(/^["']|["']$/g, ""))
+    .filter((token) => token.length > 0);
+  if (pathArgs.length === 0) return false;
+  return pathArgs.every((candidate) => pathInside(candidate, worktreePath));
+}
+
 function segmentAllowed(rawSegment: string, worktreePath: string | undefined): boolean {
   // A segment that only exports env assignments (`export PATH=… && pnpm …`)
   // is inert on its own, like `cd`.
   if (/^export\s/.test(rawSegment)) {
     return stripEnvAssignments(rawSegment.replace(/^export\s+/, "")) === "";
   }
-  const segment = stripEnvAssignments(rawSegment);
+  const segment = normalizeNpx(stripEnvAssignments(rawSegment));
   if (!segment) return false;
   if (segment.startsWith("git restore")) return gitRestoreAllowed(segment, worktreePath);
+  if (segment.startsWith("git checkout")) return gitCheckoutAllowed(segment, worktreePath);
   return AUTO_ALLOWED_COMMAND_PREFIXES.some((prefix) => segment.startsWith(prefix));
 }
 
 export function classifyCommand(command: string, worktreePath?: string): "allow" | "ask" {
   const trimmed = command.trim();
   if (DESTRUCTIVE_PATTERNS.some((re) => re.test(trimmed))) return "ask";
-  // Split shell chaining (&&, ||, ;) and require EVERY segment to be
-  // allowlisted. This both unblocks the common `cd <dir> && pnpm …` shape and
-  // closes the old hole where `pnpm typecheck && <anything>` matched the
-  // "pnpm typecheck" prefix and auto-allowed the whole line. Pipes and other
-  // shell syntax we don't model fall through to "ask" (fail closed).
+  // Split shell chaining (&&, ||, ;) AND single-pipe composition (|), and
+  // require EVERY segment to be allowlisted. This both unblocks the common
+  // `cd <dir> && pnpm …` and `cat x | head -30` shapes and closes the old
+  // hole where `pnpm typecheck && <anything>` matched the "pnpm typecheck"
+  // prefix and auto-allowed the whole line. Alternation order matters: `||`
+  // must match before `|` so it splits as one separator, not two. Piping
+  // into a non-allowlisted consumer (`cat x | sh`) still asks, and
+  // DESTRUCTIVE_PATTERNS ran against the full original line above, so no
+  // split can hide a destructive stage. Other shell syntax we don't model
+  // falls through to "ask" (fail closed).
   const segments = trimmed
-    .split(/&&|\|\||;/)
+    .split(/&&|\|\||;|\|/)
     .map((segment) => segment.trim())
     .filter(Boolean);
   if (segments.length === 0) return "ask";

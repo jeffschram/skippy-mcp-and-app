@@ -8,7 +8,7 @@
  * run continuously under launchd as a dedicated service account.
  */
 import os from "node:os";
-import { loadConfig } from "./config.js";
+import { ensureCorepackShims, extendRunnerPath, loadConfig } from "./config.js";
 import { ControlPlane, type ClaimedChatTurn, type ClaimedRun } from "./controlPlane.js";
 import { ClaudeAdapter } from "./harness/claude.js";
 import { CodexAdapter } from "./harness/codex.js";
@@ -67,6 +67,14 @@ function installProcessBackstops() {
 
 async function main() {
   installProcessBackstops();
+  // Environment provisioning (2026-08-21 six-gate autopsy): make node's bin
+  // dir and the corepack pnpm shims resolvable for every child — harness
+  // sessions, worktree provisioning, verify commands — so runs never
+  // improvise package-manager bootstraps that trip the command allowlist.
+  extendRunnerPath();
+  const shims = await ensureCorepackShims();
+  if (shims.ok) log("pnpm shims ready", { message: shims.message });
+  else log("pnpm shims unavailable — sessions may improvise and hit gates", { message: shims.message });
   const config = loadConfig();
   const plane = new ControlPlane(config.convexUrl, config.hostToken);
   const adapters = new Map<string, HarnessAdapter>();
