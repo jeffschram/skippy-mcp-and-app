@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from "react";
+import { useLayoutEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from "react";
 import { usePathname } from "next/navigation";
 import { useConvexAuth, useMutation, useQuery } from "convex/react";
-import { CheckCircle2, ExternalLink, File as FileIcon, FilePenLine, FilePlus2, GitPullRequest, ListChecks, MessageCircle, Paperclip, SendHorizontal, Sparkles, TerminalSquare, X } from "lucide-react";
+import { ArrowDown, CheckCircle2, ExternalLink, File as FileIcon, FilePenLine, FilePlus2, GitPullRequest, ListChecks, MessageCircle, Paperclip, SendHorizontal, Sparkles, TerminalSquare, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ChatMarkdown } from "../../lib/chat-markdown";
+import { isPinnedToBottom, shouldShowJumpToBottom } from "../../lib/chat-scroll";
 import { api } from "../../lib/skippy-api";
 import { approvalMoments } from "../../lib/approvals";
 import { buildChatTimeline } from "../../lib/chat-timeline";
@@ -343,9 +344,49 @@ function ChatSurface({
   );
   const lastTimelineItem = timelineItems[timelineItems.length - 1];
 
-  useEffect(() => {
+  // Scroll-follow state. `pinnedRef` mirrors whether the user is at/near the
+  // bottom: while pinned we auto-follow new content; once they scroll up to
+  // read history, incoming messages must not yank the position — the floating
+  // arrow is the way back. A ref (not state) because scroll events fire fast
+  // and the effects below need the freshest value without re-rendering.
+  const pinnedRef = useRef(true);
+  const [showJumpToBottom, setShowJumpToBottom] = useState(false);
+  const chatKey = scope.kind === "project" ? `project:${scope.projectId}` : `page:${scope.pageKey}`;
+
+  const scrollToBottom = () => {
     const el = messagesRef.current;
+    // Direct scrollTop assignment is instant (no smooth animation), so a
+    // fresh chat never visibly jumps from top to bottom.
     if (el) el.scrollTop = el.scrollHeight;
+  };
+
+  const handleTranscriptScroll = () => {
+    const el = messagesRef.current;
+    if (!el) return;
+    const metrics = { scrollTop: el.scrollTop, scrollHeight: el.scrollHeight, clientHeight: el.clientHeight };
+    pinnedRef.current = isPinnedToBottom(metrics);
+    setShowJumpToBottom(shouldShowJumpToBottom(metrics));
+  };
+
+  const jumpToBottom = () => {
+    pinnedRef.current = true;
+    setShowJumpToBottom(false);
+    scrollToBottom();
+  };
+
+  // Switching chats (the floating panel keeps one ChatSurface instance across
+  // routes): re-pin and land at the latest message before paint.
+  useLayoutEffect(() => {
+    pinnedRef.current = true;
+    setShowJumpToBottom(false);
+    scrollToBottom();
+  }, [chatKey]);
+
+  // Follow new content only while pinned. useLayoutEffect runs after the
+  // markdown renderer has laid out its variable-height messages but before
+  // paint, so the initial load lands directly on the latest message.
+  useLayoutEffect(() => {
+    if (pinnedRef.current) scrollToBottom();
   }, [
     timelineItems.length,
     lastTimelineItem?.key,
@@ -361,6 +402,10 @@ function ChatSurface({
     const content = draft.trim();
     if ((!content && !attachments.length) || sending || uploadingCount > 0) return;
     setSending(true);
+    // Sending is an explicit return to the conversation: re-pin so the sent
+    // message (and the reply) scroll into view even if they were reading history.
+    pinnedRef.current = true;
+    setShowJumpToBottom(false);
     setDraft("");
     const sentAttachments = attachments;
     setAttachments([]);
@@ -418,7 +463,8 @@ function ChatSurface({
         </header>
       )}
 
-      <div className="flex flex-1 flex-col gap-3 overflow-y-auto px-4 py-5 desk:px-6" ref={messagesRef}>
+      <div className="relative flex min-h-0 flex-1">
+      <div className="flex flex-1 flex-col gap-3 overflow-y-auto px-4 py-5 desk:px-6" ref={messagesRef} onScroll={handleTranscriptScroll}>
         {timelineItems.length === 0 ? (
           <div className="mx-auto my-auto max-w-md text-center">
             <MessageCircle className="mx-auto mb-3 text-primary" size={24} aria-hidden />
@@ -486,6 +532,21 @@ function ChatSurface({
             );
           })
         )}
+      </div>
+      {showJumpToBottom ? (
+        // Floating way back to the latest message, shown only once the user
+        // has scrolled up ~a viewport. Sits above the composer, outside the
+        // scroll container so it doesn't ride along with the transcript.
+        <button
+          type="button"
+          className="absolute bottom-3 right-4 z-10 grid size-9 place-items-center rounded-full border bg-secondary text-muted-foreground shadow-md transition-colors hover:text-foreground"
+          onClick={jumpToBottom}
+          aria-label="Jump to latest message"
+          title="Jump to latest message"
+        >
+          <ArrowDown size={16} aria-hidden />
+        </button>
+      ) : null}
       </div>
 
       {pendingApprovals.length ? (
