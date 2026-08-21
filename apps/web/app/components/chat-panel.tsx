@@ -3,12 +3,13 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { usePathname } from "next/navigation";
 import { useConvexAuth, useMutation, useQuery } from "convex/react";
-import { CheckCircle2, FilePenLine, ListChecks, MessageCircle, SendHorizontal, Sparkles, TerminalSquare, X } from "lucide-react";
+import { CheckCircle2, FilePenLine, FilePlus2, GitPullRequest, ListChecks, MessageCircle, SendHorizontal, Sparkles, TerminalSquare, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { api } from "../../lib/skippy-api";
 import { approvalMoments } from "../../lib/approvals";
 import { buildChatTimeline } from "../../lib/chat-timeline";
 import { summarizeChatActivity, type ChatActivityLine } from "../../lib/chat-activity";
+import type { TaskMomentState } from "../../lib/task-moments";
 import { ApprovalCard } from "./approval-card";
 
 type AnyRecord = Record<string, any>;
@@ -41,31 +42,65 @@ function scopeForPathname(pathname: string): ChatScope {
   return { kind: "page", pageKey: known, label: PAGE_LABELS[known] ?? "Home" };
 }
 
+const TASK_MOMENT_META: Record<
+  TaskMomentState,
+  { label: string; icon: typeof Sparkles }
+> = {
+  created: { label: "Task added", icon: FilePlus2 },
+  in_progress: { label: "In progress", icon: Sparkles },
+  in_review: { label: "In review", icon: GitPullRequest },
+  completed: { label: "Completed", icon: CheckCircle2 },
+};
+
+/**
+ * Compact lifecycle notice, not a live view: "something is happening with
+ * this task". Header + title + owner chip only, at regular chat typography —
+ * no brief/description body and no run-event subscriptions (the task detail
+ * panel streams live narration). An in-progress notice keeps a static pulse
+ * dot as its only "running" affordance. Clicking opens the task panel when
+ * the surface provides an opener.
+ */
 function TaskMoment({
   task,
   state,
+  onOpen,
 }: {
   task: AnyRecord;
-  state: "in_progress" | "completed";
+  state: TaskMomentState;
+  onOpen?: (() => void) | undefined;
 }) {
-  const done = state === "completed";
-  return (
-    <article className="my-2 w-full rounded-xl border border-primary/35 bg-primary/[0.06] p-4 shadow-sm">
-      <div className="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-[0.08em] text-primary">
-        {done ? <CheckCircle2 size={15} aria-hidden /> : <Sparkles size={15} aria-hidden />}
-        {done ? "Task completed" : "In progress"}
-        {task.ownerType === "agent" ? (
-          <span className="ml-auto rounded-full border border-primary/30 px-2 py-0.5 normal-case tracking-normal">Agent</span>
+  const meta = TASK_MOMENT_META[state] ?? TASK_MOMENT_META.created;
+  const Icon = meta.icon;
+  const body = (
+    <>
+      <span className="flex shrink-0 items-center gap-1.5 text-xs font-bold uppercase tracking-[0.08em] text-primary">
+        <Icon size={14} aria-hidden />
+        {meta.label}
+        {state === "in_progress" ? (
+          <span className="size-1.5 animate-pulse rounded-full bg-primary" aria-hidden />
         ) : null}
-      </div>
-      <h3 className="m-0 text-lg font-semibold">{task.title}</h3>
-      {task.executionBrief || task.description ? (
-        <p className="mb-0 mt-2 whitespace-pre-wrap text-sm text-muted-foreground">
-          {task.executionBrief || task.description}
-        </p>
-      ) : null}
-    </article>
+      </span>
+      <span className="min-w-0 flex-1 truncate text-sm font-semibold">{task.title}</span>
+      <span className="shrink-0 rounded-full border border-primary/30 px-2 py-0.5 text-[11px] text-primary">
+        {task.ownerType === "agent" ? "Agent" : "Owner"}
+      </span>
+    </>
   );
+  const surface =
+    "my-1 flex w-full items-center gap-2.5 rounded-lg border border-primary/25 bg-primary/[0.04] px-3 py-2 text-left";
+  if (onOpen) {
+    return (
+      <button
+        type="button"
+        className={cn(surface, "cursor-pointer transition-colors hover:border-primary/50 hover:bg-primary/[0.08]")}
+        onClick={onOpen}
+        title="Open task details"
+      >
+        {body}
+      </button>
+    );
+  }
+  return <article className={surface}>{body}</article>;
 }
 
 function activityLineIcon(line: ChatActivityLine) {
@@ -225,11 +260,17 @@ function ChatSurface({
         ) : (
           timelineItems.map((item) => {
             if (item.kind === "task") {
+              const momentTask = item.moment.task;
               return (
                 <TaskMoment
                   key={item.key}
-                  task={item.moment.task}
+                  task={momentTask}
                   state={item.moment.state}
+                  onOpen={
+                    onOpenTask && momentTask?._id
+                      ? () => onOpenTask(momentTask._id)
+                      : undefined
+                  }
                 />
               );
             }

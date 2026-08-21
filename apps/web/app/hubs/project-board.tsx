@@ -29,6 +29,7 @@ import {
   pendingApprovalCount,
   pendingApprovalsByTask,
 } from "../../lib/approvals";
+import { buildTaskMoments } from "../../lib/task-moments";
 import { ProjectChatWorkspace } from "../components/chat-panel";
 import {
   Badge,
@@ -784,33 +785,7 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
       (task: AnyRecord) => task.executionState !== "cancelled",
     );
   }, [board?.phases, board?.tasks]);
-  const taskMoments = useMemo(() => {
-    const moments: AnyRecord[] = [];
-    for (const task of activeTasks) {
-      const state = displayState(task);
-      const startedAt =
-        task.agentRequestedAt ??
-        task.startedAt ??
-        (state === "In Progress" ? task.updatedAt : undefined);
-      if (startedAt) {
-        moments.push({
-          key: `task:${task._id}:started`,
-          timestamp: startedAt,
-          state: "in_progress",
-          task,
-        });
-      }
-      if (state === "Completed") {
-        moments.push({
-          key: `task:${task._id}:completed`,
-          timestamp: task.completedAt ?? task.updatedAt,
-          state: "completed",
-          task,
-        });
-      }
-    }
-    return moments;
-  }, [activeTasks]);
+  const taskMoments = useMemo(() => buildTaskMoments(activeTasks), [activeTasks]);
   const approvalsByTask = useMemo(
     () => pendingApprovalsByTask(approvals),
     [approvals],

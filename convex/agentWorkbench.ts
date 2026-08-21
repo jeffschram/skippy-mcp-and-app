@@ -744,11 +744,23 @@ export const runEventsForViewer = queryGeneric({
     runId: v.id("agentRuns"),
     afterSeq: v.optional(v.number()),
     limit: v.optional(v.number()),
+    // Last-N mode for live-tail consumers (task detail panel): returns only
+    // the newest `tail` events, seq-ascending, so long runs don't ship their
+    // whole history to the client.
+    tail: v.optional(v.number()),
   },
-  handler: async (ctx, { runId, afterSeq, limit }) => {
+  handler: async (ctx, { runId, afterSeq, limit, tail }) => {
     const { brain } = await requireOwnedBrain(ctx);
     const run = await ctx.db.get(runId);
     if (!run || run.brainInstanceId !== brain._id) throw new Error("run not found");
+    if (tail !== undefined) {
+      const newest = await ctx.db
+        .query("agentRunEvents")
+        .withIndex("by_run_seq", (q: any) => q.eq("runId", runId))
+        .order("desc")
+        .take(Math.min(Math.max(Math.floor(tail), 1), 500));
+      return { run: runSummary(run), events: newest.reverse() };
+    }
     const events = await ctx.db
       .query("agentRunEvents")
       .withIndex("by_run_seq", (q: any) => q.eq("runId", runId).gt("seq", afterSeq ?? 0))
