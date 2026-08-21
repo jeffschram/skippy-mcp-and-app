@@ -259,10 +259,18 @@ export const sendChatMessageForViewer = mutationGeneric({
     let chatId = chat?._id;
     if (!chatId) {
       let projectTitle: string | undefined;
+      let preferredHarness: "codex" | "claude" | undefined;
       if (args.projectId) {
         const project = await ctx.db.get(args.projectId);
         if (!project || project.brainInstanceId !== brain._id) throw new Error("project not found");
         projectTitle = project.title;
+        const executionConfig = await ctx.db
+          .query("projectExecutionConfigs")
+          .withIndex("by_brain_project", (q: any) =>
+            q.eq("brainInstanceId", brain._id).eq("projectId", args.projectId),
+          )
+          .first();
+        preferredHarness = executionConfig?.preferredHarness;
       }
       chatId = await ctx.db.insert("projectChats", {
         brainInstanceId: brain._id,
@@ -270,7 +278,7 @@ export const sendChatMessageForViewer = mutationGeneric({
         title: chatTitleForScope(args.pageKey, projectTitle),
         kind: args.projectId ? "general" : "page",
         // One harness per chat for its lifetime; picked on first message.
-        harness: args.harness ?? "claude",
+        harness: args.harness ?? preferredHarness ?? "claude",
         state: "active",
         createdAt: now,
         updatedAt: now,
@@ -314,6 +322,52 @@ export const sendChatMessageForViewer = mutationGeneric({
       updatedAt: now,
     });
     return { chatId, assistantMessageId };
+  },
+});
+
+/**
+ * Switch a scope to another harness by starting a fresh conversation. Harness
+ * thread IDs are provider-specific, so changing an existing chat in place
+ * would make the new provider inherit a transcript it cannot actually resume.
+ * The prior transcript is archived (not deleted) and remains durable.
+ */
+export const startNewChatForViewer = mutationGeneric({
+  args: {
+    projectId: v.optional(v.id("projects")),
+    pageKey: v.optional(v.string()),
+    harness: harnessArg,
+  },
+  handler: async (ctx, args) => {
+    const { brain } = await requireOwnedBrain(ctx);
+    if (!args.projectId && !args.pageKey) throw new Error("projectId or pageKey is required");
+
+    let projectTitle: string | undefined;
+    if (args.projectId) {
+      const project = await ctx.db.get(args.projectId);
+      if (!project || project.brainInstanceId !== brain._id) throw new Error("project not found");
+      projectTitle = project.title;
+    }
+
+    const current = await findChatForScope(ctx.db, brain._id, args.projectId, args.pageKey);
+    if (current) {
+      if (await activeTurnForChat(ctx.db, current._id)) {
+        throw new Error("wait for the current reply to finish before switching assistants");
+      }
+      await ctx.db.patch(current._id, { state: "archived", updatedAt: Date.now() });
+    }
+
+    const now = Date.now();
+    const chatId = await ctx.db.insert("projectChats", {
+      brainInstanceId: brain._id,
+      ...(args.projectId ? { projectId: args.projectId } : { pageKey: args.pageKey }),
+      title: chatTitleForScope(args.pageKey, projectTitle),
+      kind: args.projectId ? "general" : "page",
+      harness: args.harness,
+      state: "active",
+      createdAt: now,
+      updatedAt: now,
+    });
+    return { chatId, harness: args.harness };
   },
 });
 
