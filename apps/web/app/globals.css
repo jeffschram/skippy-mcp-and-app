@@ -45,6 +45,23 @@
   --sidebar-border: light-dark(#ddd8ca, #363636);
   --sidebar-ring: #315f86;
 
+  /* Typography overrides */
+  --text-xs: .75rem;
+  --text-xs--line-height: calc(1 / .75);
+
+  --text-xs: .875rem;
+  --text-xs--line-height: calc(1.25 / .875);
+  --text-sm: 1rem;
+  --text-sm--line-height: calc(1.5 / 1);
+  --text-base: 1.125rem;
+  --text-base--line-height: calc(1.75 / 1.125);
+  --text-lg: 1.25rem;
+  --text-lg--line-height: calc(1.75 / 1.25);
+  
+  --text-xl: 1.5rem;
+  --text-xl--line-height: calc(1.75 / 1.25);
+  
+
   /* Extra app palette used across pages. */
   --blue: #315f86;
   --green: #a2d5af;
@@ -209,3 +226,6 @@
     background-color: var(--gold);
   }
 }
+
+[data-nextjs-dev-overlay='true'],
+#devtools-indicator { display: none !important; outline: 20px solid pink; }

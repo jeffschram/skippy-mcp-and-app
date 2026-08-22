@@ -334,7 +334,7 @@ function TaskRow({
           <GripVertical size={16} aria-hidden />
         </button>
         <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap gap-2">
             {task.ownerType === "agent" ? (
               // Icon instead of a text badge: agent ownership is ambient
               // metadata, not something to read on every row.
@@ -1404,7 +1404,7 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
               onStart={() => void startTask(selectedTask)}
               onComplete={() => void completeTask(selectedTask)}
               approvals={approvals}
-              className="h-[calc(100dvh-204px)]"
+              className="h-[calc(100dvh-227px)]"
             />
           ) : (
             <>
@@ -1414,7 +1414,7 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                   taskMoments={taskMoments}
                   runApprovals={approvals}
                   onOpenTask={setSelectedTaskId}
-                  className="h-[calc(100dvh-204px)]"
+                  className="h-[calc(100dvh-227px)]"
                 />
               ) : null}
               {view === "overview" ? (
