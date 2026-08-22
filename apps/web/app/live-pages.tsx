@@ -359,7 +359,7 @@ export function LiveHomeContent() {
                 ) : null}
               </div>
               {sourceSyncStatus ? (
-                <p className="m-0 mb-3 max-w-[680px] text-sm leading-[1.35] text-muted-foreground">
+                <p className="m-0 mb-3 max-w-[680px] text-sm text-muted-foreground">
                   {sourceSyncStatus.message ??
                     `Checking ${(sourceSyncStatus.sourceSystemsChecked ?? []).join(", ") || "connected sources"}.`}
                 </p>

@@ -118,7 +118,7 @@ function AgendaRowView({
       )}
 
       <div className="grid min-w-0 flex-auto gap-[3px]">
-        <span className="text-[15px] leading-[1.35] [overflow-wrap:anywhere]">{row.title}</span>
+        <span className="text-[15px] [overflow-wrap:anywhere]">{row.title}</span>
         <span className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
           {row.kind === "event" ? <Badge tone="blue">Event</Badge> : null}
           {row.kind === "recurrence" || row.fromRecurrence ? (

@@ -129,7 +129,7 @@ function NavLinks({
                 title={hub.label}
               >
                 <hub.icon className="shrink-0" size={18} aria-hidden />
-                <span className="whitespace-nowrap opacity-0 transition-opacity group-hover/sidebar:opacity-100">{hub.label}</span>
+                <span className="whitespace-nowrap hidden transition-opacity group-hover/sidebar:block">{hub.label}</span>
               </Link>
               <div
                 className={cn(
@@ -166,7 +166,7 @@ function NavLinks({
             title={hub.label}
           >
             <hub.icon className="shrink-0" size={mobile ? 15 : 18} aria-hidden />
-            {mobile ? hub.label : <span className="whitespace-nowrap opacity-0 transition-opacity group-hover/sidebar:opacity-100">{hub.label}</span>}
+            {mobile ? hub.label : <span className="whitespace-nowrap hidden transition-opacity group-hover/sidebar:block">{hub.label}</span>}
           </Link>
         );
       })}
@@ -191,7 +191,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <span className="grid size-[34px] place-items-center rounded-[9px] border bg-secondary text-primary shadow-sm">
               <Brain size={19} aria-hidden />
             </span>
-            <span className="whitespace-nowrap opacity-0 transition-opacity group-hover/sidebar:opacity-100">Skippy</span>
+            <span className="whitespace-nowrap hidden transition-opacity group-hover/sidebar:block">Skippy</span>
           </div>
           <nav className="grid gap-[3px]" aria-label="Primary">
             <NavLinks pathname={pathname} hubs={primaryHubs} projects={activeProjects ?? []} alwaysShowProjects />
@@ -200,7 +200,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <nav className="grid gap-[3px]" aria-label="Secondary">
               <NavLinks pathname={pathname} hubs={secondaryHubs} />
             </nav>
-            <div className="grid gap-1.5 overflow-hidden border-t pt-3 opacity-0 transition-opacity group-hover/sidebar:opacity-100">
+            <div className="grid gap-1.5 overflow-hidden border-t pt-3 hidden transition-opacity group-hover/sidebar:block">
               <div className="w-[220px]"><AuthStatus /></div>
             </div>
           </div>

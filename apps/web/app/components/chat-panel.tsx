@@ -243,6 +243,100 @@ function AttachmentChip({ attachment }: { attachment: AnyRecord }) {
   return <span className={chipClass}>{body}</span>;
 }
 
+/**
+ * The composer owns its draft locally so keystrokes re-render only this small
+ * row — not the whole ChatSurface (timeline rebuild + ChatMarkdown for every
+ * message), which caused visible typing lag on long transcripts. The parent
+ * only learns about the text on send; `onSend` resolves false when the message
+ * didn't go through so the draft can be restored.
+ */
+function ChatComposer({
+  placeholder,
+  canAttach,
+  hasAttachments,
+  busy,
+  onSend,
+  onAddFiles,
+}: {
+  placeholder: string;
+  canAttach: boolean;
+  hasAttachments: boolean;
+  busy: boolean;
+  onSend: (content: string) => Promise<boolean>;
+  onAddFiles: (files: File[]) => void;
+}) {
+  const [draft, setDraft] = useState("");
+  const attachInputRef = useRef<HTMLInputElement | null>(null);
+
+  const send = async () => {
+    const content = draft.trim();
+    if ((!content && !hasAttachments) || busy) return;
+    setDraft("");
+    const ok = await onSend(content);
+    if (!ok) setDraft(content);
+  };
+
+  return (
+    <div className="flex items-start gap-2 border-t bg-card p-3 desk:p-4">
+      {canAttach ? (
+        <>
+          <input
+            ref={attachInputRef}
+            type="file"
+            multiple
+            accept={PROJECT_FILE_ACCEPT}
+            style={{ display: "none" }}
+            onChange={(event) => {
+              onAddFiles(Array.from(event.target.files ?? []));
+              event.target.value = "";
+            }}
+          />
+          <button
+            type="button"
+            className="grid size-11 shrink-0 place-items-center rounded-xl border text-muted-foreground hover:text-foreground"
+            onClick={() => attachInputRef.current?.click()}
+            aria-label="Attach files"
+            title="Attach files"
+          >
+            <Paperclip size={17} aria-hidden />
+          </button>
+        </>
+      ) : null}
+      <textarea
+        className="min-h-11 max-h-32 flex-1 resize-none rounded-xl border bg-background px-3 py-2.5 text-[16px]"
+        style={{fieldSizing: 'content'}}
+        value={draft}
+        placeholder={placeholder}
+        rows={1}
+        onChange={(event) => setDraft(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" && !event.shiftKey) {
+            event.preventDefault();
+            void send();
+          }
+        }}
+        onPaste={(event) => {
+          if (!canAttach) return;
+          const files = Array.from(event.clipboardData?.files ?? []);
+          if (files.length) {
+            event.preventDefault();
+            onAddFiles(files);
+          }
+        }}
+      />
+      <button
+        type="button"
+        className="grid size-11 place-items-center rounded-xl bg-primary text-primary-foreground disabled:opacity-50"
+        disabled={(!draft.trim() && !hasAttachments) || busy}
+        onClick={() => void send()}
+        aria-label="Send message"
+      >
+        <SendHorizontal size={17} aria-hidden />
+      </button>
+    </div>
+  );
+}
+
 /** Message attachments: images render inline, other files as name/size chips. */
 function MessageAttachments({ attachments }: { attachments: AnyRecord[] }) {
   return (
@@ -286,7 +380,6 @@ function ChatSurface({
   onOpenTask?: ((taskId: string) => void) | undefined;
 }) {
   const { isAuthenticated } = useConvexAuth();
-  const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [pickedHarness, setPickedHarness] = useState<"claude" | "codex">("claude");
   const harnessWasPicked = useRef(false);
@@ -316,7 +409,6 @@ function ChatSurface({
   const [attachments, setAttachments] = useState<UploadedProjectFile[]>([]);
   const [uploadingCount, setUploadingCount] = useState(0);
   const [dragOver, setDragOver] = useState(false);
-  const attachInputRef = useRef<HTMLInputElement | null>(null);
 
   const addFiles = async (files: File[]) => {
     if (!canAttach || !files.length) return;
@@ -437,15 +529,15 @@ function ChatSurface({
     activeTurnEvents[activeTurnEvents.length - 1]?.seq,
   ]);
 
-  const send = async () => {
-    const content = draft.trim();
-    if ((!content && !attachments.length) || sending || uploadingCount > 0) return;
+  // Called by the composer (which owns the draft text). Returns whether the
+  // message went through so the composer knows to restore the draft on failure.
+  const send = async (content: string) => {
+    if ((!content && !attachments.length) || sending || uploadingCount > 0) return false;
     setSending(true);
     // Sending is an explicit return to the conversation: re-pin so the sent
     // message (and the reply) scroll into view even if they were reading history.
     pinnedRef.current = true;
     setShowJumpToBottom(false);
-    setDraft("");
     const sentAttachments = attachments;
     setAttachments([]);
     try {
@@ -455,10 +547,11 @@ function ChatSurface({
         harness: boundHarness ?? pickedHarness,
         ...(sentAttachments.length ? { attachments: sentAttachments } : {}),
       } as any);
+      return true;
     } catch (error) {
-      setDraft(content);
       setAttachments(sentAttachments);
       console.error("chat send failed", error);
+      return false;
     } finally {
       setSending(false);
     }
@@ -519,7 +612,7 @@ function ChatSurface({
       ) : null}
 
       <div className="relative flex min-h-0 flex-1">
-      <div className="flex flex-1 flex-col gap-3 overflow-y-auto px-4 py-5 desk:px-6" ref={messagesRef} onScroll={handleTranscriptScroll}>
+      <div className="flex flex-1 flex-col gap-3 overflow-y-auto px-4 py-5 desk:px-[4vw]" ref={messagesRef} onScroll={handleTranscriptScroll}>
         {timelineItems.length === 0 ? (
           <div className="mx-auto my-auto max-w-md text-center">
             <MessageCircle className="mx-auto mb-3 text-primary" size={24} aria-hidden />
@@ -621,7 +714,7 @@ function ChatSurface({
       ) : null}
 
       {canAttach && (attachments.length > 0 || uploadingCount > 0) ? (
-        <div className="flex flex-wrap items-center gap-1.5 border-t bg-card px-3 pt-3 desk:px-4">
+        <div className="flex flex-wrap items-center gap-1.5 border-t bg-card p-3 desk:px-4">
           {attachments.map((attachment, index) => (
             <span
               key={`${attachment.storageId}:${index}`}
@@ -648,56 +741,14 @@ function ChatSurface({
         </div>
       ) : null}
 
-      <div className="flex items-end gap-2 border-t bg-card p-3 desk:p-4">
-        {canAttach ? (
-          <>
-            <input
-              ref={attachInputRef}
-              type="file"
-              multiple
-              accept={PROJECT_FILE_ACCEPT}
-              style={{ display: "none" }}
-              onChange={(event) => {
-                void addFiles(Array.from(event.target.files ?? []));
-                event.target.value = "";
-              }}
-            />
-            <button
-              type="button"
-              className="grid size-11 shrink-0 place-items-center rounded-xl border text-muted-foreground hover:text-foreground"
-              onClick={() => attachInputRef.current?.click()}
-              aria-label="Attach files"
-              title="Attach files"
-            >
-              <Paperclip size={17} aria-hidden />
-            </button>
-          </>
-        ) : null}
-        <textarea
-          className="min-h-11 max-h-32 flex-1 resize-none rounded-xl border bg-background px-3 py-2.5 text-sm"
-          value={draft}
-          placeholder={scope.kind === "project" ? "Message about this project…" : `Message ${scope.label}…`}
-          rows={1}
-          onChange={(event) => setDraft(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" && !event.shiftKey) {
-              event.preventDefault();
-              void send();
-            }
-          }}
-          onPaste={(event) => {
-            if (!canAttach) return;
-            const files = Array.from(event.clipboardData?.files ?? []);
-            if (files.length) {
-              event.preventDefault();
-              void addFiles(files);
-            }
-          }}
-        />
-        <button type="button" className="grid size-11 place-items-center rounded-xl bg-primary text-primary-foreground disabled:opacity-50" disabled={(!draft.trim() && !attachments.length) || sending || uploadingCount > 0} onClick={() => void send()} aria-label="Send message">
-          <SendHorizontal size={17} aria-hidden />
-        </button>
-      </div>
+      <ChatComposer
+        placeholder={scope.kind === "project" ? "Message about this project…" : `Message ${scope.label}…`}
+        canAttach={canAttach}
+        hasAttachments={attachments.length > 0}
+        busy={sending || uploadingCount > 0}
+        onSend={send}
+        onAddFiles={(files) => void addFiles(files)}
+      />
     </section>
   );
 }
@@ -742,7 +793,7 @@ export function ChatPanel() {
   return (
     <ChatSurface
       scope={scope}
-      className="fixed bottom-0 right-0 z-[70] h-[calc(100dvh-110px)] w-screen rounded-t-2xl border bg-card shadow-md desk:bottom-[18px] desk:right-[18px] desk:h-[min(560px,calc(100vh-90px))] desk:w-[400px] desk:rounded-2xl"
+      className="fixed bottom-0 right-0 z-[70] h-[calc(100dvh-110px)] w-screen rounded-t-2xl border bg-card shadow-md desk:bottom-[18px] desk:right-[18px] desk:h-[min(1500px,calc(100vh-90px))] desk:w-[800px] desk:rounded-2xl"
       header={
         <header className="flex min-h-14 items-center gap-2 border-b bg-secondary px-4">
           <MessageCircle size={16} aria-hidden />

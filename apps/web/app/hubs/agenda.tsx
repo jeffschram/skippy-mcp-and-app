@@ -74,7 +74,7 @@ function AgendaRow({ item, timeZone }: { item: AgendaItem; timeZone: string }) {
     <>
       <span className="flex-[0_0_64px] text-xs tabular-nums text-muted-foreground">{timeLabel(item, timeZone)}</span>
       <span className="grid min-w-0 flex-auto gap-0.5">
-        <span className="text-sm leading-[1.35] [overflow-wrap:anywhere]">{item.title}</span>
+        <span className="text-sm [overflow-wrap:anywhere]">{item.title}</span>
         <span className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
           <Badge tone={item.source === "event" ? "blue" : "neutral"}>
             {SOURCE_LABELS[item.source]}
