@@ -94,6 +94,8 @@ const skippyInstructions = [
   "For noisy sources, submit only items that are actionable, relationship-building, deadline-bearing, decision-relevant, or clearly useful later.",
   "Use pending actions only for external side effects that need separate approval/execution. Do not send email, edit calendars, or mark source systems changed through Skippy.",
   "Use capture_thought, record_memory, record_decision, and record_principle for durable second-brain memory. Include source refs, related entity refs, confidence, captureReason/rubricDecision, and reviewBehavior when available.",
+  "On a project page, use get_project_plan to understand phases and ordered tasks. Use update_project for the Overview description and links, and update_phase for a phase title or Markdown description when the user asks chat to change them.",
+  "Each project also has a freeform plain-text Notes pad (the Notes tab) where the owner dumps unstructured thoughts. When the owner asks to review their notes, call get_project_notes, help fold actionable ideas into the Plan, then — only with the owner's explicit OK — call snapshot_project_notes to preserve the pad and update_project_notes to prune the processed text. Never edit the pad outside an owner-requested review.",
   "Use submit_memory_review_candidate when a possible memory is useful but uncertain. Do not queue transient alerts (balance notifications, promo deadlines, ToS notices); skip them or record directly with expiry context. Use list_memory/get_context_bundle/get_memory_detail before adding likely duplicates or answering from memory, and link_memory to attach memories to accepted entities.",
   "Use list_interview_templates/start_interview/get_interview/answer_interview_question/complete_interview/archive_interview to run guided second-brain interviews inside the harness chat. Ask one question at a time in chat, using the assistantDisplayName returned by Skippy.",
   "During scheduled or batch source-ingestion runs, also drain the Home quick-capture inbox in addition to external sources: call list_quick_captures for pending captures the owner dropped on the home page, turn useful ones into Skippy objects with the ingestion tools (ingest_object etc.), then call mark_quick_capture_handled with 'processed' or 'discarded' for each. Hold-intent captures are private device-to-device transfers: they are never returned by list_quick_captures and must never be ingested.",
@@ -536,6 +538,7 @@ function directCreateConfirmation(result: unknown, fallbackEntityType: "project"
     ownerType: resultRecord.ownerType,
     projectId: resultRecord.projectId,
     projectTitle: resultRecord.projectTitle,
+    phaseId: resultRecord.phaseId,
     relationshipId: resultRecord.relationshipId,
     reviewUrl: reviewUrl("/projects"),
   };
@@ -1683,7 +1686,7 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
     {
       title: "Create accepted task",
       description:
-        "Directly create an accepted task when the user explicitly asks to create/add a task. Optionally assign it to an accepted project by projectId. For source-derived tasks, prefer ingest_object with a rubricDecision and sourceRefs.",
+        "Directly create an accepted task when the user explicitly asks to create/add a task. Optionally assign it to an accepted project by projectId. Project tasks are placed into the project's Plan: pass phaseId (from get_project_plan) to target a specific phase, or omit it to default into the project's last phase. For source-derived tasks, prefer ingest_object with a rubricDecision and sourceRefs.",
       annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: false },
       inputSchema: z.object({
         title: z.string().describe("Task title from the user's explicit instruction."),
@@ -1703,6 +1706,12 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
         dueAt: z.number().optional().describe("Optional due date/time in epoch milliseconds."),
         priorityReason: z.string().optional().describe("Why this task matters or its intended priority."),
         projectId: z.string().optional().describe("Accepted project ID to assign the task to."),
+        phaseId: z
+          .string()
+          .optional()
+          .describe(
+            "Plan phase ID from get_project_plan. Requires projectId and must belong to that project. Omit to default into the project's last phase.",
+          ),
         createdBy: z.string().optional().describe("Harness/user identifier for audit logging."),
         area: z
           .enum(["work", "personal", "household", "health", "finance", "social", "errand"])
@@ -1849,6 +1858,163 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
   );
 
   server.registerTool(
+    "get_project_plan",
+    {
+      title: "Get a project's overview and ordered plan",
+      description:
+        "Read-only. Returns the project Overview fields, ordered phases with Markdown descriptions, ordered tasks, progress, and the currently featured next task ordering. Call get_current_context first when the user says 'this project'.",
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: z.object({ projectId: z.string().describe("Accepted project ID.") }),
+    },
+    async (args) => toolResult(await tools.getProjectPlan({ projectId: args.projectId })),
+  );
+
+  server.registerTool(
+    "update_project",
+    {
+      title: "Update a project's Overview",
+      description:
+        "Update the project name, description, or relevant links shown in Overview. Omit fields that should stay unchanged; pass an empty string to clear an optional field.",
+      annotations: { destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: z.object({
+        projectId: z.string().describe("Accepted project ID."),
+        title: z.string().optional(),
+        summary: z.string().optional().describe("Project description."),
+        repoUrl: z.string().optional().describe("GitHub repository URL."),
+        vercelUrl: z.string().optional().describe("Vercel project or dashboard URL."),
+        liveUrl: z.string().optional().describe("Public live URL."),
+      }),
+    },
+    async (args) =>
+      toolResult(
+        await tools.updateProject(
+          stripUndefined(args) as Parameters<typeof tools.updateProject>[0],
+        ),
+      ),
+  );
+
+  server.registerTool(
+    "update_phase",
+    {
+      title: "Update a project phase",
+      description:
+        "Update an existing phase title or its Markdown description. Use get_project_plan first to identify the phase ID. Omit fields that should stay unchanged; descriptionMd may be empty.",
+      annotations: { destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: z.object({
+        phaseId: z.string().describe("Phase ID returned by get_project_plan."),
+        title: z.string().optional(),
+        descriptionMd: z.string().optional().describe("Full Markdown phase description."),
+      }),
+    },
+    async (args) =>
+      toolResult(
+        await tools.updatePhase(
+          stripUndefined(args) as Parameters<typeof tools.updatePhase>[0],
+        ),
+      ),
+  );
+
+  server.registerTool(
+    "get_project_notes",
+    {
+      title: "Read a project's Notes pad",
+      description:
+        "Read-only. Returns the project's freeform Notes pad: one plain-text field where the owner dumps unstructured thoughts (often from phone). Use this when the owner asks to review their notes — read the pad, then fold actionable ideas into the Plan together in chat. Call get_current_context first when the user says 'this project'.",
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: z.object({ projectId: z.string().describe("Accepted project ID.") }),
+    },
+    async (args) => toolResult(await tools.getProjectNotes(stripUndefined(args) as { projectId: string })),
+  );
+
+  server.registerTool(
+    "update_project_notes",
+    {
+      title: "Overwrite a project's Notes pad",
+      description:
+        "Replace the project's Notes pad with new plain text (the FULL pad content, stored verbatim; an empty string clears the pad). The pad is the owner's freeform space: by convention the harness only edits it at the close of an owner-requested notes review, and only after snapshot_project_notes has preserved the current pad. Plain text only — no markdown rendering, no entry structure.",
+      annotations: { destructiveHint: true, idempotentHint: true, openWorldHint: false },
+      inputSchema: z.object({
+        projectId: z.string().describe("Accepted project ID."),
+        notesPad: z
+          .string()
+          .describe(
+            "Full replacement pad text (last-write-wins). Usually the pruned remainder after a review; empty string clears the pad.",
+          ),
+      }),
+    },
+    async (args) =>
+      toolResult(
+        await tools.updateProjectNotes(
+          stripUndefined(args) as Parameters<typeof tools.updateProjectNotes>[0],
+        ),
+      ),
+  );
+
+  server.registerTool(
+    "snapshot_project_notes",
+    {
+      title: "Snapshot a project's Notes pad",
+      description:
+        "Preserve the project's currently stored Notes pad as a timestamped snapshot (content + optional review summary). Use at the close of an owner-requested notes review, with the owner's explicit OK: snapshot first, then update_project_notes to prune the processed text from the live pad — the snapshot captures what is stored, so nothing is lost by the prune.",
+      annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      inputSchema: z.object({
+        projectId: z.string().describe("Accepted project ID."),
+        summary: z
+          .string()
+          .optional()
+          .describe("Optional one-line summary of the review session that produced this snapshot."),
+      }),
+    },
+    async (args) =>
+      toolResult(
+        await tools.snapshotProjectNotes(
+          stripUndefined(args) as Parameters<typeof tools.snapshotProjectNotes>[0],
+        ),
+      ),
+  );
+
+  server.registerTool(
+    "create_phase",
+    {
+      title: "Create a project Plan phase",
+      description:
+        "Add a new phase to a project's Plan, appended after the existing phases. Use when the user wants a new section of work (e.g. a batch of related tasks). Follow with create_task using the returned phaseId to place tasks in it; update_phase edits it later.",
+      annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      inputSchema: z.object({
+        projectId: z.string().describe("Accepted project ID."),
+        title: z.string().describe("Phase title, e.g. 'Phase 3' or a thematic name."),
+        descriptionMd: z.string().optional().describe("Optional Markdown phase description."),
+      }),
+    },
+    async (args) =>
+      toolResult(
+        await tools.createPhase(
+          stripUndefined(args) as Parameters<typeof tools.createPhase>[0],
+        ),
+      ),
+  );
+
+  server.registerTool(
+    "set_task_phase",
+    {
+      title: "Place a task in a Plan phase",
+      description:
+        "Assign or move an existing project task into a Plan phase, appended after the phase's current tasks. Use get_project_plan first to identify phase IDs (and to spot tasks with no phaseId, which are exactly the ones missing from the phase-grouped Plan). The phase must belong to the task's project.",
+      annotations: { destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: z.object({
+        taskId: z.string().describe("Task ID to place."),
+        phaseId: z.string().describe("Phase ID returned by get_project_plan."),
+      }),
+    },
+    async (args) =>
+      toolResult(
+        await tools.setTaskPhase(
+          stripUndefined(args) as Parameters<typeof tools.setTaskPhase>[0],
+        ),
+      ),
+  );
+
+  server.registerTool(
     "plan_project",
     {
       title: "Plan a project into tasks",
@@ -1962,6 +2128,12 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
           .enum(["coding", "review", "research", "design", "manual", "planning"])
           .optional()
           .describe("Optional task kind. Use coding for repo work."),
+        phaseId: z
+          .string()
+          .optional()
+          .describe(
+            "Optional Plan phase ID from get_project_plan to place the task in while briefing it. Must belong to the task's project.",
+          ),
       }),
     },
     async (args) =>
@@ -2151,6 +2323,7 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
 
   const upsertDescriptionNotes: Partial<Record<(typeof entityTypeValues)[number], string>> = {
     link: " Links are reference material: status defaults to 'saved' (no user interaction expected). Pass status 'unread' only when the user explicitly wants to read it later; if genuinely uncertain the link is valid or important, use submit_candidate_object so it lands in Review for a one-tap decision.",
+    task: " This always creates a NEW standalone task and cannot update an existing one — for project tasks use create_task (projectId/phaseId aware), brief_task to update briefs, and set_task_phase to place a task in a Plan phase.",
   };
 
   for (const entityType of entityTypeValues) {
@@ -2164,6 +2337,21 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
       },
       async (args) => {
         const candidatePayload = stripUndefined(args) as CandidateObjectInput<typeof entityType>["candidatePayload"];
+        // upsert_* is ingestion, not mutation: a payload that references an
+        // existing record would silently create an unlinked duplicate (this
+        // happened with upsert_task + taskId). Fail loudly and point at the
+        // update tools instead.
+        const updateKeys = ["taskId", "phaseId", "_id", "entityId"].filter(
+          (key) => key in (candidatePayload as Record<string, unknown>),
+        );
+        if (updateKeys.length) {
+          throw new Error(
+            `upsert_${entityType} creates a new ${entityType} and cannot update an existing record (got ${updateKeys.join(", ")}). ` +
+              (entityType === "task"
+                ? "Use create_task for new project tasks, brief_task to update a brief, or set_task_phase to place a task in a Plan phase."
+                : "Use the matching update tool or ingest_object instead."),
+          );
+        }
         const input = {
           candidateEntityType: entityType,
           candidatePayload,

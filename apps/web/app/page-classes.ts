@@ -35,14 +35,14 @@ export const pendingActionItemClass = "wide:grid-cols-[auto_minmax(0,1fr)_minmax
 export const itemIconClass = "grid size-[34px] place-items-center rounded-lg bg-accent text-green";
 export const itemIconActiveClass = "bg-gold/10 text-gold";
 export const itemTitleClass = "m-0 mb-1 font-bold";
-export const itemMetaClass = "m-0 text-sm leading-[1.35] text-muted-foreground";
+export const itemMetaClass = "m-0 text-sm text-muted-foreground";
 export const taskSideClass =
   "col-start-2 inline-flex flex-wrap justify-start gap-1.5 wide:col-start-auto wide:justify-end";
 export const pendingActionSideClass =
   "col-start-2 grid justify-items-start gap-2.5 wide:col-start-auto wide:justify-items-end";
 export const projectRowClass =
-  "items-center text-inherit no-underline transition-[border-color,box-shadow] hover:border-primary hover:shadow-[0_12px_30px_rgba(31,34,29,0.08)]";
-export const projectRowSideClass = "inline-flex items-center gap-2.5 text-muted-foreground";
+  "text-inherit no-underline transition-[border-color,box-shadow] hover:border-primary hover:shadow-[0_12px_30px_rgba(31,34,29,0.08)]";
+export const projectRowSideClass = "inline-flex gap-2.5 text-muted-foreground";
 
 /* ---- badges ---- */
 export const badgeClass =

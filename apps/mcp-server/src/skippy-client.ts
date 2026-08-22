@@ -41,6 +41,16 @@ const markTaskDoneRef = makeFunctionReference<"mutation">("knowledge:markTaskDon
 const recordPendingActionResultRef = makeFunctionReference<"mutation">("knowledge:recordPendingActionResult");
 const recordEntityReviewRef = makeFunctionReference<"mutation">("knowledge:recordEntityReview");
 const currentContextForBrainRef = makeFunctionReference<"query">("projects:currentContextForBrain");
+const projectBoardForBrainRef = makeFunctionReference<"query">("projects:projectBoardForBrain");
+const updateProjectForBrainRef = makeFunctionReference<"mutation">("projects:updateProjectForBrain");
+const updatePhaseForBrainRef = makeFunctionReference<"mutation">("projects:updatePhaseForBrain");
+const projectNotesForBrainRef = makeFunctionReference<"query">("projects:projectNotesForBrain");
+const updateProjectNotesForBrainRef = makeFunctionReference<"mutation">("projects:updateProjectNotesForBrain");
+const snapshotProjectNotesForBrainRef = makeFunctionReference<"mutation">(
+  "projects:snapshotProjectNotesForBrain",
+);
+const createPhaseForBrainRef = makeFunctionReference<"mutation">("projects:createPhaseForBrain");
+const setTaskPhaseForBrainRef = makeFunctionReference<"mutation">("projects:setTaskPhaseForBrain");
 const planProjectForBrainRef = makeFunctionReference<"action">("planning:planProjectForBrain");
 const readyTasksForBrainRef = makeFunctionReference<"query">("projects:readyTasksForBrain");
 const requestedReadyTasksForBrainRef = makeFunctionReference<"query">("projects:requestedReadyTasksForBrain");
@@ -144,6 +154,22 @@ export function createConvexSkippyClient(convexUrl: string, authToken?: string):
       client.mutation(recordEntityReviewRef, { brainInstanceId, ...review }),
     getCurrentContext: (brainInstanceId) =>
       client.query(currentContextForBrainRef, { brainInstanceId }),
+    getProjectPlan: (brainInstanceId, input) =>
+      client.query(projectBoardForBrainRef, { brainInstanceId, ...input }),
+    updateProject: (brainInstanceId, input) =>
+      client.mutation(updateProjectForBrainRef, { brainInstanceId, ...input }),
+    updatePhase: (brainInstanceId, input) =>
+      client.mutation(updatePhaseForBrainRef, { brainInstanceId, ...input }),
+    getProjectNotes: (brainInstanceId, input) =>
+      client.query(projectNotesForBrainRef, { brainInstanceId, ...input }),
+    updateProjectNotes: (brainInstanceId, input) =>
+      client.mutation(updateProjectNotesForBrainRef, { brainInstanceId, ...input }),
+    snapshotProjectNotes: (brainInstanceId, input) =>
+      client.mutation(snapshotProjectNotesForBrainRef, { brainInstanceId, ...input }),
+    createPhase: (brainInstanceId, input) =>
+      client.mutation(createPhaseForBrainRef, { brainInstanceId, ...input }),
+    setTaskPhase: (brainInstanceId, input) =>
+      client.mutation(setTaskPhaseForBrainRef, { brainInstanceId, ...input }),
     planProject: (brainInstanceId, input) =>
       client.action(planProjectForBrainRef, { brainInstanceId, ...input }),
     listReadyTasks: (brainInstanceId, input) =>

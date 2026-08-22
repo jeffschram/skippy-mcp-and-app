@@ -17,6 +17,8 @@ export interface ClaimedRun {
   harness: Harness;
   attempt: number;
   taskId?: string;
+  /** Title of the task this run executes; names the PR so the list stays scannable. */
+  taskTitle?: string;
   chatId: string;
   externalThreadId?: string;
   worktreePath?: string;
@@ -33,6 +35,29 @@ export interface ControlState {
   status: string;
   cancelRequested: boolean;
   approvals: Array<{ _id: string; harnessRequestId: string; status: string; decidedAt?: number }>;
+}
+
+/** One checklist entry of a maintenance job (post-merge close-out). */
+export interface MaintenanceStep {
+  key: string;
+  label: string;
+  status: "pending" | "running" | "ok" | "failed" | "skipped";
+  detail?: string;
+}
+
+/** Claim payload for a host-executed maintenance job (scripted, no harness). */
+export interface ClaimedMaintenanceJob {
+  jobId: string;
+  claimToken: string;
+  kind: "post_merge_closeout";
+  taskId: string;
+  taskTitle?: string;
+  prUrl?: string;
+  prNumber?: number;
+  gitBranchName?: string;
+  baseBranch: string;
+  steps: MaintenanceStep[];
+  project: { _id: string; title?: string; localPath: string };
 }
 
 export type ReportableStatus =
@@ -54,6 +79,14 @@ const fns = (anyApi as any).agentWorkbench as Record<string, any>;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const chatFns = (anyApi as any).chats as Record<string, any>;
 
+/** Attachment on the turn's user message: metadata + a short-lived download URL. */
+export interface ChatTurnAttachment {
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  url: string | null;
+}
+
 export interface ClaimedChatTurn {
   turnId: string;
   claimToken: string;
@@ -62,8 +95,11 @@ export interface ClaimedChatTurn {
   externalThreadId?: string;
   scopeContext: string;
   cwd?: string;
+  /** Project assets folder (_library) on this host, when the project is mapped. */
+  assetsPath?: string;
   history: Array<{ role: "user" | "assistant"; content: string }>;
   userContent: string;
+  attachments?: ChatTurnAttachment[];
 }
 
 export class ControlPlane {
@@ -79,11 +115,16 @@ export class ControlPlane {
     return this.client.mutation(fns.registerHost, { hostToken: this.hostToken, ...args });
   }
 
-  heartbeat(activeRunIds: string[], activeChatTurnIds: string[] = []): Promise<{ draining: boolean }> {
+  heartbeat(
+    activeRunIds: string[],
+    activeChatTurnIds: string[] = [],
+    activeMaintenanceJobIds: string[] = [],
+  ): Promise<{ draining: boolean }> {
     return this.client.mutation(fns.hostHeartbeat, {
       hostToken: this.hostToken,
       activeRunIds,
       activeChatTurnIds,
+      activeMaintenanceJobIds,
     });
   }
 
@@ -151,6 +192,65 @@ export class ControlPlane {
     return this.client.query(fns.runControlState, { hostToken: this.hostToken, runId });
   }
 
+  /**
+   * Cancel a still-pending approval with an explicit reason (e.g. the
+   * runner's approval timeout expired). Idempotent: settled approvals are
+   * left untouched.
+   */
+  cancelApproval(
+    runId: string,
+    claimToken: string,
+    harnessRequestId: string,
+    reason: string,
+  ): Promise<{ approvalId: string; status: string }> {
+    return this.client.mutation(fns.cancelApproval, {
+      hostToken: this.hostToken,
+      runId,
+      claimToken,
+      harnessRequestId,
+      reason,
+    });
+  }
+
+  /* ---- Maintenance jobs (post-merge close-out) ---- */
+
+  claimNextMaintenanceJob(): Promise<ClaimedMaintenanceJob | null> {
+    return this.client.mutation(fns.claimNextMaintenanceJob, { hostToken: this.hostToken });
+  }
+
+  updateMaintenanceJob(
+    jobId: string,
+    claimToken: string,
+    patch: {
+      status?: "running" | "completed" | "failed";
+      steps?: MaintenanceStep[];
+      errorMessage?: string;
+      resultSummary?: string;
+    } = {},
+  ): Promise<{ jobId: string; status: string }> {
+    const payload: Record<string, unknown> = { hostToken: this.hostToken, jobId, claimToken };
+    if (patch.status !== undefined) payload.status = patch.status;
+    if (patch.steps !== undefined) {
+      // Convex rejects explicit `undefined` values inside nested objects, so
+      // strip absent details rather than sending `detail: undefined`.
+      payload.steps = patch.steps.map((step) => ({
+        key: step.key,
+        label: step.label,
+        status: step.status,
+        ...(step.detail !== undefined ? { detail: step.detail } : {}),
+      }));
+    }
+    if (patch.errorMessage !== undefined) payload.errorMessage = patch.errorMessage;
+    if (patch.resultSummary !== undefined) payload.resultSummary = patch.resultSummary;
+    return this.client.mutation(fns.updateMaintenanceJob, payload);
+  }
+
+  hostActiveMaintenanceJobs(): Promise<
+    Array<{ jobId: string; status: string; kind: string; claimToken?: string; taskId: string }>
+  > {
+    return this.client.query(fns.hostActiveMaintenanceJobs, { hostToken: this.hostToken });
+  }
+
   /* ---- Conversational chat turns (local-harness chat) ---- */
 
   claimNextChatTurn(): Promise<ClaimedChatTurn | null> {
@@ -188,6 +288,19 @@ export class ControlPlane {
     return this.client.query(chatFns.chatTurnControlState, { hostToken: this.hostToken, turnId });
   }
 
+  reportChatTurnEvents(
+    turnId: string,
+    claimToken: string,
+    events: Array<{ seq: number; type: string; payload?: unknown }>,
+  ): Promise<{ accepted: number }> {
+    return this.client.mutation(chatFns.reportChatTurnEvents, {
+      hostToken: this.hostToken,
+      turnId,
+      claimToken,
+      events,
+    });
+  }
+
   completeChatTurn(
     turnId: string,
     claimToken: string,
@@ -220,12 +333,19 @@ export class ControlPlane {
   /**
    * Block until the named approval is decided (or the run is cancelled).
    * Polls control state; a decision made in the web app lands within pollMs.
+   *
+   * timeoutMs > 0 bounds the wait: when it elapses with the approval still
+   * pending, "timed_out" is returned and the caller is responsible for
+   * cancelling the approval doc + failing the run with an explicit message.
+   * This is THE approval timeout — there is deliberately no hidden one
+   * anywhere else (the Convex claim lease renews on heartbeat while waiting).
    */
   async awaitApproval(
     runId: string,
     harnessRequestId: string,
-    { pollMs = 2_000, signal }: { pollMs?: number; signal?: AbortSignal } = {},
-  ): Promise<"accepted" | "declined" | "cancelled"> {
+    { pollMs = 2_000, signal, timeoutMs = 0 }: { pollMs?: number; signal?: AbortSignal; timeoutMs?: number } = {},
+  ): Promise<"accepted" | "declined" | "cancelled" | "timed_out"> {
+    const deadline = timeoutMs > 0 ? Date.now() + timeoutMs : undefined;
     for (;;) {
       if (signal?.aborted) return "cancelled";
       const state = await this.controlState(runId);
@@ -234,6 +354,7 @@ export class ControlPlane {
       if (approval && approval.status !== "pending") {
         return approval.status === "accepted" ? "accepted" : "declined";
       }
+      if (deadline !== undefined && Date.now() >= deadline) return "timed_out";
       await new Promise((resolve) => setTimeout(resolve, pollMs));
     }
   }

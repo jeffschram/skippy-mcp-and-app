@@ -13,6 +13,7 @@
 import { mutationGeneric, queryGeneric } from "convex/server";
 import { v } from "convex/values";
 import { requireOwnedBrain } from "./auth";
+import { applyTaskResult } from "./projects";
 
 /* ------------------------------------------------------------------ */
 /* Constants                                                          */
@@ -357,6 +358,151 @@ export const projectExecutionConfigForViewer = queryGeneric({
 /* Viewer: execute, cancel, approvals, run reads                      */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Shared run-minting path for the viewer play button and the host-token
+ * chat-harness equivalent. All validation, dedupe, chat reuse, attempt
+ * numbering, and audit logging live here so the two entry points cannot
+ * drift; only authentication and actor attribution differ.
+ */
+async function queueTaskExecution(
+  ctx: any,
+  brainId: any,
+  opts: {
+    taskId: any;
+    harness?: AgentHarness | undefined;
+    actor: { actorType: "user" | "harness"; actorId?: string; requestedBy?: string };
+  },
+) {
+  const task = await ctx.db.get(opts.taskId);
+  if (!task || task.brainInstanceId !== brainId) throw new Error("task not found");
+  if (task.processingState !== "accepted") throw new Error("only accepted tasks can be executed");
+  if (task.ownerType !== "agent") throw new Error("only agent-owned tasks can be executed");
+
+  // Duplicate execution request: return the existing active run and its chat
+  // rather than creating a competing run.
+  const existing = await activeRunForTask(ctx.db, brainId, opts.taskId);
+  if (existing) {
+    return { runId: existing._id, chatId: existing.chatId, status: existing.status, existing: true };
+  }
+
+  const executionState = task.executionState ?? (task.status === "done" ? "done" : "ready");
+  if (executionState !== "ready") {
+    // Resume path (doc → Task action states: Interrupted or failed → Resume).
+    // A prior attempt moved the task to in_progress/in_review before dying;
+    // with no run active, a new attempt is legal.
+    const taskRuns = await ctx.db
+      .query("agentRuns")
+      .withIndex("by_brain_task", (q: any) => q.eq("brainInstanceId", brainId).eq("taskId", opts.taskId))
+      .collect();
+    taskRuns.sort((a: any, b: any) => b.createdAt - a.createdAt);
+    const latest = taskRuns[0];
+    const resumable =
+      (executionState === "in_progress" || executionState === "in_review") &&
+      latest &&
+      (["failed", "interrupted", "cancelled"].includes(latest.status) ||
+        // Publish-failed runs finish in_review with the work preserved on
+        // the branch; re-executing retries the push.
+        (latest.status === "in_review" && latest.errorCategory === "publish"));
+    if (!resumable) throw new Error("only ready tasks (or failed/interrupted attempts) can be executed");
+  }
+
+  const projectId = await projectIdForTask(ctx.db, brainId, opts.taskId);
+  if (!projectId) throw new Error("task is not linked to a project");
+  const project = await ctx.db.get(projectId);
+  if (!project) throw new Error("project not found");
+  if ((project.kind ?? "general") !== "code" || !project.repoUrl) {
+    throw new Error("task's project is not a code project with a configured repository");
+  }
+  const config = await ctx.db
+    .query("projectExecutionConfigs")
+    .withIndex("by_brain_project", (q: any) => q.eq("brainInstanceId", brainId).eq("projectId", projectId))
+    .first();
+  if (!config || !config.enabled) {
+    throw new Error("project has no enabled execution host mapping");
+  }
+
+  // Harness resolution order (docs/mac-mini-agent-workbench.md → Harness):
+  // explicit pick → task.requestedHarness when it is a valid enum value →
+  // project preferredHarness → default "claude".
+  const harness: AgentHarness =
+    opts.harness ??
+    (isHarness(task.requestedHarness) ? task.requestedHarness : undefined) ??
+    config.preferredHarness ??
+    "claude";
+
+  const now = Date.now();
+
+  // Reuse the task chat only when its harness matches — a chat is bound to
+  // one harness for its lifetime (context lives in the harness thread).
+  const chats = await ctx.db
+    .query("projectChats")
+    .withIndex("by_brain_task", (q: any) => q.eq("brainInstanceId", brainId).eq("taskId", opts.taskId))
+    .collect();
+  let chat = chats.find(
+    (c: any) => c.kind === "task" && c.state !== "archived" && (!c.harness || c.harness === harness),
+  );
+  let chatId = chat?._id;
+  if (!chatId) {
+    chatId = await ctx.db.insert("projectChats", {
+      brainInstanceId: brainId,
+      projectId,
+      taskId: opts.taskId,
+      title: `Task: ${task.title}`,
+      kind: "task",
+      harness,
+      state: "active",
+      createdAt: now,
+      updatedAt: now,
+    });
+  } else if (!chat.harness) {
+    await ctx.db.patch(chatId, { harness, updatedAt: now });
+  }
+
+  const priorRuns = await ctx.db
+    .query("agentRuns")
+    .withIndex("by_brain_task", (q: any) => q.eq("brainInstanceId", brainId).eq("taskId", opts.taskId))
+    .collect();
+
+  const runId = await ctx.db.insert("agentRuns", {
+    brainInstanceId: brainId,
+    projectId,
+    chatId,
+    taskId: opts.taskId,
+    attempt: priorRuns.length + 1,
+    status: "queued",
+    harness,
+    baseBranch: project.defaultBaseBranch ?? "main",
+    executionBrief: task.executionBrief,
+    acceptanceCriteria: task.acceptanceCriteria,
+    approvalPolicy: config.approvalPolicy ?? { requirePushApproval: true },
+    claimVersion: 0,
+    queuedAt: now,
+    lastEventSeq: 0,
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  await ctx.db.patch(chatId, { activeRunId: runId, updatedAt: now });
+  await ctx.db.patch(opts.taskId, {
+    agentRequestStatus: "requested",
+    agentRequestedAt: task.agentRequestedAt ?? now,
+    agentRequestedBy: opts.actor.requestedBy,
+    updatedAt: now,
+  });
+  await ctx.db.insert("activityEvents", {
+    brainInstanceId: brainId,
+    entityRef: { entityType: "task", entityId: opts.taskId },
+    activityType: "agent_run_queued",
+    actorType: opts.actor.actorType,
+    actorId: opts.actor.actorId,
+    timestamp: now,
+    summary: `Execution queued (${harness}): ${task.title}`,
+    metadata: { runId, chatId, harness },
+  });
+
+  return { runId, chatId, status: "queued", existing: false };
+}
+
 export const executeTaskForViewer = mutationGeneric({
   args: {
     taskId: v.id("tasks"),
@@ -364,134 +510,46 @@ export const executeTaskForViewer = mutationGeneric({
   },
   handler: async (ctx, args) => {
     const { user, brain } = await requireOwnedBrain(ctx);
-    const task = await ctx.db.get(args.taskId);
-    if (!task || task.brainInstanceId !== brain._id) throw new Error("task not found");
-    if (task.processingState !== "accepted") throw new Error("only accepted tasks can be executed");
-    if (task.ownerType !== "agent") throw new Error("only agent-owned tasks can be executed");
-
-    // Duplicate execution request: return the existing active run and its chat
-    // rather than creating a competing run.
-    const existing = await activeRunForTask(ctx.db, brain._id, args.taskId);
-    if (existing) {
-      return { runId: existing._id, chatId: existing.chatId, status: existing.status, existing: true };
-    }
-
-    const executionState = task.executionState ?? (task.status === "done" ? "done" : "ready");
-    if (executionState !== "ready") {
-      // Resume path (doc → Task action states: Interrupted or failed → Resume).
-      // A prior attempt moved the task to in_progress/in_review before dying;
-      // with no run active, a new attempt is legal.
-      const taskRuns = await ctx.db
-        .query("agentRuns")
-        .withIndex("by_brain_task", (q: any) => q.eq("brainInstanceId", brain._id).eq("taskId", args.taskId))
-        .collect();
-      taskRuns.sort((a: any, b: any) => b.createdAt - a.createdAt);
-      const latest = taskRuns[0];
-      const resumable =
-        (executionState === "in_progress" || executionState === "in_review") &&
-        latest &&
-        (["failed", "interrupted", "cancelled"].includes(latest.status) ||
-          // Publish-failed runs finish in_review with the work preserved on
-          // the branch; re-executing retries the push.
-          (latest.status === "in_review" && latest.errorCategory === "publish"));
-      if (!resumable) throw new Error("only ready tasks (or failed/interrupted attempts) can be executed");
-    }
-
-    const projectId = await projectIdForTask(ctx.db, brain._id, args.taskId);
-    if (!projectId) throw new Error("task is not linked to a project");
-    const project = await ctx.db.get(projectId);
-    if (!project) throw new Error("project not found");
-    if ((project.kind ?? "general") !== "code" || !project.repoUrl) {
-      throw new Error("task's project is not a code project with a configured repository");
-    }
-    const config = await ctx.db
-      .query("projectExecutionConfigs")
-      .withIndex("by_brain_project", (q: any) => q.eq("brainInstanceId", brain._id).eq("projectId", projectId))
-      .first();
-    if (!config || !config.enabled) {
-      throw new Error("project has no enabled execution host mapping");
-    }
-
-    // Harness resolution order (docs/mac-mini-agent-workbench.md → Harness):
-    // explicit pick → task.requestedHarness when it is a valid enum value →
-    // project preferredHarness → default "claude".
-    const harness: AgentHarness =
-      args.harness ??
-      (isHarness(task.requestedHarness) ? task.requestedHarness : undefined) ??
-      config.preferredHarness ??
-      "claude";
-
-    const now = Date.now();
-
-    // Reuse the task chat only when its harness matches — a chat is bound to
-    // one harness for its lifetime (context lives in the harness thread).
-    const chats = await ctx.db
-      .query("projectChats")
-      .withIndex("by_brain_task", (q: any) => q.eq("brainInstanceId", brain._id).eq("taskId", args.taskId))
-      .collect();
-    let chat = chats.find(
-      (c: any) => c.kind === "task" && c.state !== "archived" && (!c.harness || c.harness === harness),
-    );
-    let chatId = chat?._id;
-    if (!chatId) {
-      chatId = await ctx.db.insert("projectChats", {
-        brainInstanceId: brain._id,
-        projectId,
-        taskId: args.taskId,
-        title: `Task: ${task.title}`,
-        kind: "task",
-        harness,
-        state: "active",
-        createdAt: now,
-        updatedAt: now,
-      });
-    } else if (!chat.harness) {
-      await ctx.db.patch(chatId, { harness, updatedAt: now });
-    }
-
-    const priorRuns = await ctx.db
-      .query("agentRuns")
-      .withIndex("by_brain_task", (q: any) => q.eq("brainInstanceId", brain._id).eq("taskId", args.taskId))
-      .collect();
-
-    const runId = await ctx.db.insert("agentRuns", {
-      brainInstanceId: brain._id,
-      projectId,
-      chatId,
+    return queueTaskExecution(ctx, brain._id, {
       taskId: args.taskId,
-      attempt: priorRuns.length + 1,
-      status: "queued",
-      harness,
-      baseBranch: project.defaultBaseBranch ?? "main",
-      executionBrief: task.executionBrief,
-      acceptanceCriteria: task.acceptanceCriteria,
-      approvalPolicy: config.approvalPolicy ?? { requirePushApproval: true },
-      claimVersion: 0,
-      queuedAt: now,
-      lastEventSeq: 0,
-      createdAt: now,
-      updatedAt: now,
+      harness: args.harness,
+      actor: { actorType: "user", actorId: user._id, requestedBy: user.displayName ?? user.email },
     });
+  },
+});
 
-    await ctx.db.patch(chatId, { activeRunId: runId, updatedAt: now });
-    await ctx.db.patch(args.taskId, {
-      agentRequestStatus: "requested",
-      agentRequestedAt: task.agentRequestedAt ?? now,
-      agentRequestedBy: user.displayName ?? user.email,
-      updatedAt: now,
+/**
+ * Host-authenticated play button. Lets the chat harness queue a task run on
+ * the owner's explicit instruction ("start task X", "initiate all tasks in
+ * Phase N") without a board round-trip — same consent convention as
+ * decideApprovalForBrain, same host-token credential the runner itself
+ * holds. Convenience: a `briefed` task is promoted to `ready` as part of
+ * execution, mirroring what the viewer play button does in two steps.
+ * Attribution: activity is recorded with actorType "harness" so proxied
+ * starts are always distinguishable from owner clicks.
+ */
+export const executeTaskForBrain = mutationGeneric({
+  args: {
+    hostToken: v.string(),
+    taskId: v.id("tasks"),
+    harness: v.optional(harnessArg),
+    actorId: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const host = await requireHost(ctx, args.hostToken);
+    const task = await ctx.db.get(args.taskId);
+    if (!task || task.brainInstanceId !== host.brainInstanceId) {
+      throw new Error("task not found for host's brain");
+    }
+    if ((task.executionState ?? "") === "briefed") {
+      await ctx.db.patch(args.taskId, { executionState: "ready", updatedAt: Date.now() });
+    }
+    const actorId = args.actorId ?? "chat-harness";
+    return queueTaskExecution(ctx, host.brainInstanceId, {
+      taskId: args.taskId,
+      harness: args.harness,
+      actor: { actorType: "harness", actorId, requestedBy: actorId },
     });
-    await ctx.db.insert("activityEvents", {
-      brainInstanceId: brain._id,
-      entityRef: { entityType: "task", entityId: args.taskId },
-      activityType: "agent_run_queued",
-      actorType: "user",
-      actorId: user._id,
-      timestamp: now,
-      summary: `Execution queued (${harness}): ${task.title}`,
-      metadata: { runId, chatId, harness },
-    });
-
-    return { runId, chatId, status: "queued", existing: false };
   },
 });
 
@@ -541,6 +599,41 @@ export const decideApprovalForViewer = mutationGeneric({
   },
 });
 
+/**
+ * Host-authenticated approval decision. Exists because the web app currently
+ * has no surface for run approvals (v2 regression, being restored by the task
+ * detail panel work): until then, the owner can consent in chat and the chat
+ * harness clears the gate on their behalf. Requires the host token, so it is
+ * no weaker than the runner's own control-plane access. A proxied decision is
+ * distinguishable from a viewer one by its missing `decidedByUserId`.
+ */
+export const decideApprovalForBrain = mutationGeneric({
+  args: {
+    hostToken: v.string(),
+    approvalId: v.id("agentApprovals"),
+    decision: v.union(v.literal("accepted"), v.literal("declined")),
+  },
+  handler: async (ctx, args) => {
+    const host = await requireHost(ctx, args.hostToken);
+    const approval = await ctx.db.get(args.approvalId);
+    if (!approval || approval.brainInstanceId !== host.brainInstanceId) {
+      throw new Error("approval not found for host's brain");
+    }
+    if (approval.status !== "pending") {
+      // Same idempotency contract as the viewer path: never flip a settled
+      // decision.
+      return { approvalId: args.approvalId, status: approval.status };
+    }
+    const now = Date.now();
+    await ctx.db.patch(args.approvalId, {
+      status: args.decision,
+      decidedAt: now,
+      updatedAt: now,
+    });
+    return { approvalId: args.approvalId, status: args.decision };
+  },
+});
+
 export const pendingApprovalsForViewer = queryGeneric({
   args: {},
   handler: async (ctx) => {
@@ -560,6 +653,67 @@ export const pendingApprovalsForViewer = queryGeneric({
       availableDecisions: a.availableDecisions ?? ["accepted", "declined"],
       createdAt: a.createdAt,
     }));
+  },
+});
+
+/**
+ * Approvals for a project's runs, joined with the owning task, for the
+ * approval UI surface (task panel card, chat notice, board indicator).
+ * Includes settled approvals — a decided chat notice stays in the timeline
+ * as the record of the decision — capped so the payload stays bounded.
+ * Read-only join over existing tables; the approval lifecycle itself
+ * (request/decide/cancel) is untouched.
+ */
+export const approvalsForProjectForViewer = queryGeneric({
+  args: { projectId: v.id("projects") },
+  handler: async (ctx, { projectId }) => {
+    const { brain } = await requireOwnedBrain(ctx);
+    // Prefix match on by_brain_status: all runs for the brain, then narrow
+    // to the project. Bounded to the most recent runs so an old, busy
+    // project cannot balloon the payload.
+    const runs = await ctx.db
+      .query("agentRuns")
+      .withIndex("by_brain_status", (q: any) => q.eq("brainInstanceId", brain._id))
+      .collect();
+    const projectRuns = runs
+      .filter((run: any) => run.projectId === projectId)
+      .sort((a: any, b: any) => b.createdAt - a.createdAt)
+      .slice(0, 30);
+    const taskTitles = new Map<string, string | undefined>();
+    const out: any[] = [];
+    for (const run of projectRuns) {
+      if (run.taskId && !taskTitles.has(run.taskId)) {
+        const task = await ctx.db.get(run.taskId);
+        taskTitles.set(run.taskId, task?.title);
+      }
+      const approvals = await ctx.db
+        .query("agentApprovals")
+        .withIndex("by_run", (q: any) => q.eq("runId", run._id))
+        .collect();
+      for (const approval of approvals) {
+        out.push({
+          _id: approval._id,
+          runId: approval.runId,
+          taskId: run.taskId,
+          taskTitle: run.taskId ? taskTitles.get(run.taskId) : undefined,
+          runStatus: run.status,
+          branch: run.workingBranch,
+          verificationSummary: run.verificationSummary,
+          kind: approval.kind,
+          title: approval.title,
+          explanation: approval.explanation,
+          details: approval.details,
+          availableDecisions: approval.availableDecisions ?? ["accepted", "declined"],
+          status: approval.status,
+          decidedAt: approval.decidedAt,
+          reason: approval.reason,
+          createdAt: approval.createdAt,
+          updatedAt: approval.updatedAt,
+        });
+      }
+    }
+    out.sort((a, b) => a.createdAt - b.createdAt);
+    return out.slice(-100);
   },
 });
 
@@ -591,11 +745,23 @@ export const runEventsForViewer = queryGeneric({
     runId: v.id("agentRuns"),
     afterSeq: v.optional(v.number()),
     limit: v.optional(v.number()),
+    // Last-N mode for live-tail consumers (task detail panel): returns only
+    // the newest `tail` events, seq-ascending, so long runs don't ship their
+    // whole history to the client.
+    tail: v.optional(v.number()),
   },
-  handler: async (ctx, { runId, afterSeq, limit }) => {
+  handler: async (ctx, { runId, afterSeq, limit, tail }) => {
     const { brain } = await requireOwnedBrain(ctx);
     const run = await ctx.db.get(runId);
     if (!run || run.brainInstanceId !== brain._id) throw new Error("run not found");
+    if (tail !== undefined) {
+      const newest = await ctx.db
+        .query("agentRunEvents")
+        .withIndex("by_run_seq", (q: any) => q.eq("runId", runId))
+        .order("desc")
+        .take(Math.min(Math.max(Math.floor(tail), 1), 500));
+      return { run: runSummary(run), events: newest.reverse() };
+    }
     const events = await ctx.db
       .query("agentRunEvents")
       .withIndex("by_run_seq", (q: any) => q.eq("runId", runId).gt("seq", afterSeq ?? 0))
@@ -638,6 +804,7 @@ export const hostHeartbeat = mutationGeneric({
     hostToken: v.string(),
     activeRunIds: v.optional(v.array(v.id("agentRuns"))),
     activeChatTurnIds: v.optional(v.array(v.id("chatTurns"))),
+    activeMaintenanceJobIds: v.optional(v.array(v.id("maintenanceJobs"))),
   },
   handler: async (ctx, args) => {
     const host = await requireHost(ctx, args.hostToken);
@@ -654,6 +821,12 @@ export const hostHeartbeat = mutationGeneric({
       const turn = await ctx.db.get(turnId);
       if (turn && turn.hostId === host._id && (turn.status === "claimed" || turn.status === "running")) {
         await ctx.db.patch(turnId, { leaseExpiresAt: now + RUN_LEASE_MS, updatedAt: now });
+      }
+    }
+    for (const jobId of args.activeMaintenanceJobIds ?? []) {
+      const job = await ctx.db.get(jobId);
+      if (job && job.hostId === host._id && (job.status === "claimed" || job.status === "running")) {
+        await ctx.db.patch(jobId, { leaseExpiresAt: now + RUN_LEASE_MS, updatedAt: now });
       }
     }
     return { draining: host.draining ?? false };
@@ -738,6 +911,9 @@ export const claimNextRun = mutationGeneric({
 
       const project = await ctx.db.get(run.projectId);
       const chat = await ctx.db.get(run.chatId);
+      // Task title rides along so the runner can name the PR after the task
+      // instead of the generic project string (unscannable PR list, #117–#124).
+      const task = run.taskId ? await ctx.db.get(run.taskId) : null;
       // The authorized execution brief and project configuration — nothing more.
       return {
         runId: run._id,
@@ -745,6 +921,7 @@ export const claimNextRun = mutationGeneric({
         harness: run.harness,
         attempt: run.attempt,
         taskId: run.taskId,
+        taskTitle: task?.title,
         chatId: run.chatId,
         externalThreadId: chat?.externalThreadId,
         worktreePath: chat?.worktreePath,
@@ -868,6 +1045,33 @@ export const updateRunStatus = mutationGeneric({
             updatedAt: now,
           });
         }
+        // Dead-run cleanup (2026-08-20 incident): a failed/interrupted/
+        // cancelled run previously left its task orphaned — executionState
+        // stuck at in_progress and agentRequestStatus stuck at "requested",
+        // which hid the play button and made the board lie about live work.
+        // Return the task to ready so the next attempt is one click (or one
+        // executeTaskForBrain call) away. in_review tasks are left alone:
+        // their work is preserved on a branch and has its own resume path.
+        if (
+          ["failed", "interrupted", "cancelled"].includes(args.status) &&
+          task.executionState === "in_progress"
+        ) {
+          await ctx.db.patch(run.taskId, {
+            executionState: "ready",
+            status: "todo",
+            agentRequestStatus: undefined,
+            updatedAt: now,
+          });
+          await ctx.db.insert("activityEvents", {
+            brainInstanceId: host.brainInstanceId,
+            entityRef: { entityType: "task", entityId: run.taskId },
+            activityType: "agent_run_failed_task_reset",
+            actorType: "system",
+            timestamp: now,
+            summary: `Run ${args.status}; task returned to Ready for retry: ${task.title}`,
+            metadata: { runId: args.runId, runStatus: args.status, ...(args.errorMessage ? { errorMessage: args.errorMessage } : {}) },
+          });
+        }
       }
     }
 
@@ -881,6 +1085,7 @@ export const updateRunStatus = mutationGeneric({
         if (approval.status === "pending") {
           await ctx.db.patch(approval._id, {
             status: args.status === "interrupted" ? "expired" : "cancelled",
+            reason: `run reached ${args.status} before this approval was decided`,
             updatedAt: now,
           });
         }
@@ -993,6 +1198,42 @@ export const requestApproval = mutationGeneric({
   },
 });
 
+/**
+ * Runner-initiated cancellation of a still-pending approval, with an explicit
+ * reason — used when the runner's configured approval timeout expires
+ * (SKIPPY_RUNNER_APPROVAL_TIMEOUT_MS). Idempotent by the same contract as
+ * decisions: a settled approval is never flipped.
+ */
+export const cancelApproval = mutationGeneric({
+  args: {
+    hostToken: v.string(),
+    runId: v.id("agentRuns"),
+    claimToken: v.string(),
+    harnessRequestId: v.string(),
+    reason: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const host = await requireHost(ctx, args.hostToken);
+    await requireClaimedRun(ctx, host, args.runId, args.claimToken);
+    const approval = await ctx.db
+      .query("agentApprovals")
+      .withIndex("by_run_request", (q: any) => q.eq("runId", args.runId).eq("harnessRequestId", args.harnessRequestId))
+      .first();
+    if (!approval) throw new Error("approval not found for run");
+    if (approval.status !== "pending") {
+      return { approvalId: approval._id, status: approval.status };
+    }
+    const now = Date.now();
+    await ctx.db.patch(approval._id, {
+      status: "cancelled",
+      reason: args.reason.slice(0, 500),
+      decidedAt: now,
+      updatedAt: now,
+    });
+    return { approvalId: approval._id, status: "cancelled" };
+  },
+});
+
 /** Control state the runner subscribes to while executing a run: approval
  * decisions and cancellation. Reactive via Convex subscriptions. */
 export const runControlState = queryGeneric({
@@ -1044,6 +1285,372 @@ export const hostActiveRuns = queryGeneric({
         worktreePath: run.worktreePath,
         workingBranch: run.workingBranch,
         leaseExpiresAt: run.leaseExpiresAt,
+      }));
+  },
+});
+
+/* ------------------------------------------------------------------ */
+/* Maintenance jobs: post-merge close-out                             */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The post-merge close-out ritual as a fixed, deterministic checklist
+ * (previously performed manually in chat for PRs #116–#124). The server
+ * seeds this list at enqueue time so the task panel can render the whole
+ * ritual as pending immediately; the runner updates step statuses by key.
+ * Convex deploy is a skipped step by design: the convex-deploy.yml GitHub
+ * Action owns deployment on merge to main.
+ */
+export const CLOSEOUT_STEPS: ReadonlyArray<{ key: string; label: string }> = [
+  { key: "verify_merged", label: "Verify the PR is merged" },
+  { key: "pull_main", label: "Pull latest main in the canonical checkout" },
+  { key: "convex_deploy", label: "Convex deploy" },
+  { key: "runner_rebuild", label: "Rebuild runner if it changed" },
+  { key: "cleanup", label: "Remove worktree and delete agent branch" },
+  { key: "finalize", label: "Mark task done (PR merged)" },
+];
+
+const CLOSEOUT_ACTIVE_STATUSES = ["queued", "claimed", "running"] as const;
+
+const maintenanceStepsArg = v.array(
+  v.object({
+    key: v.string(),
+    label: v.string(),
+    status: v.union(
+      v.literal("pending"),
+      v.literal("running"),
+      v.literal("ok"),
+      v.literal("failed"),
+      v.literal("skipped"),
+    ),
+    detail: v.optional(v.string()),
+  }),
+);
+
+/** Host must own the job and present the claim token minted at claim time —
+ * same contract as requireClaimedRun. */
+async function requireClaimedJob(ctx: any, host: any, jobId: string, claimToken: string) {
+  const job = await ctx.db.get(jobId);
+  if (!job || job.brainInstanceId !== host.brainInstanceId) {
+    throw new Error("maintenance job not found");
+  }
+  if (job.hostId !== host._id || !job.claimToken || job.claimToken !== claimToken) {
+    throw new Error("maintenance job is not claimed by this host");
+  }
+  return job;
+}
+
+/**
+ * Shared enqueue path for the panel button and the chat harness — one backend
+ * job, two entry points, so the two close-out surfaces cannot drift (mirrors
+ * queueTaskExecution). Validation is deliberately light on merge state: the
+ * stored prStatus lags reality (the merge happens on GitHub), so the RUNNER
+ * verifies the PR is actually merged at execution time via gh and refuses
+ * politely if not.
+ */
+async function queueCloseout(
+  ctx: any,
+  brainId: any,
+  opts: {
+    taskId: any;
+    actor: { actorType: "user" | "harness"; actorId?: string; requestedBy?: string };
+  },
+) {
+  const task = await ctx.db.get(opts.taskId);
+  if (!task || task.brainInstanceId !== brainId) throw new Error("task not found");
+  if ((task.executionState ?? "") !== "in_review") {
+    throw new Error("only in_review tasks can be closed out");
+  }
+  if (!task.prUrl) throw new Error("task has no pull request recorded; nothing to close out");
+
+  const projectId = await projectIdForTask(ctx.db, brainId, opts.taskId);
+  if (!projectId) throw new Error("task is not linked to a project");
+  const project = await ctx.db.get(projectId);
+  if (!project) throw new Error("project not found");
+  const config = await ctx.db
+    .query("projectExecutionConfigs")
+    .withIndex("by_brain_project", (q: any) => q.eq("brainInstanceId", brainId).eq("projectId", projectId))
+    .first();
+  if (!config || !config.enabled) {
+    throw new Error("project has no enabled execution host mapping");
+  }
+
+  // Duplicate close-out request: return the existing active job rather than
+  // queueing a competing one.
+  const jobs = await ctx.db
+    .query("maintenanceJobs")
+    .withIndex("by_brain_task", (q: any) => q.eq("brainInstanceId", brainId).eq("taskId", opts.taskId))
+    .collect();
+  const active = jobs.find((job: any) => (CLOSEOUT_ACTIVE_STATUSES as readonly string[]).includes(job.status));
+  if (active) return { jobId: active._id, status: active.status, existing: true };
+
+  const now = Date.now();
+  const jobId = await ctx.db.insert("maintenanceJobs", {
+    brainInstanceId: brainId,
+    kind: "post_merge_closeout",
+    taskId: opts.taskId,
+    projectId,
+    status: "queued",
+    prUrl: task.prUrl,
+    ...(task.prNumber !== undefined ? { prNumber: task.prNumber } : {}),
+    ...(task.gitBranchName ? { gitBranchName: task.gitBranchName } : {}),
+    baseBranch: project.defaultBaseBranch ?? "main",
+    steps: CLOSEOUT_STEPS.map((step) => ({ ...step, status: "pending" })),
+    ...(opts.actor.requestedBy ? { requestedBy: opts.actor.requestedBy } : {}),
+    queuedAt: now,
+    createdAt: now,
+    updatedAt: now,
+  });
+  await ctx.db.insert("activityEvents", {
+    brainInstanceId: brainId,
+    entityRef: { entityType: "task", entityId: opts.taskId },
+    activityType: "task_closeout_queued",
+    actorType: opts.actor.actorType,
+    actorId: opts.actor.actorId,
+    timestamp: now,
+    summary: `Post-merge close-out queued: ${task.title}`,
+    metadata: { jobId, prUrl: task.prUrl },
+  });
+  return { jobId, status: "queued", existing: false };
+}
+
+/** The task panel's "Confirm merge & close out" button. */
+export const enqueueCloseoutForViewer = mutationGeneric({
+  args: { taskId: v.id("tasks") },
+  handler: async (ctx, args) => {
+    const { user, brain } = await requireOwnedBrain(ctx);
+    return queueCloseout(ctx, brain._id, {
+      taskId: args.taskId,
+      actor: { actorType: "user", actorId: user._id, requestedBy: user.displayName ?? user.email },
+    });
+  },
+});
+
+/**
+ * Host-authenticated close-out for the chat path — the owner says "close out
+ * task X" in chat and the harness queues the SAME job the button does (same
+ * consent convention as executeTaskForBrain, same host-token credential).
+ */
+export const enqueueCloseoutForBrain = mutationGeneric({
+  args: {
+    hostToken: v.string(),
+    taskId: v.id("tasks"),
+    actorId: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const host = await requireHost(ctx, args.hostToken);
+    const actorId = args.actorId ?? "chat-harness";
+    return queueCloseout(ctx, host.brainInstanceId, {
+      taskId: args.taskId,
+      actor: { actorType: "harness", actorId, requestedBy: actorId },
+    });
+  },
+});
+
+/** Latest close-out job for a task, for the panel's progress/steps view. */
+export const closeoutJobForTaskForViewer = queryGeneric({
+  args: { taskId: v.id("tasks") },
+  handler: async (ctx, { taskId }) => {
+    const { brain } = await requireOwnedBrain(ctx);
+    const jobs = await ctx.db
+      .query("maintenanceJobs")
+      .withIndex("by_brain_task", (q: any) => q.eq("brainInstanceId", brain._id).eq("taskId", taskId))
+      .collect();
+    if (!jobs.length) return null;
+    jobs.sort((a: any, b: any) => b.createdAt - a.createdAt);
+    const job = jobs[0];
+    return {
+      _id: job._id,
+      kind: job.kind,
+      status: job.status,
+      steps: job.steps,
+      prUrl: job.prUrl,
+      prNumber: job.prNumber,
+      gitBranchName: job.gitBranchName,
+      errorMessage: job.errorMessage,
+      resultSummary: job.resultSummary,
+      queuedAt: job.queuedAt,
+      completedAt: job.completedAt,
+      updatedAt: job.updatedAt,
+    };
+  },
+});
+
+/**
+ * Atomic claim for the oldest queued maintenance job whose project maps to
+ * this host — the runs/chat-turns claim pattern with a fresh claim token and
+ * lease. Concurrency is enforced runner-side (one job at a time); jobs are
+ * lightweight scripted work, not harness sessions.
+ */
+export const claimNextMaintenanceJob = mutationGeneric({
+  args: { hostToken: v.string() },
+  handler: async (ctx, { hostToken }) => {
+    const host = await requireHost(ctx, hostToken);
+    if (host.draining) return null;
+    const now = Date.now();
+    const queued = await ctx.db
+      .query("maintenanceJobs")
+      .withIndex("by_brain_status", (q: any) =>
+        q.eq("brainInstanceId", host.brainInstanceId).eq("status", "queued"),
+      )
+      .collect();
+    queued.sort((a: any, b: any) => a.queuedAt - b.queuedAt);
+    for (const job of queued) {
+      // The job's project must map to THIS host and be enabled.
+      const config = await ctx.db
+        .query("projectExecutionConfigs")
+        .withIndex("by_brain_project", (q: any) =>
+          q.eq("brainInstanceId", host.brainInstanceId).eq("projectId", job.projectId),
+        )
+        .first();
+      if (!config || !config.enabled || config.hostId !== host._id) continue;
+
+      const claimToken = makeToken("skippyclaim");
+      await ctx.db.patch(job._id, {
+        status: "claimed",
+        hostId: host._id,
+        claimToken,
+        leaseExpiresAt: now + RUN_LEASE_MS,
+        claimedAt: now,
+        updatedAt: now,
+      });
+      await ctx.db.patch(host._id, { lastClaimAt: now, updatedAt: now });
+
+      const task = await ctx.db.get(job.taskId);
+      const project = await ctx.db.get(job.projectId);
+      return {
+        jobId: job._id,
+        claimToken,
+        kind: job.kind,
+        taskId: job.taskId,
+        taskTitle: task?.title,
+        prUrl: job.prUrl,
+        prNumber: job.prNumber,
+        gitBranchName: job.gitBranchName ?? task?.gitBranchName,
+        baseBranch: job.baseBranch,
+        steps: job.steps,
+        project: {
+          _id: job.projectId,
+          title: project?.title,
+          localPath: config.localPath,
+        },
+      };
+    }
+    return null;
+  },
+});
+
+/** Legal maintenance-job transitions the host may report. Self-transition on
+ * `running` is the step-progress update path. */
+const MAINTENANCE_REPORTABLE_TRANSITIONS: Record<string, string[]> = {
+  running: ["claimed", "running"],
+  completed: ["claimed", "running"],
+  failed: ["claimed", "running"],
+};
+
+/**
+ * Runner progress/result reporting for a claimed maintenance job. Step
+ * updates ride along on the same mutation as status changes. On `completed`
+ * the task is marked done with prStatus "merged" through applyTaskResult —
+ * the exact recordTaskResult semantics the chat ritual used. On `failed`
+ * the task is left untouched (in_review) with the error visible on the job:
+ * a failed step never leaves a silent half-done state.
+ */
+export const updateMaintenanceJob = mutationGeneric({
+  args: {
+    hostToken: v.string(),
+    jobId: v.id("maintenanceJobs"),
+    claimToken: v.string(),
+    status: v.optional(v.union(v.literal("running"), v.literal("completed"), v.literal("failed"))),
+    steps: v.optional(maintenanceStepsArg),
+    errorMessage: v.optional(v.string()),
+    resultSummary: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const host = await requireHost(ctx, args.hostToken);
+    const job = await requireClaimedJob(ctx, host, args.jobId, args.claimToken);
+    if (job.status === "completed" || job.status === "failed" || job.status === "cancelled") {
+      // Idempotent from the runner's perspective: a retried terminal report
+      // never re-runs completion side effects.
+      return { jobId: args.jobId, status: job.status };
+    }
+    if (args.status) {
+      const allowedFrom = MAINTENANCE_REPORTABLE_TRANSITIONS[args.status];
+      if (!allowedFrom || !allowedFrom.includes(job.status)) {
+        throw new Error(`illegal maintenance job transition ${job.status} -> ${args.status}`);
+      }
+    }
+    const now = Date.now();
+    const terminal = args.status === "completed" || args.status === "failed";
+    const patch: Record<string, unknown> = {
+      updatedAt: now,
+      leaseExpiresAt: now + RUN_LEASE_MS,
+    };
+    if (args.status) patch.status = args.status;
+    if (args.steps !== undefined) patch.steps = args.steps;
+    if (args.errorMessage !== undefined) patch.errorMessage = args.errorMessage.slice(0, 1000);
+    if (args.resultSummary !== undefined) patch.resultSummary = args.resultSummary.slice(0, 2000);
+    if (terminal) patch.completedAt = now;
+    await ctx.db.patch(args.jobId, patch);
+
+    const task = await ctx.db.get(job.taskId);
+    if (args.status === "completed") {
+      // Close the task out exactly the way the chat ritual did.
+      await applyTaskResult(
+        ctx.db,
+        host.brainInstanceId,
+        { taskId: job.taskId, markDone: true, prStatus: "merged" },
+        { actorType: "harness", actorId: `runner-closeout:${host.hostKey}` },
+      );
+      await ctx.db.insert("activityEvents", {
+        brainInstanceId: host.brainInstanceId,
+        entityRef: { entityType: "task", entityId: job.taskId },
+        activityType: "task_closeout_completed",
+        actorType: "harness",
+        actorId: `runner-closeout:${host.hostKey}`,
+        timestamp: now,
+        summary: `Post-merge close-out completed: ${task?.title ?? job.taskId}`,
+        metadata: { jobId: args.jobId, prUrl: job.prUrl },
+      });
+    } else if (args.status === "failed") {
+      await ctx.db.insert("activityEvents", {
+        brainInstanceId: host.brainInstanceId,
+        entityRef: { entityType: "task", entityId: job.taskId },
+        activityType: "task_closeout_failed",
+        actorType: "harness",
+        actorId: `runner-closeout:${host.hostKey}`,
+        timestamp: now,
+        summary: `Post-merge close-out failed: ${task?.title ?? job.taskId}`,
+        metadata: {
+          jobId: args.jobId,
+          prUrl: job.prUrl,
+          ...(args.errorMessage ? { errorMessage: args.errorMessage.slice(0, 500) } : {}),
+        },
+      });
+    }
+    return { jobId: args.jobId, status: args.status ?? job.status };
+  },
+});
+
+/** Maintenance jobs this host owns that are still active — startup
+ * reconciliation after a restart (mirror of hostActiveRuns). */
+export const hostActiveMaintenanceJobs = queryGeneric({
+  args: { hostToken: v.string() },
+  handler: async (ctx, { hostToken }) => {
+    const host = await requireHost(ctx, hostToken);
+    const jobs = await ctx.db
+      .query("maintenanceJobs")
+      .withIndex("by_host", (q: any) => q.eq("hostId", host._id))
+      .collect();
+    return jobs
+      .filter((job: any) => job.status === "claimed" || job.status === "running")
+      .map((job: any) => ({
+        jobId: job._id,
+        status: job.status,
+        kind: job.kind,
+        claimToken: job.claimToken,
+        taskId: job.taskId,
+        leaseExpiresAt: job.leaseExpiresAt,
       }));
   },
 });

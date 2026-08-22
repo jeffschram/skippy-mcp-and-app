@@ -68,12 +68,22 @@ type UploadEntry = {
 
 let uploadSeq = 0;
 
+/** A file that finished the upload+register flow, ready to reference elsewhere. */
+export type UploadedProjectFile = {
+  storageId: string;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+};
+
 /**
  * Shared uploader: client pre-check with the shared validation, then
  * generateUploadUrl → POST bytes (Content-Type = file type) → register row.
  * Works project-scoped or task-scoped (taskId set at hook time, or per
  * call via uploadFiles' override — used when the task is created in the
- * same gesture, e.g. proposal attachments).
+ * same gesture, e.g. proposal attachments). Callers that reference the
+ * uploads elsewhere (e.g. chat attachments) read the returned `uploaded`
+ * list; an optional note labels the registered library rows.
  */
 export function useProjectFileUploader(projectId: string, taskId?: string) {
   const generateUploadUrl = useMutation(api.projectFiles.generateUploadUrlForViewer);
@@ -85,10 +95,15 @@ export function useProjectFileUploader(projectId: string, taskId?: string) {
     setEntries((current) => current.map((entry) => (entry.id === id ? { ...entry, ...patch } : entry)));
   const removeEntry = (id: number) => setEntries((current) => current.filter((entry) => entry.id !== id));
 
-  const uploadFiles = async (files: File[], overrideTaskId?: string) => {
+  const uploadFiles = async (
+    files: File[],
+    overrideTaskId?: string,
+    options?: { note?: string },
+  ) => {
     const targetTaskId = overrideTaskId ?? taskId;
     let done = 0;
     let failed = 0;
+    const uploaded: UploadedProjectFile[] = [];
     for (const file of files) {
       uploadSeq += 1;
       const id = uploadSeq;
@@ -118,9 +133,16 @@ export function useProjectFileUploader(projectId: string, taskId?: string) {
           fileName: check.fileName,
           mimeType: check.mimeType,
           sizeBytes: check.sizeBytes,
+          ...(options?.note ? { note: options.note } : {}),
         });
         patchEntry(id, { status: "done" });
         done += 1;
+        uploaded.push({
+          storageId,
+          fileName: check.fileName,
+          mimeType: check.mimeType,
+          sizeBytes: check.sizeBytes,
+        });
         // The reactive file list shows the registered row; clear the transient status.
         window.setTimeout(() => removeEntry(id), 2500);
       } catch (error) {
@@ -130,7 +152,7 @@ export function useProjectFileUploader(projectId: string, taskId?: string) {
         toast(`Could not upload ${check.fileName}: ${reason}`, "error");
       }
     }
-    return { done, failed };
+    return { done, failed, uploaded };
   };
 
   return { entries, uploadFiles, removeEntry };

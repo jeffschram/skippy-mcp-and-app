@@ -39,6 +39,33 @@ describe("buildCodexArgs", () => {
     ]);
   });
 
+  it("injects Skippy MCP config overrides before the resume subcommand", () => {
+    expect(
+      buildCodexArgs({
+        worktreePath: "/tmp/skippy-task",
+        threadId: "019cafe-resume-session",
+        skippyMcpUrl: "https://skippy.example.com/api/mcp",
+      }),
+    ).toEqual([
+      "exec",
+      "--json",
+      "--cd",
+      "/tmp/skippy-task",
+      "--skip-git-repo-check",
+      "--color",
+      "never",
+      "-c",
+      'mcp_servers.skippy.url="https://skippy.example.com/api/mcp"',
+      "-c",
+      'mcp_servers.skippy.bearer_token_env_var="SKIPPY_MCP_TOKEN"',
+      "--sandbox",
+      "workspace-write",
+      "resume",
+      "019cafe-resume-session",
+      "-",
+    ]);
+  });
+
   it("keeps permission bypass before resume", () => {
     expect(
       buildCodexArgs({

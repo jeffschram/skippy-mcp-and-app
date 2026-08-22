@@ -7,6 +7,7 @@ import {
   dependencyTaskIds,
   dependencyTaskIdsByTask,
 } from "./taskExecution";
+import { phaseAppendOrderIndex } from "./taskOrder";
 
 /* ------------------------------------------------------------------ */
 /* Helpers                                                            */
@@ -70,7 +71,7 @@ async function buildBoard(db: any, brainInstanceId: any, projectId: string) {
   // once a project gets large enough — which is what took this board down.
   const dependsOnByTask = await dependencyTaskIdsByTask(db, brainInstanceId);
 
-  const tasks = [];
+  const tasks: any[] = [];
   for (const task of rawTasks) {
     const dependsOn = dependsOnByTask.get(task._id as string) ?? [];
     tasks.push({
@@ -83,6 +84,7 @@ async function buildBoard(db: any, brainInstanceId: any, projectId: string) {
       executionBrief: task.executionBrief,
       acceptanceCriteria: task.acceptanceCriteria,
       orderIndex: task.orderIndex ?? 0,
+      phaseId: task.phaseId,
       ownerType: task.ownerType,
       agentRequestStatus: task.agentRequestStatus,
       requestedHarness: task.requestedHarness,
@@ -97,7 +99,12 @@ async function buildBoard(db: any, brainInstanceId: any, projectId: string) {
       lastPrCreatedAt: task.lastPrCreatedAt,
       resultSummary: task.resultSummary,
       resultUrl: task.resultUrl,
+      // Timestamp for the "in review" chat moment: when the run's result
+      // landed, not when the task was last touched.
+      resultRecordedAt: task.resultRecordedAt,
+      startedAt: task.startedAt,
       startedBy: task.startedBy,
+      completedAt: task.completedAt,
       dependsOn,
       updatedAt: task.updatedAt,
     });
@@ -119,14 +126,27 @@ async function buildBoard(db: any, brainInstanceId: any, projectId: string) {
   plans.sort((a: any, b: any) => b.createdAt - a.createdAt);
   const latestPlan = plans[0];
 
+  const phases = await db
+    .query("phases")
+    .withIndex("by_brain_project", (q: any) =>
+      q.eq("brainInstanceId", brainInstanceId).eq("projectId", projectId),
+    )
+    .collect();
+  phases.sort((a: any, b: any) => a.orderNum - b.orderNum);
+
   return {
     project: {
       _id: project._id,
       title: project.title,
       summary: project.summary,
+      // Freeform Notes-tab pad. Empty string (not undefined) so the pad
+      // textarea always has a stable controlled value.
+      notesPad: project.notesPad ?? "",
       status: project.status,
       kind: project.kind ?? "general",
       repoUrl: project.repoUrl,
+      vercelUrl: project.vercelUrl,
+      liveUrl: project.liveUrl,
       defaultBaseBranch: project.defaultBaseBranch,
       localPath: project.localPath,
       assetsFolderPath: project.assetsFolderPath,
@@ -134,6 +154,13 @@ async function buildBoard(db: any, brainInstanceId: any, projectId: string) {
       ...effectivePaths(project),
     },
     tasks,
+    phases: phases.map((phase: any) => ({
+      _id: phase._id,
+      orderNum: phase.orderNum,
+      title: phase.title,
+      descriptionMd: phase.descriptionMd,
+      taskIds: tasks.filter((task) => task.phaseId === phase._id).map((task) => task._id),
+    })),
     progress: {
       total,
       done,
@@ -420,7 +447,10 @@ async function moveTaskToProject(
   return { taskId, fromProjectId, toProjectId, relationshipId };
 }
 
-async function applyTaskResult(
+// Exported for the agent workbench: the post-merge close-out job records its
+// terminal result through this exact path so button-driven and chat-driven
+// close-outs share recordTaskResult semantics (markDone + prStatus merged).
+export async function applyTaskResult(
   db: any,
   brainInstanceId: any,
   args: {
@@ -733,7 +763,19 @@ export const createTaskProposalForViewer = mutationGeneric({
     if (!proposalText) throw new Error("proposal cannot be empty");
     const title = args.title?.trim() || provisionalTitleFromProposal(proposalText);
 
+    const phases = await ctx.db
+      .query("phases")
+      .withIndex("by_brain_project", (q: any) =>
+        q.eq("brainInstanceId", brain._id).eq("projectId", args.projectId),
+      )
+      .collect();
+    phases.sort((a: any, b: any) => a.orderNum - b.orderNum);
+
     const now = Date.now();
+    // Default placement: append to the END of the target phase. Same-millisecond
+    // timestamp orderIndexes could collide, leaving relative order undefined.
+    const phaseId = phases[0]?._id;
+    const orderIndex = phaseId ? await phaseAppendOrderIndex(ctx.db, brain._id, phaseId) : now;
     const taskId = await ctx.db.insert("tasks", {
       brainInstanceId: brain._id,
       title,
@@ -743,7 +785,8 @@ export const createTaskProposalForViewer = mutationGeneric({
       processingState: "accepted",
       kind: args.kind ?? "coding",
       executionState: "proposed",
-      orderIndex: now,
+      orderIndex,
+      phaseId,
       createdAt: now,
       updatedAt: now,
     });
@@ -793,6 +836,8 @@ export const updateProjectForViewer = mutationGeneric({
     ),
     kind: v.optional(v.union(v.literal("code"), v.literal("general"))),
     repoUrl: v.optional(v.string()),
+    vercelUrl: v.optional(v.string()),
+    liveUrl: v.optional(v.string()),
     defaultBaseBranch: v.optional(v.string()),
     localPath: v.optional(v.string()),
     // Explicit assets/output folder overrides. Empty string clears the
@@ -817,6 +862,8 @@ export const updateProjectForViewer = mutationGeneric({
     if (args.status !== undefined) patch.status = args.status;
     if (args.kind !== undefined) patch.kind = args.kind;
     if (args.repoUrl !== undefined) patch.repoUrl = args.repoUrl.trim() || undefined;
+    if (args.vercelUrl !== undefined) patch.vercelUrl = args.vercelUrl.trim() || undefined;
+    if (args.liveUrl !== undefined) patch.liveUrl = args.liveUrl.trim() || undefined;
     if (args.defaultBaseBranch !== undefined) patch.defaultBaseBranch = args.defaultBaseBranch.trim() || undefined;
     if (args.localPath !== undefined) patch.localPath = args.localPath.trim() || undefined;
     // Format-check only — the app/Convex never checks existence (the browser
@@ -830,6 +877,229 @@ export const updateProjectForViewer = mutationGeneric({
     }
     await ctx.db.patch(args.projectId, patch);
     return { projectId: args.projectId, status: "updated" };
+  },
+});
+
+/**
+ * Backward-compatible phase bootstrap. Older projects already have ordered
+ * tasks, so the first visit wraps them in one editable phase without asking
+ * the owner to migrate anything manually.
+ */
+export const ensureProjectPhasesForViewer = mutationGeneric({
+  args: { projectId: v.id("projects") },
+  handler: async (ctx, args) => {
+    const { brain } = await requireOwnedBrain(ctx);
+    const project = await ctx.db.get(args.projectId);
+    if (!project || project.brainInstanceId !== brain._id) throw new Error("project not found");
+
+    const existing = await ctx.db
+      .query("phases")
+      .withIndex("by_brain_project", (q: any) =>
+        q.eq("brainInstanceId", brain._id).eq("projectId", args.projectId),
+      )
+      .collect();
+    if (existing.length) return { phaseId: existing.sort((a: any, b: any) => a.orderNum - b.orderNum)[0]._id };
+
+    const plans = await ctx.db
+      .query("projectPlans")
+      .withIndex("by_brain_project", (q: any) =>
+        q.eq("brainInstanceId", brain._id).eq("projectId", args.projectId),
+      )
+      .collect();
+    plans.sort((a: any, b: any) => b.createdAt - a.createdAt);
+    const now = Date.now();
+    const phaseId = await ctx.db.insert("phases", {
+      brainInstanceId: brain._id,
+      projectId: args.projectId,
+      orderNum: 0,
+      title: "Project plan",
+      descriptionMd: plans[0]?.summary || project.summary || "",
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    // Backfill phase-less tasks (ingested tasks, pre-Plan tasks) into the new
+    // phase with sequential orderIndex values: without them every backfilled
+    // task read back as `orderIndex ?? 0` and collided at position 0.
+    const backfill: any[] = [];
+    for (const taskId of await projectTaskIds(ctx.db, brain._id, args.projectId)) {
+      const task = await ctx.db.get(taskId as any);
+      if (task && task.brainInstanceId === brain._id && !task.phaseId) {
+        backfill.push(task);
+      }
+    }
+    backfill.sort(
+      (a, b) => (a.orderIndex ?? 0) - (b.orderIndex ?? 0) || (a.createdAt ?? 0) - (b.createdAt ?? 0),
+    );
+    for (let index = 0; index < backfill.length; index += 1) {
+      await ctx.db.patch(backfill[index]._id, { phaseId, orderIndex: index, updatedAt: now });
+    }
+    return { phaseId };
+  },
+});
+
+export const createPhaseForViewer = mutationGeneric({
+  args: {
+    projectId: v.id("projects"),
+    title: v.string(),
+    descriptionMd: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const { brain } = await requireOwnedBrain(ctx);
+    const project = await ctx.db.get(args.projectId);
+    if (!project || project.brainInstanceId !== brain._id) throw new Error("project not found");
+    const title = args.title.trim();
+    if (!title) throw new Error("phase title cannot be empty");
+    const phases = await ctx.db
+      .query("phases")
+      .withIndex("by_brain_project", (q: any) =>
+        q.eq("brainInstanceId", brain._id).eq("projectId", args.projectId),
+      )
+      .collect();
+    const now = Date.now();
+    const phaseId = await ctx.db.insert("phases", {
+      brainInstanceId: brain._id,
+      projectId: args.projectId,
+      orderNum: phases.length ? Math.max(...phases.map((phase: any) => phase.orderNum)) + 1 : 0,
+      title,
+      descriptionMd: args.descriptionMd?.trim() ?? "",
+      createdAt: now,
+      updatedAt: now,
+    });
+    return { phaseId };
+  },
+});
+
+export const updatePhaseForViewer = mutationGeneric({
+  args: {
+    phaseId: v.id("phases"),
+    title: v.optional(v.string()),
+    descriptionMd: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const { brain } = await requireOwnedBrain(ctx);
+    const phase = await ctx.db.get(args.phaseId);
+    if (!phase || phase.brainInstanceId !== brain._id) throw new Error("phase not found");
+    const patch: Record<string, unknown> = { updatedAt: Date.now() };
+    if (args.title !== undefined) {
+      const title = args.title.trim();
+      if (!title) throw new Error("phase title cannot be empty");
+      patch.title = title;
+    }
+    // Keep an intentionally empty description: the inline editor should feel
+    // like a document surface, not a required form field.
+    if (args.descriptionMd !== undefined) patch.descriptionMd = args.descriptionMd;
+    await ctx.db.patch(args.phaseId, patch);
+    return { phaseId: args.phaseId };
+  },
+});
+
+/* ------------------------------------------------------------------ */
+/* Project notes pad                                                  */
+/*                                                                    */
+/* One freeform plain-text pad per project (projects.notesPad) — a    */
+/* notepad, not a document system. Saving overwrites the whole field  */
+/* (last-write-wins is fine for a single-owner pad); history is kept  */
+/* by snapshotting the entire pad at review-session granularity into  */
+/* projectNoteSnapshots, then pruning the live pad.                   */
+/* ------------------------------------------------------------------ */
+
+async function saveProjectNotes(db: any, brainInstanceId: any, projectId: any, notesPad: string) {
+  const project = await db.get(projectId);
+  if (!project || project.brainInstanceId !== brainInstanceId) throw new Error("project not found");
+  // Plain text stored verbatim — no trimming, so leading/trailing blank
+  // lines the owner typed survive the round trip. Empty means pruned.
+  await db.patch(projectId, { notesPad, updatedAt: Date.now() });
+  return { projectId, status: "updated" };
+}
+
+async function snapshotProjectNotes(
+  db: any,
+  brainInstanceId: any,
+  projectId: any,
+  summary: string | undefined,
+  createdBy: "user" | "harness",
+) {
+  const project = await db.get(projectId);
+  if (!project || project.brainInstanceId !== brainInstanceId) throw new Error("project not found");
+  // Snapshot what is STORED, not what the caller believes the pad says:
+  // the snapshot's whole job is to preserve the pad as-is before a prune.
+  const content = project.notesPad ?? "";
+  const snapshotId = await db.insert("projectNoteSnapshots", {
+    brainInstanceId,
+    projectId,
+    content,
+    summary: summary?.trim() || undefined,
+    createdBy,
+    createdAt: Date.now(),
+  });
+  return { snapshotId, projectId, contentLength: content.length, status: "created" };
+}
+
+export const updateProjectNotesForViewer = mutationGeneric({
+  args: { projectId: v.id("projects"), notesPad: v.string() },
+  handler: async (ctx, args) => {
+    const { brain } = await requireOwnedBrain(ctx);
+    return saveProjectNotes(ctx.db, brain._id, args.projectId, args.notesPad);
+  },
+});
+
+export const snapshotProjectNotesForViewer = mutationGeneric({
+  args: { projectId: v.id("projects"), summary: v.optional(v.string()) },
+  handler: async (ctx, args) => {
+    const { brain } = await requireOwnedBrain(ctx);
+    return snapshotProjectNotes(ctx.db, brain._id, args.projectId, args.summary, "user");
+  },
+});
+
+export const reorderTaskInPhaseForViewer = mutationGeneric({
+  args: {
+    projectId: v.id("projects"),
+    phaseId: v.id("phases"),
+    taskId: v.id("tasks"),
+    beforeTaskId: v.optional(v.id("tasks")),
+  },
+  handler: async (ctx, args) => {
+    const { brain } = await requireOwnedBrain(ctx);
+    const phase = await ctx.db.get(args.phaseId);
+    const task = await ctx.db.get(args.taskId);
+    if (!phase || phase.brainInstanceId !== brain._id || phase.projectId !== args.projectId) {
+      throw new Error("phase not found");
+    }
+    if (!task || task.brainInstanceId !== brain._id) throw new Error("task not found");
+    const projectIds = await projectTaskIds(ctx.db, brain._id, args.projectId);
+    if (!projectIds.includes(args.taskId)) throw new Error("task does not belong to this project");
+
+    const siblings: any[] = [];
+    for (const taskId of projectIds) {
+      if (taskId === args.taskId) continue;
+      const candidate = await ctx.db.get(taskId as any);
+      if (candidate?.phaseId === args.phaseId && candidate.processingState === "accepted") siblings.push(candidate);
+    }
+    siblings.sort((a, b) => (a.orderIndex ?? 0) - (b.orderIndex ?? 0));
+    const beforePosition = args.beforeTaskId
+      ? siblings.findIndex((candidate) => candidate._id === args.beforeTaskId)
+      : -1;
+    const insertAt = beforePosition === -1 ? siblings.length : beforePosition;
+    const orderIndex = orderIndexBetween(
+      insertAt > 0 ? (siblings[insertAt - 1].orderIndex ?? 0) : undefined,
+      insertAt < siblings.length ? (siblings[insertAt].orderIndex ?? 0) : undefined,
+    );
+    const now = Date.now();
+    if (orderIndex !== undefined) {
+      await ctx.db.patch(args.taskId, { phaseId: args.phaseId, orderIndex, updatedAt: now });
+      return { taskId: args.taskId, phaseId: args.phaseId, orderIndex };
+    }
+    siblings.splice(insertAt, 0, task);
+    const base = siblings.length ? Math.min(...siblings.map((candidate) => candidate.orderIndex ?? 0)) : 0;
+    for (let index = 0; index < siblings.length; index += 1) {
+      await ctx.db.patch(siblings[index]._id, {
+        phaseId: args.phaseId,
+        orderIndex: base + index,
+        updatedAt: now,
+      });
+    }
+    return { taskId: args.taskId, phaseId: args.phaseId, orderIndex: base + insertAt };
   },
 });
 
@@ -934,7 +1204,11 @@ async function applyExecutionStateChange(
 ) {
   const patch: Record<string, unknown> = { executionState, updatedAt: now };
   // Keep the user-facing status roughly in sync with the lifecycle.
-  if (executionState === "in_progress") patch.status = "in_progress";
+  if (executionState === "in_progress") {
+    patch.status = "in_progress";
+    patch.startedAt = task.startedAt ?? now;
+    patch.startedBy = task.startedBy ?? user.displayName ?? user.email;
+  }
   else if (executionState === "done") {
     patch.status = "done";
     patch.completedAt = now;
@@ -1102,6 +1376,8 @@ async function currentContext(db: any, brainInstanceId: any) {
         title: project.title,
         kind: project.kind,
         repoUrl: project.repoUrl,
+        vercelUrl: project.vercelUrl,
+        liveUrl: project.liveUrl,
         localPath: project.localPath,
         ...effectivePaths(project),
       };
@@ -1152,6 +1428,201 @@ export const projectBoardForBrain = queryGeneric({
   args: { brainInstanceId: v.id("brainInstances"), projectId: v.id("projects") },
   handler: async ({ db }, args) => {
     return buildBoard(db, args.brainInstanceId, args.projectId);
+  },
+});
+
+export const updateProjectForBrain = mutationGeneric({
+  args: {
+    brainInstanceId: v.id("brainInstances"),
+    projectId: v.id("projects"),
+    title: v.optional(v.string()),
+    summary: v.optional(v.string()),
+    repoUrl: v.optional(v.string()),
+    vercelUrl: v.optional(v.string()),
+    liveUrl: v.optional(v.string()),
+  },
+  handler: async ({ db }, args) => {
+    const project = await db.get(args.projectId);
+    if (!project || project.brainInstanceId !== args.brainInstanceId) throw new Error("project not found");
+    const patch: Record<string, unknown> = { updatedAt: Date.now() };
+    if (args.title !== undefined) {
+      const title = args.title.trim();
+      if (!title) throw new Error("project title cannot be empty");
+      patch.title = title;
+    }
+    if (args.summary !== undefined) patch.summary = args.summary.trim() || undefined;
+    if (args.repoUrl !== undefined) patch.repoUrl = args.repoUrl.trim() || undefined;
+    if (args.vercelUrl !== undefined) patch.vercelUrl = args.vercelUrl.trim() || undefined;
+    if (args.liveUrl !== undefined) patch.liveUrl = args.liveUrl.trim() || undefined;
+    await db.patch(args.projectId, patch);
+    return { projectId: args.projectId, status: "updated" };
+  },
+});
+
+export const updatePhaseForBrain = mutationGeneric({
+  args: {
+    brainInstanceId: v.id("brainInstances"),
+    phaseId: v.id("phases"),
+    title: v.optional(v.string()),
+    descriptionMd: v.optional(v.string()),
+  },
+  handler: async ({ db }, args) => {
+    const phase = await db.get(args.phaseId);
+    if (!phase || phase.brainInstanceId !== args.brainInstanceId) throw new Error("phase not found");
+    const patch: Record<string, unknown> = { updatedAt: Date.now() };
+    if (args.title !== undefined) {
+      const title = args.title.trim();
+      if (!title) throw new Error("phase title cannot be empty");
+      patch.title = title;
+    }
+    if (args.descriptionMd !== undefined) patch.descriptionMd = args.descriptionMd;
+    await db.patch(args.phaseId, patch);
+    return { phaseId: args.phaseId, status: "updated" };
+  },
+});
+
+/**
+ * Harness-facing notes pad read: this is what makes the "review my notes"
+ * verb work — the chat harness reads the pad, the owner and assistant fold
+ * items into the Plan, then (with the owner's explicit OK) the harness
+ * snapshots and prunes. Convention, not code-enforced: the harness only
+ * edits the pad at the close of an owner-requested review.
+ */
+export const projectNotesForBrain = queryGeneric({
+  args: { brainInstanceId: v.id("brainInstances"), projectId: v.id("projects") },
+  handler: async ({ db }, args) => {
+    const project = await db.get(args.projectId);
+    if (!project || project.brainInstanceId !== args.brainInstanceId) throw new Error("project not found");
+    return {
+      projectId: args.projectId,
+      projectTitle: project.title,
+      notesPad: project.notesPad ?? "",
+    };
+  },
+});
+
+export const updateProjectNotesForBrain = mutationGeneric({
+  args: {
+    brainInstanceId: v.id("brainInstances"),
+    projectId: v.id("projects"),
+    notesPad: v.string(),
+  },
+  handler: async ({ db }, args) => {
+    return saveProjectNotes(db, args.brainInstanceId, args.projectId, args.notesPad);
+  },
+});
+
+export const snapshotProjectNotesForBrain = mutationGeneric({
+  args: {
+    brainInstanceId: v.id("brainInstances"),
+    projectId: v.id("projects"),
+    summary: v.optional(v.string()),
+  },
+  handler: async ({ db }, args) => {
+    return snapshotProjectNotes(db, args.brainInstanceId, args.projectId, args.summary, "harness");
+  },
+});
+
+/**
+ * Harness-facing phase creation: appended after the project's existing phases,
+ * mirroring createPhaseForViewer. Completes the MCP phase toolset so an agent
+ * can stand up a new plan section (create_phase -> create_task with phaseId)
+ * without a UI round-trip.
+ */
+export const createPhaseForBrain = mutationGeneric({
+  args: {
+    brainInstanceId: v.id("brainInstances"),
+    projectId: v.id("projects"),
+    title: v.string(),
+    descriptionMd: v.optional(v.string()),
+    actorId: v.optional(v.string()),
+  },
+  handler: async ({ db }, args) => {
+    const project = await db.get(args.projectId);
+    if (!project || project.brainInstanceId !== args.brainInstanceId) throw new Error("project not found");
+    const title = args.title.trim();
+    if (!title) throw new Error("phase title cannot be empty");
+    const phases = await db
+      .query("phases")
+      .withIndex("by_brain_project", (q: any) =>
+        q.eq("brainInstanceId", args.brainInstanceId).eq("projectId", args.projectId),
+      )
+      .collect();
+    const now = Date.now();
+    const phaseId = await db.insert("phases", {
+      brainInstanceId: args.brainInstanceId,
+      projectId: args.projectId,
+      orderNum: phases.length ? Math.max(...phases.map((phase: any) => phase.orderNum)) + 1 : 0,
+      title,
+      descriptionMd: args.descriptionMd?.trim() ?? "",
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    await db.insert("activityEvents", {
+      brainInstanceId: args.brainInstanceId,
+      entityRef: { entityType: "project", entityId: args.projectId },
+      activityType: "phase_created",
+      actorType: "harness",
+      actorId: args.actorId,
+      timestamp: now,
+      summary: `Phase created: ${title}`,
+      metadata: { phaseId },
+    });
+
+    return { phaseId, title, projectId: args.projectId, status: "created" };
+  },
+});
+
+/**
+ * Harness-facing phase (re)assignment: place an existing task into a Plan
+ * phase, appended after the phase's current tasks. This is the MCP escape
+ * hatch for tasks that predate phase-aware creation (created without a
+ * phaseId) or that should move between phases.
+ */
+export const setTaskPhaseForBrain = mutationGeneric({
+  args: {
+    brainInstanceId: v.id("brainInstances"),
+    taskId: v.id("tasks"),
+    phaseId: v.id("phases"),
+    actorId: v.optional(v.string()),
+  },
+  handler: async ({ db }, args) => {
+    const task = await db.get(args.taskId);
+    if (!task || task.brainInstanceId !== args.brainInstanceId) throw new Error("task not found");
+    const phase = await db.get(args.phaseId);
+    if (!phase || phase.brainInstanceId !== args.brainInstanceId) throw new Error("phase not found");
+    const projectIds = await projectTaskIds(db, args.brainInstanceId, phase.projectId);
+    if (!projectIds.includes(args.taskId)) {
+      throw new Error("task does not belong to the phase's project");
+    }
+
+    // Append after the phase's current tasks so the Plan ordering is stable.
+    let maxOrderIndex: number | undefined;
+    for (const taskId of projectIds) {
+      if (taskId === args.taskId) continue;
+      const sibling = await db.get(taskId as any);
+      if (sibling?.phaseId === args.phaseId && sibling.processingState === "accepted") {
+        const orderIndex = sibling.orderIndex ?? 0;
+        maxOrderIndex = maxOrderIndex === undefined ? orderIndex : Math.max(maxOrderIndex, orderIndex);
+      }
+    }
+    const now = Date.now();
+    const orderIndex = maxOrderIndex === undefined ? (task.orderIndex ?? 0) : maxOrderIndex + 1;
+    await db.patch(args.taskId, { phaseId: args.phaseId, orderIndex, updatedAt: now });
+
+    await db.insert("activityEvents", {
+      brainInstanceId: args.brainInstanceId,
+      entityRef: { entityType: "task", entityId: args.taskId },
+      activityType: "task_phase_set",
+      actorType: "harness",
+      actorId: args.actorId,
+      timestamp: now,
+      summary: `Task placed in phase "${phase.title}": ${task.title}`,
+      metadata: { phaseId: args.phaseId, projectId: phase.projectId },
+    });
+
+    return { taskId: args.taskId, phaseId: args.phaseId, phaseTitle: phase.title, orderIndex, status: "updated" };
   },
 });
 
@@ -1314,5 +1785,90 @@ export const restoreTaskForBrain = mutationGeneric({
       actorType: "harness",
       ...(args.actorId ? { actorId: args.actorId } : {}),
     });
+  },
+});
+
+/**
+ * Hard-delete a task plus the relationship edges that reference it. Unlike
+ * `cancelTask` (soft, restorable), this permanently removes the record — it
+ * exists for board cleanup of stale/duplicate items. Historical references
+ * from agentRuns/chat cards are left in place; consumers already treat a
+ * missing task as "no longer on the board".
+ */
+async function deleteTaskCascade(db: any, brainInstanceId: string, taskId: string) {
+  // Endpoint indexes keep this to exactly the edges touching the task —
+  // the brain's full edge set is far beyond function read limits.
+  const outgoing = await db
+    .query("relationships")
+    .withIndex("by_brain_from", (q: any) =>
+      q.eq("brainInstanceId", brainInstanceId).eq("from.entityId", taskId),
+    )
+    .collect();
+  const incoming = await db
+    .query("relationships")
+    .withIndex("by_brain_to", (q: any) =>
+      q.eq("brainInstanceId", brainInstanceId).eq("to.entityId", taskId),
+    )
+    .collect();
+  let removedEdges = 0;
+  for (const rel of [...outgoing, ...incoming]) {
+    await db.delete(rel._id);
+    removedEdges += 1;
+  }
+  await db.delete(taskId);
+  return removedEdges;
+}
+
+export const deleteTaskForBrain = mutationGeneric({
+  args: {
+    brainInstanceId: v.id("brainInstances"),
+    taskId: v.id("tasks"),
+    actorId: v.optional(v.string()),
+  },
+  handler: async ({ db }, args) => {
+    const task = await db.get(args.taskId);
+    if (!task || task.brainInstanceId !== args.brainInstanceId) {
+      throw new Error("task not found for brain instance");
+    }
+    const removedEdges = await deleteTaskCascade(db, args.brainInstanceId, args.taskId);
+    return { taskId: args.taskId, deleted: true, removedEdges, title: task.title };
+  },
+});
+
+/**
+ * Hard-delete a Plan phase. Refuses when the phase still contains tasks
+ * unless `deleteTasks` is set, so a caller can never silently vaporize work;
+ * the alternative is moving tasks out first via `setTaskPhaseForBrain`.
+ */
+export const deletePhaseForBrain = mutationGeneric({
+  args: {
+    brainInstanceId: v.id("brainInstances"),
+    phaseId: v.id("phases"),
+    deleteTasks: v.optional(v.boolean()),
+    actorId: v.optional(v.string()),
+  },
+  handler: async ({ db }, args) => {
+    const phase = await db.get(args.phaseId);
+    if (!phase || phase.brainInstanceId !== args.brainInstanceId) {
+      throw new Error("phase not found for brain instance");
+    }
+    const tasks = await db
+      .query("tasks")
+      .withIndex("by_brain_phase", (q: any) =>
+        q.eq("brainInstanceId", args.brainInstanceId).eq("phaseId", args.phaseId),
+      )
+      .collect();
+    if (tasks.length > 0 && !args.deleteTasks) {
+      throw new Error(
+        `phase still contains ${tasks.length} task(s); pass deleteTasks: true or move them out first`,
+      );
+    }
+    const deletedTaskIds: string[] = [];
+    for (const task of tasks) {
+      await deleteTaskCascade(db, args.brainInstanceId, task._id);
+      deletedTaskIds.push(task._id);
+    }
+    await db.delete(args.phaseId);
+    return { phaseId: args.phaseId, deleted: true, title: phase.title, deletedTaskIds };
   },
 });

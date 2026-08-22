@@ -16,6 +16,7 @@ import {
   diffSummary,
   ensureWorktree,
   hasUncommittedChanges,
+  provisionWorktree,
   pushBranch,
   slugify,
 } from "./worktree.js";
@@ -27,6 +28,12 @@ export class RunExecutor {
   private seq = 0;
   private pendingEvents: Array<{ seq: number; type: string; payload?: unknown }> = [];
   private abort = new AbortController();
+  /**
+   * Set when an approval wait exceeded config.approvalTimeoutMs. Recorded so
+   * the run fails with an explicit `approval timed out: <command>` instead of
+   * the opaque teardown message (exit 143) run qx719evfy produced.
+   */
+  private approvalTimedOutCommand: string | undefined;
 
   constructor(
     private config: RunnerConfig,
@@ -87,7 +94,27 @@ export class RunExecutor {
         baseBranch: run.baseBranch,
         branchName,
       });
-      this.emit({ type: "status", payload: { phase: "worktree_ready", ...worktree } });
+      // Provision dependencies BEFORE the harness session starts, so runs
+      // never rediscover the environment and improvise package-manager
+      // bootstraps (2026-08-21 six-gate autopsy). A failure degrades
+      // gracefully: the run continues against a bare worktree and any
+      // improvised commands hit the normal approval gates.
+      this.emit({ type: "status", payload: { phase: "provisioning", worktreePath: worktree.worktreePath } });
+      await this.flushEvents(); // install can take minutes; show narration now
+      const provision = await provisionWorktree(worktree.worktreePath);
+      if (provision.status === "failed") {
+        this.emit({ type: "error", payload: { phase: "provisioning", message: provision.message } });
+      }
+      this.emit({
+        type: "status",
+        payload: {
+          phase: "worktree_ready",
+          ...worktree,
+          provisioning: provision.status,
+          provisioningDetail: provision.message,
+          provisioningDurationMs: provision.durationMs,
+        },
+      });
       await plane.updateRunStatus(run.runId, run.claimToken, "running", {
         workingBranch: worktree.branchName,
         worktreePath: worktree.worktreePath,
@@ -103,7 +130,32 @@ export class RunExecutor {
           await plane.requestApproval(run.runId, run.claimToken, approval);
           const decision = await plane.awaitApproval(run.runId, approval.harnessRequestId, {
             signal: this.abort.signal,
+            timeoutMs: config.approvalTimeoutMs,
           });
+          if (decision === "timed_out") {
+            // The explicit approval timeout (config.approvalTimeoutMs). Mark
+            // the approval doc cancelled with a reason, remember the command
+            // for the run's errorMessage, and tear the turn down cleanly.
+            const command =
+              typeof (approval.details as Record<string, unknown> | undefined)?.command === "string"
+                ? String((approval.details as Record<string, unknown>).command)
+                : approval.title;
+            this.approvalTimedOutCommand = command.slice(0, 400);
+            await plane
+              .cancelApproval(
+                run.runId,
+                run.claimToken,
+                approval.harnessRequestId,
+                `approval timed out after ${Math.round(config.approvalTimeoutMs / 60_000)} min without a decision`,
+              )
+              .catch(() => {});
+            this.emit({
+              type: "error",
+              payload: { message: `approval timed out: ${this.approvalTimedOutCommand}`, phase: "approval_timeout" },
+            });
+            this.abort.abort();
+            return decision;
+          }
           if (decision !== "cancelled") {
             // Approval settled; let the harness continue under `running`.
             await plane
@@ -119,6 +171,16 @@ export class RunExecutor {
         await plane.updateRunStatus(run.runId, run.claimToken, "running", {
           externalThreadId: turn.externalThreadId,
         });
+      }
+      if (this.approvalTimedOutCommand) {
+        // Approval-timeout ergonomics: an explicit, greppable failure instead
+        // of the opaque "harness exited with code 143" the teardown produces.
+        await this.flushEvents();
+        await plane.updateRunStatus(run.runId, run.claimToken, "failed", {
+          errorCategory: "approval_timeout",
+          errorMessage: `approval timed out: ${this.approvalTimedOutCommand}`.slice(0, 500),
+        });
+        return;
       }
       if (turn.outcome === "interrupted" || this.abort.signal.aborted) {
         await this.flushEvents();
@@ -192,7 +254,24 @@ export class RunExecutor {
       });
       const publishDecision = await plane.awaitApproval(run.runId, publishRequestId, {
         signal: this.abort.signal,
+        timeoutMs: config.approvalTimeoutMs,
       });
+      if (publishDecision === "timed_out") {
+        await plane
+          .cancelApproval(
+            run.runId,
+            run.claimToken,
+            publishRequestId,
+            `approval timed out after ${Math.round(config.approvalTimeoutMs / 60_000)} min without a decision`,
+          )
+          .catch(() => {});
+        await this.flushEvents();
+        await plane.updateRunStatus(run.runId, run.claimToken, "failed", {
+          errorCategory: "approval_timeout",
+          errorMessage: `approval timed out: push ${worktree.branchName} and open a PR`.slice(0, 500),
+        });
+        return;
+      }
       if (publishDecision !== "accepted") {
         await this.flushEvents();
         await plane.updateRunStatus(
@@ -221,7 +300,7 @@ export class RunExecutor {
         prUrl = await createOrUpdatePr({
           worktreePath: worktree.worktreePath,
           baseBranch: run.baseBranch,
-          title: run.project.title ? `Agent: ${run.project.title}` : `Agent work on ${worktree.branchName}`,
+          title: prTitle(run, worktree.branchName),
           body: `${turn.resultText ?? "Automated agent work."}\n\n---\nRun ${run.runId} (attempt ${run.attempt}) via Skippy agent workbench.`,
         });
       } catch (error: unknown) {
@@ -285,6 +364,20 @@ async function runVerifyCommand(
       },
     );
   });
+}
+
+/**
+ * PR title for a published run. Uses the task's title so the GitHub PR list
+ * stays scannable — every run titled with the project string ("Agent: Skippy
+ * MCP and APP", PRs #117–#124) made the list unreadable. Falls back to the
+ * project title for chat-scoped runs without a task, then the branch name.
+ */
+export function prTitle(
+  run: Pick<ClaimedRun, "taskTitle"> & { project: Pick<ClaimedRun["project"], "title"> },
+  branchName: string,
+): string {
+  const title = run.taskTitle?.trim() || run.project.title?.trim();
+  return title ? `Agent: ${title}` : `Agent work on ${branchName}`;
 }
 
 function buildPrompt(run: ClaimedRun): string {

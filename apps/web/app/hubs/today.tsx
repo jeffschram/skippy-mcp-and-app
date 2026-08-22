@@ -60,7 +60,7 @@ const focusSummaryParagraphClass = "mb-0 max-w-[680px] text-xl leading-[1.42] te
 const focusItemActionsClass = "inline-flex gap-1.5 align-middle [&_button]:h-[30px] [&_button]:min-h-[30px]";
 const syncStatusPillClass =
   "inline-flex min-h-[26px] items-center gap-1.5 rounded-lg border bg-blue/10 px-[9px] text-xs font-extrabold text-blue [&_svg]:animate-spin";
-const syncStatusCopyClass = "m-0 mb-3 max-w-[680px] text-sm leading-[1.35] text-muted-foreground";
+const syncStatusCopyClass = "m-0 mb-3 max-w-[680px] text-sm text-muted-foreground";
 
 /* ------------------------------------------------------------------ */
 /* Quick capture: a quiet inbox slot on the home page — one inbox, two */

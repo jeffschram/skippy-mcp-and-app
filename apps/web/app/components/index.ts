@@ -21,5 +21,7 @@ export {
 export type { BadgeTone } from "./ui";
 export { Tabs, Drawer, Dialog, Chip, ChipGroup, ToastProvider, useToast } from "./widgets";
 export { InlineMarkdown } from "./markdown";
+export { ApprovalCard } from "./approval-card";
+export { useSettlingApprovals } from "./use-settling-approvals";
 export type { TabItem } from "./widgets";
 export { AppShell, PageHeader, hubs } from "./app-shell";

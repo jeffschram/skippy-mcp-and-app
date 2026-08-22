@@ -50,9 +50,12 @@ export interface HarnessTurnRequest {
   /**
    * Adapter calls this before any action outside the auto-allow policy and
    * blocks until the user decides. Returning "cancelled" means the run is
-   * being torn down and the adapter should stop.
+   * being torn down and the adapter should stop. "timed_out" means the
+   * configured approval timeout expired with the request still pending — the
+   * executor records `approval timed out: <command>` and tears the turn
+   * down; the adapter should deny the action and wind down.
    */
-  requestApproval: (request: ApprovalRequest) => Promise<"accepted" | "declined" | "cancelled">;
+  requestApproval: (request: ApprovalRequest) => Promise<"accepted" | "declined" | "cancelled" | "timed_out">;
 }
 
 export interface HarnessTurnResult {

@@ -137,6 +137,8 @@ export type SkippyClient = {
       dueAt?: number;
       priorityReason?: string;
       projectId?: string;
+      // Optional Plan phase; defaults to the project's last phase when omitted.
+      phaseId?: string;
       createdBy?: string;
       // Life-layer axes. Optional so existing callers are unaffected.
       area?: TaskArea;
@@ -183,6 +185,35 @@ export type SkippyClient = {
   ): Promise<unknown>;
   recordEntityReview(brainInstanceId: string, review: EntityReviewInput): Promise<unknown>;
   getCurrentContext(brainInstanceId: string): Promise<unknown>;
+  getProjectPlan(brainInstanceId: string, input: { projectId: string }): Promise<unknown>;
+  updateProject(
+    brainInstanceId: string,
+    input: {
+      projectId: string;
+      title?: string;
+      summary?: string;
+      repoUrl?: string;
+      vercelUrl?: string;
+      liveUrl?: string;
+    },
+  ): Promise<unknown>;
+  updatePhase(
+    brainInstanceId: string,
+    input: { phaseId: string; title?: string; descriptionMd?: string },
+  ): Promise<unknown>;
+  getProjectNotes(brainInstanceId: string, input: { projectId: string }): Promise<unknown>;
+  updateProjectNotes(
+    brainInstanceId: string,
+    input: { projectId: string; notesPad: string },
+  ): Promise<unknown>;
+  snapshotProjectNotes(
+    brainInstanceId: string,
+    input: { projectId: string; summary?: string },
+  ): Promise<unknown>;
+  createPhase(
+    brainInstanceId: string,
+    input: { projectId: string; title: string; descriptionMd?: string; actorId?: string },
+  ): Promise<unknown>;
   planProject(brainInstanceId: string, input: { projectId: string; maxTasks?: number }): Promise<unknown>;
   listReadyTasks(brainInstanceId: string, input: { limit?: number }): Promise<unknown>;
   listRequestedReadyTasks(brainInstanceId: string, input: { limit?: number }): Promise<unknown>;
@@ -197,8 +228,14 @@ export type SkippyClient = {
       title?: string;
       description?: string;
       kind?: "coding" | "review" | "research" | "design" | "manual" | "planning";
+      // Optional Plan phase to place the task in while briefing it.
+      phaseId?: string;
       actorId?: string;
     },
+  ): Promise<unknown>;
+  setTaskPhase(
+    brainInstanceId: string,
+    input: { taskId: string; phaseId: string; actorId?: string },
   ): Promise<unknown>;
   getSkill(brainInstanceId: string, input: { slug: string }): Promise<unknown>;
   recordTaskResult(
@@ -1200,6 +1237,47 @@ export function createSkippyToolHandlers(client: SkippyClient, brainInstanceId: 
       return await client.getCurrentContext(brainInstanceId);
     },
 
+    async getProjectPlan(input: { projectId: string }) {
+      return await client.getProjectPlan(brainInstanceId, input);
+    },
+
+    async updateProject(input: {
+      projectId: string;
+      title?: string;
+      summary?: string;
+      repoUrl?: string;
+      vercelUrl?: string;
+      liveUrl?: string;
+    }) {
+      return await client.updateProject(brainInstanceId, input);
+    },
+
+    async updatePhase(input: { phaseId: string; title?: string; descriptionMd?: string }) {
+      return await client.updatePhase(brainInstanceId, input);
+    },
+
+    async getProjectNotes(input: { projectId: string }) {
+      return await client.getProjectNotes(brainInstanceId, input);
+    },
+
+    async updateProjectNotes(input: { projectId: string; notesPad: string }) {
+      // Stored verbatim — no trimming or normalization. The pad is the
+      // owner's formless space; blank lines are content.
+      return await client.updateProjectNotes(brainInstanceId, input);
+    },
+
+    async snapshotProjectNotes(input: { projectId: string; summary?: string }) {
+      return await client.snapshotProjectNotes(brainInstanceId, input);
+    },
+
+    async createPhase(input: { projectId: string; title: string; descriptionMd?: string }) {
+      return await client.createPhase(brainInstanceId, {
+        ...input,
+        title: normalizeRequiredText(input.title, "title"),
+        actorId: "skippy_mcp",
+      });
+    },
+
     async planProject(input: { projectId: string; maxTasks?: number }) {
       return await client.planProject(brainInstanceId, input);
     },
@@ -1227,11 +1305,20 @@ export function createSkippyToolHandlers(client: SkippyClient, brainInstanceId: 
       title?: string;
       description?: string;
       kind?: "coding" | "review" | "research" | "design" | "manual" | "planning";
+      phaseId?: string;
     }) {
       const executionBrief = normalizeRequiredText(input.executionBrief, "executionBrief");
       return await client.briefTask(brainInstanceId, {
         ...input,
         executionBrief,
+        actorId: "skippy_mcp",
+      });
+    },
+
+    async setTaskPhase(input: { taskId: string; phaseId: string }) {
+      return await client.setTaskPhase(brainInstanceId, {
+        taskId: normalizeRequiredText(input.taskId, "taskId"),
+        phaseId: normalizeRequiredText(input.phaseId, "phaseId"),
         actorId: "skippy_mcp",
       });
     },

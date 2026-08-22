@@ -324,6 +324,11 @@ export default defineSchema({
     brainInstanceId: v.id("brainInstances"),
     title: v.string(),
     summary: v.optional(v.string()),
+    // Freeform per-project notes pad (the Notes tab): ONE always-editable
+    // plain-text field, deliberately NOT `note` entities. Structure lives in
+    // the Plan; history is captured at review-session granularity in
+    // projectNoteSnapshots (same storage shape as phase descriptions).
+    notesPad: v.optional(v.string()),
     ...processingMetadata,
     status: v.union(
       v.literal("idea"),
@@ -337,6 +342,8 @@ export default defineSchema({
     // "code" projects have a GitHub repo + local folder and follow the branch->PR agent workflow.
     kind: v.optional(v.union(v.literal("code"), v.literal("general"))),
     repoUrl: v.optional(v.string()),
+    vercelUrl: v.optional(v.string()),
+    liveUrl: v.optional(v.string()),
     defaultBaseBranch: v.optional(v.string()),
     // Project local folder (all projects may have one).
     localPath: v.optional(v.string()),
@@ -395,6 +402,9 @@ export default defineSchema({
     orderIndex: v.optional(v.number()),
     briefReadyAt: v.optional(v.number()),
     planRunId: v.optional(v.id("projectPlans")),
+    // Optional plan grouping. Existing tasks remain valid and are assigned to
+    // a default phase lazily when their project is first opened.
+    phaseId: v.optional(v.id("phases")),
     gitBranchName: v.optional(v.string()),
     prUrl: v.optional(v.string()),
     prNumber: v.optional(v.number()),
@@ -413,7 +423,8 @@ export default defineSchema({
     .index("by_brain_due", ["brainInstanceId", "dueAt"])
     .index("by_brain_commitment", ["brainInstanceId", "commitment"])
     .index("by_brain_execution_state", ["brainInstanceId", "executionState"])
-    .index("by_brain_plan", ["brainInstanceId", "planRunId"]),
+    .index("by_brain_plan", ["brainInstanceId", "planRunId"])
+    .index("by_brain_phase", ["brainInstanceId", "phaseId"]),
 
   // Repeating life obligations: furnace filters, oil changes, renewals, trash
   // night, quarterly taxes. A task with a dueAt cannot express any of these,
@@ -652,7 +663,13 @@ export default defineSchema({
     createdBy: v.union(v.literal("user"), v.literal("harness"), v.literal("skippy_ai"), v.literal("system")),
     createdAt: v.number(),
     updatedAt: v.number(),
-  }).index("by_brain_type", ["brainInstanceId", "type"]),
+  })
+    .index("by_brain_type", ["brainInstanceId", "type"])
+    // Endpoint lookups: find every edge touching a specific entity without
+    // scanning the brain's whole edge set (which is far past function read
+    // limits). Used by the task deletion cascade; general-purpose by design.
+    .index("by_brain_from", ["brainInstanceId", "from.entityId"])
+    .index("by_brain_to", ["brainInstanceId", "to.entityId"]),
 
   sourceRefs: defineTable({
     brainInstanceId: v.id("brainInstances"),
@@ -806,6 +823,36 @@ export default defineSchema({
   })
     .index("by_brain_project", ["brainInstanceId", "projectId"])
     .index("by_brain_created", ["brainInstanceId", "createdAt"]),
+
+  // Ordered, narrative sections of a project plan. Tasks point at a phase via
+  // tasks.phaseId; the project board composes that relationship into each
+  // phase's ordered task list.
+  phases: defineTable({
+    brainInstanceId: v.id("brainInstances"),
+    projectId: v.id("projects"),
+    orderNum: v.number(),
+    title: v.string(),
+    descriptionMd: v.string(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_brain_project", ["brainInstanceId", "projectId"])
+    .index("by_project_order", ["projectId", "orderNum"]),
+
+  // Point-in-time archives of a project's notes pad (projects.notesPad).
+  // Archive-by-snapshot, not by entry: at the close of an owner-requested
+  // notes review the WHOLE pad is preserved here, then the live pad is
+  // pruned. No UI in v1 — snapshots exist in the data, browsable later.
+  projectNoteSnapshots: defineTable({
+    brainInstanceId: v.id("brainInstances"),
+    projectId: v.id("projects"),
+    // Full pad text at snapshot time. Plain text only, like the pad itself.
+    content: v.string(),
+    // Optional one-line description of the review session that produced it.
+    summary: v.optional(v.string()),
+    createdBy: v.union(v.literal("user"), v.literal("harness")),
+    createdAt: v.number(),
+  }).index("by_brain_project", ["brainInstanceId", "projectId"]),
 
   // Cloud-canonical project library backed by Convex file storage. The local
   // `_library` folder (effectiveAssetsPath) is the harness's materialization of
@@ -1333,9 +1380,27 @@ export default defineSchema({
     chatId: v.id("projectChats"),
     role: v.union(v.literal("user"), v.literal("assistant")),
     content: v.string(),
+    // Files dropped/pasted into the chat composer. Each is uploaded through
+    // the project-library flow first (so it is also a projectFiles row) and
+    // referenced here by storageId; download URLs are always resolved at
+    // read time — never persisted. Project chats only in v1.
+    attachments: v.optional(
+      v.array(
+        v.object({
+          storageId: v.id("_storage"),
+          fileName: v.string(),
+          mimeType: v.string(),
+          sizeBytes: v.number(),
+        }),
+      ),
+    ),
     status: v.union(v.literal("complete"), v.literal("pending"), v.literal("error")),
     error: v.optional(v.string()),
     createdAt: v.number(),
+    // Assistant placeholders are inserted at send time and filled when the
+    // turn finishes; completedAt records that finish so the chat timeline can
+    // order the reply after any task moments that happened during the turn.
+    completedAt: v.optional(v.number()),
   }).index("by_chat", ["chatId", "createdAt"]),
 
   // Work queue for conversational turns: lighter siblings of agentRuns — same
@@ -1367,6 +1432,21 @@ export default defineSchema({
     .index("by_brain_status", ["brainInstanceId", "status"])
     .index("by_chat", ["chatId"])
     .index("by_host", ["hostId"]),
+
+  // Live activity for an in-flight chat turn: the harness's interim narration,
+  // commands, file edits, and plan updates, so the chat panel can show real
+  // progress instead of an indeterminate "Thinking" indicator. Ephemeral by
+  // design — rows are deleted when the turn finishes; the reply is the
+  // durable product (mirrors agentRunEvents' idempotent (turn, seq) shape).
+  chatTurnEvents: defineTable({
+    brainInstanceId: v.id("brainInstances"),
+    chatTurnId: v.id("chatTurns"),
+    seq: v.number(),
+    type: v.string(),
+    // Safe structured payload — secrets redacted runner-side before transmission.
+    payload: v.optional(v.any()),
+    createdAt: v.number(),
+  }).index("by_turn_seq", ["chatTurnId", "seq"]),
 
   // Durable execution attempts. A separate table rather than an evolution of
   // the task's agent-request fields: agentRequestStatus ("requested" |
@@ -1461,6 +1541,9 @@ export default defineSchema({
     scope: v.optional(v.union(v.literal("command"), v.literal("turn"), v.literal("session"))),
     decidedByUserId: v.optional(v.id("users")),
     decidedAt: v.optional(v.number()),
+    // Why a non-user settlement happened (e.g. "approval timed out after 1440
+    // min without a decision", "run ended before approval was decided").
+    reason: v.optional(v.string()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
@@ -1469,6 +1552,64 @@ export default defineSchema({
     .index("by_chat_turn", ["chatTurnId"])
     .index("by_chat_turn_request", ["chatTurnId", "harnessRequestId"])
     .index("by_brain_status", ["brainInstanceId", "status"]),
+
+  // Host-executed maintenance jobs: deterministic scripted rituals the runner
+  // claims like runs/chat turns (same host-token + claim-token + lease model)
+  // but executes as a checklist — no LLM session. First kind:
+  // post_merge_closeout, the post-merge ritual (verify merged → pull main →
+  // conditional runner rebuild + deferred restart → worktree/branch cleanup →
+  // mark task done with prStatus merged). Step progress lives inline on the
+  // job (bounded, fixed checklist) so the task panel renders it reactively; a
+  // failed step leaves the task in_review with the error visible.
+  maintenanceJobs: defineTable({
+    brainInstanceId: v.id("brainInstances"),
+    kind: v.literal("post_merge_closeout"),
+    taskId: v.id("tasks"),
+    projectId: v.id("projects"),
+    hostId: v.optional(v.id("agentHosts")),
+    status: v.union(
+      v.literal("queued"),
+      v.literal("claimed"),
+      v.literal("running"),
+      v.literal("completed"),
+      v.literal("failed"),
+      v.literal("cancelled"),
+    ),
+    claimToken: v.optional(v.string()),
+    leaseExpiresAt: v.optional(v.number()),
+    // Snapshot of the PR/branch facts the ritual operates on, taken at
+    // enqueue time from the task.
+    prUrl: v.optional(v.string()),
+    prNumber: v.optional(v.number()),
+    gitBranchName: v.optional(v.string()),
+    baseBranch: v.string(),
+    steps: v.array(
+      v.object({
+        key: v.string(),
+        label: v.string(),
+        status: v.union(
+          v.literal("pending"),
+          v.literal("running"),
+          v.literal("ok"),
+          v.literal("failed"),
+          v.literal("skipped"),
+        ),
+        detail: v.optional(v.string()),
+      }),
+    ),
+    // Safe (redacted) message only — never raw command stderr dumps.
+    errorMessage: v.optional(v.string()),
+    resultSummary: v.optional(v.string()),
+    requestedBy: v.optional(v.string()),
+    queuedAt: v.number(),
+    claimedAt: v.optional(v.number()),
+    completedAt: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_brain_status", ["brainInstanceId", "status"])
+    .index("by_brain_task", ["brainInstanceId", "taskId"])
+    .index("by_host", ["hostId"]),
 
   aiProcessingRuns: defineTable({
     brainInstanceId: v.id("brainInstances"),

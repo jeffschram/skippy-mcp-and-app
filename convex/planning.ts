@@ -238,6 +238,24 @@ export const writePlan = internalMutationGeneric({
       completedAt: now,
     });
 
+    const existingPhases = await db
+      .query("phases")
+      .withIndex("by_brain_project", (q: any) =>
+        q.eq("brainInstanceId", args.brainInstanceId).eq("projectId", args.projectId),
+      )
+      .collect();
+    const phaseId = await db.insert("phases", {
+      brainInstanceId: args.brainInstanceId,
+      projectId: args.projectId,
+      orderNum: existingPhases.length
+        ? Math.max(...existingPhases.map((phase: any) => phase.orderNum)) + 1
+        : 0,
+      title: `Phase ${existingPhases.length + 1}`,
+      descriptionMd: args.summary || "",
+      createdAt: now,
+      updatedAt: now,
+    });
+
     const taskIds: string[] = [];
     for (let index = 0; index < args.tasks.length; index += 1) {
       const draft = args.tasks[index] as ProjectPlanTaskDraft;
@@ -256,6 +274,7 @@ export const writePlan = internalMutationGeneric({
         orderIndex: index,
         briefReadyAt: now,
         planRunId: planId,
+        phaseId,
         priorityReason: args.summary || undefined,
         createdAt: now,
         updatedAt: now,
@@ -398,13 +417,45 @@ export const briefTaskForBrain = mutationGeneric({
     kind: v.optional(taskKindValidator),
     executionBrief: v.string(),
     acceptanceCriteria: v.optional(v.array(v.string())),
+    // Optional Plan phase to place the task in while briefing, so a harness
+    // can brief + position in one call. Validated against the brain and the
+    // task's project.
+    phaseId: v.optional(v.id("phases")),
     actorId: v.optional(v.string()),
   },
   handler: async ({ db }, args) => {
-    return applyTaskBrief(db, args, {
+    const { phaseId, ...briefArgs } = args;
+    if (phaseId) {
+      const phase = await db.get(phaseId);
+      if (!phase || phase.brainInstanceId !== args.brainInstanceId) {
+        throw new Error("phase not found for brain instance");
+      }
+      const rels = await db
+        .query("relationships")
+        .withIndex("by_brain_type", (q: any) =>
+          q.eq("brainInstanceId", args.brainInstanceId).eq("type", "belongs_to"),
+        )
+        .collect();
+      const belongsToPhaseProject = rels.some(
+        (rel: any) =>
+          rel.from.entityType === "task" &&
+          rel.from.entityId === args.taskId &&
+          rel.to.entityType === "project" &&
+          rel.to.entityId === phase.projectId,
+      );
+      if (!belongsToPhaseProject) {
+        throw new Error("phase does not belong to this task's project");
+      }
+    }
+    const result = await applyTaskBrief(db, briefArgs, {
       actorType: "harness",
       actorId: args.actorId,
     });
+    if (phaseId) {
+      await db.patch(args.taskId, { phaseId, updatedAt: Date.now() });
+      return { ...(result as Record<string, unknown>), phaseId };
+    }
+    return result;
   },
 });
 

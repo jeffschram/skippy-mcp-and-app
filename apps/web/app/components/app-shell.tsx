@@ -93,7 +93,7 @@ export const secondaryHubs: Hub[] = [
 export const hubs = [...primaryHubs, ...secondaryHubs];
 
 const navLinkClass =
-  "flex min-h-[42px] items-center gap-[11px] rounded-[10px] px-3 text-[15px] font-bold text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground focus-visible:outline-none";
+  "flex min-h-[42px] items-center gap-[11px] overflow-hidden rounded-[10px] px-3 text-[15px] font-bold text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground focus-visible:outline-none";
 const navLinkActiveClass = "bg-secondary text-foreground shadow-sm [&_svg]:text-primary";
 const navSubLinkClass =
   "block truncate rounded-lg px-2.5 py-[7px] text-[13px] font-semibold leading-tight text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground focus-visible:outline-none";
@@ -126,14 +126,15 @@ function NavLinks({
                 href={hub.href}
                 className={cn(navLinkClass, active && navLinkActiveClass)}
                 aria-current={active ? "page" : undefined}
+                title={hub.label}
               >
-                <hub.icon size={18} aria-hidden />
-                {hub.label}
+                <hub.icon className="shrink-0" size={18} aria-hidden />
+                <span className="whitespace-nowrap hidden transition-opacity group-hover/sidebar:block">{hub.label}</span>
               </Link>
               <div
                 className={cn(
-                  "hidden gap-0.5 pb-2 pl-8 pt-0.5 group-focus-within:grid group-hover:grid",
-                  projectSubmenuOpen && "grid",
+                  "hidden gap-0.5 pb-2 pl-8 pt-0.5 group-focus-within:grid group-hover/sidebar:grid",
+                  projectSubmenuOpen && "group-hover/sidebar:grid",
                 )}
                 aria-label="Active projects"
               >
@@ -162,9 +163,10 @@ function NavLinks({
               active && (mobile ? "bg-secondary text-foreground" : navLinkActiveClass),
             )}
             aria-current={active ? "page" : undefined}
+            title={hub.label}
           >
-            <hub.icon size={mobile ? 15 : 18} aria-hidden />
-            {hub.label}
+            <hub.icon className="shrink-0" size={mobile ? 15 : 18} aria-hidden />
+            {mobile ? hub.label : <span className="whitespace-nowrap hidden transition-opacity group-hover/sidebar:block">{hub.label}</span>}
           </Link>
         );
       })}
@@ -174,6 +176,7 @@ function NavLinks({
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname() ?? "/";
+  const projectDetail = /^\/projects\/[^/]+/.test(pathname);
   const { isAuthenticated } = useConvexAuth();
   const activeProjects = useQuery(api.projects.activeProjectsForViewer, isAuthenticated ? {} : "skip") as
     | NavProject[]
@@ -182,13 +185,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <ToastProvider>
       <ViewerContextTracker />
-      <div className="grid min-h-screen grid-cols-1 desk:grid-cols-[248px_minmax(0,1fr)]">
-        <aside className="sticky top-0 hidden h-screen flex-col gap-1.5 self-start border-r bg-card px-3.5 py-[18px] desk:flex">
-          <div className="flex items-center gap-2.5 px-2 pb-3.5 pt-1.5 text-lg font-extrabold">
+      <div className="grid min-h-screen grid-cols-1 desk:grid-cols-[64px_minmax(0,1fr)]">
+        <aside className="group/sidebar sticky top-0 z-40 hidden h-screen w-16 flex-col gap-1.5 self-start overflow-hidden border-r bg-card px-2.5 py-[18px] shadow-none transition-[width,box-shadow] duration-200 hover:w-[248px] hover:shadow-xl focus-within:w-[248px] desk:flex">
+          <div className="flex items-center gap-2.5 px-1 pb-3.5 pt-1.5 text-lg font-extrabold">
             <span className="grid size-[34px] place-items-center rounded-[9px] border bg-secondary text-primary shadow-sm">
               <Brain size={19} aria-hidden />
             </span>
-            Skippy
+            <span className="whitespace-nowrap hidden transition-opacity group-hover/sidebar:block">Skippy</span>
           </div>
           <nav className="grid gap-[3px]" aria-label="Primary">
             <NavLinks pathname={pathname} hubs={primaryHubs} projects={activeProjects ?? []} alwaysShowProjects />
@@ -197,8 +200,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <nav className="grid gap-[3px]" aria-label="Secondary">
               <NavLinks pathname={pathname} hubs={secondaryHubs} />
             </nav>
-            <div className="grid gap-1.5 border-t pt-3">
-              <AuthStatus />
+            <div className="grid gap-1.5 overflow-hidden border-t pt-3 hidden transition-opacity group-hover/sidebar:block">
+              <div className="w-[220px]"><AuthStatus /></div>
             </div>
           </div>
         </aside>
@@ -210,7 +213,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <NavLinks pathname={pathname} hubs={hubs} mobile />
             </nav>
           </header>
-          <main className="mx-auto w-full px-[30px] pb-16 pt-[22px] desk:pt-[30px]">{children}</main>
+          <main className={cn("w-full", projectDetail ? "p-0" : "mx-auto px-[30px] pb-16 pt-[22px] desk:pt-[30px]")}>{children}</main>
         </div>
       </div>
       <ChatPanel />
