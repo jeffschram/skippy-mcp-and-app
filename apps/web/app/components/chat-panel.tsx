@@ -245,16 +245,24 @@ function AttachmentChip({ attachment }: { attachment: AnyRecord }) {
 
 /**
  * The composer owns its draft locally so keystrokes re-render only this small
- * row — not the whole ChatSurface (timeline rebuild + ChatMarkdown for every
- * message), which caused visible typing lag on long transcripts. The parent
- * only learns about the text on send; `onSend` resolves false when the message
- * didn't go through so the draft can be restored.
+ * region — not the whole ChatSurface (timeline rebuild + ChatMarkdown for
+ * every message), which caused visible typing lag on long transcripts. The
+ * parent only learns about the text on send; `onSend` resolves false when the
+ * message didn't go through so the draft can be restored.
+ *
+ * Layout follows the Codex/ChatGPT convention: one rounded container that
+ * reads as "the text box", with a borderless auto-growing textarea on top and
+ * a pinned control row below (attach on the left; harness picker + send on
+ * the right). The textarea expands with content while the buttons stay put.
  */
 function ChatComposer({
   placeholder,
   canAttach,
   hasAttachments,
   busy,
+  harness,
+  harnessBound,
+  onChooseHarness,
   onSend,
   onAddFiles,
 }: {
@@ -262,6 +270,11 @@ function ChatComposer({
   canAttach: boolean;
   hasAttachments: boolean;
   busy: boolean;
+  /** Currently effective harness (bound conversation harness or the picked default). */
+  harness: "claude" | "codex";
+  /** Whether the conversation is already bound — switching then starts a new chat. */
+  harnessBound: boolean;
+  onChooseHarness: (next: "claude" | "codex") => void;
   onSend: (content: string) => Promise<boolean>;
   onAddFiles: (files: File[]) => void;
 }) {
@@ -277,62 +290,77 @@ function ChatComposer({
   };
 
   return (
-    <div className="flex items-start gap-2 border-t bg-card p-3 desk:p-4">
-      {canAttach ? (
-        <>
-          <input
-            ref={attachInputRef}
-            type="file"
-            multiple
-            accept={PROJECT_FILE_ACCEPT}
-            style={{ display: "none" }}
-            onChange={(event) => {
-              onAddFiles(Array.from(event.target.files ?? []));
-              event.target.value = "";
-            }}
-          />
+    <div className="p-3 desk:px-[4vw] desk:pb-[2vw] desk:pt-[1vw]">
+      <div className="rounded-2xl border bg-card transition-colors focus-within:border-primary/60">
+        <textarea
+          className="max-h-40 min-h-11 w-full resize-none bg-transparent px-3.5 pb-1 pt-3 text-[16px] outline-none"
+          style={{ fieldSizing: "content" }}
+          value={draft}
+          placeholder={placeholder}
+          rows={1}
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && !event.shiftKey) {
+              event.preventDefault();
+              void send();
+            }
+          }}
+          onPaste={(event) => {
+            if (!canAttach) return;
+            const files = Array.from(event.clipboardData?.files ?? []);
+            if (files.length) {
+              event.preventDefault();
+              onAddFiles(files);
+            }
+          }}
+        />
+        <div className="flex items-center gap-1.5 px-2 pb-2">
+          {canAttach ? (
+            <>
+              <input
+                ref={attachInputRef}
+                type="file"
+                multiple
+                accept={PROJECT_FILE_ACCEPT}
+                style={{ display: "none" }}
+                onChange={(event) => {
+                  onAddFiles(Array.from(event.target.files ?? []));
+                  event.target.value = "";
+                }}
+              />
+              <button
+                type="button"
+                className="grid size-9 shrink-0 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                onClick={() => attachInputRef.current?.click()}
+                aria-label="Attach files"
+                title="Attach files"
+              >
+                <Paperclip size={17} aria-hidden />
+              </button>
+            </>
+          ) : null}
+          <div className="flex-1" />
+          <select
+            className="rounded-lg border-0 bg-transparent px-1.5 py-1 text-xs text-muted-foreground hover:text-foreground"
+            value={harness}
+            onChange={(event) => onChooseHarness(event.target.value as "claude" | "codex")}
+            aria-label="Assistant"
+            title={harnessBound ? "Changing assistant starts a new conversation" : "Choose assistant"}
+          >
+            <option value="claude">Claude</option>
+            <option value="codex">Codex</option>
+          </select>
           <button
             type="button"
-            className="grid size-11 shrink-0 place-items-center rounded-xl border text-muted-foreground hover:text-foreground"
-            onClick={() => attachInputRef.current?.click()}
-            aria-label="Attach files"
-            title="Attach files"
+            className="grid size-9 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground disabled:opacity-50"
+            disabled={(!draft.trim() && !hasAttachments) || busy}
+            onClick={() => void send()}
+            aria-label="Send message"
           >
-            <Paperclip size={17} aria-hidden />
+            <SendHorizontal size={16} aria-hidden />
           </button>
-        </>
-      ) : null}
-      <textarea
-        className="min-h-11 max-h-32 flex-1 resize-none rounded-xl border bg-background px-3 py-2.5 text-[16px]"
-        style={{fieldSizing: 'content'}}
-        value={draft}
-        placeholder={placeholder}
-        rows={1}
-        onChange={(event) => setDraft(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === "Enter" && !event.shiftKey) {
-            event.preventDefault();
-            void send();
-          }
-        }}
-        onPaste={(event) => {
-          if (!canAttach) return;
-          const files = Array.from(event.clipboardData?.files ?? []);
-          if (files.length) {
-            event.preventDefault();
-            onAddFiles(files);
-          }
-        }}
-      />
-      <button
-        type="button"
-        className="grid size-11 place-items-center rounded-xl bg-primary text-primary-foreground disabled:opacity-50"
-        disabled={(!draft.trim() && !hasAttachments) || busy}
-        onClick={() => void send()}
-        aria-label="Send message"
-      >
-        <SendHorizontal size={17} aria-hidden />
-      </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -572,44 +600,10 @@ function ChatSurface({
           </p>
         </div>
       ) : null}
-      {header ?? (
-        <header className="flex min-h-14 items-center gap-2 border-b px-4">
-          <MessageCircle size={17} aria-hidden />
-          <div className="min-w-0 flex-1">
-            <p className="m-0 text-sm font-bold">Project chat</p>
-            <p className="m-0 truncate text-xs text-muted-foreground">
-              {data?.chat?.title ?? scope.label}{boundHarness ? ` · ${boundHarness}` : ""}
-            </p>
-          </div>
-          <select
-            className="rounded-lg border bg-card px-2 py-1.5 text-xs"
-            value={boundHarness ?? pickedHarness}
-            onChange={(event) => void chooseHarness(event.target.value as "claude" | "codex")}
-            aria-label="Assistant"
-            title={boundHarness ? "Changing assistant starts a new conversation" : "Choose assistant"}
-          >
-            <option value="claude">Claude</option>
-            <option value="codex">Codex</option>
-          </select>
-        </header>
-      )}
-      {header ? (
-        <div className="flex items-center justify-end gap-2 border-b bg-card px-4 py-2">
-          <label htmlFor={`chat-harness-${chatKey}`} className="text-xs text-muted-foreground">
-            Assistant
-          </label>
-          <select
-            id={`chat-harness-${chatKey}`}
-            className="rounded-lg border bg-background px-2 py-1.5 text-xs"
-            value={boundHarness ?? pickedHarness}
-            onChange={(event) => void chooseHarness(event.target.value as "claude" | "codex")}
-            title={boundHarness ? "Changing assistant starts a new conversation" : "Choose assistant"}
-          >
-            <option value="claude">Claude</option>
-            <option value="codex">Codex</option>
-          </select>
-        </div>
-      ) : null}
+      {/* Project chat renders headerless — the transcript starts at the top
+          and the harness lives in the composer. The floating page panel
+          passes its own header (it needs the close affordance). */}
+      {header}
 
       <div className="relative flex min-h-0 flex-1">
       <div className="flex flex-1 flex-col gap-3 overflow-y-auto px-4 py-5 desk:px-[4vw]" ref={messagesRef} onScroll={handleTranscriptScroll}>
@@ -746,6 +740,9 @@ function ChatSurface({
         canAttach={canAttach}
         hasAttachments={attachments.length > 0}
         busy={sending || uploadingCount > 0}
+        harness={(boundHarness as "claude" | "codex" | undefined) ?? pickedHarness}
+        harnessBound={Boolean(boundHarness)}
+        onChooseHarness={(next) => void chooseHarness(next)}
         onSend={send}
         onAddFiles={(files) => void addFiles(files)}
       />

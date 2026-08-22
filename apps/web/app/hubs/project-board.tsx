@@ -58,7 +58,6 @@ import {
   Badge,
   Button,
   Card,
-  Dialog,
   Field,
   LoadingRow,
   Select,
@@ -86,13 +85,14 @@ import { TaskDetailPanel } from "./task-detail";
 import { useViewerReady } from "./use-viewer";
 
 type AnyRecord = Record<string, any>;
-type ProjectView = "chat" | "overview" | "plan" | "notes" | "library";
+type ProjectView = "chat" | "overview" | "plan" | "notes" | "library" | "settings";
 
 const panelTabs: Array<{ key: Exclude<ProjectView, "chat">; label: string }> = [
   { key: "overview", label: "Overview" },
   { key: "plan", label: "Plan" },
   { key: "notes", label: "Notes" },
   { key: "library", label: "Library" },
+  { key: "settings", label: "Settings" },
 ];
 
 const mobileTabs: Array<{
@@ -105,6 +105,7 @@ const mobileTabs: Array<{
   { key: "plan", label: "Plan", icon: ListChecks },
   { key: "notes", label: "Notes", icon: StickyNote },
   { key: "library", label: "Library", icon: Link2 },
+  { key: "settings", label: "Settings", icon: Settings2 },
 ];
 
 function displayState(
@@ -448,7 +449,14 @@ function SortableTaskRow({
   );
 }
 
-function ProjectOverview({ project }: { project: AnyRecord }) {
+function ProjectOverview({
+  project,
+  progress,
+}: {
+  project: AnyRecord;
+  /** Board progress counts (moved here from the removed top bar). */
+  progress?: AnyRecord | undefined;
+}) {
   const links = [
     project.repoUrl
       ? { label: "GitHub repository", href: project.repoUrl, icon: GitBranch }
@@ -477,6 +485,23 @@ function ProjectOverview({ project }: { project: AnyRecord }) {
             "No project description yet. Ask chat to add one."}
         </p>
       </section>
+
+      {progress?.total ? (
+        <section>
+          <div className="flex items-center gap-2 text-sm">
+            <Sparkles size={15} className="text-primary" aria-hidden />
+            <span className="font-bold">
+              {progress.done}/{progress.total} tasks complete
+            </span>
+          </div>
+          <div className="mt-2.5 h-1.5 overflow-hidden rounded-full bg-secondary">
+            <div
+              className="h-full rounded-full bg-primary transition-[width]"
+              style={{ width: `${progress.percent ?? 0}%` }}
+            />
+          </div>
+        </section>
+      ) : null}
 
       <section>
         <h2 className="mb-3 text-lg">Links</h2>
@@ -974,6 +999,239 @@ function ProjectPlan({
   );
 }
 
+/**
+ * Project settings as a side-panel tab (formerly a modal). Form fields load
+ * from the project when the tab mounts and commit on Save — switching tabs
+ * discards unsaved edits, same as closing the old dialog did. The
+ * task-harness picker lives here too; its state stays in ProjectBoardContent
+ * because Start actions consume it when launching agent tasks.
+ */
+function ProjectSettingsPanel({
+  project,
+  projectId,
+  executionConfig,
+  taskHarness,
+  onTaskHarness,
+}: {
+  project: AnyRecord;
+  projectId: string;
+  executionConfig: AnyRecord | null | undefined;
+  taskHarness: "claude" | "codex";
+  onTaskHarness: (next: "claude" | "codex") => void;
+}) {
+  const updateProject = useMutation(api.projects.updateProjectForViewer);
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  const [projectTitle, setProjectTitle] = useState<string>(project.title ?? "");
+  const [projectKind, setProjectKind] = useState<string>(project.kind ?? "general");
+  const [projectSummary, setProjectSummary] = useState<string>(project.summary ?? "");
+  const [repoUrl, setRepoUrl] = useState<string>(project.repoUrl ?? "");
+  const [vercelUrl, setVercelUrl] = useState<string>(project.vercelUrl ?? "");
+  const [liveUrl, setLiveUrl] = useState<string>(project.liveUrl ?? "");
+  const [baseBranch, setBaseBranch] = useState<string>(project.defaultBaseBranch ?? "");
+  const [localPath, setLocalPath] = useState<string>(project.localPath ?? "");
+  const [assetsFolderPath, setAssetsFolderPath] = useState<string>(project.assetsFolderPath ?? "");
+  const [outputFolderPath, setOutputFolderPath] = useState<string>(project.outputFolderPath ?? "");
+
+  const folderBase = localPath.trim().replace(/[\\/]+$/, "");
+
+  const saveProjectSettings = async () => {
+    if (!projectTitle.trim()) {
+      toast("Project title cannot be empty.", "error");
+      return;
+    }
+    setBusy(true);
+    try {
+      await updateProject({
+        projectId: projectId as any,
+        title: projectTitle,
+        kind: projectKind as any,
+        summary: projectSummary,
+        repoUrl,
+        vercelUrl,
+        liveUrl,
+        defaultBaseBranch: baseBranch,
+        localPath,
+        assetsFolderPath,
+        outputFolderPath,
+      } as any);
+      toast("Project updated.", "success");
+    } catch (error) {
+      toast(
+        error instanceof Error ? error.message : "Could not update project",
+        "error",
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const setProjectArchived = async (archived: boolean) => {
+    if (
+      archived &&
+      !window.confirm(
+        `Archive "${project.title}"? You can restore it from Settings.`,
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    try {
+      await updateProject({
+        projectId: projectId as any,
+        status: archived ? "archived" : "planned",
+      } as any);
+      toast(archived ? "Project archived." : "Project restored.", "success");
+    } catch (error) {
+      toast(
+        error instanceof Error
+          ? error.message
+          : archived
+            ? "Could not archive project"
+            : "Could not restore project",
+        "error",
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="grid gap-4 p-5 desk:p-6">
+      {executionConfig?.enabled ? (
+        <div className="border-b pb-4">
+          <h3 className="mb-3 text-sm">Tasks</h3>
+          <Field label="Task harness">
+            <Select
+              value={taskHarness}
+              onChange={(event) => onTaskHarness(event.target.value as "claude" | "codex")}
+              aria-label="Task harness"
+              title="Harness used when starting agent tasks"
+            >
+              <option value="claude">Tasks: Claude</option>
+              <option value="codex">Tasks: Codex</option>
+            </Select>
+          </Field>
+        </div>
+      ) : null}
+
+      <Field label="Project name">
+        <TextInput
+          value={projectTitle}
+          onChange={(event) => setProjectTitle(event.target.value)}
+        />
+      </Field>
+      <Field label="Description">
+        <TextArea
+          value={projectSummary}
+          onChange={(event) => setProjectSummary(event.target.value)}
+        />
+      </Field>
+      <Field label="Project type">
+        <Select
+          value={projectKind}
+          onChange={(event) => setProjectKind(event.target.value)}
+        >
+          <option value="general">General</option>
+          <option value="code">Code project</option>
+        </Select>
+      </Field>
+
+      <div className="border-t pt-4">
+        <h3 className="mb-3 text-sm">Links</h3>
+        <div className="grid gap-3">
+          <Field label="GitHub repository URL">
+            <TextInput
+              type="url"
+              value={repoUrl}
+              onChange={(event) => setRepoUrl(event.target.value)}
+              placeholder="https://github.com/you/repository"
+            />
+          </Field>
+          <Field label="Vercel project URL">
+            <TextInput
+              type="url"
+              value={vercelUrl}
+              onChange={(event) => setVercelUrl(event.target.value)}
+              placeholder="https://vercel.com/you/project"
+            />
+          </Field>
+          <Field label="Live URL">
+            <TextInput
+              type="url"
+              value={liveUrl}
+              onChange={(event) => setLiveUrl(event.target.value)}
+              placeholder="https://example.com"
+            />
+          </Field>
+          {projectKind === "code" ? (
+            <Field label="Default base branch">
+              <TextInput
+                value={baseBranch}
+                onChange={(event) => setBaseBranch(event.target.value)}
+                placeholder="main"
+              />
+            </Field>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="border-t pt-4">
+        <h3 className="mb-3 text-sm">Folders</h3>
+        <div className="grid gap-3">
+          <Field label="Project local folder">
+            <TextInput
+              value={localPath}
+              onChange={(event) => setLocalPath(event.target.value)}
+              placeholder="/Users/you/projects/project"
+            />
+          </Field>
+          <Field label="Library folder">
+            <TextInput
+              value={assetsFolderPath}
+              onChange={(event) => setAssetsFolderPath(event.target.value)}
+              placeholder={folderBase ? `${folderBase}/_library` : "Set the project folder first"}
+              disabled={!folderBase}
+            />
+          </Field>
+          <Field label="Output folder">
+            <TextInput
+              value={outputFolderPath}
+              onChange={(event) => setOutputFolderPath(event.target.value)}
+              placeholder={folderBase ? `${folderBase}/_output` : "Set the project folder first"}
+              disabled={!folderBase}
+            />
+          </Field>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4">
+        {project.status === "archived" ? (
+          <Button disabled={busy} onClick={() => void setProjectArchived(false)}>
+            <ArchiveRestore size={15} aria-hidden /> Restore project
+          </Button>
+        ) : (
+          <Button
+            variant="danger"
+            disabled={busy}
+            onClick={() => void setProjectArchived(true)}
+          >
+            <Archive size={15} aria-hidden /> Archive project
+          </Button>
+        )}
+        <Button
+          variant="primary"
+          className="ml-auto"
+          disabled={busy || !projectTitle.trim()}
+          onClick={() => void saveProjectSettings()}
+        >
+          Save
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function SidePanel({
   board,
   view,
@@ -984,6 +1242,9 @@ function SidePanel({
   onSelect,
   onStart,
   onComplete,
+  executionConfig,
+  taskHarness,
+  onTaskHarness,
 }: {
   board: AnyRecord;
   view: ProjectView;
@@ -994,6 +1255,9 @@ function SidePanel({
   onSelect: (task: AnyRecord) => void;
   onStart: (task: AnyRecord) => void;
   onComplete: (task: AnyRecord) => void;
+  executionConfig: AnyRecord | null | undefined;
+  taskHarness: "claude" | "codex";
+  onTaskHarness: (next: "claude" | "codex") => void;
 }) {
   return (
     <aside className="flex min-h-0 flex-col bg-secondary/35">
@@ -1028,7 +1292,7 @@ function SidePanel({
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
         {view === "overview" ? (
-          <ProjectOverview project={board.project} />
+          <ProjectOverview project={board.project} progress={board.progress} />
         ) : null}
         {view === "plan" ? (
           <ProjectPlan
@@ -1045,6 +1309,15 @@ function SidePanel({
           <div className="p-4">
             <ProjectLibrarySection projectId={board.project._id} alwaysOpen />
           </div>
+        ) : null}
+        {view === "settings" ? (
+          <ProjectSettingsPanel
+            project={board.project}
+            projectId={board.project._id}
+            executionConfig={executionConfig}
+            taskHarness={taskHarness}
+            onTaskHarness={onTaskHarness}
+          />
         ) : null}
       </div>
     </aside>
@@ -1072,28 +1345,17 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
     api.agentWorkbench.projectExecutionConfigForViewer,
     viewerReady ? { projectId: projectId as any } : "skip",
   ) as AnyRecord | null | undefined;
-  const updateProject = useMutation(api.projects.updateProjectForViewer);
   const toast = useToast();
   const [view, setView] = useState<ProjectView>("overview");
   // A selected Plan task swaps the chat's slot for its detail panel; the chat
   // stays mounted underneath so its draft and scroll position survive.
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
   // Task-row actions track WHICH task is busy so only the clicked row's
-  // button disables; the global `busy` stays for the settings dialog.
+  // button disables.
   const [busyTaskId, setBusyTaskId] = useState<string | null>(null);
+  // Lives here (not in the Settings tab, which renders the picker) because
+  // startTask consumes it when launching agent tasks.
   const [taskHarness, setTaskHarness] = useState<"claude" | "codex">("claude");
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [projectTitle, setProjectTitle] = useState("");
-  const [projectKind, setProjectKind] = useState("general");
-  const [projectSummary, setProjectSummary] = useState("");
-  const [repoUrl, setRepoUrl] = useState("");
-  const [vercelUrl, setVercelUrl] = useState("");
-  const [liveUrl, setLiveUrl] = useState("");
-  const [baseBranch, setBaseBranch] = useState("");
-  const [localPath, setLocalPath] = useState("");
-  const [assetsFolderPath, setAssetsFolderPath] = useState("");
-  const [outputFolderPath, setOutputFolderPath] = useState("");
   const ensured = useRef(false);
 
   useEffect(() => {
@@ -1161,84 +1423,6 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
       (task: AnyRecord) => task._id === selectedTaskId,
     ) ?? null;
 
-  const openProjectSettings = () => {
-    const project = board.project;
-    setProjectTitle(project.title ?? "");
-    setProjectKind(project.kind ?? "general");
-    setProjectSummary(project.summary ?? "");
-    setRepoUrl(project.repoUrl ?? "");
-    setVercelUrl(project.vercelUrl ?? "");
-    setLiveUrl(project.liveUrl ?? "");
-    setBaseBranch(project.defaultBaseBranch ?? "");
-    setLocalPath(project.localPath ?? "");
-    setAssetsFolderPath(project.assetsFolderPath ?? "");
-    setOutputFolderPath(project.outputFolderPath ?? "");
-    setSettingsOpen(true);
-  };
-
-  const saveProjectSettings = async () => {
-    if (!projectTitle.trim()) {
-      toast("Project title cannot be empty.", "error");
-      return;
-    }
-    setBusy(true);
-    try {
-      await updateProject({
-        projectId: projectId as any,
-        title: projectTitle,
-        kind: projectKind as any,
-        summary: projectSummary,
-        repoUrl,
-        vercelUrl,
-        liveUrl,
-        defaultBaseBranch: baseBranch,
-        localPath,
-        assetsFolderPath,
-        outputFolderPath,
-      } as any);
-      toast("Project updated.", "success");
-      setSettingsOpen(false);
-    } catch (error) {
-      toast(
-        error instanceof Error ? error.message : "Could not update project",
-        "error",
-      );
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const setProjectArchived = async (archived: boolean) => {
-    if (
-      archived &&
-      !window.confirm(
-        `Archive "${board.project.title}"? You can restore it from Settings.`,
-      )
-    ) {
-      return;
-    }
-    setBusy(true);
-    try {
-      await updateProject({
-        projectId: projectId as any,
-        status: archived ? "archived" : "planned",
-      } as any);
-      toast(archived ? "Project archived." : "Project restored.", "success");
-      setSettingsOpen(false);
-    } catch (error) {
-      toast(
-        error instanceof Error
-          ? error.message
-          : archived
-            ? "Could not archive project"
-            : "Could not restore project",
-        "error",
-      );
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const startTask = async (task: AnyRecord) => {
     if (busyTaskId) return;
     setBusyTaskId(task._id);
@@ -1285,13 +1469,15 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
     }
   };
 
-  const folderBase = localPath.trim().replace(/[\\/]+$/, "");
-
   return (
     <LiveGate>
       <>
         <div className="flex min-h-[calc(100dvh-92px)] flex-col desk:h-screen desk:min-h-0">
-        <header className="flex items-center gap-3 border-b bg-card px-4 py-3 desk:px-5">
+        {/* The old top bar (progress, task-harness selector, Settings button)
+            is gone: progress lives in Overview, the selector and settings
+            form live in the Settings tab, and the side panel now reaches the
+            top of the viewport. Mobile keeps a slim bar for back navigation. */}
+        <header className="flex items-center gap-3 border-b bg-card px-4 py-2.5 desk:hidden">
           <Link
             href="/projects"
             className="grid size-9 place-items-center rounded-lg border text-muted-foreground hover:text-foreground"
@@ -1299,38 +1485,11 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
           >
             <ArrowLeft size={17} aria-hidden />
           </Link>
-          <div className="min-w-0 flex-1">
-            <p className="m-0 truncate font-bold">{board.project.title}</p>
-            <p className="m-0 text-xs text-muted-foreground desk:hidden">
-              {board.progress.done}/{board.progress.total} tasks complete
-            </p>
-          </div>
-          <div className="ml-auto flex shrink-0 items-center gap-2">
-            <div className="hidden items-center gap-2 text-xs text-muted-foreground desk:flex">
-              <Sparkles size={14} className="text-primary" aria-hidden />{" "}
-              {board.progress.done}/{board.progress.total} complete
-            </div>
-            {executionConfig?.enabled ? (
-              <Select
-                className="w-[9.5rem] shrink-0"
-                value={taskHarness}
-                onChange={(event) => setTaskHarness(event.target.value as "claude" | "codex")}
-                aria-label="Task harness"
-                title="Harness used when starting agent tasks"
-              >
-                <option value="claude">Tasks: Claude</option>
-                <option value="codex">Tasks: Codex</option>
-              </Select>
-            ) : null}
-            <Button small onClick={openProjectSettings} title="Project settings">
-              <Settings2 size={15} aria-hidden />
-              <span className="hidden desk:inline">Settings</span>
-            </Button>
-          </div>
+          <p className="m-0 min-w-0 flex-1 truncate font-bold">{board.project.title}</p>
         </header>
 
         <nav
-          className="grid grid-cols-5 border-b bg-card desk:hidden"
+          className="grid grid-cols-6 border-b bg-card desk:hidden"
           aria-label="Project views"
         >
           {mobileTabs.map((tab) => (
@@ -1358,27 +1517,43 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
         </nav>
 
         <div className="hidden min-h-0 flex-1 grid-cols-[minmax(0,2fr)_minmax(340px,1fr)] desk:grid">
-          {/* The detail panel overlays the chat instead of replacing it so the
-              chat keeps its draft text and scroll position while hidden. */}
-          <div className="relative flex min-h-0 min-w-0 flex-col border-r">
-            <ProjectChatWorkspace
-              projectId={projectId}
-              taskMoments={taskMoments}
-              runApprovals={approvals}
-              onOpenTask={setSelectedTaskId}
-              className="min-h-0 flex-1"
-            />
-            {selectedTask ? (
-              <TaskDetailPanel
-                task={selectedTask}
-                busy={busyTaskId === selectedTask._id}
-                onBack={() => setSelectedTaskId(null)}
-                onStart={() => void startTask(selectedTask)}
-                onComplete={() => void completeTask(selectedTask)}
-                approvals={approvals}
-                className="absolute inset-0 z-10"
+          <div className="flex min-h-0 min-w-0 flex-col border-r">
+            {/* Back navigation + title live over the chat column only; the
+                side panel's tab row tops the right column. min-h matches the
+                tab row so the two header borders read as one line. */}
+            <header className="flex min-h-[53px] items-center gap-3 border-b bg-card px-4">
+              <Link
+                href="/projects"
+                className="grid size-9 shrink-0 place-items-center rounded-lg border text-muted-foreground hover:text-foreground"
+                aria-label="Back to projects"
+              >
+                <ArrowLeft size={17} aria-hidden />
+              </Link>
+              <p className="m-0 min-w-0 flex-1 truncate font-bold">{board.project.title}</p>
+            </header>
+            {/* The detail panel overlays the chat instead of replacing it so
+                the chat keeps its draft text and scroll position while
+                hidden; the overlay stays below the back/title header. */}
+            <div className="relative flex min-h-0 flex-1 flex-col">
+              <ProjectChatWorkspace
+                projectId={projectId}
+                taskMoments={taskMoments}
+                runApprovals={approvals}
+                onOpenTask={setSelectedTaskId}
+                className="min-h-0 flex-1"
               />
-            ) : null}
+              {selectedTask ? (
+                <TaskDetailPanel
+                  task={selectedTask}
+                  busy={busyTaskId === selectedTask._id}
+                  onBack={() => setSelectedTaskId(null)}
+                  onStart={() => void startTask(selectedTask)}
+                  onComplete={() => void completeTask(selectedTask)}
+                  approvals={approvals}
+                  className="absolute inset-0 z-10"
+                />
+              ) : null}
+            </div>
           </div>
           <SidePanel
             board={board}
@@ -1390,6 +1565,9 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
             onSelect={(task) => setSelectedTaskId(task._id)}
             onStart={(task) => void startTask(task)}
             onComplete={(task) => void completeTask(task)}
+            executionConfig={executionConfig}
+            taskHarness={taskHarness}
+            onTaskHarness={setTaskHarness}
           />
         </div>
 
@@ -1404,7 +1582,7 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
               onStart={() => void startTask(selectedTask)}
               onComplete={() => void completeTask(selectedTask)}
               approvals={approvals}
-              className="h-[calc(100dvh-227px)]"
+              className="h-[calc(100dvh-207px)]"
             />
           ) : (
             <>
@@ -1414,11 +1592,11 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                   taskMoments={taskMoments}
                   runApprovals={approvals}
                   onOpenTask={setSelectedTaskId}
-                  className="h-[calc(100dvh-227px)]"
+                  className="h-[calc(100dvh-207px)]"
                 />
               ) : null}
               {view === "overview" ? (
-                <ProjectOverview project={board.project} />
+                <ProjectOverview project={board.project} progress={board.progress} />
               ) : null}
               {view === "plan" ? (
                 <ProjectPlan
@@ -1438,137 +1616,20 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                   <ProjectLibrarySection projectId={projectId} alwaysOpen />
                 </div>
               ) : null}
+              {view === "settings" ? (
+                <ProjectSettingsPanel
+                  project={board.project}
+                  projectId={projectId}
+                  executionConfig={executionConfig}
+                  taskHarness={taskHarness}
+                  onTaskHarness={setTaskHarness}
+                />
+              ) : null}
             </>
           )}
         </div>
         </div>
 
-        <Dialog
-          open={settingsOpen}
-          onClose={() => setSettingsOpen(false)}
-          title="Project settings"
-        >
-          <div className="grid gap-4">
-            <Field label="Project name">
-              <TextInput
-                value={projectTitle}
-                onChange={(event) => setProjectTitle(event.target.value)}
-                autoFocus
-              />
-            </Field>
-            <Field label="Description">
-              <TextArea
-                value={projectSummary}
-                onChange={(event) => setProjectSummary(event.target.value)}
-              />
-            </Field>
-            <Field label="Project type">
-              <Select
-                value={projectKind}
-                onChange={(event) => setProjectKind(event.target.value)}
-              >
-                <option value="general">General</option>
-                <option value="code">Code project</option>
-              </Select>
-            </Field>
-
-            <div className="border-t pt-4">
-              <h3 className="mb-3 text-sm">Links</h3>
-              <div className="grid gap-3">
-                <Field label="GitHub repository URL">
-                  <TextInput
-                    type="url"
-                    value={repoUrl}
-                    onChange={(event) => setRepoUrl(event.target.value)}
-                    placeholder="https://github.com/you/repository"
-                  />
-                </Field>
-                <Field label="Vercel project URL">
-                  <TextInput
-                    type="url"
-                    value={vercelUrl}
-                    onChange={(event) => setVercelUrl(event.target.value)}
-                    placeholder="https://vercel.com/you/project"
-                  />
-                </Field>
-                <Field label="Live URL">
-                  <TextInput
-                    type="url"
-                    value={liveUrl}
-                    onChange={(event) => setLiveUrl(event.target.value)}
-                    placeholder="https://example.com"
-                  />
-                </Field>
-                {projectKind === "code" ? (
-                  <Field label="Default base branch">
-                    <TextInput
-                      value={baseBranch}
-                      onChange={(event) => setBaseBranch(event.target.value)}
-                      placeholder="main"
-                    />
-                  </Field>
-                ) : null}
-              </div>
-            </div>
-
-            <div className="border-t pt-4">
-              <h3 className="mb-3 text-sm">Folders</h3>
-              <div className="grid gap-3">
-                <Field label="Project local folder">
-                  <TextInput
-                    value={localPath}
-                    onChange={(event) => setLocalPath(event.target.value)}
-                    placeholder="/Users/you/projects/project"
-                  />
-                </Field>
-                <Field label="Library folder">
-                  <TextInput
-                    value={assetsFolderPath}
-                    onChange={(event) => setAssetsFolderPath(event.target.value)}
-                    placeholder={folderBase ? `${folderBase}/_library` : "Set the project folder first"}
-                    disabled={!folderBase}
-                  />
-                </Field>
-                <Field label="Output folder">
-                  <TextInput
-                    value={outputFolderPath}
-                    onChange={(event) => setOutputFolderPath(event.target.value)}
-                    placeholder={folderBase ? `${folderBase}/_output` : "Set the project folder first"}
-                    disabled={!folderBase}
-                  />
-                </Field>
-              </div>
-            </div>
-
-            <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4">
-              {board.project.status === "archived" ? (
-                <Button disabled={busy} onClick={() => void setProjectArchived(false)}>
-                  <ArchiveRestore size={15} aria-hidden /> Restore project
-                </Button>
-              ) : (
-                <Button
-                  variant="danger"
-                  disabled={busy}
-                  onClick={() => void setProjectArchived(true)}
-                >
-                  <Archive size={15} aria-hidden /> Archive project
-                </Button>
-              )}
-              <div className="ml-auto flex gap-2">
-                <Button disabled={busy} onClick={() => setSettingsOpen(false)}>
-                  Cancel
-                </Button>
-                <Button
-                  variant="primary"
-                  disabled={busy || !projectTitle.trim()}
-                  onClick={() => void saveProjectSettings()}
-                >
-                  Save
-                </Button>
-              </div>
-            </div>
-          </div>
-        </Dialog>
       </>
     </LiveGate>
   );
