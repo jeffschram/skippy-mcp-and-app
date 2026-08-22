@@ -26,6 +26,33 @@ function truncate(text: unknown, max: number): string {
   return String(text ?? "").slice(0, max);
 }
 
+export function buildCodexArgs({
+  worktreePath,
+  threadId,
+  bypassPermissions,
+}: {
+  worktreePath: string;
+  threadId?: string | undefined;
+  bypassPermissions?: boolean | undefined;
+}): string[] {
+  const args = ["exec", "--json", "--cd", worktreePath, "--skip-git-repo-check", "--color", "never"];
+
+  if (bypassPermissions) {
+    // Codex's equivalent of --dangerously-skip-permissions. Chat-only, opt-in.
+    args.push("--dangerously-bypass-approvals-and-sandbox");
+  } else {
+    args.push("--sandbox", "workspace-write");
+  }
+
+  if (threadId) {
+    args.push("resume", threadId);
+  }
+
+  // The prompt goes over stdin ("-") to avoid argv length/quoting issues.
+  args.push("-");
+  return args;
+}
+
 /** Translate one codex JSONL item into zero or one HarnessEvent. */
 function eventForItem(phase: "started" | "updated" | "completed", item: any): HarnessEvent | null {
   switch (item?.type) {
@@ -85,17 +112,12 @@ export class CodexAdapter implements HarnessAdapter {
     let resultText: string | undefined;
     let turnFailed: string | undefined;
 
-    // New thread: `codex exec [opts] -`; resume: `codex exec resume <id> [opts] -`.
-    // The prompt goes over stdin ("-") to avoid argv length/quoting issues.
-    const args = threadId ? ["exec", "resume", threadId] : ["exec"];
-    args.push("--json", "--cd", worktreePath, "--skip-git-repo-check", "--color", "never");
-    if (request.bypassPermissions) {
-      // Codex's equivalent of --dangerously-skip-permissions. Chat-only, opt-in.
-      args.push("--dangerously-bypass-approvals-and-sandbox");
-    } else {
-      args.push("--sandbox", "workspace-write");
-    }
-    args.push("-");
+    // Exec-level options must precede the optional `resume` subcommand.
+    const args = buildCodexArgs({
+      worktreePath,
+      threadId,
+      bypassPermissions: request.bypassPermissions,
+    });
 
     return new Promise<HarnessTurnResult>((resolve) => {
       const child = spawn("codex", args, {
