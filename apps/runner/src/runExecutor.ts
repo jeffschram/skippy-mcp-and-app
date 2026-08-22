@@ -8,6 +8,11 @@
 import type { RunnerConfig } from "./config.js";
 import type { ClaimedRun, ControlPlane } from "./controlPlane.js";
 import type { HarnessAdapter, HarnessEvent } from "./harness/types.js";
+import fs from "node:fs";
+import fsp from "node:fs/promises";
+import path from "node:path";
+import { Readable } from "node:stream";
+import { collectArtifacts, materializeManifest } from "./fileWorkspace.js";
 import {
   assertGitRepo,
   assertInsideAllowedRoot,
@@ -82,18 +87,19 @@ export class RunExecutor {
 
       // Authorization boundary: the control-plane path must resolve inside the
       // runner's allowed root and be a real git checkout.
-      const repoPath = assertInsideAllowedRoot(run.project.localPath, config.allowedRoot);
-      await assertGitRepo(repoPath);
-
       const branchName =
         run.branchName ??
         (run.taskId ? `agent/task-${run.taskId.slice(-8)}-${slugify(run.project.title ?? "task")}` : `agent/chat-${run.chatId.slice(-8)}`);
-      const worktree = await ensureWorktree({
-        repoPath,
-        worktreeRoot: config.worktreeRoot,
-        baseBranch: run.baseBranch,
-        branchName,
-      });
+      let worktree: { worktreePath: string; branchName: string };
+      if ((run.workspaceMode ?? "code") === "temporary") {
+        await fsp.mkdir(config.worktreeRoot, { recursive: true });
+        worktree = { worktreePath: await fsp.mkdtemp(path.join(config.worktreeRoot, `run-${run.runId.slice(-8)}-`)), branchName };
+      } else {
+        if (!run.project.localPath) throw new Error("code project has no repository checkout on this host");
+        const repoPath = assertInsideAllowedRoot(run.project.localPath, config.allowedRoot);
+        await assertGitRepo(repoPath);
+        worktree = await ensureWorktree({ repoPath, worktreeRoot: config.worktreeRoot, baseBranch: run.baseBranch, branchName });
+      }
       // Provision dependencies BEFORE the harness session starts, so runs
       // never rediscover the environment and improvise package-manager
       // bootstraps (2026-08-21 six-gate autopsy). A failure degrades
@@ -101,7 +107,9 @@ export class RunExecutor {
       // improvised commands hit the normal approval gates.
       this.emit({ type: "status", payload: { phase: "provisioning", worktreePath: worktree.worktreePath } });
       await this.flushEvents(); // install can take minutes; show narration now
-      const provision = await provisionWorktree(worktree.worktreePath);
+      const provision = (run.workspaceMode ?? "code") === "temporary"
+        ? { status: "skipped" as const, message: "temporary non-code workspace", durationMs: 0 }
+        : await provisionWorktree(worktree.worktreePath);
       if (provision.status === "failed") {
         this.emit({ type: "error", payload: { phase: "provisioning", message: provision.message } });
       }
@@ -120,7 +128,10 @@ export class RunExecutor {
         worktreePath: worktree.worktreePath,
       });
 
-      const prompt = buildPrompt(run);
+      const materialized = await materializeManifest(worktree.worktreePath, run.inputManifest ?? []);
+      const outputRoot = path.join(worktree.worktreePath, ".skippy", "outputs");
+      await fsp.mkdir(outputRoot, { recursive: true, mode: 0o700 });
+      const prompt = buildPrompt(run, materialized.inputRoot, outputRoot, materialized.files);
       const turn = await this.adapter.runTurn({
         prompt,
         worktreePath: worktree.worktreePath,
@@ -198,6 +209,21 @@ export class RunExecutor {
           errorCategory: "harness",
           errorMessage: turn.errorMessage ?? "harness failed",
         });
+        return;
+      }
+
+      try {
+        await uploadRunArtifacts(plane, run, outputRoot);
+      } catch (error) {
+        await this.flushEvents();
+        await plane.updateRunStatus(run.runId, run.claimToken, "failed", { errorCategory: "artifact_upload_failed", errorMessage: (error instanceof Error ? error.message : String(error)).slice(0, 500) });
+        return;
+      }
+
+      if ((run.workspaceMode ?? "code") === "temporary") {
+        await this.flushEvents();
+        await plane.updateRunStatus(run.runId, run.claimToken, "in_review", { resultSummary: turn.resultText?.slice(0, 4000) ?? "Run completed.", verificationSummary: "non-code temporary workspace" });
+        await fsp.rm(worktree.worktreePath, { recursive: true, force: true });
         return;
       }
 
@@ -380,7 +406,7 @@ export function prTitle(
   return title ? `Agent: ${title}` : `Agent work on ${branchName}`;
 }
 
-function buildPrompt(run: ClaimedRun): string {
+function buildPrompt(run: ClaimedRun, inputRoot?: string, outputRoot?: string, files: Array<{ fileId: string; fileName: string; localPath?: string; required: boolean }> = []): string {
   const lines = [
     "You are executing a Skippy task inside a dedicated git worktree.",
     "Stay inside the worktree; never push, merge, or deploy — the runner handles publishing after approval.",
@@ -394,6 +420,25 @@ function buildPrompt(run: ClaimedRun): string {
   if (run.acceptanceCriteria?.length) {
     lines.push("## Acceptance criteria", ...run.acceptanceCriteria.map((c) => `- ${c}`), "");
   }
+  if (inputRoot) lines.push("## Temporary cloud file workspace", "Convex projectFiles records are canonical. These paths are isolated disposable copies for this run.", `Input directory: ${inputRoot}`, ...files.map((file) => `- ${file.required ? "required" : "optional"} ${file.fileId}: ${file.localPath ?? file.fileName}`), "");
+  if (outputRoot) lines.push("## Durable artifacts", `Write requested deliverables to ${outputRoot}. The runner uploads this directory after the harness exits; local paths are temporary and are never canonical.`, "");
   lines.push("When the work is complete, summarize what changed and how you verified it.");
   return lines.join("\n");
+}
+
+async function uploadRunArtifacts(plane: ControlPlane, run: ClaimedRun, outputRoot: string) {
+  if (!run.outputPolicy?.enabled) return [];
+  const artifacts = await collectArtifacts(outputRoot, { maxFiles: run.outputPolicy.maxFiles, maxFileBytes: run.outputPolicy.maxFileBytes, maxTotalBytes: run.outputPolicy.maxTotalBytes });
+  if (run.outputPolicy.required && artifacts.length === 0) throw new Error("required artifact output directory is empty");
+  const fileIds: string[] = [];
+  for (const artifact of artifacts) {
+    const begun = await plane.beginArtifactUpload(run.runId, run.claimToken, { ...artifact, required: run.outputPolicy.required });
+    if (begun.status === "ready") { fileIds.push(begun.fileId); continue; }
+    if (!begun.uploadUrl) throw new Error(`upload URL unavailable for artifact ${artifact.relativePath}`);
+    const response = await fetch(begun.uploadUrl, { method: "POST", headers: { "Content-Type": artifact.mimeType }, body: Readable.toWeb(fs.createReadStream(artifact.absolutePath)) as any, duplex: "half" } as any);
+    if (!response.ok) throw new Error(`artifact upload failed for ${artifact.relativePath} (HTTP ${response.status})`);
+    const { storageId } = await response.json() as { storageId: string };
+    await plane.finalizeArtifactUpload(run.runId, run.claimToken, { fileId: begun.fileId, storageId, sha256: artifact.sha256 }); fileIds.push(begun.fileId);
+  }
+  return fileIds;
 }

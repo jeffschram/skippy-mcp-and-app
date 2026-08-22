@@ -98,6 +98,9 @@ async function main() {
     os: `${os.platform()} ${os.release()}`,
     arch: os.arch(),
     maxConcurrency: config.maxConcurrency,
+    projectFileManifests: true,
+    artifactUploads: true,
+    isolatedChatAttachments: true,
   });
   log("registered host", { hostId: registration.hostId, harnesses: config.harnesses });
 

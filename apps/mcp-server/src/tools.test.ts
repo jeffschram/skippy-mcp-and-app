@@ -95,6 +95,10 @@ function createFakeClient(): { client: SkippyClient; calls: Array<{ name: string
       generateProjectFileUploadUrl: (brainInstanceId) => record("generateProjectFileUploadUrl", brainInstanceId),
       registerProjectFile: (brainInstanceId, input) => record("registerProjectFile", brainInstanceId, input),
       listProjectFiles: (brainInstanceId, input) => record("listProjectFiles", brainInstanceId, input),
+      getProjectFile: (brainInstanceId, input) => record("getProjectFile", brainInstanceId, input),
+      beginProjectFileUpload: (brainInstanceId, input) => record("beginProjectFileUpload", brainInstanceId, input),
+      finalizeProjectFileUpload: (brainInstanceId, input) => record("finalizeProjectFileUpload", brainInstanceId, input),
+      abortProjectFileUpload: (brainInstanceId, input) => record("abortProjectFileUpload", brainInstanceId, input),
       listQuickCaptures: (brainInstanceId, input) => record("listQuickCaptures", brainInstanceId, input),
       markQuickCaptureHandled: (brainInstanceId, input) =>
         record("markQuickCaptureHandled", brainInstanceId, input),

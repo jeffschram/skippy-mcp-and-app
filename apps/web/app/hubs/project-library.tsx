@@ -12,6 +12,7 @@ import {
   FileText,
   Image as ImageIcon,
   Paperclip,
+  RotateCcw,
   Trash2,
   Upload,
   X,
@@ -43,6 +44,10 @@ type LibraryFile = {
   mimeType: string;
   sizeBytes: number;
   uploadedBy: "user" | "harness";
+  kind?: "library_input" | "generated_artifact";
+  status?: "pending_upload" | "ready" | "failed" | "deleted";
+  sha256?: string;
+  runId?: string;
   note?: string;
   createdAt: number;
   /** Time-limited download URL resolved at read time — never persisted. */
@@ -70,7 +75,7 @@ let uploadSeq = 0;
 
 /** A file that finished the upload+register flow, ready to reference elsewhere. */
 export type UploadedProjectFile = {
-  storageId: string;
+  fileId: string;
   fileName: string;
   mimeType: string;
   sizeBytes: number;
@@ -86,8 +91,8 @@ export type UploadedProjectFile = {
  * list; an optional note labels the registered library rows.
  */
 export function useProjectFileUploader(projectId: string, taskId?: string) {
-  const generateUploadUrl = useMutation(api.projectFiles.generateUploadUrlForViewer);
-  const registerFile = useMutation(api.projectFiles.registerFileForViewer);
+  const beginUpload = useMutation(api.projectFiles.beginUploadForViewer);
+  const finalizeUpload = useMutation(api.projectFiles.finalizeUploadForViewer);
   const toast = useToast();
   const [entries, setEntries] = useState<UploadEntry[]>([]);
 
@@ -118,36 +123,28 @@ export function useProjectFileUploader(projectId: string, taskId?: string) {
       }
       setEntries((current) => [...current, { id, fileName: check.fileName, status: "uploading" }]);
       try {
-        const uploadUrl = (await generateUploadUrl({})) as string;
+        const bytes = await file.arrayBuffer();
+        const sha256 = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))).map((byte) => byte.toString(16).padStart(2, "0")).join("");
+        const begun = await beginUpload({ projectId: projectId as any, ...(targetTaskId ? { taskId: targetTaskId as any } : {}), kind: "library_input", fileName: check.fileName, mimeType: check.mimeType, sizeBytes: check.sizeBytes, ...(options?.note ? { note: options.note } : {}), uploadKey: crypto.randomUUID() }) as any;
+        const uploadUrl = begun.uploadUrl as string;
         const response = await fetch(uploadUrl, {
           method: "POST",
           headers: { "Content-Type": check.mimeType },
-          body: file,
+          body: bytes,
         });
         if (!response.ok) throw new Error(`upload failed (HTTP ${response.status})`);
         const { storageId } = (await response.json()) as { storageId: string };
-        await registerFile({
-          projectId: projectId as any,
-          ...(targetTaskId ? { taskId: targetTaskId as any } : {}),
-          storageId: storageId as any,
-          fileName: check.fileName,
-          mimeType: check.mimeType,
-          sizeBytes: check.sizeBytes,
-          ...(options?.note ? { note: options.note } : {}),
-        });
+        await finalizeUpload({ fileId: begun.fileId as any, storageId: storageId as any, sha256 });
         patchEntry(id, { status: "done" });
         done += 1;
-        uploaded.push({
-          storageId,
-          fileName: check.fileName,
-          mimeType: check.mimeType,
-          sizeBytes: check.sizeBytes,
-        });
+        uploaded.push({ fileId: begun.fileId, fileName: check.fileName, mimeType: check.mimeType, sizeBytes: check.sizeBytes });
         // The reactive file list shows the registered row; clear the transient status.
         window.setTimeout(() => removeEntry(id), 2500);
       } catch (error) {
         const reason = error instanceof Error ? error.message : "upload failed";
         patchEntry(id, { status: "failed", reason });
+        // Pending rows remain diagnostic and cleanup-safe; abort is best effort
+        // when the failure happened after begin.
         failed += 1;
         toast(`Could not upload ${check.fileName}: ${reason}`, "error");
       }
@@ -286,6 +283,7 @@ function UploadZone({ onFiles, compact }: { onFiles: (files: File[]) => void; co
 
 function FileRow({ file, compact }: { file: LibraryFile; compact?: boolean }) {
   const deleteFile = useMutation(api.projectFiles.deleteFileForViewer);
+  const restoreFile = useMutation(api.projectFiles.restoreFileForViewer);
   const toast = useToast();
   const [confirming, setConfirming] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -345,11 +343,14 @@ function FileRow({ file, compact }: { file: LibraryFile; compact?: boolean }) {
           <span className="text-sm font-bold text-inherit [overflow-wrap:anywhere]">{file.fileName}</span>
         )}
         <span className="text-[12.5px] text-muted-foreground">
-          {formatFileSize(file.sizeBytes)} · {formatUploadDate(file.createdAt)}
+          {file.kind === "generated_artifact" ? "Generated artifact" : "Library input"} · {file.status ?? "ready"} · {formatFileSize(file.sizeBytes)} · {formatUploadDate(file.createdAt)}
+          {file.runId ? ` · run ${file.runId.slice(-8)}` : ""}{file.sha256 ? ` · SHA ${file.sha256.slice(0, 10)}` : " · legacy hash pending"}
         </span>
       </div>
       <div className="ml-auto flex items-center gap-1.5">
-        {confirming ? (
+        {file.status === "deleted" ? (
+          <IconButton small aria-label={`Restore ${file.fileName}`} title="Restore" onClick={() => void restoreFile({ fileId: file._id as any })}><RotateCcw size={14} aria-hidden /></IconButton>
+        ) : confirming ? (
           <button
             type="button"
             className="cursor-pointer rounded-lg border border-red bg-transparent px-2.5 py-1 text-[13px] font-bold text-red disabled:cursor-default disabled:opacity-60"
@@ -380,7 +381,7 @@ export function ProjectLibrarySection({
   const viewerReady = useViewerReady();
   const files = useQuery(
     api.projectFiles.listFilesForViewer,
-    viewerReady ? { projectId: projectId as any } : "skip",
+    viewerReady ? { projectId: projectId as any, includeDeleted: true } : "skip",
   ) as LibraryFile[] | undefined;
   const { entries, uploadFiles, removeEntry } = useProjectFileUploader(projectId);
   const [openState, setOpenState] = useState(false);
@@ -417,10 +418,12 @@ export function ProjectLibrarySection({
               </p>
             ) : null
           ) : (
-            <div className="grid gap-2">
-              {files.map((file) => (
-                <FileRow key={file._id} file={file} />
-              ))}
+            <div className="grid gap-4">
+              {(["library_input", "generated_artifact"] as const).map((kind) => {
+                const grouped = files.filter((file) => (file.kind ?? "library_input") === kind);
+                if (!grouped.length) return null;
+                return <section key={kind} className="grid gap-2"><h4 className="m-0 text-xs uppercase tracking-wide text-muted-foreground">{kind === "library_input" ? "Library inputs" : "Generated artifacts"}</h4>{grouped.map((file) => <FileRow key={file._id} file={file} />)}</section>;
+              })}
             </div>
           )}
         </div>

@@ -96,6 +96,10 @@ const generateProjectFileUploadUrlForBrainRef = makeFunctionReference<"mutation"
 );
 const registerProjectFileForBrainRef = makeFunctionReference<"mutation">("projectFiles:registerFileForBrain");
 const listProjectFilesForBrainRef = makeFunctionReference<"query">("projectFiles:listFilesForBrain");
+const getProjectFileForBrainRef = makeFunctionReference<"query">("projectFiles:getFileForBrain");
+const beginProjectFileUploadForBrainRef = makeFunctionReference<"mutation">("projectFiles:beginUploadForBrain");
+const finalizeProjectFileUploadForBrainRef = makeFunctionReference<"mutation">("projectFiles:finalizeUploadForBrain");
+const abortProjectFileUploadForBrainRef = makeFunctionReference<"mutation">("projectFiles:abortUploadForBrain");
 const listQuickCapturesForBrainRef = makeFunctionReference<"query">("knowledge:listQuickCapturesForBrain");
 // Life layer.
 const upsertRecurrenceRef = makeFunctionReference<"mutation">("recurrences:upsertRecurrence");
@@ -244,6 +248,10 @@ export function createConvexSkippyClient(convexUrl: string, authToken?: string):
       client.mutation(registerProjectFileForBrainRef, { brainInstanceId, ...input }),
     listProjectFiles: (brainInstanceId, input) =>
       client.query(listProjectFilesForBrainRef, { brainInstanceId, ...input }),
+    getProjectFile: (brainInstanceId, input) => client.query(getProjectFileForBrainRef, { brainInstanceId, ...input }),
+    beginProjectFileUpload: (brainInstanceId, input) => client.mutation(beginProjectFileUploadForBrainRef, { brainInstanceId, ...input }),
+    finalizeProjectFileUpload: (brainInstanceId, input) => client.mutation(finalizeProjectFileUploadForBrainRef, { brainInstanceId, ...input }),
+    abortProjectFileUpload: (brainInstanceId, input) => client.mutation(abortProjectFileUploadForBrainRef, { brainInstanceId, ...input }),
     listQuickCaptures: (brainInstanceId, input) =>
       client.query(listQuickCapturesForBrainRef, { brainInstanceId, ...input }),
     upsertRecurrence: (brainInstanceId, input) =>

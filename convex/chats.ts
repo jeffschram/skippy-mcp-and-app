@@ -27,27 +27,30 @@ const MAX_MESSAGE_CHARS = 8000;
 /** Max files attachable to a single chat message. */
 const MAX_MESSAGE_ATTACHMENTS = 8;
 
-const attachmentArg = v.object({
-  storageId: v.id("_storage"),
-  fileName: v.string(),
-  mimeType: v.string(),
-  sizeBytes: v.number(),
-});
+const attachmentArg = v.union(
+  v.object({ fileId: v.id("projectFiles") }),
+  v.object({ storageId: v.id("_storage"), fileName: v.string(), mimeType: v.string(), sizeBytes: v.number() }),
+);
 
 /** Resolve short-lived download URLs for a message's attachments at read time. */
 async function attachmentsWithUrls(
-  storage: { getUrl(storageId: string): Promise<string | null> },
-  attachments: Array<{ storageId: string; fileName: string; mimeType: string; sizeBytes: number }> | undefined,
+  ctx: any,
+  attachments: Array<any> | undefined,
 ) {
   if (!attachments?.length) return undefined;
   const resolved = [];
   for (const attachment of attachments) {
+    const file = attachment.fileId ? await ctx.db.get(attachment.fileId) : undefined;
+    if (attachment.fileId && (!file || (file.status ?? "ready") !== "ready")) continue;
+    const storageId = file?.storageId ?? attachment.storageId;
     resolved.push({
-      fileName: attachment.fileName,
-      mimeType: attachment.mimeType,
-      sizeBytes: attachment.sizeBytes,
+      fileId: file?._id,
+      fileName: file?.fileName ?? attachment.fileName,
+      mimeType: file?.mimeType ?? attachment.mimeType,
+      sizeBytes: file?.sizeBytes ?? attachment.sizeBytes,
+      sha256: file?.sha256,
       // Time-limited URL — resolved fresh on every read, never persisted.
-      url: await storage.getUrl(attachment.storageId),
+      url: storageId ? await ctx.storage.getUrl(storageId) : null,
     });
   }
   return resolved;
@@ -215,7 +218,7 @@ export const chatForScopeForViewer = queryGeneric({
           _id: m._id,
           role: m.role,
           content: m.content,
-          attachments: await attachmentsWithUrls(ctx.storage, m.attachments),
+          attachments: await attachmentsWithUrls(ctx, m.attachments),
           status: m.status,
           error: m.error,
           createdAt: m.createdAt,
@@ -251,7 +254,14 @@ export const sendChatMessageForViewer = mutationGeneric({
       }
       // Same size/type gate as the library register path — the composer
       // pre-checks, but the mutation is the real boundary.
-      for (const attachment of attachments) validateProjectFileInput(attachment);
+      for (const attachment of attachments) {
+        if ("fileId" in attachment) {
+          const file = await ctx.db.get(attachment.fileId);
+          if (!file || file.brainInstanceId !== brain._id || file.projectId !== args.projectId || (file.status ?? "ready") !== "ready") {
+            throw new Error("attachment file is not a ready file in this project");
+          }
+        } else validateProjectFileInput(attachment);
+      }
     }
 
     const now = Date.now();
@@ -503,7 +513,7 @@ export const claimNextChatTurn = mutationGeneric({
         // Attachment metadata plus short-lived download URLs so the runner
         // can materialize the files into the project's _library before the
         // harness turn starts. URLs expire — the runner downloads promptly.
-        attachments: await attachmentsWithUrls(ctx.storage, userMessage?.attachments),
+        attachments: await attachmentsWithUrls(ctx, userMessage?.attachments),
       };
     }
     return null;

@@ -462,6 +462,9 @@ async function queueTaskExecution(
     .query("agentRuns")
     .withIndex("by_brain_task", (q: any) => q.eq("brainInstanceId", brainId).eq("taskId", opts.taskId))
     .collect();
+  const frozenInputs = (await ctx.db.query("projectFiles").withIndex("by_brain_task", (q: any) =>
+    q.eq("brainInstanceId", brainId).eq("taskId", opts.taskId),
+  ).collect()).filter((file: any) => (file.status ?? "ready") === "ready" && (file.kind ?? "library_input") === "library_input");
 
   const runId = await ctx.db.insert("agentRuns", {
     brainInstanceId: brainId,
@@ -474,6 +477,8 @@ async function queueTaskExecution(
     baseBranch: project.defaultBaseBranch ?? "main",
     executionBrief: task.executionBrief,
     acceptanceCriteria: task.acceptanceCriteria,
+    inputFileRefs: frozenInputs.map((file: any) => ({ fileId: file._id, required: file.required ?? true })),
+    fileLifecycleEnabled: frozenInputs.length > 0,
     approvalPolicy: config.approvalPolicy ?? { requirePushApproval: true },
     claimVersion: 0,
     queuedAt: now,
@@ -781,6 +786,9 @@ export const registerHost = mutationGeneric({
     os: v.optional(v.string()),
     arch: v.optional(v.string()),
     maxConcurrency: v.optional(v.number()),
+    projectFileManifests: v.optional(v.boolean()),
+    artifactUploads: v.optional(v.boolean()),
+    isolatedChatAttachments: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const host = await requireHost(ctx, args.hostToken);
@@ -791,6 +799,9 @@ export const registerHost = mutationGeneric({
         os: args.os,
         arch: args.arch,
         maxConcurrency: Math.max(1, args.maxConcurrency ?? 1),
+        projectFileManifests: args.projectFileManifests ?? false,
+        artifactUploads: args.artifactUploads ?? false,
+        isolatedChatAttachments: args.isolatedChatAttachments ?? false,
       },
       lastHeartbeatAt: now,
       updatedAt: now,
@@ -844,7 +855,7 @@ export const claimableRuns = queryGeneric({
       .withIndex("by_brain_status", (q: any) => q.eq("brainInstanceId", host.brainInstanceId).eq("status", "queued"))
       .collect();
     const harnesses: string[] = host.capabilities?.harnesses ?? [];
-    return queued.filter((run: any) => harnesses.includes(run.harness)).map((run: any) => run._id);
+    return queued.filter((run: any) => harnesses.includes(run.harness) && (!(run.inputFileRefs?.length) || host.capabilities?.projectFileManifests)).map((run: any) => run._id);
   },
 });
 
@@ -874,6 +885,7 @@ export const claimNextRun = mutationGeneric({
 
     for (const run of queued) {
       if (!harnesses.includes(run.harness)) continue;
+      if (run.inputFileRefs?.length && !host.capabilities?.projectFileManifests) continue;
       // The project must map to THIS host and be enabled.
       const config = await ctx.db
         .query("projectExecutionConfigs")
@@ -914,6 +926,15 @@ export const claimNextRun = mutationGeneric({
       // Task title rides along so the runner can name the PR after the task
       // instead of the generic project string (unscannable PR list, #117–#124).
       const task = run.taskId ? await ctx.db.get(run.taskId) : null;
+      const inputManifest = [];
+      for (const ref of run.inputFileRefs ?? []) {
+        const file = await ctx.db.get(ref.fileId);
+        if (!file || (file.status ?? "ready") !== "ready" || !file.storageId) {
+          if (ref.required) throw new Error(`required input ${ref.fileId} is no longer ready`);
+          continue;
+        }
+        inputManifest.push({ fileId: file._id, fileName: file.fileName, mimeType: file.mimeType, sizeBytes: file.sizeBytes, sha256: file.sha256, required: ref.required, url: await ctx.storage.getUrl(file.storageId) });
+      }
       // The authorized execution brief and project configuration — nothing more.
       return {
         runId: run._id,
@@ -929,6 +950,9 @@ export const claimNextRun = mutationGeneric({
         baseBranch: run.baseBranch,
         executionBrief: run.executionBrief,
         acceptanceCriteria: run.acceptanceCriteria,
+        workspaceMode: project?.kind === "code" ? "code" : "temporary",
+        inputManifest,
+        outputPolicy: { enabled: host.capabilities?.artifactUploads ?? false, required: run.requiredArtifacts ?? false, maxFiles: 32, maxFileBytes: 26_214_400, maxTotalBytes: 104_857_600 },
         approvalPolicy: run.approvalPolicy,
         verifyCommand: config.verifyCommand,
         project: {
@@ -983,6 +1007,12 @@ export const updateRunStatus = mutationGeneric({
     // resuming `running` after an approval settles, lease refreshes).
     if (!allowedFrom || (run.status !== args.status && !allowedFrom.includes(run.status))) {
       throw new Error(`illegal run transition ${run.status} -> ${args.status}`);
+    }
+    if (args.status === "in_review" && run.requiredArtifacts) {
+      const artifacts = await ctx.db.query("projectFiles").withIndex("by_run", (q: any) => q.eq("runId", run._id)).collect();
+      if (!artifacts.some((file: any) => (file.status ?? "ready") === "ready" && (file.kind ?? "library_input") === "generated_artifact")) {
+        throw new Error("required artifacts must be durable before review");
+      }
     }
     const now = Date.now();
     const terminal = (TERMINAL_RUN_STATUSES as readonly string[]).includes(args.status);

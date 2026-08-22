@@ -1176,35 +1176,6 @@ function ProjectSettingsPanel({
         </div>
       </div>
 
-      <div className="border-t pt-4">
-        <h3 className="mb-3 text-sm">Folders</h3>
-        <div className="grid gap-3">
-          <Field label="Project local folder">
-            <TextInput
-              value={localPath}
-              onChange={(event) => setLocalPath(event.target.value)}
-              placeholder="/Users/you/projects/project"
-            />
-          </Field>
-          <Field label="Library folder">
-            <TextInput
-              value={assetsFolderPath}
-              onChange={(event) => setAssetsFolderPath(event.target.value)}
-              placeholder={folderBase ? `${folderBase}/_library` : "Set the project folder first"}
-              disabled={!folderBase}
-            />
-          </Field>
-          <Field label="Output folder">
-            <TextInput
-              value={outputFolderPath}
-              onChange={(event) => setOutputFolderPath(event.target.value)}
-              placeholder={folderBase ? `${folderBase}/_output` : "Set the project folder first"}
-              disabled={!folderBase}
-            />
-          </Field>
-        </div>
-      </div>
-
       <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4">
         {project.status === "archived" ? (
           <Button disabled={busy} onClick={() => void setProjectArchived(false)}>
