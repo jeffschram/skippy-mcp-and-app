@@ -286,6 +286,10 @@ function createFakeClient(overrides: Partial<SkippyClient> = {}): SkippyClient {
         url: "https://files.convex.cloud/project_file_123?token=ephemeral",
       },
     ],
+    getProjectFile: async (_brainInstanceId, input) => ({ _id: input.fileId }),
+    beginProjectFileUpload: async () => ({ fileId: "file1", uploadUrl: "https://upload.example", status: "pending_upload" }),
+    finalizeProjectFileUpload: async (_brainInstanceId, input) => ({ fileId: input.fileId, status: "ready" }),
+    abortProjectFileUpload: async (_brainInstanceId, input) => ({ fileId: input.fileId, status: "failed" }),
     listQuickCaptures: async (_brainInstanceId, input) => [
       {
         _id: "quick_capture_123",
@@ -592,15 +596,11 @@ describe("Skippy MCP manifest", () => {
         expect(harnessBootstrap.messages[0].content.text).toContain("First 5 Minutes");
         expect(harnessBootstrap.messages[0].content.text).toContain("`brief_task`");
         expect(harnessBootstrap.messages[0].content.text).toContain("Project Folders");
-        expect(harnessBootstrap.messages[0].content.text).toContain(
-          "Read user-provided inputs from `effectiveAssetsPath`; write generated artifacts and deliverables to `effectiveOutputPath`.",
-        );
-        expect(harnessBootstrap.messages[0].content.text).toContain("`mkdir -p` on first write");
+        expect(harnessBootstrap.messages[0].content.text).toContain("Runner-provided input/output paths are isolated temporary copies");
+        expect(harnessBootstrap.messages[0].content.text).toContain("`begin_project_file_upload`");
         expect(harnessBootstrap.messages[0].content.text).toContain("cloud-canonical");
-        expect(harnessBootstrap.messages[0].content.text).toContain("`list_project_files`");
-        expect(harnessBootstrap.messages[0].content.text).toContain(
-          "Files found only locally are NOT in the library unless registered",
-        );
+        expect(harnessBootstrap.messages[0].content.text).toContain("exact project file manifests");
+        expect(harnessBootstrap.messages[0].content.text).toContain("Files found only locally are NOT durable");
         expect(harnessBootstrap.messages[0].content.text).toContain(
           "Never write deliverables into the project's code repo unless they ARE the product.",
         );

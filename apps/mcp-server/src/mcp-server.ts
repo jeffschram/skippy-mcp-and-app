@@ -361,12 +361,11 @@ function buildHarnessBootstrapMessage({
     "",
     "## Project Folders",
     "",
-    "- Project payloads (task briefs, `get_current_context`) include `effectiveAssetsPath` and `effectiveOutputPath`, derived from the project local folder (`<localPath>/_library` and `<localPath>/_output`) unless the user set explicit overrides in project Settings.",
-    "- Read user-provided inputs from `effectiveAssetsPath`; write generated artifacts and deliverables to `effectiveOutputPath`. An explicit user instruction always overrides these defaults.",
-    "- The project library is cloud-canonical: user-provided files live in Convex storage, and the local `_library` folder (`effectiveAssetsPath`) is just the harness's materialization of it.",
-    "- At task start, call `list_project_files` for the project (and task) and download any relevant files into `effectiveAssetsPath` before working, skipping files already present with a matching size. Download URLs are ephemeral — fetch promptly.",
-    "- Files found only locally are NOT in the library unless registered: upload with `generate_project_file_upload_url` + HTTP POST, then `register_project_file`.",
-    "- Skippy never checks these folders exist — create them with `mkdir -p` on first write.",
+    "- Convex projectFiles records are canonical. Runner-provided input/output paths are isolated temporary copies for one run, never durable product locations.",
+    "- Read exact selected manifest paths and write deliverables only to the runner-designated output directory; report durable artifact file IDs.",
+    "- The project library is cloud-canonical: stable projectFiles records and Convex blobs are authoritative; local copies are disposable.",
+    "- Capable runners freeze and hash-verify task inputs before launch. Otherwise use exact project file manifests and verify SHA-256; download URLs are ephemeral.",
+    "- Files found only locally are NOT durable: use `begin_project_file_upload` + HTTP POST + `finalize_project_file_upload`; the generate/register pair is legacy compatibility.",
     "- Never write deliverables into the project's code repo unless they ARE the product.",
     "",
     "## Key Tools",
@@ -2163,6 +2162,7 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
           .boolean()
           .optional()
           .describe("If true, mark the task done immediately instead of leaving it for owner review."),
+        artifactFileIds: z.array(z.string()).optional().describe("Exact ready generated-artifact projectFiles IDs produced by this task."),
       }),
     },
     async (args) =>
@@ -2177,6 +2177,7 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
             prNumber?: number;
             prStatus?: "open" | "merged" | "closed";
             markDone?: boolean;
+            artifactFileIds?: string[];
           },
         ),
       ),
@@ -2217,6 +2218,38 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
       return toolResult(projectFilesListConfirmation(input, await tools.listProjectFiles(input)));
     },
   );
+
+  server.registerTool("get_project_file_manifest", {
+    title: "Get exact project file manifest", description: "Return exact ready projectFiles records with fresh ephemeral URLs, hashes, sizes, MIME types, and required semantics. Convex records are canonical; any local paths are temporary runner copies.",
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    inputSchema: z.object({ projectId: z.string(), taskId: z.string().optional() }),
+  }, async (args) => toolResult(await tools.listProjectFiles(stripUndefined(args) as ListProjectFilesInput)));
+
+  server.registerTool("get_project_file", {
+    title: "Get an exact project file", description: "Resolve one stable projectFiles ID to its immutable metadata and a fresh ephemeral download URL.",
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }, inputSchema: z.object({ fileId: z.string() }),
+  }, async (args) => toolResult(await tools.getProjectFile(args as { fileId: string })));
+
+  server.registerTool("begin_project_file_upload", {
+    title: "Begin a project file upload", description: "Create a pending canonical file record and return its stable fileId plus a short-lived upload URL. Reuse uploadKey when retrying the same logical upload.",
+    annotations: { destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    inputSchema: z.object({ projectId: z.string(), taskId: z.string().optional(), runId: z.string().optional(), kind: z.enum(["library_input", "generated_artifact"]), fileName: z.string(), mimeType: z.string(), sizeBytes: z.number().int().positive().max(PROJECT_FILE_MAX_BYTES), required: z.boolean().optional(), note: z.string().optional(), uploadKey: z.string().optional() }),
+  }, async (args) => toolResult(await tools.beginProjectFileUpload(stripUndefined(args) as any)));
+
+  server.registerTool("finalize_project_file_upload", {
+    title: "Finalize a project file upload", description: "Validate authoritative blob metadata and atomically make a pending file durable and visible. Replay with the same storageId and SHA-256 is idempotent.",
+    annotations: { destructiveHint: false, idempotentHint: true, openWorldHint: false }, inputSchema: z.object({ fileId: z.string(), storageId: z.string(), sha256: z.string().regex(/^[a-fA-F0-9]{64}$/) }),
+  }, async (args) => toolResult(await tools.finalizeProjectFileUpload(args as any)));
+
+  server.registerTool("abort_project_file_upload", {
+    title: "Abort a project file upload", description: "Mark an incomplete upload failed and remove the supplied orphan blob when present.",
+    annotations: { destructiveHint: true, idempotentHint: true, openWorldHint: false }, inputSchema: z.object({ fileId: z.string(), storageId: z.string().optional(), reason: z.string().optional() }),
+  }, async (args) => toolResult(await tools.abortProjectFileUpload(stripUndefined(args) as any)));
+
+  server.registerTool("list_task_artifacts", {
+    title: "List task artifacts", description: "List durable generated artifacts attached to a task. Returned file IDs are stable; URLs are ephemeral.", annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    inputSchema: z.object({ projectId: z.string(), taskId: z.string() }),
+  }, async (args) => { const result: any = await tools.listProjectFiles(args as ListProjectFilesInput); const rows = Array.isArray(result) ? result.filter((f: any) => f.kind === "generated_artifact") : result; return toolResult(rows); });
 
   server.registerTool(
     "generate_project_file_upload_url",

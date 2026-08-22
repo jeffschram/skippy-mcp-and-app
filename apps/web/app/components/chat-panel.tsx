@@ -573,7 +573,7 @@ function ChatSurface({
         ...queryArgs,
         content,
         harness: boundHarness ?? pickedHarness,
-        ...(sentAttachments.length ? { attachments: sentAttachments } : {}),
+        ...(sentAttachments.length ? { attachments: sentAttachments.map(({ fileId }) => ({ fileId })) } : {}),
       } as any);
       return true;
     } catch (error) {
@@ -711,7 +711,7 @@ function ChatSurface({
         <div className="flex flex-wrap items-center gap-1.5 border-t bg-card p-3 desk:px-4">
           {attachments.map((attachment, index) => (
             <span
-              key={`${attachment.storageId}:${index}`}
+              key={`${attachment.fileId}:${index}`}
               className="flex max-w-60 items-center gap-1.5 rounded-lg border bg-secondary px-2.5 py-1.5 text-xs"
             >
               <FileIcon size={14} aria-hidden className="shrink-0 text-muted-foreground" />

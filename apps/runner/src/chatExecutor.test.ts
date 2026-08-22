@@ -36,27 +36,23 @@ function makeTurn(overrides: Partial<ClaimedChatTurn> = {}): ClaimedChatTurn {
 }
 
 function mockFetchWithBody(body: string) {
-  const bytes = new TextEncoder().encode(body);
-  return vi.spyOn(globalThis, "fetch").mockResolvedValue({
-    ok: true,
-    status: 200,
-    arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
-  } as unknown as Response);
+  return vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(body));
 }
 
 describe("materializeChatAttachments", () => {
-  it("downloads attachments into the assets folder and returns local paths", async () => {
+  it("downloads attachments into an isolated turn folder and returns stable-ID paths", async () => {
     const assetsPath = path.join(tmpDir, "_library");
     mockFetchWithBody("hello attachment");
     const result = await materializeChatAttachments(
       {
-        assetsPath,
-        attachments: [{ fileName: "notes.txt", mimeType: "text/plain", sizeBytes: 16, url: "https://storage.example/1" }],
+        turnId: "turn-1", assetsPath,
+        attachments: [{ fileId: "file-aaaaaaaaaaaa", fileName: "notes.txt", mimeType: "text/plain", sizeBytes: 16, url: "https://storage.example/1" }],
       },
       tmpDir,
     );
-    expect(result).toEqual([{ fileName: "notes.txt", localPath: path.join(assetsPath, "notes.txt") }]);
-    expect(fs.readFileSync(path.join(assetsPath, "notes.txt"), "utf8")).toBe("hello attachment");
+    const expected = path.join(tmpDir, ".skippy-chat-turns", "turn-1", ".skippy", "inputs", "aaaaaaaaaaaa--notes.txt");
+    expect(result).toEqual([{ fileName: "notes.txt", localPath: expected }]);
+    expect(fs.readFileSync(expected, "utf8")).toBe("hello attachment");
   });
 
   it("strips path segments from attachment file names", async () => {
@@ -64,29 +60,29 @@ describe("materializeChatAttachments", () => {
     mockFetchWithBody("x");
     const result = await materializeChatAttachments(
       {
-        assetsPath,
-        attachments: [{ fileName: "../../evil.txt", mimeType: "text/plain", sizeBytes: 1, url: "https://storage.example/1" }],
+        turnId: "turn-2", assetsPath,
+        attachments: [{ fileId: "file-bbbbbbbbbbbb", fileName: "../../evil.txt", mimeType: "text/plain", sizeBytes: 1, url: "https://storage.example/1" }],
       },
       tmpDir,
     );
-    expect(result[0]?.localPath).toBe(path.join(assetsPath, "evil.txt"));
+    expect(result[0]?.localPath).toBe(path.join(tmpDir, ".skippy-chat-turns", "turn-2", ".skippy", "inputs", "bbbbbbbbbbbb--evil.txt"));
     expect(fs.existsSync(path.join(tmpDir, "..", "evil.txt"))).toBe(false);
   });
 
-  it("skips the download when an identically sized copy already exists", async () => {
+  it("does not trust an identically sized shared-basename copy", async () => {
     const assetsPath = path.join(tmpDir, "_library");
     fs.mkdirSync(assetsPath, { recursive: true });
     fs.writeFileSync(path.join(assetsPath, "notes.txt"), "abcd");
-    const fetchSpy = mockFetchWithBody("ignored");
+    const fetchSpy = mockFetchWithBody("fresh");
     const result = await materializeChatAttachments(
       {
-        assetsPath,
-        attachments: [{ fileName: "notes.txt", mimeType: "text/plain", sizeBytes: 4, url: "https://storage.example/1" }],
+        turnId: "turn-3", assetsPath,
+        attachments: [{ fileName: "notes.txt", mimeType: "text/plain", sizeBytes: 5, url: "https://storage.example/1" }],
       },
       tmpDir,
     );
-    expect(fetchSpy).not.toHaveBeenCalled();
-    expect(result[0]?.localPath).toBe(path.join(assetsPath, "notes.txt"));
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    expect(result[0]?.localPath).toContain(".skippy-chat-turns");
   });
 
   it("degrades to a filename mention when the download fails", async () => {
@@ -112,7 +108,7 @@ describe("materializeChatAttachments", () => {
     expect(result).toEqual([{ fileName: "a.png" }]);
   });
 
-  it("refuses an assets folder outside the allowed root", async () => {
+  it("ignores an outside legacy assets folder and still isolates the turn", async () => {
     const outside = fs.mkdtempSync(path.join(os.tmpdir(), "skippy-outside-"));
     try {
       const fetchSpy = mockFetchWithBody("x");
@@ -123,8 +119,8 @@ describe("materializeChatAttachments", () => {
         },
         tmpDir,
       );
-      expect(fetchSpy).not.toHaveBeenCalled();
-      expect(result).toEqual([{ fileName: "a.txt" }]);
+      expect(fetchSpy).toHaveBeenCalledOnce();
+      expect(result[0]?.localPath).toContain(path.join(tmpDir, ".skippy-chat-turns"));
     } finally {
       fs.rmSync(outside, { recursive: true, force: true });
     }

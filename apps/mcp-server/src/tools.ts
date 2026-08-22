@@ -249,6 +249,7 @@ export type SkippyClient = {
       prNumber?: number;
       prStatus?: "open" | "merged" | "closed";
       markDone?: boolean;
+      artifactFileIds?: string[];
       actorId?: string;
     },
   ): Promise<unknown>;
@@ -342,6 +343,10 @@ export type SkippyClient = {
   generateProjectFileUploadUrl(brainInstanceId: string): Promise<unknown>;
   registerProjectFile(brainInstanceId: string, input: RegisterProjectFileInput & { actorId?: string }): Promise<unknown>;
   listProjectFiles(brainInstanceId: string, input: ListProjectFilesInput): Promise<unknown>;
+  getProjectFile(brainInstanceId: string, input: { fileId: string }): Promise<unknown>;
+  beginProjectFileUpload(brainInstanceId: string, input: BeginProjectFileUploadInput & { actorId?: string }): Promise<unknown>;
+  finalizeProjectFileUpload(brainInstanceId: string, input: { fileId: string; storageId: string; sha256: string }): Promise<unknown>;
+  abortProjectFileUpload(brainInstanceId: string, input: { fileId: string; storageId?: string; reason?: string }): Promise<unknown>;
   listQuickCaptures(brainInstanceId: string, input: ListQuickCapturesInput): Promise<unknown>;
   upsertRecurrence(brainInstanceId: string, input: UpsertRecurrenceInput): Promise<unknown>;
   completeRecurrence(
@@ -390,6 +395,11 @@ export type RegisterProjectFileInput = {
 export type ListProjectFilesInput = {
   projectId: string;
   taskId?: string;
+};
+
+export type BeginProjectFileUploadInput = {
+  projectId: string; taskId?: string; runId?: string; kind: "library_input" | "generated_artifact";
+  fileName: string; mimeType: string; sizeBytes: number; required?: boolean; note?: string; uploadKey?: string;
 };
 
 export type UpsertFinancialAccountInput = {
@@ -1336,6 +1346,7 @@ export function createSkippyToolHandlers(client: SkippyClient, brainInstanceId: 
       prNumber?: number;
       prStatus?: "open" | "merged" | "closed";
       markDone?: boolean;
+      artifactFileIds?: string[];
     }) {
       return await client.recordTaskResult(brainInstanceId, {
         ...input,
@@ -1377,6 +1388,14 @@ export function createSkippyToolHandlers(client: SkippyClient, brainInstanceId: 
     async listProjectFiles(input: ListProjectFilesInput) {
       return await client.listProjectFiles(brainInstanceId, input);
     },
+
+    async getProjectFile(input: { fileId: string }) { return await client.getProjectFile(brainInstanceId, input); },
+    async beginProjectFileUpload(input: BeginProjectFileUploadInput) {
+      const metadata = validateProjectFileInput(input);
+      return await client.beginProjectFileUpload(brainInstanceId, { ...input, ...metadata, actorId: "skippy_mcp" });
+    },
+    async finalizeProjectFileUpload(input: { fileId: string; storageId: string; sha256: string }) { return await client.finalizeProjectFileUpload(brainInstanceId, input); },
+    async abortProjectFileUpload(input: { fileId: string; storageId?: string; reason?: string }) { return await client.abortProjectFileUpload(brainInstanceId, input); },
 
     async listQuickCaptures(input: ListQuickCapturesInput = {}) {
       const rows = await client.listQuickCaptures(brainInstanceId, {

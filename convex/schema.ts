@@ -412,6 +412,7 @@ export default defineSchema({
     lastPrCreatedAt: v.optional(v.number()),
     resultSummary: v.optional(v.string()),
     resultUrl: v.optional(v.string()),
+    artifactFileIds: v.optional(v.array(v.id("projectFiles"))),
     resultRecordedAt: v.optional(v.number()),
     focusSnoozedUntil: v.optional(v.number()),
     ...priorityMetadata,
@@ -862,17 +863,38 @@ export default defineSchema({
     brainInstanceId: v.id("brainInstances"),
     projectId: v.id("projects"),
     taskId: v.optional(v.id("tasks")),
-    storageId: v.id("_storage"),
+    storageId: v.optional(v.id("_storage")),
+    kind: v.optional(v.union(v.literal("library_input"), v.literal("generated_artifact"))),
+    status: v.optional(
+      v.union(v.literal("pending_upload"), v.literal("ready"), v.literal("failed"), v.literal("deleted")),
+    ),
+    sha256: v.optional(v.string()),
     fileName: v.string(),
     mimeType: v.string(),
     sizeBytes: v.number(),
     uploadedBy: v.union(v.literal("user"), v.literal("harness")),
+    runId: v.optional(v.id("agentRuns")),
+    chatId: v.optional(v.id("projectChats")),
+    messageId: v.optional(v.id("chatMessages")),
+    createdByType: v.optional(v.union(v.literal("user"), v.literal("harness"), v.literal("migration"))),
+    createdById: v.optional(v.string()),
+    required: v.optional(v.boolean()),
+    uploadKey: v.optional(v.string()),
+    uploadExpiresAt: v.optional(v.number()),
+    readyAt: v.optional(v.number()),
+    deletedAt: v.optional(v.number()),
+    retentionUntil: v.optional(v.number()),
+    failureReason: v.optional(v.string()),
     note: v.optional(v.string()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
     .index("by_brain_project", ["brainInstanceId", "projectId"])
-    .index("by_brain_task", ["brainInstanceId", "taskId"]),
+    .index("by_brain_project_kind", ["brainInstanceId", "projectId", "kind"])
+    .index("by_brain_task", ["brainInstanceId", "taskId"])
+    .index("by_run", ["runId"])
+    .index("by_brain_status", ["brainInstanceId", "status"])
+    .index("by_brain_upload_key", ["brainInstanceId", "uploadKey"]),
 
   // Home quick-capture inbox: thoughts, notes, URLs, and files the owner drops
   // on the home page to be remembered later. Source-ingestion harnesses read
@@ -1300,6 +1322,9 @@ export default defineSchema({
       os: v.optional(v.string()),
       arch: v.optional(v.string()),
       maxConcurrency: v.number(),
+      projectFileManifests: v.optional(v.boolean()),
+      artifactUploads: v.optional(v.boolean()),
+      isolatedChatAttachments: v.optional(v.boolean()),
     }),
     tokenHash: v.string(),
     tokenPrefix: v.string(),
@@ -1386,12 +1411,12 @@ export default defineSchema({
     // read time — never persisted. Project chats only in v1.
     attachments: v.optional(
       v.array(
-        v.object({
+        v.union(v.object({
           storageId: v.id("_storage"),
           fileName: v.string(),
           mimeType: v.string(),
           sizeBytes: v.number(),
-        }),
+        }), v.object({ fileId: v.id("projectFiles") })),
       ),
     ),
     status: v.union(v.literal("complete"), v.literal("pending"), v.literal("error")),
@@ -1468,6 +1493,10 @@ export default defineSchema({
     // Brief snapshot so the claim returns only the authorized payload.
     executionBrief: v.optional(v.string()),
     acceptanceCriteria: v.optional(v.array(v.string())),
+    inputFileRefs: v.optional(v.array(v.object({ fileId: v.id("projectFiles"), required: v.boolean() }))),
+    artifactFileIds: v.optional(v.array(v.id("projectFiles"))),
+    requiredArtifacts: v.optional(v.boolean()),
+    fileLifecycleEnabled: v.optional(v.boolean()),
     approvalPolicy: v.optional(agentApprovalPolicy),
     // Lease-based claiming: claim is atomic; the host renews leaseExpiresAt via
     // heartbeat. An expired lease does NOT auto-start a second harness against

@@ -28,7 +28,10 @@ export interface ClaimedRun {
   acceptanceCriteria?: string[];
   approvalPolicy?: { requirePushApproval?: boolean };
   verifyCommand?: string;
-  project: { _id: string; title?: string; repoUrl?: string; localPath: string };
+  workspaceMode?: "code" | "temporary";
+  inputManifest?: Array<{ fileId: string; fileName: string; mimeType: string; sizeBytes: number; sha256?: string; url: string | null; required: boolean }>;
+  outputPolicy?: { enabled: boolean; required: boolean; maxFiles: number; maxFileBytes: number; maxTotalBytes: number };
+  project: { _id: string; title?: string; repoUrl?: string; localPath?: string };
 }
 
 export interface ControlState {
@@ -78,12 +81,16 @@ export type ReportableStatus =
 const fns = (anyApi as any).agentWorkbench as Record<string, any>;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const chatFns = (anyApi as any).chats as Record<string, any>;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const fileFns = (anyApi as any).projectFiles as Record<string, any>;
 
 /** Attachment on the turn's user message: metadata + a short-lived download URL. */
 export interface ChatTurnAttachment {
+  fileId?: string;
   fileName: string;
   mimeType: string;
   sizeBytes: number;
+  sha256?: string;
   url: string | null;
 }
 
@@ -111,7 +118,7 @@ export class ControlPlane {
     this.client = new ConvexHttpClient(convexUrl);
   }
 
-  registerHost(args: { harnesses: Harness[]; os: string; arch: string; maxConcurrency: number }) {
+  registerHost(args: { harnesses: Harness[]; os: string; arch: string; maxConcurrency: number; projectFileManifests?: boolean; artifactUploads?: boolean; isolatedChatAttachments?: boolean }) {
     return this.client.mutation(fns.registerHost, { hostToken: this.hostToken, ...args });
   }
 
@@ -171,6 +178,14 @@ export class ControlPlane {
   reportEvents(runId: string, claimToken: string, events: Array<{ seq: number; type: string; payload?: unknown }>) {
     if (!events.length) return Promise.resolve({ inserted: 0 });
     return this.client.mutation(fns.reportRunEvents, { hostToken: this.hostToken, runId, claimToken, events });
+  }
+
+  beginArtifactUpload(runId: string, claimToken: string, artifact: { fileName: string; mimeType: string; sizeBytes: number; sha256: string; relativePath: string; required?: boolean }) {
+    return this.client.mutation(fileFns.beginArtifactUploadForRunner, { hostToken: this.hostToken, runId, claimToken, ...artifact }) as Promise<{ fileId: string; uploadUrl?: string; status: string }>;
+  }
+
+  finalizeArtifactUpload(runId: string, claimToken: string, args: { fileId: string; storageId: string; sha256: string }) {
+    return this.client.mutation(fileFns.finalizeArtifactUploadForRunner, { hostToken: this.hostToken, runId, claimToken, ...args });
   }
 
   requestApproval(

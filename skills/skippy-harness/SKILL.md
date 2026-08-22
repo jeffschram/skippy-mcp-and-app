@@ -76,9 +76,9 @@ Keep the human in the loop: surface the plan and each result for review instead 
 
 When the user refers to a project without naming it ("add a task to this project", "plan this", "here"), call `get_current_context` to get the active project the user has open in the web app, then use its id with `create_task`, `plan_project`, etc.
 
-### Code projects (GitHub repo + local folder)
+### Code projects (GitHub repo + host checkout)
 
-A project may be a **code project** with an associated GitHub repo URL and a local folder path (set in the web app's project Settings; surfaced in `get_current_context` and task briefs). For an agent-owned task on a code project, follow this execution loop:
+A project may be a **code project** with an associated GitHub repo URL and a host-scoped repository checkout. Runner-provided checkout paths are temporary execution context, not product-level file authority. For an agent-owned task on a code project, follow this execution loop:
 
 1. Create a new local branch in the project's local repo.
 2. Do the work in that branch.
@@ -86,24 +86,25 @@ A project may be a **code project** with an associated GitHub repo URL and a loc
 4. Call `record_task_result` with the PR URL as `resultUrl` (and a short summary). This moves the task to `in_review`. **Do not** pass `markDone` — the user completes it.
 5. When the user approves/merges the PR, the task is marked done (`mark_task_done` or recording the result with `markDone: true`), which unblocks dependent tasks.
 
-Non-code projects may still have a local folder for inputs and artifacts; the same result-recording flow applies without a PR.
+Non-code projects run in temporary workspaces and need no checkout; the same result-recording flow applies without a PR.
 
-### Assets and output folders
+### Temporary input and output paths
 
-Project payloads (task briefs, `get_current_context`) include `effectiveAssetsPath` and `effectiveOutputPath`. These derive from the project local folder — `<localPath>/_library` for user-provided inputs and `<localPath>/_output` for generated artifacts — unless the user set explicit overrides in the web app's project Settings. Convention:
+Convex `projectFiles` records are the sole durable authority for library inputs and generated artifacts. A capable runner freezes exact input file IDs and materializes verified copies into an isolated per-run directory. It also supplies a designated output directory for artifacts. Every runner-provided path is temporary:
 
-- Read user-provided inputs (source documents, data, reference material) from `effectiveAssetsPath`.
-- Write generated artifacts and deliverables to `effectiveOutputPath`.
+- Read selected inputs only from the exact paths in the runner manifest.
+- Write generated artifacts and deliverables only to the runner's designated output directory.
 - An explicit user instruction always overrides these defaults.
-- Skippy never checks these folders exist — create them with `mkdir -p` on first write.
+- Do not copy deliverables to a user's `_output` folder or treat a local file as durable.
 - Never write deliverables into the project's code repo unless they ARE the product.
 
 ### Project library (cloud-canonical files)
 
-The project library is cloud-canonical: user-provided project files live in Convex file storage, and the local `_library` folder (`effectiveAssetsPath`) is the harness's materialization of it.
+The project library is cloud-canonical: stable `projectFiles` IDs and Convex blobs are authoritative. Download URLs and local paths are short-lived capabilities/copies.
 
-- At task start, call `list_project_files` for the project (and task, when the task ID is known) and download any relevant files into `effectiveAssetsPath` before working. Skip files already present locally with a matching size. Download URLs are ephemeral — fetch promptly, never store them.
-- Files found only locally are NOT in the library unless registered. To add a file: `generate_project_file_upload_url`, HTTP POST the raw bytes to the returned URL (the response JSON contains `{storageId}`), then `register_project_file` with that `storageId`, `fileName`, `mimeType`, and `sizeBytes`.
+- Runner task manifests already contain selected inputs; use them instead of rediscovering mandatory files. Outside a runner, use `get_project_file_manifest`/`get_project_file` and verify the supplied SHA-256 after downloading.
+- To add a durable file, use `begin_project_file_upload`, POST bytes to its URL, then `finalize_project_file_upload` with the returned storage ID and SHA-256. Reuse the upload key when retrying. The legacy generate/register pair remains compatibility-only.
+- Report produced exact IDs through `record_task_result.artifactFileIds`. A required artifact is not complete until finalize succeeds.
 - Library files are capped at 25 MB and limited to safe document types (images, PDFs, text/markdown/csv, JSON, common office documents); executables and arbitrary binaries are rejected.
 
 ## Entity Mapping

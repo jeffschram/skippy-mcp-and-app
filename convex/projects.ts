@@ -462,6 +462,7 @@ export async function applyTaskResult(
     prUrl?: string;
     prNumber?: number;
     prStatus?: "open" | "merged" | "closed";
+    artifactFileIds?: string[];
   },
   actor: { actorType: string; actorId?: string },
 ) {
@@ -470,9 +471,16 @@ export async function applyTaskResult(
     throw new Error("task not found for brain instance");
   }
   const now = Date.now();
+  for (const fileId of args.artifactFileIds ?? []) {
+    const file = await db.get(fileId);
+    if (!file || file.brainInstanceId !== brainInstanceId || file.taskId !== args.taskId || (file.kind ?? "library_input") !== "generated_artifact" || (file.status ?? "ready") !== "ready") {
+      throw new Error(`artifact ${fileId} is not a durable artifact for this task`);
+    }
+  }
   const patch: Record<string, unknown> = {
     resultSummary: args.resultSummary?.trim() || task.resultSummary,
     resultUrl: args.resultUrl?.trim() || task.resultUrl,
+    artifactFileIds: args.artifactFileIds ?? task.artifactFileIds,
     gitBranchName: args.gitBranchName?.trim() || task.gitBranchName,
     prUrl: args.prUrl?.trim() || task.prUrl || (args.resultUrl?.includes("github.com") ? args.resultUrl.trim() : undefined),
     prNumber: args.prNumber ?? task.prNumber,
@@ -598,6 +606,7 @@ export const recordTaskResultForViewer = mutationGeneric({
     prNumber: v.optional(v.number()),
     prStatus: v.optional(v.union(v.literal("open"), v.literal("merged"), v.literal("closed"))),
     markDone: v.optional(v.boolean()),
+    artifactFileIds: v.optional(v.array(v.id("projectFiles"))),
   },
   handler: async (ctx, args) => {
     const { user, brain } = await requireOwnedBrain(ctx);
@@ -613,6 +622,7 @@ export const recordTaskResultForViewer = mutationGeneric({
         ...(args.prNumber !== undefined ? { prNumber: args.prNumber } : {}),
         ...(args.prStatus !== undefined ? { prStatus: args.prStatus } : {}),
         ...(args.markDone !== undefined ? { markDone: args.markDone } : {}),
+        ...(args.artifactFileIds !== undefined ? { artifactFileIds: args.artifactFileIds } : {}),
       },
       { actorType: "user", actorId: user._id },
     );
@@ -1705,6 +1715,7 @@ export const recordTaskResultForBrain = mutationGeneric({
     prNumber: v.optional(v.number()),
     prStatus: v.optional(v.union(v.literal("open"), v.literal("merged"), v.literal("closed"))),
     markDone: v.optional(v.boolean()),
+    artifactFileIds: v.optional(v.array(v.id("projectFiles"))),
     actorId: v.optional(v.string()),
   },
   handler: async ({ db }, args) => {
@@ -1720,6 +1731,7 @@ export const recordTaskResultForBrain = mutationGeneric({
         ...(args.prNumber !== undefined ? { prNumber: args.prNumber } : {}),
         ...(args.prStatus !== undefined ? { prStatus: args.prStatus } : {}),
         ...(args.markDone !== undefined ? { markDone: args.markDone } : {}),
+        ...(args.artifactFileIds !== undefined ? { artifactFileIds: args.artifactFileIds } : {}),
       },
       { actorType: "harness", ...(args.actorId ? { actorId: args.actorId } : {}) },
     );

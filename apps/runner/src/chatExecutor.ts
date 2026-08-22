@@ -13,6 +13,7 @@ import type { RunnerConfig } from "./config.js";
 import type { ClaimedChatTurn, ControlPlane } from "./controlPlane.js";
 import type { HarnessAdapter, HarnessEvent } from "./harness/types.js";
 import { assertInsideAllowedRoot } from "./worktree.js";
+import { materializeManifest } from "./fileWorkspace.js";
 
 /** How often buffered live-activity events are flushed to the control plane. */
 const CHAT_EVENT_FLUSH_INTERVAL_MS = 1_000;
@@ -120,6 +121,7 @@ export async function executeChatTurn(
   } finally {
     clearInterval(cancelWatcher);
     clearInterval(eventFlusher);
+    await fs.promises.rm(path.join(config.allowedRoot, ".skippy-chat-turns", turn.turnId), { recursive: true, force: true }).catch(() => {});
   }
 }
 
@@ -133,47 +135,20 @@ export type MaterializedAttachment = { fileName: string; localPath?: string };
  * root, expired/missing URL, or a failed fetch/write — the turn always runs.
  */
 export async function materializeChatAttachments(
-  turn: Pick<ClaimedChatTurn, "attachments" | "assetsPath">,
+  turn: Pick<ClaimedChatTurn, "attachments" | "assetsPath"> & { turnId?: string },
   allowedRoot: string,
 ): Promise<MaterializedAttachment[]> {
   const attachments = turn.attachments ?? [];
   if (!attachments.length) return [];
 
-  let dir: string | undefined;
-  if (turn.assetsPath) {
-    try {
-      dir = assertInsideAllowedRoot(turn.assetsPath, allowedRoot);
-    } catch {
-      dir = undefined;
-    }
-  }
-
-  const results: MaterializedAttachment[] = [];
-  for (const attachment of attachments) {
-    // basename() guards against a fileName smuggling path segments.
-    const safeName = path.basename(attachment.fileName.trim());
-    if (!dir || !attachment.url || !safeName) {
-      results.push({ fileName: attachment.fileName });
-      continue;
-    }
-    try {
-      fs.mkdirSync(dir, { recursive: true });
-      const target = path.join(dir, safeName);
-      // Skip the download when an identically sized copy is already there
-      // (mirrors the library materialization convention).
-      const existingSize = fs.existsSync(target) ? fs.statSync(target).size : -1;
-      if (existingSize !== attachment.sizeBytes) {
-        const response = await fetch(attachment.url);
-        if (!response.ok) throw new Error(`download failed (HTTP ${response.status})`);
-        fs.writeFileSync(target, Buffer.from(await response.arrayBuffer()));
-      }
-      results.push({ fileName: attachment.fileName, localPath: target });
-    } catch {
-      // Silent skip: the prompt mentions the filename without a local path.
-      results.push({ fileName: attachment.fileName });
-    }
-  }
-  return results;
+  const turnsRoot = path.join(allowedRoot, ".skippy-chat-turns");
+  await fs.promises.mkdir(turnsRoot, { recursive: true, mode: 0o700 });
+  const turnRoot = assertInsideAllowedRoot(path.join(turnsRoot, turn.turnId ?? "legacy-test-turn"), allowedRoot);
+  const materialized = await materializeManifest(turnRoot, attachments.map((attachment, index) => ({
+    fileId: attachment.fileId ?? `legacy-${index}`, fileName: attachment.fileName, mimeType: attachment.mimeType,
+    sizeBytes: attachment.sizeBytes, ...(attachment.sha256 ? { sha256: attachment.sha256 } : {}), url: attachment.url, required: false,
+  })));
+  return materialized.files.map((file) => ({ fileName: file.fileName, ...(file.localPath ? { localPath: file.localPath } : {}) }));
 }
 
 export function buildChatPrompt(turn: ClaimedChatTurn, attachments: MaterializedAttachment[] = []): string {
