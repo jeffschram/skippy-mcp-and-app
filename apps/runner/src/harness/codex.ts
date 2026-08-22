@@ -26,6 +26,48 @@ function truncate(text: unknown, max: number): string {
   return String(text ?? "").slice(0, max);
 }
 
+export function buildCodexArgs({
+  worktreePath,
+  threadId,
+  bypassPermissions,
+  skippyMcpUrl,
+}: {
+  worktreePath: string;
+  threadId?: string | undefined;
+  bypassPermissions?: boolean | undefined;
+  skippyMcpUrl?: string | undefined;
+}): string[] {
+  const args = ["exec", "--json", "--cd", worktreePath, "--skip-git-repo-check", "--color", "never"];
+
+  if (skippyMcpUrl) {
+    // Codex reads MCP servers from ~/.codex/config.toml, which is the same
+    // silently-mutable host state that bit the Claude path on 2026-08-18.
+    // Inject the Skippy MCP explicitly via config overrides instead
+    // (equivalent to `codex mcp add skippy --url … --bearer-token-env-var
+    // SKIPPY_MCP_TOKEN`, but per-invocation and independent of host state).
+    // Known gap: codex's JSONL output has no tool/MCP listing, so there is
+    // no equivalent of the Claude adapter's missing-tools alarm here — a
+    // broken endpoint only shows up when a Skippy tool call fails.
+    args.push("-c", `mcp_servers.skippy.url=${JSON.stringify(skippyMcpUrl)}`);
+    args.push("-c", `mcp_servers.skippy.bearer_token_env_var="SKIPPY_MCP_TOKEN"`);
+  }
+
+  if (bypassPermissions) {
+    // Codex's equivalent of --dangerously-skip-permissions. Chat-only, opt-in.
+    args.push("--dangerously-bypass-approvals-and-sandbox");
+  } else {
+    args.push("--sandbox", "workspace-write");
+  }
+
+  if (threadId) {
+    args.push("resume", threadId);
+  }
+
+  // The prompt goes over stdin ("-") to avoid argv length/quoting issues.
+  args.push("-");
+  return args;
+}
+
 /** Translate one codex JSONL item into zero or one HarnessEvent. */
 function eventForItem(phase: "started" | "updated" | "completed", item: any): HarnessEvent | null {
   switch (item?.type) {
@@ -95,29 +137,13 @@ export class CodexAdapter implements HarnessAdapter {
     let resultText: string | undefined;
     let turnFailed: string | undefined;
 
-    // New thread: `codex exec [opts] -`; resume: `codex exec resume <id> [opts] -`.
-    // The prompt goes over stdin ("-") to avoid argv length/quoting issues.
-    const args = threadId ? ["exec", "resume", threadId] : ["exec"];
-    args.push("--json", "--cd", worktreePath, "--skip-git-repo-check", "--color", "never");
-    if (this.options.skippyMcpUrl) {
-      // Codex reads MCP servers from ~/.codex/config.toml, which is the same
-      // silently-mutable host state that bit the Claude path on 2026-08-18.
-      // Inject the Skippy MCP explicitly via config overrides instead
-      // (equivalent to `codex mcp add skippy --url … --bearer-token-env-var
-      // SKIPPY_MCP_TOKEN`, but per-invocation and independent of host state).
-      // Known gap: codex's JSONL output has no tool/MCP listing, so there is
-      // no equivalent of the Claude adapter's missing-tools alarm here — a
-      // broken endpoint only shows up when a Skippy tool call fails.
-      args.push("-c", `mcp_servers.skippy.url=${JSON.stringify(this.options.skippyMcpUrl)}`);
-      args.push("-c", `mcp_servers.skippy.bearer_token_env_var="SKIPPY_MCP_TOKEN"`);
-    }
-    if (request.bypassPermissions) {
-      // Codex's equivalent of --dangerously-skip-permissions. Chat-only, opt-in.
-      args.push("--dangerously-bypass-approvals-and-sandbox");
-    } else {
-      args.push("--sandbox", "workspace-write");
-    }
-    args.push("-");
+    // Exec-level options must precede the optional `resume` subcommand.
+    const args = buildCodexArgs({
+      worktreePath,
+      threadId,
+      bypassPermissions: request.bypassPermissions,
+      skippyMcpUrl: this.options.skippyMcpUrl,
+    });
 
     return new Promise<HarnessTurnResult>((resolve) => {
       const child = spawn("codex", args, {
