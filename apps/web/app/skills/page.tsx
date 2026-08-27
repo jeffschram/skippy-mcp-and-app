@@ -1,8 +1,8 @@
-import { isLiveConfigured } from "../../lib/skippy-api";
-import { AppShell } from "../components";
-import { NotConfigured } from "../hubs/not-configured";
-import { SkillsListContent } from "../hubs/skills";
+import { redirect } from "next/navigation";
 
+// The skills listing lives in the consolidated Agents hub now. Public
+// /skills/[slug] pages stay at their canonical URLs — external schedulers and
+// the MCP fallback path load them directly.
 export default function SkillsPage() {
-  return <AppShell>{isLiveConfigured() ? <SkillsListContent /> : <NotConfigured />}</AppShell>;
+  redirect("/agents?tab=skills");
 }

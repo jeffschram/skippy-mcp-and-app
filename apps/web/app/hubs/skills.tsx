@@ -48,21 +48,16 @@ function MarkdownBlock({ text }: { text: string }) {
   );
 }
 
-export function SkillsListContent() {
+/** Header-less skills listing, embeddable in the consolidated Agents hub. */
+export function SkillsListBody() {
   const skills = useQuery(api.skills.listSkills, {}) as AnyRecord[] | undefined;
 
   return (
     <>
-      <div className={pageHeaderClass}>
-        <div>
-          <p className={eyebrowClass}>Harness skills</p>
-          <h1>Skills.</h1>
-          <p className={mutedClass} style={{ maxWidth: 640 }}>
-            Portable Skippy instructions that Codex, Claude, Hermes, or another harness can load without copy-paste drift.
-          </p>
-        </div>
-      </div>
-
+      <p className={mutedClass} style={{ maxWidth: 640, marginBottom: 12 }}>
+        Portable Skippy instructions that Codex, Claude, Hermes, or another harness can load without copy-paste drift.
+        Agent configs bind these to roles by slug.
+      </p>
       {skills === undefined ? (
         <Card>
           <LoadingRow label="Loading skills..." />

@@ -4,12 +4,12 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useConvexAuth, useQuery } from "convex/react";
 import {
+  Bot,
   Brain,
   CalendarDays,
   FolderKanban,
   House,
   Inbox,
-  ScrollText,
   Settings,
   Wallet,
   type LucideIcon,
@@ -77,10 +77,11 @@ export const secondaryHubs: Hub[] = [
     match: (p) => p.startsWith("/brain"),
   },
   {
-    href: "/skills",
-    label: "Skills",
-    icon: ScrollText,
-    match: (p) => p.startsWith("/skills"),
+    href: "/agents",
+    label: "Agents",
+    icon: Bot,
+    // /skills/[slug] pages stay at their canonical URLs but belong to this hub.
+    match: (p) => p.startsWith("/agents") || p.startsWith("/skills"),
   },
   {
     href: "/settings",
