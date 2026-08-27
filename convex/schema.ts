@@ -1311,6 +1311,29 @@ export default defineSchema({
 
   // --- Mac mini agent workbench (docs/mac-mini-agent-workbench.md) ---
 
+  // Connector inventory (docs/connectors.md): named access to external systems
+  // (google, imessage, plaid). Metadata ONLY — OAuth tokens and API secrets
+  // stay local on the providing host, chmod-600, and never touch Convex.
+  // Availability is derived at read time: a connector is usable when a
+  // non-revoked, recently-heartbeating host lists its slug in
+  // capabilities.connectors.
+  connectors: defineTable({
+    brainInstanceId: v.id("brainInstances"),
+    slug: v.string(),
+    displayName: v.string(),
+    kind: v.union(
+      v.literal("local_mcp"), // audited MCP server on the host (plaid pattern)
+      v.literal("local_data"), // direct local data access (imessage db)
+      v.literal("http_feed"), // token-authed HTTP push/pull (calendar-sync)
+    ),
+    readOnly: v.boolean(),
+    status: v.union(v.literal("pending"), v.literal("active"), v.literal("retired")),
+    docsPath: v.optional(v.string()),
+    notes: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_brain_slug", ["brainInstanceId", "slug"]),
+
   // Registered execution machines. The first host is the always-on Mac mini.
   // Online/Busy/Offline is DERIVED from lastHeartbeatAt at read time — there is
   // deliberately no stored status flag to go stale. Auth follows the mcpTokens
@@ -1329,6 +1352,10 @@ export default defineSchema({
       projectFileManifests: v.optional(v.boolean()),
       artifactUploads: v.optional(v.boolean()),
       isolatedChatAttachments: v.optional(v.boolean()),
+      // Connector slugs this host provides locally (docs/connectors.md):
+      // e.g. ["plaid", "imessage", "google"]. Gates agent-pass claiming the
+      // same way `harnesses` gates run claiming.
+      connectors: v.optional(v.array(v.string())),
     }),
     tokenHash: v.string(),
     tokenPrefix: v.string(),
