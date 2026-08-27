@@ -225,6 +225,16 @@ function createFakeClient(overrides: Partial<SkippyClient> = {}): SkippyClient {
             version: 1,
             isDefault: true,
           }
+        : input.slug === "agenda-ingestion"
+        ? {
+            slug: input.slug,
+            title: "Agenda ingestion",
+            description: "Agenda Agent role skill.",
+            body: "# Skippy Agenda Ingestion\n\nYou are running as the **Agenda Agent** (role key: `agenda`).",
+            visibility: "public",
+            version: 1,
+            isDefault: true,
+          }
         : {
             slug: input.slug,
             title: "Task heartbeat",
@@ -557,6 +567,9 @@ describe("Skippy MCP manifest", () => {
       expect(prompts.prompts.find((prompt) => prompt.name === "skippy_slash_commands")?.description).toContain(
         "slash command",
       );
+      expect(prompts.prompts.find((prompt) => prompt.name === "skippy_agenda_ingestion")?.description).toContain(
+        "Agenda Agent",
+      );
 
       const intro = await client.getPrompt({ name: "skippy_intro" });
       expect(intro.messages[0]?.content.type).toBe("text");
@@ -584,6 +597,13 @@ describe("Skippy MCP manifest", () => {
       if (taskHeartbeat.messages[0]?.content.type === "text") {
         expect(taskHeartbeat.messages[0].content.text).toContain("Skippy Task Heartbeat");
         expect(taskHeartbeat.messages[0].content.text).toContain("requested Ready agent tasks");
+      }
+
+      const agendaIngestion = await client.getPrompt({ name: "skippy_agenda_ingestion" });
+      expect(agendaIngestion.messages[0]?.content.type).toBe("text");
+      if (agendaIngestion.messages[0]?.content.type === "text") {
+        expect(agendaIngestion.messages[0].content.text).toContain("Skippy Agenda Ingestion");
+        expect(agendaIngestion.messages[0].content.text).toContain("Agenda Agent");
       }
 
       const harnessBootstrap = await client.getPrompt({

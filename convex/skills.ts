@@ -114,6 +114,54 @@ const HARNESS_BOOTSTRAP_SCHEDULER_INSTRUCTIONS = [
   "https://skippy.jeffschram.dev/skills/harness-bootstrap",
 ].join("\n");
 
+const AGENDA_INGESTION_BODY = [
+  "# Skippy Agenda Ingestion",
+  "",
+  "You are running as the **Agenda Agent** (role key: `agenda`). The role is defined by this skill; the harness executing it (Codex, Claude, Hermes) is interchangeable. See `docs/agents.md` for the agents-as-roles architecture.",
+  "",
+  "The job: read the user's sources, apply the importance rubric, store what matters as accepted Skippy objects with provenance, and refresh the focus summary. Coordinate through shared Skippy state only — never assume another agent will be messaged.",
+  "",
+  "## Run Protocol",
+  "",
+  "1. Call `update_source_sync_status` with status `running`, harness set to your engine name, and the sources in scope (for example `gmail`, `calendar`, `imessage`). Include `metadata.role: \"agenda\"`.",
+  "2. Call `get_importance_rubric` and read `renderedText` before judging any item.",
+  "3. Read the sources in scope since the last successful run. Also call `list_quick_captures` for pending Home quick captures — they are part of every ingestion pass.",
+  "4. For each item, decide under the rubric:",
+  "   - **Store**: clear deadline, money, commitment, relationship, focus-relevant, or security signal. Use `ingest_object` with a specific `rubricDecision` and at least one `sourceRef` (IDs, timestamp, one-line summary, shortest useful excerpt — never raw bodies).",
+  "   - **Review**: genuinely uncertain but inspectable later. Use `submit_candidate_object`.",
+  "   - **Ignore**: marketing, newsletters, shipping notices, generic confirmations, transient alerts, secrets/credentials. Write nothing.",
+  "   - Durable preferences, decisions, or principles evidenced by a source go through `record_memory` / `record_decision` / `record_principle` with provenance.",
+  "5. For each pending quick capture, create the useful objects, then call `mark_quick_capture_handled` with `processed` (listing `relatedEntityRefs` you created) or `discarded` with a short note.",
+  "6. Call `refresh_focus_summary` so the dashboard reflects the new state.",
+  "7. Call `record_ingestion_run` with sources checked, object counts, errors, and `metadata.role: \"agenda\"`.",
+  "8. Call `update_source_sync_status` with `completed` (or `failed` plus short error summaries). For long runs, heartbeat with `lastHeartbeatAt` while work continues.",
+  "",
+  "## Attribution",
+  "",
+  "Every run this skill performs is attributed to the `agenda` role, separate from the harness. Always set `metadata.role: \"agenda\"` on `record_ingestion_run` and `update_source_sync_status` so runs read as \"the Agenda Agent ran on <harness>\".",
+  "",
+  "## Boundaries",
+  "",
+  "- Ingestion and memory tools only: do not execute agent tasks, write financial data, or perform external side effects. Anything with side effects belongs in the approval-gated pending-actions flow.",
+  "- Store distilled summaries with source refs, not raw private dumps.",
+  "- Sensitive items (health, legal, family, private third-party facts) are never silently stored; queue for review or skip.",
+  "- If a source is unreachable, record the error on the run and continue with the remaining sources; never fail silently.",
+].join("\n");
+
+const AGENDA_INGESTION_USAGE_DESCRIPTION =
+  "Use this skill for scheduled Agenda Agent runs: reading gmail/calendar/imessage and pending quick captures, applying the importance rubric, ingesting accepted objects with provenance, and refreshing the focus summary.";
+
+const AGENDA_INGESTION_SCHEDULER_INSTRUCTIONS = [
+  "If you support Skippy MCP prompts:",
+  "Use the prompt `skippy_agenda_ingestion`.",
+  "",
+  "If you do not support Skippy MCP prompts but do support Skippy MCP tools:",
+  "Call `get_skill` with slug `agenda-ingestion`",
+  "",
+  "If neither of those work, load the Skippy skill at:",
+  "https://skippy.jeffschram.dev/skills/agenda-ingestion",
+].join("\n");
+
 const DEFAULT_SKILLS = [
   {
     slug: "task-heartbeat",
@@ -134,6 +182,18 @@ const DEFAULT_SKILLS = [
     usageDescription: HARNESS_BOOTSTRAP_USAGE_DESCRIPTION,
     usageLeadIn: "Give a newly connected harness this instruction:",
     schedulerInstructions: HARNESS_BOOTSTRAP_SCHEDULER_INSTRUCTIONS,
+    visibility: "public" as const,
+    version: 1,
+  },
+  {
+    slug: "agenda-ingestion",
+    title: "Agenda ingestion",
+    description:
+      "The Agenda Agent's role skill: rubric-driven source ingestion with provenance, quick-capture handling, sync status, and focus refresh.",
+    body: AGENDA_INGESTION_BODY,
+    usageDescription: AGENDA_INGESTION_USAGE_DESCRIPTION,
+    usageLeadIn: "In your harness scheduler paste the following:",
+    schedulerInstructions: AGENDA_INGESTION_SCHEDULER_INSTRUCTIONS,
     visibility: "public" as const,
     version: 1,
   },

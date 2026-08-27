@@ -947,6 +947,25 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
   );
 
   server.registerResource(
+    "skippy_agenda_ingestion",
+    "skippy://skills/agenda-ingestion",
+    {
+      title: "Skippy agenda ingestion skill",
+      description: "The Agenda Agent's role skill: rubric-driven source ingestion with provenance and focus refresh.",
+      mimeType: "text/markdown",
+    },
+    async (uri) => ({
+      contents: [
+        {
+          uri: uri.href,
+          mimeType: "text/markdown",
+          text: skillText(await tools.getSkill({ slug: "agenda-ingestion" }), buildSkillsMessage()),
+        },
+      ],
+    }),
+  );
+
+  server.registerResource(
     "skippy_harness_bootstrap",
     "skippy://skills/harness-bootstrap",
     {
@@ -1037,6 +1056,27 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
           content: {
             type: "text",
             text: skillText(await tools.getSkill({ slug: "task-heartbeat" }), buildSkillsMessage()),
+          },
+        },
+      ],
+    }),
+  );
+
+  server.registerPrompt(
+    "skippy_agenda_ingestion",
+    {
+      title: "Load Skippy Agenda Ingestion",
+      description:
+        "The Agenda Agent's role skill for scheduled ingestion runs: read sources and quick captures under the importance rubric, ingest with provenance, and refresh the focus summary.",
+    },
+    async () => ({
+      description: "Teach the connected harness how to run a Skippy Agenda Agent ingestion pass.",
+      messages: [
+        {
+          role: "assistant",
+          content: {
+            type: "text",
+            text: skillText(await tools.getSkill({ slug: "agenda-ingestion" }), buildSkillsMessage()),
           },
         },
       ],
