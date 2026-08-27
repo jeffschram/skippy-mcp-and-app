@@ -1096,6 +1096,10 @@ export default defineSchema({
     label: v.string(),
     tokenHash: v.string(),
     tokenPrefix: v.string(),
+    // Optional agent-role scope (docs/agents.md): "agenda", "finance",
+    // "task-executor", or "pm"/"pm:{projectId}". Tokens without a role keep
+    // full tool access; role-scoped tokens get a deny-by-default allowlist.
+    role: v.optional(v.string()),
     revokedAt: v.optional(v.number()),
     lastUsedAt: v.optional(v.number()),
     createdAt: v.number(),

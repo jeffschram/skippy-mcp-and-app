@@ -28,6 +28,7 @@ import {
   type UpsertFinancialAccountInput,
   type UpsertRecurrenceInput,
 } from "./tools.js";
+import { resolveAllowedTools } from "./role-policy.js";
 import {
   BALANCE_SOURCES,
   CONTRIBUTION_SOURCES,
@@ -896,7 +897,20 @@ function stripUndefined<T>(value: T): T {
   return result as T;
 }
 
-export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
+export type CreateMcpServerOptions = {
+  /**
+   * Agent-role scope from the authenticated token (docs/agents.md). When set,
+   * only the role's allowlisted tools are registered on this connection;
+   * everything else is invisible and uncallable. Undefined = full access.
+   */
+  role?: string;
+};
+
+export function createMcpServer(
+  client: SkippyClient,
+  brainInstanceId: string,
+  options?: CreateMcpServerOptions,
+) {
   const server = new McpServer(
     {
       name: "skippy",
@@ -906,6 +920,21 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
       instructions: skippyInstructions,
     },
   );
+
+  const allowedTools = resolveAllowedTools(options?.role);
+  if (allowedTools) {
+    const registerToolUnrestricted = server.registerTool.bind(server) as (...args: unknown[]) => unknown;
+    (server as unknown as { registerTool: (name: string, ...rest: unknown[]) => unknown }).registerTool = (
+      name: string,
+      ...rest: unknown[]
+    ) => {
+      if (!allowedTools.has(name)) {
+        return undefined;
+      }
+      return registerToolUnrestricted(name, ...rest);
+    };
+  }
+
   const tools = createSkippyToolHandlers(client, brainInstanceId);
 
   server.registerResource(

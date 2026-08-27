@@ -20,10 +20,12 @@ export async function handleRemoteMcpRequest(request: Request, options: RemoteMc
 
   const authResult = (await convex.mutation(authenticateMcpTokenRef, {
     token: options.bearerToken,
-  })) as { brainInstanceId: string };
+  })) as { brainInstanceId: string; role?: string };
 
   const skippyClient = createConvexSkippyClient(options.convexUrl, options.convexAuthToken);
-  const server = createMcpServer(skippyClient, authResult.brainInstanceId);
+  const server = authResult.role
+    ? createMcpServer(skippyClient, authResult.brainInstanceId, { role: authResult.role })
+    : createMcpServer(skippyClient, authResult.brainInstanceId);
   const transport = new WebStandardStreamableHTTPServerTransport({
     enableJsonResponse: true,
   });

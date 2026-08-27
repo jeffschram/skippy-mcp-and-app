@@ -67,6 +67,19 @@ describe("remote MCP transport authorization", () => {
     expect(mocks.transportHandleRequest).toHaveBeenCalledWith(request);
   });
 
+  it("passes the token's agent role through to server creation", async () => {
+    const { handleRemoteMcpRequest } = await import("./remote");
+    mocks.convexMutation.mockResolvedValueOnce({ brainInstanceId: "brain_123", role: "finance" });
+
+    const response = await handleRemoteMcpRequest(new Request("https://skippy.test/api/mcp", { method: "POST" }), {
+      convexUrl: "https://convex.test",
+      bearerToken: "skippy-secret",
+    });
+
+    expect(response.status).toBe(200);
+    expect(mocks.createMcpServer).toHaveBeenCalledWith({ skippy: true }, "brain_123", { role: "finance" });
+  });
+
   it("does not create a server when token authentication fails", async () => {
     const { handleRemoteMcpRequest } = await import("./remote");
     mocks.convexMutation.mockRejectedValueOnce(new Error("invalid MCP token"));
