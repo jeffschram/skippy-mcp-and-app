@@ -52,6 +52,7 @@ import {
   textareaClass,
   toolbarClass,
 } from "./page-classes";
+import { agentRoleDisplayName, agentRoleFromMetadata } from "../lib/display";
 import { focusItemKey, focusSummaryBullets, focusSummaryPresentation } from "./focus-summary";
 import { LiveGate } from "./live-auth";
 import { icons } from "./ui";
@@ -525,14 +526,17 @@ export function LiveIngestionLogsContent() {
         <p className={mutedClass}>No ingestion runs have been recorded yet.</p>
       ) : (
         <div className={itemListClass}>
-          {runs.map((run) => (
+          {runs.map((run) => {
+            const roleName = agentRoleDisplayName(agentRoleFromMetadata(run.metadata));
+            return (
             <Link className={cn(itemClass, projectRowClass)} href={`/ingestion-logs/${run._id}`} key={run._id}>
               <span className={cn(itemIconClass, run.status === "running" && itemIconActiveClass)}>
                 <icons.Archive size={17} aria-hidden />
               </span>
               <div>
-                <p className={itemTitleClass}>{run.harness}</p>
+                <p className={itemTitleClass}>{roleName ?? run.harness}</p>
                 <p className={itemMetaClass}>
+                  {roleName ? `on ${run.harness} · ` : ""}
                   {formatDate(run.startedAt)}
                   {" · "}
                   {(run.sourceSystemsChecked ?? []).join(", ") || "no sources recorded"}
@@ -547,7 +551,8 @@ export function LiveIngestionLogsContent() {
                 <icons.ChevronRight size={18} aria-hidden />
               </span>
             </Link>
-          ))}
+            );
+          })}
         </div>
       )}
     </LiveGate>
@@ -579,6 +584,7 @@ export function LiveIngestionLogDetailContent({ ingestionRunId }: { ingestionRun
   const memories = data?.memories ?? [];
   const entities = data?.entities ?? [];
   const ignoredItems = data?.ignoredItems ?? [];
+  const runRoleName = run ? agentRoleDisplayName(agentRoleFromMetadata(run.metadata)) : null;
 
   return (
     <LiveGate>
@@ -591,8 +597,9 @@ export function LiveIngestionLogDetailContent({ ingestionRunId }: { ingestionRun
           <section className={cn(cardClass, sectionClass, span12Class)}>
             <div className={settingsRowClass}>
               <div>
-                <h2>{run.harness}</h2>
+                <h2>{runRoleName ?? run.harness}</h2>
                 <p className={mutedClass}>
+                  {runRoleName ? `on ${run.harness} · ` : ""}
                   Started {formatDate(run.startedAt)}
                   {run.completedAt ? ` · Completed ${formatDate(run.completedAt)}` : " · Still running"}
                   {" · "}
@@ -2593,6 +2600,11 @@ export function LiveSettingsContent() {
                         {token.tokenPrefix}..., last used {formatDate(token.lastUsedAt)}
                       </p>
                     </div>
+                    {token.role ? (
+                      <span className={cn(badgeClass, badgeGoldClass)} title={`Role-scoped token: ${token.role}`}>
+                        {agentRoleDisplayName(token.role)}
+                      </span>
+                    ) : null}
                     <span className={cn(badgeClass, token.revokedAt ? badgeRedClass : badgeBlueClass)}>
                       {token.revokedAt ? "Revoked" : "Active"}
                     </span>

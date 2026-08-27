@@ -23,7 +23,7 @@ import {
 } from "lucide-react";
 import { activeSourceSyncStatus, type QuickCaptureIntent } from "@skippy/shared";
 import { api } from "../../lib/skippy-api";
-import { formatRelative } from "../../lib/display";
+import { agentRoleDisplayName, agentRoleFromMetadata, formatRelative } from "../../lib/display";
 import { focusItemKey, parseFocusSummary } from "../focus-summary";
 import { LiveGate } from "../live-auth";
 import { Badge, Button, Card, IconButton, InlineMarkdown, LoadingRow, Section, TextArea, useToast } from "../components";
@@ -736,8 +736,12 @@ export function TodayContent() {
               <div className={focusSummaryHeadClass}>
                 <p className={cn(eyebrowClass, "mb-0")}>Now</p>
                 {sync ? (
-                  <span className={syncStatusPillClass} title={sync.message ?? "Source sync is running"}>
-                    <RefreshCw size={14} aria-hidden /> Updating
+                  <span
+                    className={syncStatusPillClass}
+                    title={sync.message ?? `Source sync is running on ${sync.harness}`}
+                  >
+                    <RefreshCw size={14} aria-hidden />{" "}
+                    {agentRoleDisplayName(agentRoleFromMetadata(sync.metadata)) ?? "Updating"}
                   </span>
                 ) : null}
               </div>

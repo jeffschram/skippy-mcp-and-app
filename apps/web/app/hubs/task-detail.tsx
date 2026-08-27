@@ -461,11 +461,11 @@ export function TaskDetailPanel({
               </Badge>
               {task.kind ? <Badge tone="neutral">{task.kind}</Badge> : null}
               <Badge tone={task.ownerType === "agent" ? "blue" : "gold"}>
-                {task.ownerType === "agent" ? "Agent" : "Owner"}
+                {task.ownerType === "agent" ? "Task Agent" : "Owner"}
               </Badge>
               {task.agentRequestStatus === "requested" ? (
                 <Badge tone="blue">
-                  Queued{task.requestedHarness ? ` for ${task.requestedHarness}` : ""}
+                  Queued{task.requestedHarness ? ` on ${task.requestedHarness}` : ""}
                 </Badge>
               ) : null}
             </div>

@@ -95,3 +95,29 @@ export function badgeToneForState(state: unknown): BadgeTone {
   if (/(accept|done|complete|sent|achiev)/.test(text)) return "green";
   return "blue";
 }
+
+/**
+ * Agent-role attribution (docs/agents.md). Run records carry an optional role
+ * key in metadata.role ("agenda", "finance", "task-executor", "pm"/"pm:{projectId}").
+ * The UI renders role-first, harness-second; legacy records without a role
+ * render as the bare harness.
+ */
+export function agentRoleFromMetadata(metadata: unknown): string | null {
+  if (typeof metadata !== "object" || metadata === null) return null;
+  const role = (metadata as Record<string, unknown>).role;
+  return typeof role === "string" && role.trim() ? role.trim() : null;
+}
+
+export function agentRoleDisplayName(
+  role: string | null | undefined,
+  projectTitle?: string,
+): string | null {
+  if (!role) return null;
+  if (role === "agenda") return "Agenda Agent";
+  if (role === "finance") return "Financial Agent";
+  if (role === "task-executor") return "Task Agent";
+  if (role === "pm" || role.startsWith("pm:")) {
+    return projectTitle ? `PM: ${projectTitle}` : "Project Manager";
+  }
+  return titleCase(role);
+}
