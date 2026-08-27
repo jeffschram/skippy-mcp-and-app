@@ -225,6 +225,26 @@ function createFakeClient(overrides: Partial<SkippyClient> = {}): SkippyClient {
             version: 1,
             isDefault: true,
           }
+        : input.slug === "agenda-ingestion"
+        ? {
+            slug: input.slug,
+            title: "Agenda ingestion",
+            description: "Agenda Agent role skill.",
+            body: "# Skippy Agenda Ingestion\n\nYou are running as the **Agenda Agent** (role key: `agenda`).",
+            visibility: "public",
+            version: 1,
+            isDefault: true,
+          }
+        : input.slug === "finance-sync"
+        ? {
+            slug: input.slug,
+            title: "Finance sync",
+            description: "Financial Agent role skill.",
+            body: "# Skippy Finance Sync\n\nYou are running as the **Financial Agent** (role key: `finance`).",
+            visibility: "public",
+            version: 1,
+            isDefault: true,
+          }
         : {
             slug: input.slug,
             title: "Task heartbeat",
@@ -557,6 +577,9 @@ describe("Skippy MCP manifest", () => {
       expect(prompts.prompts.find((prompt) => prompt.name === "skippy_slash_commands")?.description).toContain(
         "slash command",
       );
+      expect(prompts.prompts.find((prompt) => prompt.name === "skippy_agenda_ingestion")?.description).toContain(
+        "Agenda Agent",
+      );
 
       const intro = await client.getPrompt({ name: "skippy_intro" });
       expect(intro.messages[0]?.content.type).toBe("text");
@@ -584,6 +607,20 @@ describe("Skippy MCP manifest", () => {
       if (taskHeartbeat.messages[0]?.content.type === "text") {
         expect(taskHeartbeat.messages[0].content.text).toContain("Skippy Task Heartbeat");
         expect(taskHeartbeat.messages[0].content.text).toContain("requested Ready agent tasks");
+      }
+
+      const agendaIngestion = await client.getPrompt({ name: "skippy_agenda_ingestion" });
+      expect(agendaIngestion.messages[0]?.content.type).toBe("text");
+      if (agendaIngestion.messages[0]?.content.type === "text") {
+        expect(agendaIngestion.messages[0].content.text).toContain("Skippy Agenda Ingestion");
+        expect(agendaIngestion.messages[0].content.text).toContain("Agenda Agent");
+      }
+
+      const financeSync = await client.getPrompt({ name: "skippy_finance_sync" });
+      expect(financeSync.messages[0]?.content.type).toBe("text");
+      if (financeSync.messages[0]?.content.type === "text") {
+        expect(financeSync.messages[0].content.text).toContain("Skippy Finance Sync");
+        expect(financeSync.messages[0].content.text).toContain("Financial Agent");
       }
 
       const harnessBootstrap = await client.getPrompt({
@@ -2226,5 +2263,90 @@ describe("life-layer tools", () => {
       await client.close();
       await server.close();
     }
+  });
+});
+
+describe("agent role tool scoping", () => {
+  async function listToolNames(role?: string) {
+    const server = role
+      ? createMcpServer(createFakeClient(), "brain_123", { role })
+      : createMcpServer(createFakeClient(), "brain_123");
+    const client = new Client({ name: "role-scope-test", version: "0.1.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    try {
+      await server.connect(serverTransport);
+      await client.connect(clientTransport);
+      const { tools } = await client.listTools();
+      return new Set(tools.map((tool) => tool.name));
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  }
+
+  it("keeps full access for tokens without a role", async () => {
+    const names = await listToolNames();
+    expect(names.has("ingest_object")).toBe(true);
+    expect(names.has("record_task_result")).toBe(true);
+    expect(names.has("record_financial_transactions")).toBe(true);
+  });
+
+  it("scopes the agenda role to ingestion and memory tools", async () => {
+    const names = await listToolNames("agenda");
+    expect(names.has("ingest_object")).toBe(true);
+    expect(names.has("list_quick_captures")).toBe(true);
+    expect(names.has("record_memory")).toBe(true);
+    expect(names.has("refresh_focus_summary")).toBe(true);
+    expect(names.has("record_ingestion_run")).toBe(true);
+    // No task execution, no finance writes, no external side effects.
+    expect(names.has("record_task_result")).toBe(false);
+    expect(names.has("mark_task_done")).toBe(false);
+    expect(names.has("record_financial_transactions")).toBe(false);
+    expect(names.has("dispatch_notifications")).toBe(false);
+  });
+
+  it("scopes the finance role to financial tools only", async () => {
+    const names = await listToolNames("finance");
+    expect(names.has("upsert_financial_account")).toBe(true);
+    expect(names.has("record_financial_transactions")).toBe(true);
+    expect(names.has("record_financial_balances")).toBe(true);
+    expect(names.has("get_financial_report")).toBe(true);
+    expect(names.has("record_ingestion_run")).toBe(true);
+    // Nothing beyond finance + anomaly ingestion + bookkeeping.
+    expect(names.has("record_task_result")).toBe(false);
+    expect(names.has("create_task")).toBe(false);
+    expect(names.has("list_quick_captures")).toBe(false);
+  });
+
+  it("scopes pm roles (including pm:{projectId}) to briefing and review tools", async () => {
+    const names = await listToolNames("pm:m9abc123");
+    expect(names.has("get_project_plan")).toBe(true);
+    expect(names.has("brief_task")).toBe(true);
+    expect(names.has("record_entity_review")).toBe(true);
+    expect(names.has("list_tasks_by_state")).toBe(true);
+    // The PM reports; it never executes, completes, or edits plans/notes.
+    expect(names.has("record_task_result")).toBe(false);
+    expect(names.has("mark_task_done")).toBe(false);
+    expect(names.has("update_project_notes")).toBe(false);
+    expect(names.has("update_phase")).toBe(false);
+    expect(names.has("record_financial_transactions")).toBe(false);
+  });
+
+  it("scopes the task-executor role to the execution surface", async () => {
+    const names = await listToolNames("task-executor");
+    expect(names.has("list_requested_ready_tasks")).toBe(true);
+    expect(names.has("get_task_brief")).toBe(true);
+    expect(names.has("mark_task_in_progress")).toBe(true);
+    expect(names.has("record_task_result")).toBe(true);
+    expect(names.has("record_financial_transactions")).toBe(false);
+    expect(names.has("ingest_object")).toBe(false);
+  });
+
+  it("falls back to a minimal read-only surface for unknown roles", async () => {
+    const names = await listToolNames("mystery-role");
+    expect(names.has("get_skill")).toBe(true);
+    expect(names.has("get_current_context")).toBe(true);
+    expect(names.size).toBe(2);
   });
 });

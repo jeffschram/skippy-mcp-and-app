@@ -17,6 +17,19 @@ function makeToken() {
   return `skippy_${body}`;
 }
 
+// Agent-role scopes (docs/agents.md). "pm" may be bare or parameterized as
+// "pm:{projectId}". Validated at create time so a typo cannot strand a token
+// on the deny-by-default allowlist.
+function isValidTokenRole(role: string) {
+  return (
+    role === "agenda" ||
+    role === "finance" ||
+    role === "task-executor" ||
+    role === "pm" ||
+    /^pm:[a-z0-9]+$/i.test(role)
+  );
+}
+
 export const list = queryGeneric({
   args: {},
   handler: async (ctx) => {
@@ -30,6 +43,7 @@ export const list = queryGeneric({
       _id: token._id,
       label: token.label,
       tokenPrefix: token.tokenPrefix,
+      role: token.role,
       revokedAt: token.revokedAt,
       lastUsedAt: token.lastUsedAt,
       createdAt: token.createdAt,
@@ -41,9 +55,16 @@ export const list = queryGeneric({
 export const create = mutationGeneric({
   args: {
     label: v.string(),
+    role: v.optional(v.string()),
   },
-  handler: async (ctx, { label }) => {
+  handler: async (ctx, { label, role }) => {
     const { brain } = await requireOwnedBrain(ctx);
+    const trimmedRole = role?.trim() || undefined;
+    if (trimmedRole && !isValidTokenRole(trimmedRole)) {
+      throw new Error(
+        `invalid token role '${trimmedRole}': expected agenda, finance, task-executor, pm, or pm:{projectId}`,
+      );
+    }
     const now = Date.now();
     const token = makeToken();
     const tokenHash = await sha256Hex(token);
@@ -54,6 +75,7 @@ export const create = mutationGeneric({
       label,
       tokenHash,
       tokenPrefix,
+      ...(trimmedRole ? { role: trimmedRole } : {}),
       createdAt: now,
       updatedAt: now,
     });
@@ -63,11 +85,11 @@ export const create = mutationGeneric({
       activityType: "mcp_token_created",
       actorType: "user",
       timestamp: now,
-      summary: `MCP token created: ${label}`,
-      metadata: { tokenId, tokenPrefix },
+      summary: trimmedRole ? `MCP token created: ${label} (role: ${trimmedRole})` : `MCP token created: ${label}`,
+      metadata: { tokenId, tokenPrefix, ...(trimmedRole ? { role: trimmedRole } : {}) },
     });
 
-    return { tokenId, token, tokenPrefix };
+    return { tokenId, token, tokenPrefix, role: trimmedRole };
   },
 });
 
@@ -121,6 +143,6 @@ export const authenticate = mutationGeneric({
       updatedAt: Date.now(),
     });
 
-    return { brainInstanceId: record.brainInstanceId };
+    return { brainInstanceId: record.brainInstanceId, role: record.role };
   },
 });

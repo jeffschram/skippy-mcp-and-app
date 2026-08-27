@@ -28,6 +28,7 @@ import {
   type UpsertFinancialAccountInput,
   type UpsertRecurrenceInput,
 } from "./tools.js";
+import { resolveAllowedTools } from "./role-policy.js";
 import {
   BALANCE_SOURCES,
   CONTRIBUTION_SOURCES,
@@ -896,7 +897,20 @@ function stripUndefined<T>(value: T): T {
   return result as T;
 }
 
-export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
+export type CreateMcpServerOptions = {
+  /**
+   * Agent-role scope from the authenticated token (docs/agents.md). When set,
+   * only the role's allowlisted tools are registered on this connection;
+   * everything else is invisible and uncallable. Undefined = full access.
+   */
+  role?: string;
+};
+
+export function createMcpServer(
+  client: SkippyClient,
+  brainInstanceId: string,
+  options?: CreateMcpServerOptions,
+) {
   const server = new McpServer(
     {
       name: "skippy",
@@ -906,6 +920,21 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
       instructions: skippyInstructions,
     },
   );
+
+  const allowedTools = resolveAllowedTools(options?.role);
+  if (allowedTools) {
+    const registerToolUnrestricted = server.registerTool.bind(server) as (...args: unknown[]) => unknown;
+    (server as unknown as { registerTool: (name: string, ...rest: unknown[]) => unknown }).registerTool = (
+      name: string,
+      ...rest: unknown[]
+    ) => {
+      if (!allowedTools.has(name)) {
+        return undefined;
+      }
+      return registerToolUnrestricted(name, ...rest);
+    };
+  }
+
   const tools = createSkippyToolHandlers(client, brainInstanceId);
 
   server.registerResource(
@@ -941,6 +970,44 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
           uri: uri.href,
           mimeType: "text/markdown",
           text: skillText(await tools.getSkill({ slug: "task-heartbeat" }), buildSkillsMessage()),
+        },
+      ],
+    }),
+  );
+
+  server.registerResource(
+    "skippy_agenda_ingestion",
+    "skippy://skills/agenda-ingestion",
+    {
+      title: "Skippy agenda ingestion skill",
+      description: "The Agenda Agent's role skill: rubric-driven source ingestion with provenance and focus refresh.",
+      mimeType: "text/markdown",
+    },
+    async (uri) => ({
+      contents: [
+        {
+          uri: uri.href,
+          mimeType: "text/markdown",
+          text: skillText(await tools.getSkill({ slug: "agenda-ingestion" }), buildSkillsMessage()),
+        },
+      ],
+    }),
+  );
+
+  server.registerResource(
+    "skippy_finance_sync",
+    "skippy://skills/finance-sync",
+    {
+      title: "Skippy finance sync skill",
+      description: "The Financial Agent's role skill: Plaid sync into Skippy under the fixed CSP taxonomy.",
+      mimeType: "text/markdown",
+    },
+    async (uri) => ({
+      contents: [
+        {
+          uri: uri.href,
+          mimeType: "text/markdown",
+          text: skillText(await tools.getSkill({ slug: "finance-sync" }), buildSkillsMessage()),
         },
       ],
     }),
@@ -1037,6 +1104,48 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
           content: {
             type: "text",
             text: skillText(await tools.getSkill({ slug: "task-heartbeat" }), buildSkillsMessage()),
+          },
+        },
+      ],
+    }),
+  );
+
+  server.registerPrompt(
+    "skippy_agenda_ingestion",
+    {
+      title: "Load Skippy Agenda Ingestion",
+      description:
+        "The Agenda Agent's role skill for scheduled ingestion runs: read sources and quick captures under the importance rubric, ingest with provenance, and refresh the focus summary.",
+    },
+    async () => ({
+      description: "Teach the connected harness how to run a Skippy Agenda Agent ingestion pass.",
+      messages: [
+        {
+          role: "assistant",
+          content: {
+            type: "text",
+            text: skillText(await tools.getSkill({ slug: "agenda-ingestion" }), buildSkillsMessage()),
+          },
+        },
+      ],
+    }),
+  );
+
+  server.registerPrompt(
+    "skippy_finance_sync",
+    {
+      title: "Load Skippy Finance Sync",
+      description:
+        "The Financial Agent's role skill for scheduled Plaid sync runs: idempotent account upserts, CSP taxonomy mapping with transfer and off-ledger 401k rules, and end-of-day balance snapshots.",
+    },
+    async () => ({
+      description: "Teach the connected harness how to run a Skippy Financial Agent sync pass.",
+      messages: [
+        {
+          role: "assistant",
+          content: {
+            type: "text",
+            text: skillText(await tools.getSkill({ slug: "finance-sync" }), buildSkillsMessage()),
           },
         },
       ],
@@ -2768,7 +2877,7 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
         completedAt: z.number().optional().describe("Epoch milliseconds when this run completed or failed."),
         lastHeartbeatAt: z.number().optional().describe("Epoch milliseconds for long-running heartbeat updates."),
         errors: z.array(z.string()).optional().describe("Short error summaries; avoid secrets or raw source payloads."),
-        metadata: z.unknown().optional().describe("Small JSON metadata object for audit/debugging. Avoid secrets and raw source dumps."),
+        metadata: z.unknown().optional().describe("Small JSON metadata object for audit/debugging. Include role (e.g. \"agenda\") to attribute the sync to an agent role, separate from the harness. Avoid secrets and raw source dumps."),
       }),
     },
     async (args) =>
@@ -2795,7 +2904,7 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
     {
       title: "Record ingestion run",
       description:
-        "Record metadata about a harness ingestion/review run. Use this around scheduled or batch reads of email, calendar, reminders, messages, or links so the user can audit source coverage and errors.",
+        "Record metadata about a harness ingestion/review run. Use this around scheduled or batch reads of email, calendar, reminders, messages, or links so the user can audit source coverage and errors. When running under a named agent role (docs/agents.md), attribute the run with metadata.role, e.g. { role: \"agenda\" }.",
       annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: true },
       inputSchema: z.object({
         harness: z.string().describe("Harness name, e.g. codex, chatgpt, claude, hermes, or scheduled_worker."),
@@ -2807,7 +2916,7 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
         objectsCreated: z.number().optional().describe("Number of accepted objects created, if known."),
         objectsUpdated: z.number().optional().describe("Number of accepted objects updated, if known."),
         errors: z.array(z.string()).optional().describe("Short error summaries; avoid secrets or raw source payloads."),
-        metadata: z.unknown().optional().describe("Small JSON metadata object for audit/debugging. Avoid secrets and raw source dumps."),
+        metadata: z.unknown().optional().describe("Small JSON metadata object for audit/debugging. Include role (e.g. \"agenda\") to attribute the run to an agent role, separate from the harness. Avoid secrets and raw source dumps."),
       }),
     },
     async (args) =>
