@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from "react";
 import { usePathname } from "next/navigation";
 import { useConvexAuth, useMutation, useQuery } from "convex/react";
 import { ArrowDown, CheckCircle2, ExternalLink, File as FileIcon, FilePenLine, FilePlus2, GitPullRequest, ListChecks, MessageCircle, Paperclip, SendHorizontal, Sparkles, TerminalSquare, X } from "lucide-react";
@@ -13,6 +13,7 @@ import { buildChatTimeline } from "../../lib/chat-timeline";
 import { summarizeChatActivity, type ChatActivityLine } from "../../lib/chat-activity";
 import type { TaskMomentState } from "../../lib/task-moments";
 import { ApprovalCard } from "./approval-card";
+import { Avatar, type AvatarStateName } from "./avatar";
 import { useSettlingApprovals } from "./use-settling-approvals";
 import { Spinner } from "./ui";
 import { useToast } from "./widgets";
@@ -252,11 +253,12 @@ function AttachmentChip({ attachment }: { attachment: AnyRecord }) {
  *
  * Layout follows the Codex/ChatGPT convention: one rounded container that
  * reads as "the text box", with a borderless auto-growing textarea on top and
- * a pinned control row below (attach on the left; harness picker + send on
- * the right). The textarea expands with content while the buttons stay put.
+ * a pinned control row below (avatar on the left; harness, attach, and send
+ * on the right). The textarea expands with content while the controls stay put.
  */
 function ChatComposer({
   placeholder,
+  avatarState,
   canAttach,
   hasAttachments,
   busy,
@@ -265,8 +267,10 @@ function ChatComposer({
   onChooseHarness,
   onSend,
   onAddFiles,
+  onTypingChange,
 }: {
   placeholder: string;
+  avatarState: AvatarStateName;
   canAttach: boolean;
   hasAttachments: boolean;
   busy: boolean;
@@ -277,20 +281,32 @@ function ChatComposer({
   onChooseHarness: (next: "claude" | "codex") => void;
   onSend: (content: string) => Promise<boolean>;
   onAddFiles: (files: File[]) => void;
+  /** Fires only when the draft crosses between empty and non-empty. */
+  onTypingChange: (typing: boolean) => void;
 }) {
   const [draft, setDraft] = useState("");
   const attachInputRef = useRef<HTMLInputElement | null>(null);
+  const typingRef = useRef(false);
+
+  const updateDraft = (nextDraft: string) => {
+    setDraft(nextDraft);
+    const typing = Boolean(nextDraft.trim());
+    if (typing !== typingRef.current) {
+      typingRef.current = typing;
+      onTypingChange(typing);
+    }
+  };
 
   const send = async () => {
     const content = draft.trim();
     if ((!content && !hasAttachments) || busy) return;
-    setDraft("");
+    updateDraft("");
     const ok = await onSend(content);
-    if (!ok) setDraft(content);
+    if (!ok) updateDraft(content);
   };
 
   return (
-    <div className="p-3 desk:px-[4vw] desk:pb-[2vw] desk:pt-[1vw]">
+    <div className="p-3 pb-6 desk:p-3 desk:px-[4vw] desk:pb-[2vw] desk:pt-[1vw]">
       <div className="rounded-2xl border bg-card transition-colors focus-within:border-primary/60">
         <textarea
           className="max-h-40 min-h-11 w-full resize-none bg-transparent px-3.5 pb-1 pt-3 text-[16px] outline-none"
@@ -298,7 +314,7 @@ function ChatComposer({
           value={draft}
           placeholder={placeholder}
           rows={1}
-          onChange={(event) => setDraft(event.target.value)}
+          onChange={(event) => updateDraft(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === "Enter" && !event.shiftKey) {
               event.preventDefault();
@@ -315,6 +331,18 @@ function ChatComposer({
           }}
         />
         <div className="flex items-center gap-1.5 px-2 pb-2">
+          <Avatar state={avatarState} className="shrink-0 select-none px-1 font-mono text-sm font-semibold text-foreground" />
+          <div className="flex-1" />
+          <select
+            className="rounded-lg border-0 bg-transparent px-1.5 py-1 text-xs text-muted-foreground hover:text-foreground"
+            value={harness}
+            onChange={(event) => onChooseHarness(event.target.value as "claude" | "codex")}
+            aria-label="Assistant"
+            title={harnessBound ? "Changing assistant starts a new conversation" : "Choose assistant"}
+          >
+            <option value="claude">Claude</option>
+            <option value="codex">Codex</option>
+          </select>
           {canAttach ? (
             <>
               <input
@@ -339,17 +367,6 @@ function ChatComposer({
               </button>
             </>
           ) : null}
-          <div className="flex-1" />
-          <select
-            className="rounded-lg border-0 bg-transparent px-1.5 py-1 text-xs text-muted-foreground hover:text-foreground"
-            value={harness}
-            onChange={(event) => onChooseHarness(event.target.value as "claude" | "codex")}
-            aria-label="Assistant"
-            title={harnessBound ? "Changing assistant starts a new conversation" : "Choose assistant"}
-          >
-            <option value="claude">Claude</option>
-            <option value="codex">Codex</option>
-          </select>
           <button
             type="button"
             className="grid size-9 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground disabled:opacity-50"
@@ -473,6 +490,110 @@ function ChatSurface({
   const pendingApprovals: AnyRecord[] = data?.pendingApprovals ?? [];
   const activeTurnEvents: AnyRecord[] = data?.activeTurnEvents ?? [];
   const boundHarness: string | undefined = data?.chat?.harness;
+  const [isTyping, setIsTyping] = useState(false);
+  const [isSleeping, setIsSleeping] = useState(false);
+  const [avatarMoment, setAvatarMoment] = useState<AvatarStateName | null>(null);
+  const avatarMomentTimerRef = useRef<number | null>(null);
+  const showAvatarMoment = useCallback((state: AvatarStateName, durationMs: number) => {
+    if (avatarMomentTimerRef.current !== null) window.clearTimeout(avatarMomentTimerRef.current);
+    setAvatarMoment(state);
+    avatarMomentTimerRef.current = window.setTimeout(() => {
+      setAvatarMoment(null);
+      avatarMomentTimerRef.current = null;
+    }, durationMs);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (avatarMomentTimerRef.current !== null) window.clearTimeout(avatarMomentTimerRef.current);
+    };
+  }, []);
+
+  const pendingAssistantMessage = [...messages]
+    .reverse()
+    .find((message: AnyRecord) => message.role === "assistant" && message.status === "pending");
+  const latestCompletedAssistantMessage = [...messages]
+    .reverse()
+    .find((message: AnyRecord) => message.role === "assistant" && message.status === "complete");
+  const latestTurnEvent = activeTurnEvents[activeTurnEvents.length - 1];
+  const latestErrorEventKey =
+    latestTurnEvent?.type === "error"
+      ? `${String(latestTurnEvent._id ?? "event")}:${String(latestTurnEvent.seq ?? "")}`
+      : null;
+  const latestNotableTaskMoment = [...(taskMoments ?? [])]
+    .filter((moment) => moment.state === "in_review" || moment.state === "completed")
+    .sort((a, b) => Number(b.timestamp ?? 0) - Number(a.timestamp ?? 0))[0];
+  const latestAssistantKey = latestCompletedAssistantMessage?._id
+    ? String(latestCompletedAssistantMessage._id)
+    : null;
+  const latestTaskMomentKey = latestNotableTaskMoment?.key
+    ? String(latestNotableTaskMoment.key)
+    : null;
+  const avatarSourceKey = String(
+    data?.chat?._id ?? (scope.kind === "project" ? `project:${scope.projectId}` : `page:${scope.pageKey}`),
+  );
+  const avatarBaselineSourceRef = useRef<string | null>(null);
+  const seenAssistantKeyRef = useRef<string | null>(null);
+  const seenTaskMomentKeyRef = useRef<string | null>(null);
+  const seenErrorEventRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (data === undefined) return;
+    if (avatarBaselineSourceRef.current !== avatarSourceKey) {
+      avatarBaselineSourceRef.current = avatarSourceKey;
+      seenAssistantKeyRef.current = latestAssistantKey;
+      seenTaskMomentKeyRef.current = latestTaskMomentKey;
+      seenErrorEventRef.current = latestErrorEventKey;
+      return;
+    }
+
+    const errorChanged = Boolean(latestErrorEventKey && latestErrorEventKey !== seenErrorEventRef.current);
+    const taskChanged = Boolean(latestTaskMomentKey && latestTaskMomentKey !== seenTaskMomentKeyRef.current);
+    const assistantChanged = Boolean(latestAssistantKey && latestAssistantKey !== seenAssistantKeyRef.current);
+
+    seenAssistantKeyRef.current = latestAssistantKey;
+    seenTaskMomentKeyRef.current = latestTaskMomentKey;
+    seenErrorEventRef.current = latestErrorEventKey;
+
+    if (errorChanged) showAvatarMoment("disagree", 1500);
+    else if (taskChanged && latestNotableTaskMoment?.state === "completed") showAvatarMoment("celebrate", 2000);
+    else if (taskChanged && latestNotableTaskMoment?.state === "in_review") showAvatarMoment("proud", 1800);
+    else if (assistantChanged) showAvatarMoment("wink", 1000);
+  }, [
+    data,
+    avatarSourceKey,
+    latestAssistantKey,
+    latestErrorEventKey,
+    latestNotableTaskMoment?.state,
+    latestTaskMomentKey,
+    showAvatarMoment,
+  ]);
+
+  const latestMessage = messages[messages.length - 1];
+  const idleActivityKey = `${String(latestMessage?._id ?? "")}:${String(latestMessage?.status ?? "")}:${String(latestTurnEvent?.seq ?? "")}`;
+  const hasPendingApproval =
+    pendingApprovals.length > 0 || (runApprovals ?? []).some((approval) => approval.status === "pending");
+
+  useEffect(() => {
+    setIsSleeping(false);
+    if (pendingAssistantMessage || sending || isTyping || hasPendingApproval || avatarMoment) return;
+    const timeoutId = window.setTimeout(() => setIsSleeping(true), 30_000);
+    return () => window.clearTimeout(timeoutId);
+  }, [avatarMoment, hasPendingApproval, idleActivityKey, isTyping, pendingAssistantMessage, sending]);
+
+  const avatarState: AvatarStateName = avatarMoment
+    ? avatarMoment
+    : hasPendingApproval
+      ? "surprised"
+      : pendingAssistantMessage || sending
+        ? latestTurnEvent?.type === "assistant_message"
+          ? "talking"
+          : "searching"
+        : isTyping
+          ? "smile"
+          : isSleeping
+            ? "sleeping"
+            : "default";
 
   const chooseHarness = async (next: "claude" | "codex") => {
     harnessWasPicked.current = true;
@@ -578,6 +699,7 @@ function ChatSurface({
       return true;
     } catch (error) {
       setAttachments(sentAttachments);
+      showAvatarMoment("disagree", 1500);
       console.error("chat send failed", error);
       return false;
     } finally {
@@ -737,6 +859,7 @@ function ChatSurface({
 
       <ChatComposer
         placeholder={scope.kind === "project" ? "Message about this project…" : `Message ${scope.label}…`}
+        avatarState={avatarState}
         canAttach={canAttach}
         hasAttachments={attachments.length > 0}
         busy={sending || uploadingCount > 0}
@@ -745,6 +868,7 @@ function ChatSurface({
         onChooseHarness={(next) => void chooseHarness(next)}
         onSend={send}
         onAddFiles={(files) => void addFiles(files)}
+        onTypingChange={setIsTyping}
       />
     </section>
   );
