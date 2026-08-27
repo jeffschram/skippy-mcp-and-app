@@ -1,6 +1,6 @@
 # Connectors & Agent Runtime
 
-Status: Proposed (Phase 6 design note — implementation tasks follow this spec)
+Status: Accepted (Phase 6 design note — implementation tasks follow this spec)
 
 ## Summary
 
@@ -116,9 +116,18 @@ schedules get their own small union, reusing the shared time-zone helpers
 
 ```ts
 type AgentSchedule =
-  | { kind: "interval"; everyMinutes: number }                       // agenda: 30
+  | {
+      kind: "interval";
+      everyMinutes: number;                    // agenda: 30
+      window?: { start: string; end: string }; // quiet hours: only run 07:00–22:00
+      timeZone?: string;                       // window wall-clock zone
+    }
   | { kind: "daily"; timesOfDay: string[]; timeZone?: string };      // pm: ["23:30"]
 ```
+
+The `window` (owner-confirmed) keeps interval agents inside waking hours: a
+slot falling outside the window is skipped and `nextDueAt` advances to the
+window start. `start`/`end` are "HH:MM" wall-clock in the schedule's zone.
 
 `nextDueAt` is the single source of truth for due-ness (same pattern as
 recurrences). It is **schedule-anchored**: advanced from the scheduled slot,
@@ -208,14 +217,13 @@ Two additions to the settings hub (alongside the existing "Agent hosts" tab):
 - **No connector SDK/abstraction layer.** A connector is a slug plus locally
   configured access; the harness uses whatever tools the host registers.
 
-## Open questions for the owner
+## Resolved with the owner
 
-1. **Default schedules** — proposal: agenda `interval` every 30 min (07:00–22:00
-   quiet hours worth adding to the union?), finance `daily ["06:30"]`, PM
-   `daily ["23:30"]` per active project. Tune after the first week of digests.
-2. **Quiet hours / windows** — the two-variant schedule union is deliberately
-   minimal. If "only between 7am and 10pm" matters for agenda, we add an
-   optional `window` to the interval variant now rather than later.
-3. **Pass visibility** — is `lastRunStatus` in settings plus the existing
-   role-attributed run logs enough, or do you want a "recent agent passes"
-   feed on the Today page from day one?
+1. **Default schedules** — agenda `interval` every 30 min with a 07:00–22:00
+   window, finance `daily ["06:30"]`, PM `daily ["23:30"]` per active
+   project. Tune after the first week of digests.
+2. **Quiet hours** — confirmed useful; the interval variant carries an
+   optional `window` from day one (see Schedule representation).
+3. **Pass visibility** — v1 is `lastRunStatus` in settings plus the existing
+   role-attributed run logs. A Today-page "recent agent passes" card is a
+   possible follow-up once passes are flowing.
