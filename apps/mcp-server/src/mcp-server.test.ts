@@ -245,6 +245,16 @@ function createFakeClient(overrides: Partial<SkippyClient> = {}): SkippyClient {
             version: 1,
             isDefault: true,
           }
+        : input.slug === "project-manager"
+        ? {
+            slug: input.slug,
+            title: "Project manager",
+            description: "Project Manager Agent role skill.",
+            body: "# Skippy Project Manager\n\nYou are running as the **Project Manager Agent** for ONE project (role key: `pm:{projectId}`).",
+            visibility: "public",
+            version: 1,
+            isDefault: true,
+          }
         : {
             slug: input.slug,
             title: "Task heartbeat",
@@ -621,6 +631,17 @@ describe("Skippy MCP manifest", () => {
       if (financeSync.messages[0]?.content.type === "text") {
         expect(financeSync.messages[0].content.text).toContain("Skippy Finance Sync");
         expect(financeSync.messages[0].content.text).toContain("Financial Agent");
+      }
+
+      const projectManager = await client.getPrompt({
+        name: "skippy_project_manager",
+        arguments: { projectId: "m9project123" },
+      });
+      expect(projectManager.messages[0]?.content.type).toBe("text");
+      if (projectManager.messages[0]?.content.type === "text") {
+        expect(projectManager.messages[0].content.text).toContain("Skippy Project Manager");
+        expect(projectManager.messages[0].content.text).toContain("Project Manager Agent");
+        expect(projectManager.messages[0].content.text).toContain("Run this PM pass for projectId: m9project123");
       }
 
       const harnessBootstrap = await client.getPrompt({
