@@ -1,6 +1,6 @@
 # Project Manager Agent
 
-Status: Proposed (Phase 5 design — implementation task follows this spec)
+Status: Accepted (implemented as the `project-manager` skill in `convex/skills.ts`)
 
 ## Summary
 

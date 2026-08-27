@@ -995,6 +995,26 @@ export function createMcpServer(
   );
 
   server.registerResource(
+    "skippy_project_manager",
+    "skippy://skills/project-manager",
+    {
+      title: "Skippy project manager skill",
+      description:
+        "The Project Manager Agent's role skill: per-project result reviews, grounded briefs, flags, and digests.",
+      mimeType: "text/markdown",
+    },
+    async (uri) => ({
+      contents: [
+        {
+          uri: uri.href,
+          mimeType: "text/markdown",
+          text: skillText(await tools.getSkill({ slug: "project-manager" }), buildSkillsMessage()),
+        },
+      ],
+    }),
+  );
+
+  server.registerResource(
     "skippy_finance_sync",
     "skippy://skills/finance-sync",
     {
@@ -1125,6 +1145,33 @@ export function createMcpServer(
           content: {
             type: "text",
             text: skillText(await tools.getSkill({ slug: "agenda-ingestion" }), buildSkillsMessage()),
+          },
+        },
+      ],
+    }),
+  );
+
+  server.registerPrompt(
+    "skippy_project_manager",
+    {
+      title: "Load Skippy Project Manager",
+      description:
+        "The Project Manager Agent's role skill, parameterized by projectId: review task results, brief proposed tasks against the repo, flag blocked/stale work, and record an owner-facing digest.",
+      argsSchema: {
+        projectId: z.string().optional().describe("Accepted project ID this PM pass should operate on."),
+      },
+    },
+    async (args) => ({
+      description: "Teach the connected harness how to run a Skippy Project Manager Agent pass.",
+      messages: [
+        {
+          role: "assistant",
+          content: {
+            type: "text",
+            text: [
+              skillText(await tools.getSkill({ slug: "project-manager" }), buildSkillsMessage()),
+              ...(args.projectId ? [``, `Run this PM pass for projectId: ${args.projectId}`] : []),
+            ].join("\n"),
           },
         },
       ],

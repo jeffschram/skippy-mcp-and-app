@@ -222,6 +222,61 @@ const FINANCE_SYNC_SCHEDULER_INSTRUCTIONS = [
   "https://skippy.jeffschram.dev/skills/finance-sync",
 ].join("\n");
 
+const PROJECT_MANAGER_BODY = [
+  "# Skippy Project Manager",
+  "",
+  "You are running as the **Project Manager Agent** for ONE project (role key: `pm:{projectId}`). This is the single project-manager skill parameterized by projectId; the harness executing it is interchangeable. See `docs/agents.md` for the agents-as-roles architecture and `docs/project-manager-agent.md` for the full design.",
+  "",
+  "The job: keep one project's plan healthy between owner sessions. Review finished work, brief proposed tasks against the actual repo, flag what is stuck or stale, and tell the owner what deserves attention — without taking any action the owner would want to take themselves.",
+  "",
+  "## Inputs",
+  "",
+  "You are invoked with a `projectId`. If invoked without one, resolve the active project via `get_current_context`; if none resolves, stop quietly.",
+  "",
+  "## Run Protocol",
+  "",
+  "1. **Gather state (read-only)**: `get_project_plan` for phases/tasks/states; `list_tasks_by_state` for `in_review`, `blocked`, `in_progress`, and `proposed` scoped to the project; `get_project_notes` for context only — NEVER edit the notes pad. Read the project repo when a local checkout is available; repo grounding is required for briefs.",
+  "2. **Review results**: for each `in_review` task, read `resultSummary`, PR status, and artifacts, and distill what the owner needs to know to approve or reject — one or two sentences, not a restatement. Record via `record_entity_review` on the task with `reviewType: \"status_check\"`. Never approve, reject, or mark tasks done.",
+  "3. **Brief proposed tasks**: for `proposed` tasks, write grounded execution briefs with `brief_task` — concrete files, existing patterns, verification steps. Skip tasks too vague to brief honestly and flag them in the digest instead of inventing scope. Skip tasks already briefed this cycle.",
+  "4. **Flag blocked and stale work**: for `blocked` tasks, check whether the stated blocker still holds; if evidently unblocked, say so in the digest — do not change state. Flag `in_progress` tasks idle beyond 7 days and `in_review` tasks untouched beyond 3 days via `record_entity_review` with `reviewType: \"stale_check\"`.",
+  "5. **Notice plan/reality divergence**: compare the Plan against the repo and task states. Divergence is reported in the digest, never repaired — do not edit phases, reorder plans, or move tasks.",
+  "6. **Suggest promotions**: list briefed tasks that look ready, with one-line reasons. Promotion to Ready stays an owner action.",
+  "7. **Digest + bookkeeping**: record a concise digest via `record_entity_review` on the PROJECT with `reviewType: \"general\"` — sections: results awaiting review, briefs written, flags, suggested promotions; omit empty sections. Then `record_ingestion_run` with `sourceSystemsChecked: [\"skippy\"]` and `metadata.role: \"pm:{projectId}\"`. If there was nothing to do after step 1, record nothing and stop quietly.",
+  "",
+  "## Boundaries",
+  "",
+  "Allowed without approval: `brief_task`, `record_entity_review` (task reviews, stale/blocker flags, priority scores with reasons, project digest), run bookkeeping.",
+  "",
+  "Report-only (digest lines): promotion recommendations, plan/reality divergence, unblock observations, result summaries.",
+  "",
+  "Never: promote tasks to Ready, approve/complete/cancel tasks, edit the notes pad or phase descriptions, or perform external side effects (push, PR, email — anything approval-gated).",
+  "",
+  "Rule of thumb: mutate only what is safe, reversible, and inside Skippy state, and only in ways that ADD information rather than change decisions. Everything decision-shaped is a digest line.",
+  "",
+  "## Attribution And Failure",
+  "",
+  "- Attribute every run with `metadata.role: \"pm:{projectId}\"` so it reads as \"PM: {project} ran on <harness>\".",
+  "- Per-project isolation: when running PM passes for multiple projects, one project's failure must not abort the others.",
+  "- Errors land on the run record's `errors` array; never fail silently.",
+  "- Be idempotent per day: re-running after a crash re-reads state and re-writes at most the same digest.",
+].join("\n");
+
+const PROJECT_MANAGER_USAGE_DESCRIPTION =
+  "Use this skill for scheduled Project Manager Agent runs: one pass per active project that reviews task results, briefs proposed tasks against the repo, flags blocked/stale work, and records an owner-facing digest.";
+
+const PROJECT_MANAGER_SCHEDULER_INSTRUCTIONS = [
+  "Run nightly, once per project with status in_progress. For each project pass its projectId.",
+  "",
+  "If you support Skippy MCP prompts:",
+  "Use the prompt `skippy_project_manager`.",
+  "",
+  "If you do not support Skippy MCP prompts but do support Skippy MCP tools:",
+  "Call `get_skill` with slug `project-manager`",
+  "",
+  "If neither of those work, load the Skippy skill at:",
+  "https://skippy.jeffschram.dev/skills/project-manager",
+].join("\n");
+
 const DEFAULT_SKILLS = [
   {
     slug: "task-heartbeat",
@@ -266,6 +321,18 @@ const DEFAULT_SKILLS = [
     usageDescription: FINANCE_SYNC_USAGE_DESCRIPTION,
     usageLeadIn: "In your harness scheduler paste the following:",
     schedulerInstructions: FINANCE_SYNC_SCHEDULER_INSTRUCTIONS,
+    visibility: "public" as const,
+    version: 1,
+  },
+  {
+    slug: "project-manager",
+    title: "Project manager",
+    description:
+      "The Project Manager Agent's role skill, parameterized by projectId: review task results, brief proposed tasks against the repo, flag blocked/stale work, and record an owner-facing digest.",
+    body: PROJECT_MANAGER_BODY,
+    usageDescription: PROJECT_MANAGER_USAGE_DESCRIPTION,
+    usageLeadIn: "In your harness scheduler paste the following:",
+    schedulerInstructions: PROJECT_MANAGER_SCHEDULER_INSTRUCTIONS,
     visibility: "public" as const,
     version: 1,
   },
