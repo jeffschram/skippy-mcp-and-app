@@ -162,6 +162,66 @@ const AGENDA_INGESTION_SCHEDULER_INSTRUCTIONS = [
   "https://skippy.jeffschram.dev/skills/agenda-ingestion",
 ].join("\n");
 
+const FINANCE_SYNC_BODY = [
+  "# Skippy Finance Sync",
+  "",
+  "You are running as the **Financial Agent** (role key: `finance`). The role is defined by this skill; the harness executing it is interchangeable. See `docs/agents.md` for the agents-as-roles architecture and `docs/plaid-financial-source.md` for the Plaid server setup and security posture.",
+  "",
+  "The job: sync bank data from the local read-only Plaid MCP server into Skippy's financial tables. Plaid data is **ground truth** — record it directly, never queue it for review. The judgment this skill canonicalizes is the mapping from raw Plaid data to the fixed Conscious Spending Plan (CSP) taxonomy.",
+  "",
+  "## Run Protocol",
+  "",
+  "1. Call `update_source_sync_status` with status `running`, statusKey `plaid-sync`, harness set to your engine name, sources `[\"plaid\"]`, and `metadata.role: \"finance\"`.",
+  "2. **Accounts**: for each linked account, call `upsert_financial_account` with the Plaid `account_id` as `plaidAccountId` so re-syncs update rather than duplicate. `mask` is the LAST 4 characters only — never full account numbers. `accountType` is `Jeff Personal` or `Family Shared`.",
+  "3. **Transactions**: fetch the raw feed and call `record_financial_transactions` with Plaid `transaction_id`s as `externalId`s (idempotent: existing IDs update in place). Amounts are integer cents, positive magnitudes; `txType` determines direction.",
+  "4. **Balances**: call `record_financial_balances` with end-of-day snapshots computed by walking the FULL raw Plaid feed backward from the `/accounts/balance/get` current balance — including feed rows not recorded as budget transactions. NEVER derive balances by summing recorded budget transactions.",
+  "5. Call `record_ingestion_run` with sources `[\"plaid\"]`, counts, errors, and `metadata.role: \"finance\"`.",
+  "6. Call `update_source_sync_status` with `completed` (or `failed` plus short error summaries).",
+  "",
+  "## CSP Mapping Judgment",
+  "",
+  "Map each transaction to the FIXED type-category taxonomy (invalid pairs are rejected server-side):",
+  "",
+  "- **Fixed Costs**: `Mortgage, HOA, Mortgage Loan` | `Recurring Bills` | `Debt Payments` | `Groceries` | `Subscriptions`",
+  "- **Investments**: `Retirement` | `Brokerage`",
+  "- **Savings**: `Emergency Fund` | `Goals`",
+  "- **Guilt-Free**: `Restaurants` | `Gas, Amazon, Home Depot, Etc` | `Misc.`",
+  "- **Income**: `Jeff` | `Holly`",
+  "- **Transfer**: `Transfers In` | `Transfers Out`",
+  "",
+  "Rules that override merchant-name intuition:",
+  "",
+  "- **Transfer detection**: money moving between the owner's own accounts — tracked or untracked, including business checking or a partner's external account — is txType `Transfer` with `Transfers In`/`Transfers Out`. Never Income, never an outgoing bucket. Transfers are excluded from budget totals automatically.",
+  "- **Off-ledger 401k**: payroll-deducted retirement contributions that never touch checking are `offLedger: true` (txType `Investments` only) with `contributionSource`: `employee` amounts are the owner's pre-tax pay and gross up the percent-of-income denominator for CSP targets; `employer` match counts in Investments totals but is NOT income and never grosses up the denominator.",
+  "- **Merchant judgment**: grocery stores map to `Groceries`; restaurants and coffee to `Restaurants`; gas, Amazon, and home improvement to `Gas, Amazon, Home Depot, Etc`; recognized paychecks to `Income` under the correct earner (`Jeff` or `Holly`). When genuinely ambiguous, prefer `Guilt-Free` / `Misc.` over inventing a fixed cost.",
+  "",
+  "## Attribution",
+  "",
+  "Every run is attributed to the `finance` role, separate from the harness. Always set `metadata.role: \"finance\"` on `record_ingestion_run` and `update_source_sync_status` so runs read as \"the Financial Agent ran on <harness>\".",
+  "",
+  "## Boundaries",
+  "",
+  "- Financial tools and run bookkeeping only: no task execution, no general source ingestion, no external side effects.",
+  "- The Plaid server is read-only; never attempt money movement, item modification, or write endpoints.",
+  "- Never print, log, or store Plaid secrets or access tokens; they stay in the local chmod-600 config.",
+  "- Sandbox credentials only for automated runs; production credentials require an explicit owner-approved task.",
+  "- Record structured budget data, not prose dumps. Notable anomalies (fraud-shaped charges, missed payroll, failed autopay) may additionally be ingested as concise Skippy objects with `sourceSystem: \"plaid\"` sourceRefs.",
+].join("\n");
+
+const FINANCE_SYNC_USAGE_DESCRIPTION =
+  "Use this skill for scheduled Financial Agent runs: syncing accounts, transactions, and balances from the local read-only Plaid MCP server into Skippy under the fixed CSP taxonomy.";
+
+const FINANCE_SYNC_SCHEDULER_INSTRUCTIONS = [
+  "If you support Skippy MCP prompts:",
+  "Use the prompt `skippy_finance_sync`.",
+  "",
+  "If you do not support Skippy MCP prompts but do support Skippy MCP tools:",
+  "Call `get_skill` with slug `finance-sync`",
+  "",
+  "If neither of those work, load the Skippy skill at:",
+  "https://skippy.jeffschram.dev/skills/finance-sync",
+].join("\n");
+
 const DEFAULT_SKILLS = [
   {
     slug: "task-heartbeat",
@@ -194,6 +254,18 @@ const DEFAULT_SKILLS = [
     usageDescription: AGENDA_INGESTION_USAGE_DESCRIPTION,
     usageLeadIn: "In your harness scheduler paste the following:",
     schedulerInstructions: AGENDA_INGESTION_SCHEDULER_INSTRUCTIONS,
+    visibility: "public" as const,
+    version: 1,
+  },
+  {
+    slug: "finance-sync",
+    title: "Finance sync",
+    description:
+      "The Financial Agent's role skill: Plaid account/transaction/balance sync into Skippy under the fixed CSP taxonomy, with transfer and off-ledger 401k rules.",
+    body: FINANCE_SYNC_BODY,
+    usageDescription: FINANCE_SYNC_USAGE_DESCRIPTION,
+    usageLeadIn: "In your harness scheduler paste the following:",
+    schedulerInstructions: FINANCE_SYNC_SCHEDULER_INSTRUCTIONS,
     visibility: "public" as const,
     version: 1,
   },

@@ -966,6 +966,25 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
   );
 
   server.registerResource(
+    "skippy_finance_sync",
+    "skippy://skills/finance-sync",
+    {
+      title: "Skippy finance sync skill",
+      description: "The Financial Agent's role skill: Plaid sync into Skippy under the fixed CSP taxonomy.",
+      mimeType: "text/markdown",
+    },
+    async (uri) => ({
+      contents: [
+        {
+          uri: uri.href,
+          mimeType: "text/markdown",
+          text: skillText(await tools.getSkill({ slug: "finance-sync" }), buildSkillsMessage()),
+        },
+      ],
+    }),
+  );
+
+  server.registerResource(
     "skippy_harness_bootstrap",
     "skippy://skills/harness-bootstrap",
     {
@@ -1077,6 +1096,27 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
           content: {
             type: "text",
             text: skillText(await tools.getSkill({ slug: "agenda-ingestion" }), buildSkillsMessage()),
+          },
+        },
+      ],
+    }),
+  );
+
+  server.registerPrompt(
+    "skippy_finance_sync",
+    {
+      title: "Load Skippy Finance Sync",
+      description:
+        "The Financial Agent's role skill for scheduled Plaid sync runs: idempotent account upserts, CSP taxonomy mapping with transfer and off-ledger 401k rules, and end-of-day balance snapshots.",
+    },
+    async () => ({
+      description: "Teach the connected harness how to run a Skippy Financial Agent sync pass.",
+      messages: [
+        {
+          role: "assistant",
+          content: {
+            type: "text",
+            text: skillText(await tools.getSkill({ slug: "finance-sync" }), buildSkillsMessage()),
           },
         },
       ],

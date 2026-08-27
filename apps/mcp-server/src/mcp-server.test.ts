@@ -235,6 +235,16 @@ function createFakeClient(overrides: Partial<SkippyClient> = {}): SkippyClient {
             version: 1,
             isDefault: true,
           }
+        : input.slug === "finance-sync"
+        ? {
+            slug: input.slug,
+            title: "Finance sync",
+            description: "Financial Agent role skill.",
+            body: "# Skippy Finance Sync\n\nYou are running as the **Financial Agent** (role key: `finance`).",
+            visibility: "public",
+            version: 1,
+            isDefault: true,
+          }
         : {
             slug: input.slug,
             title: "Task heartbeat",
@@ -604,6 +614,13 @@ describe("Skippy MCP manifest", () => {
       if (agendaIngestion.messages[0]?.content.type === "text") {
         expect(agendaIngestion.messages[0].content.text).toContain("Skippy Agenda Ingestion");
         expect(agendaIngestion.messages[0].content.text).toContain("Agenda Agent");
+      }
+
+      const financeSync = await client.getPrompt({ name: "skippy_finance_sync" });
+      expect(financeSync.messages[0]?.content.type).toBe("text");
+      if (financeSync.messages[0]?.content.type === "text") {
+        expect(financeSync.messages[0].content.text).toContain("Skippy Finance Sync");
+        expect(financeSync.messages[0].content.text).toContain("Financial Agent");
       }
 
       const harnessBootstrap = await client.getPrompt({
