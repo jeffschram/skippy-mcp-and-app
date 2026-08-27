@@ -1311,6 +1311,74 @@ export default defineSchema({
 
   // --- Mac mini agent workbench (docs/mac-mini-agent-workbench.md) ---
 
+  // Connector inventory (docs/connectors.md): named access to external systems
+  // (google, imessage, plaid). Metadata ONLY — OAuth tokens and API secrets
+  // stay local on the providing host, chmod-600, and never touch Convex.
+  // Availability is derived at read time: a connector is usable when a
+  // non-revoked, recently-heartbeating host lists its slug in
+  // capabilities.connectors.
+  connectors: defineTable({
+    brainInstanceId: v.id("brainInstances"),
+    slug: v.string(),
+    displayName: v.string(),
+    kind: v.union(
+      v.literal("local_mcp"), // audited MCP server on the host (plaid pattern)
+      v.literal("local_data"), // direct local data access (imessage db)
+      v.literal("http_feed"), // token-authed HTTP push/pull (calendar-sync)
+    ),
+    readOnly: v.boolean(),
+    status: v.union(v.literal("pending"), v.literal("active"), v.literal("retired")),
+    docsPath: v.optional(v.string()),
+    notes: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_brain_slug", ["brainInstanceId", "slug"]),
+
+  // Stored agent configuration (docs/connectors.md): the pre-planned promotion
+  // of Phase 5 role strings to records. roleKey is the same string used for
+  // run attribution (metadata.role) — the foreign key that keeps history
+  // continuous with no backfill. The scoped token's PLAINTEXT lives only in
+  // the runner's local config; Convex stores the token document id for
+  // display/revocation. Claim/lease fields mirror agentRuns so the runner's
+  // agent-pass loop reuses the same discipline; claiming atomically advances
+  // nextDueAt (the double-fire guard).
+  agentConfigs: defineTable({
+    brainInstanceId: v.id("brainInstances"),
+    roleKey: v.string(), // "agenda" | "finance" | "task-executor" | "pm:{projectId}"
+    displayName: v.string(),
+    skillSlugs: v.array(v.string()),
+    connectorSlugs: v.array(v.string()),
+    mcpTokenId: v.optional(v.id("mcpTokens")),
+    preferredHarness: v.optional(agentHarness),
+    schedule: v.optional(
+      v.union(
+        v.object({
+          kind: v.literal("interval"),
+          everyMinutes: v.number(),
+          window: v.optional(v.object({ start: v.string(), end: v.string() })),
+          timeZone: v.optional(v.string()),
+        }),
+        v.object({
+          kind: v.literal("daily"),
+          timesOfDay: v.array(v.string()),
+          timeZone: v.optional(v.string()),
+        }),
+      ),
+    ),
+    enabled: v.boolean(),
+    nextDueAt: v.optional(v.number()),
+    lastRunStartedAt: v.optional(v.number()),
+    lastRunStatus: v.optional(v.union(v.literal("completed"), v.literal("failed"))),
+    claimedByHostId: v.optional(v.id("agentHosts")),
+    claimToken: v.optional(v.string()),
+    claimVersion: v.number(),
+    leaseExpiresAt: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_brain_role", ["brainInstanceId", "roleKey"])
+    .index("by_brain_due", ["brainInstanceId", "enabled", "nextDueAt"]),
+
   // Registered execution machines. The first host is the always-on Mac mini.
   // Online/Busy/Offline is DERIVED from lastHeartbeatAt at read time — there is
   // deliberately no stored status flag to go stale. Auth follows the mcpTokens
@@ -1329,6 +1397,10 @@ export default defineSchema({
       projectFileManifests: v.optional(v.boolean()),
       artifactUploads: v.optional(v.boolean()),
       isolatedChatAttachments: v.optional(v.boolean()),
+      // Connector slugs this host provides locally (docs/connectors.md):
+      // e.g. ["plaid", "imessage", "google"]. Gates agent-pass claiming the
+      // same way `harnesses` gates run claiming.
+      connectors: v.optional(v.array(v.string())),
     }),
     tokenHash: v.string(),
     tokenPrefix: v.string(),

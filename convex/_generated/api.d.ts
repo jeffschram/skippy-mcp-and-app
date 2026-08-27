@@ -9,11 +9,13 @@
  */
 
 import type * as agenda from "../agenda.js";
+import type * as agentConfigs from "../agentConfigs.js";
 import type * as agentWorkbench from "../agentWorkbench.js";
 import type * as auth from "../auth.js";
 import type * as bootstrap from "../bootstrap.js";
 import type * as calendar from "../calendar.js";
 import type * as chats from "../chats.js";
+import type * as connectors from "../connectors.js";
 import type * as finances from "../finances.js";
 import type * as http from "../http.js";
 import type * as interviews from "../interviews.js";
@@ -29,6 +31,7 @@ import type * as resurfacing from "../resurfacing.js";
 import type * as settings from "../settings.js";
 import type * as skills from "../skills.js";
 import type * as taskExecution from "../taskExecution.js";
+import type * as taskOrder from "../taskOrder.js";
 import type * as waiting from "../waiting.js";
 
 import type {
@@ -39,11 +42,13 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   agenda: typeof agenda;
+  agentConfigs: typeof agentConfigs;
   agentWorkbench: typeof agentWorkbench;
   auth: typeof auth;
   bootstrap: typeof bootstrap;
   calendar: typeof calendar;
   chats: typeof chats;
+  connectors: typeof connectors;
   finances: typeof finances;
   http: typeof http;
   interviews: typeof interviews;
@@ -59,6 +64,7 @@ declare const fullApi: ApiFromModules<{
   settings: typeof settings;
   skills: typeof skills;
   taskExecution: typeof taskExecution;
+  taskOrder: typeof taskOrder;
   waiting: typeof waiting;
 }>;
 
