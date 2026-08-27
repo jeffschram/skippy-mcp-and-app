@@ -198,9 +198,12 @@ export const capture = httpActionGeneric(async (ctx, request) => {
 /* record the run, and update the source-sync status pill. Auth reuses  */
 /* the same MCP bearer tokens as /capture — a SCOPED token, never a     */
 /* Convex admin key. Body (JSON):                                       */
-/*   { harness?, statusKey?, sourceSystemsChecked?: string[],           */
+/*   { harness?, statusKey?, role?, sourceSystemsChecked?: string[],    */
 /*     message?, items: [{ candidateEntityType, candidatePayload,       */
 /*                         rubricDecision, confidence?, sourceRefs? }] } */
+/* Runs are attributed to an agent role (docs/agents.md) separate from  */
+/* the harness; /ingest is the Agenda Agent's path, so role defaults to */
+/* "agenda" and lands in metadata.role on the run + sync status.        */
 /* ------------------------------------------------------------------ */
 export const ingest = httpActionGeneric(async (ctx, request) => {
   const token = parseBearerToken(request.headers.get("authorization"));
@@ -231,6 +234,7 @@ export const ingest = httpActionGeneric(async (ctx, request) => {
   const harness = typeof body.harness === "string" && body.harness.trim() ? body.harness.trim() : "http-ingest";
   const statusKey =
     typeof body.statusKey === "string" && body.statusKey.trim() ? body.statusKey.trim() : "http-ingest";
+  const role = typeof body.role === "string" && body.role.trim() ? body.role.trim() : "agenda";
   const sourceSystemsChecked = Array.isArray(body.sourceSystemsChecked)
     ? body.sourceSystemsChecked.filter((s: unknown): s is string => typeof s === "string")
     : [];
@@ -282,6 +286,7 @@ export const ingest = httpActionGeneric(async (ctx, request) => {
       sourceSystemsChecked,
       objectsCreated: created.length,
       ...(errors.length ? { errors } : {}),
+      metadata: { role },
     });
     await ctx.runMutation(updateSourceSyncStatusRef, {
       brainInstanceId,
@@ -293,6 +298,7 @@ export const ingest = httpActionGeneric(async (ctx, request) => {
         ? { message: body.message.trim() }
         : {}),
       ...(errors.length ? { errors } : {}),
+      metadata: { role },
     });
   } catch {
     // Ignore bookkeeping errors; the ingested objects are what matter.

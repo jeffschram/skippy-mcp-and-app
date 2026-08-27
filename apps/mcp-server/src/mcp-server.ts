@@ -2808,7 +2808,7 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
         completedAt: z.number().optional().describe("Epoch milliseconds when this run completed or failed."),
         lastHeartbeatAt: z.number().optional().describe("Epoch milliseconds for long-running heartbeat updates."),
         errors: z.array(z.string()).optional().describe("Short error summaries; avoid secrets or raw source payloads."),
-        metadata: z.unknown().optional().describe("Small JSON metadata object for audit/debugging. Avoid secrets and raw source dumps."),
+        metadata: z.unknown().optional().describe("Small JSON metadata object for audit/debugging. Include role (e.g. \"agenda\") to attribute the sync to an agent role, separate from the harness. Avoid secrets and raw source dumps."),
       }),
     },
     async (args) =>
@@ -2835,7 +2835,7 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
     {
       title: "Record ingestion run",
       description:
-        "Record metadata about a harness ingestion/review run. Use this around scheduled or batch reads of email, calendar, reminders, messages, or links so the user can audit source coverage and errors.",
+        "Record metadata about a harness ingestion/review run. Use this around scheduled or batch reads of email, calendar, reminders, messages, or links so the user can audit source coverage and errors. When running under a named agent role (docs/agents.md), attribute the run with metadata.role, e.g. { role: \"agenda\" }.",
       annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: true },
       inputSchema: z.object({
         harness: z.string().describe("Harness name, e.g. codex, chatgpt, claude, hermes, or scheduled_worker."),
@@ -2847,7 +2847,7 @@ export function createMcpServer(client: SkippyClient, brainInstanceId: string) {
         objectsCreated: z.number().optional().describe("Number of accepted objects created, if known."),
         objectsUpdated: z.number().optional().describe("Number of accepted objects updated, if known."),
         errors: z.array(z.string()).optional().describe("Short error summaries; avoid secrets or raw source payloads."),
-        metadata: z.unknown().optional().describe("Small JSON metadata object for audit/debugging. Avoid secrets and raw source dumps."),
+        metadata: z.unknown().optional().describe("Small JSON metadata object for audit/debugging. Include role (e.g. \"agenda\") to attribute the run to an agent role, separate from the harness. Avoid secrets and raw source dumps."),
       }),
     },
     async (args) =>
