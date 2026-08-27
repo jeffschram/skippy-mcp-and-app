@@ -13,6 +13,10 @@ export * from "./agenda";
 // Waiting-on ledger: identity matching so replies clear entries automatically.
 export * from "./waiting";
 
+// Agent-pass schedules (docs/connectors.md): minute-granular, schedule-anchored
+// cadences for named agents. Distinct from life recurrences by design.
+export * from "./agent-schedule";
+
 /* ------------------------------------------------------------------ */
 /* Project folder paths (assets/output)                                */
 /* ------------------------------------------------------------------ */
