@@ -46,6 +46,7 @@ const SEED_CONFIGS: Array<{
   skillSlugs: string[];
   connectorSlugs: string[];
   schedule?: AgentSchedule;
+  model?: string;
 }> = [
   {
     roleKey: "agenda",
@@ -58,6 +59,9 @@ const SEED_CONFIGS: Array<{
       window: { start: "07:00", end: "22:00" },
       timeZone: OWNER_TIME_ZONE,
     },
+    // Background triage doesn't need Opus-class reasoning (token tiering,
+    // docs/token-efficiency.md §4). Interactive chat is never tiered down.
+    model: "sonnet",
   },
   {
     roleKey: "finance",
@@ -65,6 +69,7 @@ const SEED_CONFIGS: Array<{
     skillSlugs: ["harness-bootstrap", "finance-sync"],
     connectorSlugs: ["plaid"],
     schedule: { kind: "daily", timesOfDay: ["06:30"], timeZone: OWNER_TIME_ZONE },
+    model: "sonnet",
   },
   {
     roleKey: "task-executor",
@@ -95,6 +100,7 @@ export const listForViewer = queryGeneric({
           skillSlugs: config.skillSlugs,
           connectorSlugs: config.connectorSlugs,
           preferredHarness: config.preferredHarness,
+          model: config.model,
           schedule: config.schedule,
           enabled: config.enabled,
           nextDueAt: config.nextDueAt,
@@ -125,6 +131,9 @@ export const upsertForViewer = mutationGeneric({
     connectorSlugs: v.optional(v.array(v.string())),
     mcpTokenId: v.optional(v.union(v.id("mcpTokens"), v.null())),
     preferredHarness: v.optional(v.union(agentHarness, v.null())),
+    // Harness-native model name/alias for scheduled passes; null clears back
+    // to the harness default (token tiering, docs/token-efficiency.md §4).
+    model: v.optional(v.union(v.string(), v.null())),
     schedule: v.optional(v.union(agentScheduleValidator, v.null())),
     enabled: v.optional(v.boolean()),
   },
@@ -183,6 +192,12 @@ export const upsertForViewer = mutationGeneric({
           : args.preferredHarness === null
             ? undefined
             : args.preferredHarness,
+      model:
+        args.model === undefined
+          ? existing?.model
+          : args.model === null
+            ? undefined
+            : args.model.trim() || undefined,
       schedule,
       enabled,
       nextDueAt,
@@ -239,6 +254,7 @@ export const seedDefaultsForViewer = mutationGeneric({
         skillSlugs: ["harness-bootstrap", "project-manager"],
         connectorSlugs: [],
         schedule: { kind: "daily", timesOfDay: ["23:30"], timeZone: OWNER_TIME_ZONE },
+        model: "sonnet",
       });
     }
 
@@ -257,6 +273,7 @@ export const seedDefaultsForViewer = mutationGeneric({
         skillSlugs: seed.skillSlugs,
         connectorSlugs: seed.connectorSlugs,
         schedule: seed.schedule,
+        model: seed.model,
         enabled: false, // ship disabled; owner enables per the migration plan
         claimVersion: 0,
         createdAt: now,

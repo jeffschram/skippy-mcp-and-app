@@ -321,6 +321,9 @@ export class ClaudeAdapter implements HarnessAdapter {
       abortController: sdkAbort,
     };
     if (sessionId) options.resume = sessionId;
+    // Model tiering: only set when the run carries one, so chat sessions and
+    // unconfigured projects keep the harness's own default (owner's Opus).
+    if (request.model) options.model = request.model;
 
     try {
       const stream = sdk.query({ prompt, options });

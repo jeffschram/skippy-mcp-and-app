@@ -359,6 +359,12 @@ export default defineSchema({
     vercelUrl: v.optional(v.string()),
     liveUrl: v.optional(v.string()),
     defaultBaseBranch: v.optional(v.string()),
+    // Default model for unattended task runs on this project (token tiering,
+    // docs/token-efficiency.md §4). Harness-native name/alias ("sonnet",
+    // "opus", "gpt-5-codex", ...); absent = harness default. Interactive chat
+    // deliberately has no such setting — chat stays on the owner's
+    // Opus-class default and is never demoted.
+    defaultTaskModel: v.optional(v.string()),
     // Project local folder (all projects may have one).
     localPath: v.optional(v.string()),
     // Explicit overrides for the assets (inputs) and output (artifacts) folders.
@@ -1364,6 +1370,10 @@ export default defineSchema({
     connectorSlugs: v.array(v.string()),
     mcpTokenId: v.optional(v.id("mcpTokens")),
     preferredHarness: v.optional(agentHarness),
+    // Model for this agent's scheduled passes (token tiering: background
+    // agents run Sonnet/Haiku-class, docs/token-efficiency.md §4). Absent =
+    // harness default. Consumed by the agent-pass claim path when it lands.
+    model: v.optional(v.string()),
     schedule: v.optional(
       v.union(
         v.object({
@@ -1579,6 +1589,10 @@ export default defineSchema({
     attempt: v.number(),
     status: agentRunStatus,
     harness: agentHarness,
+    // Model snapshot taken at enqueue time from the project's
+    // defaultTaskModel, so a later settings change never retro-affects a
+    // queued run. Absent = harness default.
+    model: v.optional(v.string()),
     baseBranch: v.string(),
     workingBranch: v.optional(v.string()),
     worktreePath: v.optional(v.string()),

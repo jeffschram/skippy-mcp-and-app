@@ -17,6 +17,27 @@ describe("buildCodexArgs", () => {
     ]);
   });
 
+  it("passes a model override as an exec-level flag", () => {
+    expect(buildCodexArgs({ worktreePath: "/tmp/skippy-task", model: "gpt-5-codex" })).toEqual([
+      "exec",
+      "--json",
+      "--cd",
+      "/tmp/skippy-task",
+      "--skip-git-repo-check",
+      "--color",
+      "never",
+      "--model",
+      "gpt-5-codex",
+      "--sandbox",
+      "workspace-write",
+      "-",
+    ]);
+  });
+
+  it("omits the model flag when no model is configured (harness default)", () => {
+    expect(buildCodexArgs({ worktreePath: "/tmp/skippy-task" })).not.toContain("--model");
+  });
+
   it("places exec-level arguments before the resume subcommand", () => {
     expect(
       buildCodexArgs({

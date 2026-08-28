@@ -148,6 +148,7 @@ async function buildBoard(db: any, brainInstanceId: any, projectId: string) {
       vercelUrl: project.vercelUrl,
       liveUrl: project.liveUrl,
       defaultBaseBranch: project.defaultBaseBranch,
+      defaultTaskModel: project.defaultTaskModel,
       localPath: project.localPath,
       assetsFolderPath: project.assetsFolderPath,
       outputFolderPath: project.outputFolderPath,
@@ -849,6 +850,9 @@ export const updateProjectForViewer = mutationGeneric({
     vercelUrl: v.optional(v.string()),
     liveUrl: v.optional(v.string()),
     defaultBaseBranch: v.optional(v.string()),
+    // Task-run model override (token tiering). Empty string clears back to
+    // the harness default.
+    defaultTaskModel: v.optional(v.string()),
     localPath: v.optional(v.string()),
     // Explicit assets/output folder overrides. Empty string clears the
     // override (falls back to the derived `${localPath}/_library` / `_output`).
@@ -875,6 +879,7 @@ export const updateProjectForViewer = mutationGeneric({
     if (args.vercelUrl !== undefined) patch.vercelUrl = args.vercelUrl.trim() || undefined;
     if (args.liveUrl !== undefined) patch.liveUrl = args.liveUrl.trim() || undefined;
     if (args.defaultBaseBranch !== undefined) patch.defaultBaseBranch = args.defaultBaseBranch.trim() || undefined;
+    if (args.defaultTaskModel !== undefined) patch.defaultTaskModel = args.defaultTaskModel.trim() || undefined;
     if (args.localPath !== undefined) patch.localPath = args.localPath.trim() || undefined;
     // Format-check only — the app/Convex never checks existence (the browser
     // PWA and cloud cannot see the user's disk); the harness `mkdir -p`s on

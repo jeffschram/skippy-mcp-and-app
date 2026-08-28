@@ -559,6 +559,10 @@ async function queueTaskExecution(
     attempt: priorRuns.length + 1,
     status: "queued",
     harness,
+    // Snapshot the project's task-run model at enqueue time (token tiering,
+    // docs/token-efficiency.md §4) — a later settings change never
+    // retro-affects an already-queued run.
+    model: project.defaultTaskModel,
     baseBranch: project.defaultBaseBranch ?? "main",
     executionBrief: task.executionBrief,
     acceptanceCriteria: task.acceptanceCriteria,
@@ -1025,6 +1029,7 @@ export const claimNextRun = mutationGeneric({
         runId: run._id,
         claimToken,
         harness: run.harness,
+        model: run.model,
         attempt: run.attempt,
         taskId: run.taskId,
         taskTitle: task?.title,

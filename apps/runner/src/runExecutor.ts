@@ -144,6 +144,7 @@ export class RunExecutor {
       const turn = await this.adapter.runTurn({
         prompt,
         worktreePath: worktree.worktreePath,
+        model: run.model,
         signal: this.abort.signal,
         onEvent: (event) => this.emit(event),
         requestApproval: async (approval) => {
