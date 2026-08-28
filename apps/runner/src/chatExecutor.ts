@@ -14,6 +14,7 @@ import type { ClaimedChatTurn, ControlPlane } from "./controlPlane.js";
 import type { HarnessAdapter, HarnessEvent } from "./harness/types.js";
 import { assertInsideAllowedRoot } from "./worktree.js";
 import { materializeManifest } from "./fileWorkspace.js";
+import { accumulateUsage, normalizeUsage, type TokenUsage } from "./usage.js";
 
 /** How often buffered live-activity events are flushed to the control plane. */
 const CHAT_EVENT_FLUSH_INTERVAL_MS = 1_000;
@@ -42,7 +43,15 @@ export async function executeChatTurn(
   // turn (events are re-queued once; the reply remains the durable product).
   let seq = 0;
   let pending: Array<{ seq: number; type: string; payload?: unknown }> = [];
+  // Token accounting (docs/token-efficiency.md lever 1): usage events are not
+  // live-view material, but their totals are persisted with the finished turn.
+  let usageTotal: TokenUsage | undefined;
   const emit = (event: HarnessEvent) => {
+    if (event.type === "usage") {
+      const sample = normalizeUsage((event.payload as { usage?: unknown } | undefined)?.usage);
+      if (sample) usageTotal = accumulateUsage(usageTotal, sample);
+      return;
+    }
     if (!LIVE_EVENT_TYPES.has(event.type)) return;
     seq += 1;
     pending.push({ seq, type: event.type, payload: event.payload });
@@ -102,6 +111,7 @@ export async function executeChatTurn(
       await plane.completeChatTurn(turn.turnId, turn.claimToken, {
         resultText: result.resultText ?? "",
         ...(result.externalThreadId ? { externalThreadId: result.externalThreadId } : {}),
+        ...(usageTotal ? { usage: usageTotal } : {}),
       });
     } else {
       await plane.completeChatTurn(turn.turnId, turn.claimToken, {
@@ -110,13 +120,17 @@ export async function executeChatTurn(
             ? "Chat turn was cancelled."
             : (result.errorMessage ?? "harness failed"),
         ...(result.externalThreadId ? { externalThreadId: result.externalThreadId } : {}),
+        ...(usageTotal ? { usage: usageTotal } : {}),
       });
     }
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`[skippy-runner] chat turn ${turn.turnId} failed:`, error);
     await plane
-      .completeChatTurn(turn.turnId, turn.claimToken, { errorMessage: message.slice(0, 500) })
+      .completeChatTurn(turn.turnId, turn.claimToken, {
+        errorMessage: message.slice(0, 500),
+        ...(usageTotal ? { usage: usageTotal } : {}),
+      })
       .catch(() => {});
   } finally {
     clearInterval(cancelWatcher);
