@@ -14,6 +14,7 @@ import { mutationGeneric, queryGeneric } from "convex/server";
 import { v } from "convex/values";
 import { requireOwnedBrain } from "./auth";
 import { applyTaskResult } from "./projects";
+import { tokenUsage } from "./schema";
 
 /* ------------------------------------------------------------------ */
 /* Constants                                                          */
@@ -232,6 +233,90 @@ export const listHostsForViewer = queryGeneric({
       revokedAt: host.revokedAt,
       createdAt: host.createdAt,
     }));
+  },
+});
+
+/* ------------------------------------------------------------------ */
+/* Token usage (docs/token-efficiency.md lever 1)                     */
+/* ------------------------------------------------------------------ */
+
+type UsageTotals = { inputTokens: number; cachedInputTokens: number; outputTokens: number; totalTokens: number };
+
+function zeroUsage(): UsageTotals {
+  return { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, totalTokens: 0 };
+}
+
+function addUsage(target: UsageTotals, usage: UsageTotals) {
+  target.inputTokens += usage.inputTokens;
+  target.cachedInputTokens += usage.cachedInputTokens;
+  target.outputTokens += usage.outputTokens;
+  target.totalTokens += usage.totalTokens;
+}
+
+/**
+ * Aggregated token usage across chat turns and agent runs, for the Agents hub
+ * Usage tab. Aggregation happens at read time from the per-turn/per-run
+ * `usage` fields the runner reports (already normalized provider-agnostically
+ * there). Full-table scans per brain are fine at personal-app scale; if the
+ * tables ever grow painful, add a createdAt index and window server-side.
+ */
+export const usageSummaryForViewer = queryGeneric({
+  args: { days: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    const { brain } = await requireOwnedBrain(ctx);
+    const days = Math.min(Math.max(Math.floor(args.days ?? 30), 1), 90);
+    const cutoff = Date.now() - days * 86_400_000;
+    // UTC day buckets: stable regardless of where the query executes.
+    const dayKey = (ts: number) => new Date(ts).toISOString().slice(0, 10);
+
+    const totals = { chat: zeroUsage(), runs: zeroUsage(), all: zeroUsage() };
+    const byHarness: Record<string, UsageTotals> = {};
+    const byDay = new Map<string, { day: string; chat: UsageTotals; runs: UsageTotals; total: UsageTotals }>();
+    let chatTurnCount = 0;
+    let runCount = 0;
+
+    const record = (kind: "chat" | "runs", harness: string, at: number, usage: UsageTotals) => {
+      addUsage(totals[kind], usage);
+      addUsage(totals.all, usage);
+      byHarness[harness] ??= zeroUsage();
+      addUsage(byHarness[harness], usage);
+      const key = dayKey(at);
+      let bucket = byDay.get(key);
+      if (!bucket) {
+        bucket = { day: key, chat: zeroUsage(), runs: zeroUsage(), total: zeroUsage() };
+        byDay.set(key, bucket);
+      }
+      addUsage(bucket[kind], usage);
+      addUsage(bucket.total, usage);
+    };
+
+    const turns = await ctx.db
+      .query("chatTurns")
+      .withIndex("by_brain_status", (q: any) => q.eq("brainInstanceId", brain._id))
+      .collect();
+    for (const turn of turns) {
+      if (!turn.usage || turn.updatedAt < cutoff) continue;
+      chatTurnCount += 1;
+      record("chat", turn.harness, turn.updatedAt, turn.usage);
+    }
+
+    const runs = await ctx.db
+      .query("agentRuns")
+      .withIndex("by_brain_status", (q: any) => q.eq("brainInstanceId", brain._id))
+      .collect();
+    for (const run of runs) {
+      if (!run.usage || run.updatedAt < cutoff) continue;
+      runCount += 1;
+      record("runs", run.harness, run.updatedAt, run.usage);
+    }
+
+    return {
+      days,
+      counts: { chatTurns: chatTurnCount, runs: runCount },
+      totals,
+      byHarness,
+      byDay: [...byDay.values()].sort((a, b) => (a.day < b.day ? 1 : -1)),
+    };
   },
 });
 
@@ -998,6 +1083,8 @@ export const updateRunStatus = mutationGeneric({
     resultUrl: v.optional(v.string()),
     prUrl: v.optional(v.string()),
     prNumber: v.optional(v.number()),
+    // Normalized session token totals (docs/token-efficiency.md lever 1).
+    usage: v.optional(tokenUsage),
   },
   handler: async (ctx, args) => {
     const host = await requireHost(ctx, args.hostToken);
@@ -1033,6 +1120,7 @@ export const updateRunStatus = mutationGeneric({
       "resultUrl",
       "prUrl",
       "prNumber",
+      "usage",
     ] as const) {
       if (args[key] !== undefined) patch[key] = args[key];
     }

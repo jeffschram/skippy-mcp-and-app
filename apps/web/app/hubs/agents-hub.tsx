@@ -16,12 +16,14 @@ import { AgentsContent } from "./agents";
 import { SkillsListBody } from "./skills";
 import { ConnectorsContent } from "./connectors";
 import { AgentHostsContent } from "./agent-hosts";
+import { AgentUsageContent } from "./agent-usage";
 
 const TABS = [
   { key: "agents", label: "Agents" },
   { key: "skills", label: "Skills" },
   { key: "connectors", label: "Connectors" },
   { key: "hosts", label: "Hosts" },
+  { key: "usage", label: "Usage" },
 ];
 
 const TAB_KEYS = new Set(TABS.map((tab) => tab.key));
@@ -46,6 +48,7 @@ export function AgentsHubContent({ initialTab }: { initialTab?: string | undefin
       {tab === "skills" ? <SkillsListBody /> : null}
       {tab === "connectors" ? <ConnectorsContent /> : null}
       {tab === "hosts" ? <AgentHostsContent /> : null}
+      {tab === "usage" ? <AgentUsageContent /> : null}
     </LiveGate>
   );
 }

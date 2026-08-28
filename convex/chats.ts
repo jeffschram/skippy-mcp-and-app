@@ -20,6 +20,7 @@ import { v } from "convex/values";
 import { effectiveProjectPaths, validateProjectFileInput } from "@skippy/shared";
 import { requireOwnedBrain } from "./auth";
 import { requireHost } from "./agentWorkbench";
+import { tokenUsage } from "./schema";
 
 const CHAT_LEASE_MS = 150_000;
 const HISTORY_LIMIT = 20;
@@ -684,6 +685,8 @@ export const completeChatTurn = mutationGeneric({
     resultText: v.optional(v.string()),
     errorMessage: v.optional(v.string()),
     externalThreadId: v.optional(v.string()),
+    // Normalized session token totals (docs/token-efficiency.md lever 1).
+    usage: v.optional(tokenUsage),
   },
   handler: async (ctx, args) => {
     const host = await requireHost(ctx, args.hostToken);
@@ -713,6 +716,7 @@ export const completeChatTurn = mutationGeneric({
     await ctx.db.patch(args.turnId, {
       status: failed ? "failed" : "completed",
       ...(failed ? { errorMessage: (args.errorMessage ?? "").slice(0, 500) } : {}),
+      ...(args.usage ? { usage: args.usage } : {}),
       updatedAt: now,
     });
     await deleteTurnEvents(ctx, args.turnId);

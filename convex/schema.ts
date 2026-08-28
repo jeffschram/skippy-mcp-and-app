@@ -240,6 +240,20 @@ const agentApprovalPolicy = v.object({
   requirePushApproval: v.optional(v.boolean()),
 });
 
+// Normalized token totals for one harness session (docs/token-efficiency.md
+// lever 1). The RUNNER normalizes the provider-specific shapes (Claude
+// reports cache activity alongside input_tokens; Codex reports cached as a
+// subset of it), so this stored shape is provider-agnostic:
+// inputTokens = fresh input incl. cache writes; cachedInputTokens = cache
+// reads; totalTokens = input + cached + output. Exported for the runner-facing
+// mutations that accept it (completeChatTurn, updateRunStatus).
+export const tokenUsage = v.object({
+  inputTokens: v.number(),
+  cachedInputTokens: v.number(),
+  outputTokens: v.number(),
+  totalTokens: v.number(),
+});
+
 export default defineSchema({
   users: defineTable({
     authProvider: v.literal("clerk"),
@@ -1527,6 +1541,8 @@ export default defineSchema({
     leaseExpiresAt: v.optional(v.number()),
     cancelRequested: v.optional(v.boolean()),
     errorMessage: v.optional(v.string()),
+    // Session token totals reported by the runner when the turn completes.
+    usage: v.optional(tokenUsage),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
@@ -1595,6 +1611,8 @@ export default defineSchema({
     resultUrl: v.optional(v.string()),
     prUrl: v.optional(v.string()),
     prNumber: v.optional(v.number()),
+    // Session token totals reported by the runner after the harness turn.
+    usage: v.optional(tokenUsage),
     // High-water mark for idempotent event ingestion.
     lastEventSeq: v.number(),
     createdAt: v.number(),

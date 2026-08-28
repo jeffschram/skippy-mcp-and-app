@@ -25,6 +25,7 @@ import {
   pushBranch,
   slugify,
 } from "./worktree.js";
+import { accumulateUsage, normalizeUsage, type TokenUsage } from "./usage.js";
 
 const EVENT_FLUSH_INTERVAL_MS = 1_500;
 const CONTROL_POLL_INTERVAL_MS = 3_000;
@@ -39,6 +40,9 @@ export class RunExecutor {
    * the opaque teardown message (exit 143) run qx719evfy produced.
    */
   private approvalTimedOutCommand: string | undefined;
+  /** Session token totals, accumulated from harness usage events
+   * (docs/token-efficiency.md lever 1) and persisted onto the run. */
+  private usageTotal: TokenUsage | undefined;
 
   constructor(
     private config: RunnerConfig,
@@ -48,6 +52,11 @@ export class RunExecutor {
   ) {}
 
   private emit(event: HarnessEvent) {
+    if (event.type === "usage") {
+      const sample = normalizeUsage((event.payload as { usage?: unknown } | undefined)?.usage);
+      if (sample) this.usageTotal = accumulateUsage(this.usageTotal, sample);
+      // Still forwarded below: agentRunEvents keeps the raw per-turn samples.
+    }
     this.seq += 1;
     this.pendingEvents.push({ seq: this.seq, type: event.type, payload: event.payload });
   }
@@ -178,9 +187,12 @@ export class RunExecutor {
         ...(run.externalThreadId ? { externalThreadId: run.externalThreadId } : {}),
       });
 
-      if (turn.externalThreadId) {
+      if (turn.externalThreadId || this.usageTotal) {
+        // Self-transition metadata update: session id + token totals recorded
+        // regardless of which terminal status the run ends in.
         await plane.updateRunStatus(run.runId, run.claimToken, "running", {
-          externalThreadId: turn.externalThreadId,
+          ...(turn.externalThreadId ? { externalThreadId: turn.externalThreadId } : {}),
+          ...(this.usageTotal ? { usage: this.usageTotal } : {}),
         });
       }
       if (this.approvalTimedOutCommand) {

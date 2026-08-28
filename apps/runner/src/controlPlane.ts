@@ -8,6 +8,7 @@
  */
 import { ConvexHttpClient } from "convex/browser";
 import { anyApi } from "convex/server";
+import type { TokenUsage } from "./usage.js";
 
 export type Harness = "codex" | "claude";
 
@@ -164,6 +165,7 @@ export class ControlPlane {
       resultUrl: string;
       prUrl: string;
       prNumber: number;
+      usage: TokenUsage;
     }> = {},
   ) {
     return this.client.mutation(fns.updateRunStatus, {
@@ -319,12 +321,13 @@ export class ControlPlane {
   completeChatTurn(
     turnId: string,
     claimToken: string,
-    result: { resultText?: string; errorMessage?: string; externalThreadId?: string },
+    result: { resultText?: string; errorMessage?: string; externalThreadId?: string; usage?: TokenUsage },
   ) {
     const payload: Record<string, unknown> = { hostToken: this.hostToken, turnId, claimToken };
     if (result.resultText !== undefined) payload.resultText = result.resultText;
     if (result.errorMessage !== undefined) payload.errorMessage = result.errorMessage;
     if (result.externalThreadId !== undefined) payload.externalThreadId = result.externalThreadId;
+    if (result.usage !== undefined) payload.usage = result.usage;
     return this.client.mutation(chatFns.completeChatTurn, payload);
   }
 
