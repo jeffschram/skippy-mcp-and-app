@@ -1029,6 +1029,7 @@ function ProjectSettingsPanel({
   const [vercelUrl, setVercelUrl] = useState<string>(project.vercelUrl ?? "");
   const [liveUrl, setLiveUrl] = useState<string>(project.liveUrl ?? "");
   const [baseBranch, setBaseBranch] = useState<string>(project.defaultBaseBranch ?? "");
+  const [taskModel, setTaskModel] = useState<string>(project.defaultTaskModel ?? "");
   const [localPath, setLocalPath] = useState<string>(project.localPath ?? "");
   const [assetsFolderPath, setAssetsFolderPath] = useState<string>(project.assetsFolderPath ?? "");
   const [outputFolderPath, setOutputFolderPath] = useState<string>(project.outputFolderPath ?? "");
@@ -1051,6 +1052,7 @@ function ProjectSettingsPanel({
         vercelUrl,
         liveUrl,
         defaultBaseBranch: baseBranch,
+        defaultTaskModel: taskModel,
         localPath,
         assetsFolderPath,
         outputFolderPath,
@@ -1170,6 +1172,15 @@ function ProjectSettingsPanel({
                 value={baseBranch}
                 onChange={(event) => setBaseBranch(event.target.value)}
                 placeholder="main"
+              />
+            </Field>
+          ) : null}
+          {projectKind === "code" ? (
+            <Field label="Task run model">
+              <TextInput
+                value={taskModel}
+                onChange={(event) => setTaskModel(event.target.value)}
+                placeholder="harness default"
               />
             </Field>
           ) : null}

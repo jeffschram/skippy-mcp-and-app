@@ -31,13 +31,20 @@ export function buildCodexArgs({
   threadId,
   bypassPermissions,
   skippyMcpUrl,
+  model,
 }: {
   worktreePath: string;
   threadId?: string | undefined;
   bypassPermissions?: boolean | undefined;
   skippyMcpUrl?: string | undefined;
+  /** Model tiering: `codex exec --model <name>`; absent = codex default. */
+  model?: string | undefined;
 }): string[] {
   const args = ["exec", "--json", "--cd", worktreePath, "--skip-git-repo-check", "--color", "never"];
+
+  if (model) {
+    args.push("--model", model);
+  }
 
   if (skippyMcpUrl) {
     // Codex reads MCP servers from ~/.codex/config.toml, which is the same
@@ -143,6 +150,7 @@ export class CodexAdapter implements HarnessAdapter {
       threadId,
       bypassPermissions: request.bypassPermissions,
       skippyMcpUrl: this.options.skippyMcpUrl,
+      model: request.model,
     });
 
     return new Promise<HarnessTurnResult>((resolve) => {

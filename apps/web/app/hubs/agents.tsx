@@ -45,6 +45,7 @@ const EMPTY_FORM = {
   skillSlugs: "",
   connectorSlugs: "",
   preferredHarness: "",
+  model: "",
   scheduleKind: "manual",
   everyMinutes: "30",
   windowStart: "07:00",
@@ -94,6 +95,7 @@ function formFromConfig(config: AnyRecord): AnyRecord {
     skillSlugs: (config.skillSlugs ?? []).join(", "),
     connectorSlugs: (config.connectorSlugs ?? []).join(", "),
     preferredHarness: config.preferredHarness ?? "",
+    model: config.model ?? "",
     scheduleKind: schedule?.kind ?? "manual",
     everyMinutes: String(schedule?.kind === "interval" ? schedule.everyMinutes : 30),
     windowStart: schedule?.kind === "interval" ? (schedule.window?.start ?? "") : "07:00",
@@ -158,6 +160,7 @@ export function AgentsContent() {
           .map((slug: string) => slug.trim())
           .filter(Boolean),
         preferredHarness: form.preferredHarness ? form.preferredHarness : null,
+        model: form.model.trim() ? form.model.trim() : null,
         schedule: scheduleFromForm(form),
         mcpTokenId: form.mcpTokenId ? form.mcpTokenId : null,
       } as any);
@@ -340,6 +343,13 @@ export function AgentsContent() {
               <option value="claude">Claude</option>
               <option value="codex">Codex</option>
             </Select>
+          </Field>
+          <Field label="Model">
+            <TextInput
+              value={form.model}
+              onChange={(event) => setForm({ ...form, model: event.target.value })}
+              placeholder="harness default"
+            />
           </Field>
         </div>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "end" }}>

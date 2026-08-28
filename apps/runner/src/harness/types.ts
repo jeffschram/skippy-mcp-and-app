@@ -40,6 +40,14 @@ export interface HarnessTurnRequest {
   /** Absolute path of the dedicated worktree the harness must stay inside. */
   worktreePath: string;
   /**
+   * Harness-native model name/alias for this turn (token tiering,
+   * docs/token-efficiency.md §4): task runs use the project's
+   * defaultTaskModel, scheduled agents their config's model. Absent = the
+   * harness's own default — which is what interactive chat always uses
+   * (chat is deliberately never tiered down).
+   */
+  model?: string | undefined;
+  /**
    * Run with harness permissions bypassed — no approval callbacks, no
    * sandbox. Only ever set for chat turns, by explicit runner config.
    */

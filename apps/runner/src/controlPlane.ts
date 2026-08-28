@@ -16,6 +16,8 @@ export interface ClaimedRun {
   runId: string;
   claimToken: string;
   harness: Harness;
+  /** Model snapshot from the project's defaultTaskModel; absent = harness default. */
+  model?: string;
   attempt: number;
   taskId?: string;
   /** Title of the task this run executes; names the PR so the list stays scannable. */
