@@ -564,7 +564,14 @@ async function queueTaskExecution(
     // retro-affects an already-queued run.
     model: project.defaultTaskModel,
     baseBranch: project.defaultBaseBranch ?? "main",
-    executionBrief: task.executionBrief,
+    // Fall back to the task's own title + description when it was never
+    // briefed — without this, the runner's prompt degrades to just the
+    // project title and the harness has nothing to work from (2026-08-28:
+    // an un-briefed task ran with only "Skippy MCP and APP" as its prompt
+    // and produced an empty PR).
+    executionBrief:
+      task.executionBrief ??
+      ([task.title, task.description].filter(Boolean).join("\n\n") || undefined),
     acceptanceCriteria: task.acceptanceCriteria,
     inputFileRefs: frozenInputs.map((file: any) => ({ fileId: file._id, required: file.required ?? true })),
     fileLifecycleEnabled: frozenInputs.length > 0,
