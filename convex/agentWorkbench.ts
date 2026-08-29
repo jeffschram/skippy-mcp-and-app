@@ -885,6 +885,10 @@ export const registerHost = mutationGeneric({
     projectFileManifests: v.optional(v.boolean()),
     artifactUploads: v.optional(v.boolean()),
     isolatedChatAttachments: v.optional(v.boolean()),
+    // Connector slugs this host provides locally (docs/connectors.md), e.g.
+    // ["plaid", "imessage", "google"]. The connector inventory shows a
+    // connector as available when a live host advertises its slug here.
+    connectors: v.optional(v.array(v.string())),
   },
   handler: async (ctx, args) => {
     const host = await requireHost(ctx, args.hostToken);
@@ -898,6 +902,7 @@ export const registerHost = mutationGeneric({
         projectFileManifests: args.projectFileManifests ?? false,
         artifactUploads: args.artifactUploads ?? false,
         isolatedChatAttachments: args.isolatedChatAttachments ?? false,
+        ...(args.connectors ? { connectors: args.connectors } : {}),
       },
       lastHeartbeatAt: now,
       updatedAt: now,
