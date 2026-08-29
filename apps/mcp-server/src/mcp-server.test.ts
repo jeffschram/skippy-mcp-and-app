@@ -427,13 +427,13 @@ describe("Skippy MCP manifest", () => {
       const markQuickCaptureHandled = tools.find((tool) => tool.name === "mark_quick_capture_handled");
 
       expect(ingestObject?.description).toContain("importance rubric");
-      expect(ingestObject?.description).toContain("default to 'saved'");
-      expect(ingestObject?.description).toContain("pass status 'unread' only for explicit read-later intent");
+      expect(ingestObject?.description).toContain("default to status 'saved'");
+      expect(ingestObject?.description).toContain("pass 'unread' only for explicit read-later intent");
       expect(upsertLink?.description).toContain("status defaults to 'saved'");
-      expect(upsertLink?.description).toContain("use submit_candidate_object");
+      expect(upsertLink?.description).toContain("Prefer ingest_object");
       expect(upsertNote?.description).not.toContain("status defaults to 'saved'");
       expect(ingestObject?.inputSchema.properties?.rubricDecision).toBeDefined();
-      expect(submitCandidate?.description).toContain("Legacy fallback");
+      expect(submitCandidate?.description).toContain("Review-queue fallback");
       expect(submitCandidate?.inputSchema.properties?.reviewReason).toBeDefined();
       expect(createTask?.description).toContain("when the user explicitly asks");
       expect(createTask?.inputSchema.properties?.ownerType).toBeDefined();
@@ -445,83 +445,58 @@ describe("Skippy MCP manifest", () => {
       expect(listTasksByState?.inputSchema.properties?.projectId).toBeDefined();
       expect(listTasksByState?.inputSchema.properties?.ownerType).toBeDefined();
       expect(briefTask?.description).toContain("Ground the brief in the actual repo");
-      expect(getTaskBriefTool?.description).toContain("read user-provided inputs from effectiveAssetsPath");
+      expect(getTaskBriefTool?.description).toContain("effectiveAssetsPath for inputs");
+      expect(getTaskBriefTool?.description).toContain("effectiveOutputPath for deliverables");
       expect(getTaskBriefTool?.description).toContain(
-        "write generated artifacts/deliverables to effectiveOutputPath",
+        "Never write deliverables into the code repo unless they ARE the product",
       );
-      expect(getTaskBriefTool?.description).toContain("mkdir -p");
-      expect(getTaskBriefTool?.description).toContain(
-        "never write deliverables into the project's code repo unless they ARE the product",
-      );
-      expect(getCurrentContextTool?.description).toContain("effectiveAssetsPath");
-      expect(getCurrentContextTool?.description).toContain("effectiveOutputPath");
-      expect(getCurrentContextTool?.description).toContain("localPath");
+      expect(getCurrentContextTool?.description).toContain("activeRoute");
+      expect(getCurrentContextTool?.description).toContain("activeProject");
+      expect(getCurrentContextTool?.description).toContain("'this project'");
       expect(briefTask?.inputSchema.properties?.executionBrief).toBeDefined();
       expect(briefTask?.inputSchema.properties?.acceptanceCriteria).toBeDefined();
       expect(cancelTaskTool?.description).toContain("ONLY when the owner explicitly asks");
       expect(cancelTaskTool?.description).toContain("rejected server-side");
-      expect(cancelTaskTool?.description).toContain("no restore tool");
+      expect(cancelTaskTool?.description).toContain("restoring is owner-only");
       expect(cancelTaskTool?.inputSchema.properties?.taskId).toBeDefined();
       expect(cancelTaskTool?.inputSchema.properties?.reason).toBeDefined();
-      expect(updateLinkStatus?.description).toContain("genuine lifecycle changes");
-      expect(updateLinkStatus?.description).toContain("Never use it to fake user engagement");
+      expect(updateLinkStatus?.description).toContain("lifecycle status");
+      expect(updateLinkStatus?.description).toContain("Never fake user engagement");
       expect(updateLinkStatus?.inputSchema.properties?.linkId).toBeDefined();
       expect(updateLinkStatus?.inputSchema.properties?.status).toBeDefined();
       expect(updateLinkStatus?.inputSchema.properties?.reason).toBeDefined();
-      expect(upsertFinancialAccount?.description).toContain("never send full account numbers");
+      expect(upsertFinancialAccount?.description).toContain("never full account numbers");
       expect(upsertFinancialAccount?.description).toContain("plaidAccountId");
       expect(upsertFinancialAccount?.inputSchema.properties?.mask).toBeDefined();
       expect(recordFinancialTransactions?.description).toContain("ground truth");
-      expect(recordFinancialTransactions?.description).toContain("never queue it for review");
+      expect(recordFinancialTransactions?.description).toContain("never queue for review");
       expect(recordFinancialTransactions?.description).toContain("INTEGER CENTS");
-      expect(recordFinancialTransactions?.description).toContain("externalIds for idempotency");
-      expect(recordFinancialTransactions?.description).toContain(
-        "Fixed Costs: Mortgage, HOA, Mortgage Loan | Recurring Bills | Debt Payments | Groceries | Subscriptions",
-      );
-      expect(recordFinancialTransactions?.description).toContain("Investments: Retirement | Brokerage");
-      expect(recordFinancialTransactions?.description).toContain("Savings: Emergency Fund | Goals");
-      expect(recordFinancialTransactions?.description).toContain(
-        "Guilt-Free: Restaurants | Gas, Amazon, Home Depot, Etc | Misc.",
-      );
-      expect(recordFinancialTransactions?.description).toContain("Transfer: Transfers In | Transfers Out");
-      expect(recordFinancialTransactions?.description).toContain(
-        "Transfers between the owner's own accounts (tracked or untracked, e.g. business checking or a partner's external account) are txType 'Transfer' with category 'Transfers In' or 'Transfers Out' — never Income or an outgoing bucket",
-      );
-      expect(recordFinancialTransactions?.description).toContain("automatically excluded from budget totals");
-      expect(recordFinancialTransactions?.description).toContain("Payroll-deducted retirement contributions");
-      expect(recordFinancialTransactions?.description).toContain("offLedger: true (txType 'Investments' only)");
-      expect(recordFinancialTransactions?.description).toContain(
-        "'employee' amounts are the owner's pre-tax pay, so they gross up the percent-of-income denominator",
-      );
-      expect(recordFinancialTransactions?.description).toContain(
-        "'employer' match amounts count in Investments totals but are NOT income and never gross up the denominator",
-      );
-      expect(recordFinancialTransactions?.description).toContain(
-        "Off-ledger rows are excluded from outgoing/net and from account balances",
-      );
+      expect(recordFinancialTransactions?.description).toContain("externalIds for idempotent dedupe");
+      // The full CSP taxonomy (category lists, transfer direction, off-ledger
+      // 401k gross-up rules) moved into the finance-taxonomy skill so every
+      // session stops paying for it in the manifest; the description must keep
+      // pointing there.
+      expect(recordFinancialTransactions?.description).toContain("finance-taxonomy skill");
+      expect(recordFinancialTransactions?.description).toContain("type-category pairing is enforced");
       expect(recordFinancialTransactions?.inputSchema.properties?.transactions).toBeDefined();
-      expect(recordFinancialBalances?.description).toContain("FULL raw Plaid transaction feed");
-      expect(recordFinancialBalances?.description).toContain("NEVER derive balances by summing recorded budget transactions");
-      expect(recordFinancialBalances?.description).toContain("one snapshot per account+day");
-      expect(recordFinancialBalances?.description).toContain("INTEGER CENTS");
+      expect(recordFinancialBalances?.description).toContain("FULL raw Plaid feed");
+      expect(recordFinancialBalances?.description).toContain("NEVER by summing recorded budget transactions");
+      expect(recordFinancialBalances?.description).toContain("idempotent per account+day");
+      expect(recordFinancialBalances?.description).toContain("integer cents");
       expect(recordFinancialBalances?.inputSchema.properties?.balances).toBeDefined();
       expect(getFinancialReport?.annotations?.readOnlyHint).toBe(true);
       expect(getFinancialReport?.description).toContain("previous-month deltas");
       expect(getFinancialReport?.inputSchema.properties?.monthKey).toBeDefined();
       expect(listProjectFiles?.annotations?.readOnlyHint).toBe(true);
-      expect(listProjectFiles?.description).toContain("Download URLs are ephemeral");
-      expect(listProjectFiles?.description).toContain("effectiveAssetsPath");
-      expect(listProjectFiles?.description).toContain("_library");
-      expect(listProjectFiles?.description).toContain("matching size");
-      expect(listProjectFiles?.description).toContain("not in the library unless registered");
+      expect(listProjectFiles?.description).toContain("ephemeral downloadUrls");
+      expect(listProjectFiles?.description).toContain("file-upload skill");
       expect(listProjectFiles?.inputSchema.properties?.projectId).toBeDefined();
       expect(listProjectFiles?.inputSchema.properties?.taskId).toBeDefined();
       expect(generateProjectFileUploadUrl?.description).toContain("short-lived");
       expect(generateProjectFileUploadUrl?.description).toContain("{storageId}");
       expect(generateProjectFileUploadUrl?.description).toContain("register_project_file");
       expect(generateProjectFileUploadUrl?.inputSchema.properties?.projectId).toBeDefined();
-      expect(registerProjectFile?.description).toContain("generate_project_file_upload_url");
-      expect(registerProjectFile?.description).toContain("HTTP POST the raw file bytes");
+      expect(registerProjectFile?.description).toContain("Step 2");
       expect(registerProjectFile?.description).toContain("{storageId}");
       expect(registerProjectFile?.description).toContain("25 MB");
       expect(registerProjectFile?.description).toContain("executables and arbitrary binaries are rejected");
@@ -532,17 +507,13 @@ describe("Skippy MCP manifest", () => {
       expect(listQuickCaptures?.annotations?.readOnlyHint).toBe(true);
       expect(listQuickCaptures?.description).toContain("Home quick-capture inbox");
       expect(listQuickCaptures?.description).toContain("source-ingestion run");
-      expect(listQuickCaptures?.description).toContain("ingest_object");
       expect(listQuickCaptures?.description).toContain("mark_quick_capture_handled");
-      expect(listQuickCaptures?.description).toContain("ephemeral fileUrl");
-      expect(listQuickCaptures?.description).toContain("hold intent");
-      expect(listQuickCaptures?.description).toContain("device-to-device transfers");
-      expect(listQuickCaptures?.description).toContain("must not be ingested");
+      expect(listQuickCaptures?.description).toContain("fileUrls are ephemeral");
       expect(listQuickCaptures?.inputSchema.properties?.status).toBeDefined();
-      expect(markQuickCaptureHandled?.description).toContain("ingestion harness handled a quick capture");
+      expect(markQuickCaptureHandled?.description).toContain("quick capture was handled");
       expect(markQuickCaptureHandled?.description).toContain("'processed'");
       expect(markQuickCaptureHandled?.description).toContain("'discarded'");
-      expect(markQuickCaptureHandled?.description).toContain("Only pending captures can be marked");
+      expect(markQuickCaptureHandled?.description).toContain("already-handled captures are rejected");
       expect(markQuickCaptureHandled?.inputSchema.properties?.captureId).toBeDefined();
       expect(markQuickCaptureHandled?.inputSchema.properties?.outcome).toBeDefined();
       expect(markQuickCaptureHandled?.inputSchema.properties?.processingNote).toBeDefined();
@@ -550,8 +521,8 @@ describe("Skippy MCP manifest", () => {
       expect(capture?.description).toContain("accepted note directly");
       expect(ask?.annotations?.readOnlyHint).toBe(true);
       expect(refreshFocusSummary?.description).toContain("Generate and store");
-      expect(recordEntityReview?.description).toContain("Record a review of an accepted Skippy entity");
-      expect(markTaskInProgress?.description).toContain("when a harness starts working");
+      expect(recordEntityReview?.description).toContain("Record a review of an accepted entity");
+      expect(markTaskInProgress?.description).toContain("before doing meaningful work");
       expect(dispatchNotifications?.description).toContain("Use dryRun first");
       expect(captureThought?.description).toContain("second-brain memory");
       expect(captureThought?.inputSchema.properties?.sourceRefs).toBeDefined();
@@ -566,7 +537,7 @@ describe("Skippy MCP manifest", () => {
       expect(getMemoryDetail?.description).toContain("memory detail");
       expect(linkMemory?.inputSchema.properties?.confidence).toBeDefined();
       expect(listInterviewTemplates?.description).toContain("assistantDisplayName");
-      expect(startInterview?.description).toContain("one question at a time in chat");
+      expect(startInterview?.description).toContain("one question at a time");
       expect(answerInterviewQuestion?.description).toContain("current interview question");
       expect(completeInterview?.description).toContain("Complete a guided interview");
       expect(getSkill?.description).toContain("Skippy-hosted harness skill");
@@ -1224,7 +1195,7 @@ describe("Skippy MCP manifest", () => {
       expect(updateDescription).toContain("owner-requested notes review");
       const snapshotDescription =
         tools.find((tool) => tool.name === "snapshot_project_notes")?.description ?? "";
-      expect(snapshotDescription).toContain("owner's explicit OK");
+      expect(snapshotDescription).toContain("owner's OK");
 
       const readResult = await client.callTool({
         name: "get_project_notes",
@@ -2188,7 +2159,7 @@ describe("life-layer tools", () => {
 
       expect(description).toContain("completion");
       expect(description).toContain("schedule");
-      expect(description).toMatch(/actually finished|shifts with you/);
+      expect(description).toMatch(/when the work is finished|recurrence-semantics/);
     });
   });
 
