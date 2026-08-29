@@ -1323,6 +1323,9 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
   const ensurePhases = useMutation(api.projects.ensureProjectPhasesForViewer);
   const setExecState = useMutation(api.projects.setTaskExecutionStateForViewer);
   const executeTask = useMutation(api.agentWorkbench.executeTaskForViewer);
+  const setExecutionConfig = useMutation(
+    api.agentWorkbench.setProjectExecutionConfigForViewer,
+  );
   const executionConfig = useQuery(
     api.agentWorkbench.projectExecutionConfigForViewer,
     viewerReady ? { projectId: projectId as any } : "skip",
@@ -1343,6 +1346,27 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
   useEffect(() => {
     if (executionConfig?.preferredHarness) setTaskHarness(executionConfig.preferredHarness);
   }, [executionConfig?.preferredHarness]);
+
+  // Persist the harness pick immediately. It used to be local state only, so
+  // the choice silently reverted to the stored config on reload (2026-08-29).
+  // The picker lives outside the Settings Save form, so on-change is the
+  // honest semantics; hostId/localPath are required by the mutation and come
+  // from the existing config row.
+  const changeTaskHarness = (next: "claude" | "codex") => {
+    setTaskHarness(next);
+    if (!executionConfig?.hostId || !executionConfig?.localPath) return;
+    void setExecutionConfig({
+      projectId: projectId as any,
+      hostId: executionConfig.hostId,
+      localPath: executionConfig.localPath,
+      preferredHarness: next,
+    }).catch((error) => {
+      toast(
+        error instanceof Error ? error.message : "Could not save task harness",
+        "error",
+      );
+    });
+  };
 
   useEffect(() => {
     if (!board || board.phases?.length || ensured.current) return;
@@ -1549,7 +1573,7 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
             onComplete={(task) => void completeTask(task)}
             executionConfig={executionConfig}
             taskHarness={taskHarness}
-            onTaskHarness={setTaskHarness}
+            onTaskHarness={changeTaskHarness}
           />
         </div>
 
@@ -1604,7 +1628,7 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
                   projectId={projectId}
                   executionConfig={executionConfig}
                   taskHarness={taskHarness}
-                  onTaskHarness={setTaskHarness}
+                  onTaskHarness={changeTaskHarness}
                 />
               ) : null}
             </>
