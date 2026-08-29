@@ -86,6 +86,25 @@ const fns = (anyApi as any).agentWorkbench as Record<string, any>;
 const chatFns = (anyApi as any).chats as Record<string, any>;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const fileFns = (anyApi as any).projectFiles as Record<string, any>;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const agentFns = (anyApi as any).agentConfigs as Record<string, any>;
+
+/**
+ * Claim payload for one scheduled agent pass (convex/agentConfigs.ts →
+ * claimNextAgentPass). Identity and budget only — the behavioral instructions
+ * live in versioned skills the pass fetches itself via get_skill.
+ */
+export interface ClaimedAgentPass {
+  configId: string;
+  claimToken: string;
+  roleKey: string;
+  displayName: string;
+  skillSlugs: string[];
+  connectorSlugs: string[];
+  harness: Harness;
+  /** Agent's configured model (token tiering); absent = harness default. */
+  model?: string;
+}
 
 /** Attachment on the turn's user message: metadata + a short-lived download URL. */
 export interface ChatTurnAttachment {
@@ -130,12 +149,31 @@ export class ControlPlane {
     activeRunIds: string[],
     activeChatTurnIds: string[] = [],
     activeMaintenanceJobIds: string[] = [],
+    activeAgentConfigIds: string[] = [],
   ): Promise<{ draining: boolean }> {
     return this.client.mutation(fns.hostHeartbeat, {
       hostToken: this.hostToken,
       activeRunIds,
       activeChatTurnIds,
       activeMaintenanceJobIds,
+      activeAgentConfigIds,
+    });
+  }
+
+  claimNextAgentPass(): Promise<ClaimedAgentPass | null> {
+    return this.client.mutation(agentFns.claimNextAgentPass, { hostToken: this.hostToken });
+  }
+
+  completeAgentPass(
+    configId: string,
+    claimToken: string,
+    result: { status: "completed" | "failed"; summary?: string },
+  ): Promise<{ status: string }> {
+    return this.client.mutation(agentFns.completeAgentPass, {
+      hostToken: this.hostToken,
+      configId,
+      claimToken,
+      ...result,
     });
   }
 

@@ -912,6 +912,7 @@ export const hostHeartbeat = mutationGeneric({
     activeRunIds: v.optional(v.array(v.id("agentRuns"))),
     activeChatTurnIds: v.optional(v.array(v.id("chatTurns"))),
     activeMaintenanceJobIds: v.optional(v.array(v.id("maintenanceJobs"))),
+    activeAgentConfigIds: v.optional(v.array(v.id("agentConfigs"))),
   },
   handler: async (ctx, args) => {
     const host = await requireHost(ctx, args.hostToken);
@@ -934,6 +935,14 @@ export const hostHeartbeat = mutationGeneric({
       const job = await ctx.db.get(jobId);
       if (job && job.hostId === host._id && (job.status === "claimed" || job.status === "running")) {
         await ctx.db.patch(jobId, { leaseExpiresAt: now + RUN_LEASE_MS, updatedAt: now });
+      }
+    }
+    // Agent passes (agentConfigs.claimNextAgentPass): claimToken presence is
+    // the "still active" signal — completeAgentPass clears it.
+    for (const configId of args.activeAgentConfigIds ?? []) {
+      const config = await ctx.db.get(configId);
+      if (config && config.claimedByHostId === host._id && config.claimToken) {
+        await ctx.db.patch(configId, { leaseExpiresAt: now + RUN_LEASE_MS, updatedAt: now });
       }
     }
     return { draining: host.draining ?? false };

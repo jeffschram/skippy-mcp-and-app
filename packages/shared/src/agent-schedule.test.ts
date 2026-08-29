@@ -31,6 +31,25 @@ describe("validateAgentSchedule", () => {
   });
 });
 
+describe("settled agenda budget: hourly, 09:00-21:00 (docs/token-efficiency.md §2.7)", () => {
+  // Owner decision 2026-08-29: Agenda is the only scheduled agent, hourly
+  // inside waking hours. Pin the exact shape the seed ships.
+  const schedule: AgentSchedule = {
+    kind: "interval",
+    everyMinutes: 60,
+    window: { start: "09:00", end: "21:00" },
+  };
+
+  it("runs hourly inside the window", () => {
+    expect(nextAgentDueAt(schedule, utc("2026-01-05T10:15:00Z"))).toBe(utc("2026-01-05T11:15:00Z"));
+  });
+
+  it("rolls the last evening slot to tomorrow 09:00", () => {
+    // 20:30 + 60min = 21:30, past the end -> tomorrow 09:00.
+    expect(nextAgentDueAt(schedule, utc("2026-01-05T20:30:00Z"))).toBe(utc("2026-01-06T09:00:00Z"));
+  });
+});
+
 describe("nextAgentDueAt: interval", () => {
   it("advances by the interval without a window", () => {
     const schedule: AgentSchedule = { kind: "interval", everyMinutes: 30 };

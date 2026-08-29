@@ -2,6 +2,7 @@ import { mutationGeneric, queryGeneric } from "convex/server";
 import { v } from "convex/values";
 import { nextAgentDueAt, validateAgentSchedule, type AgentSchedule } from "@skippy/shared";
 import { requireOwnedBrain } from "./auth";
+import { requireHost } from "./agentWorkbench";
 
 /**
  * Stored agent configuration (docs/connectors.md): the promotion of Phase 5
@@ -53,10 +54,14 @@ const SEED_CONFIGS: Array<{
     displayName: "Agenda Agent",
     skillSlugs: ["harness-bootstrap", "agenda-ingestion"],
     connectorSlugs: ["google", "imessage"],
+    // Settled budget (docs/token-efficiency.md §2.7, owner decision
+    // 2026-08-29): hourly inside waking hours, and Agenda is the ONLY
+    // scheduled agent — every other role runs on demand. Seeds only apply on
+    // first insert; bump any live config in the Agents hub to match.
     schedule: {
       kind: "interval",
-      everyMinutes: 30,
-      window: { start: "07:00", end: "22:00" },
+      everyMinutes: 60,
+      window: { start: "09:00", end: "21:00" },
       timeZone: OWNER_TIME_ZONE,
     },
     // Background triage doesn't need Opus-class reasoning (token tiering,
@@ -68,7 +73,8 @@ const SEED_CONFIGS: Array<{
     displayName: "Financial Agent",
     skillSlugs: ["harness-bootstrap", "finance-sync"],
     connectorSlugs: ["plaid"],
-    schedule: { kind: "daily", timesOfDay: ["06:30"], timeZone: OWNER_TIME_ZONE },
+    // No schedule (owner decision 2026-08-29): only Agenda runs on a clock;
+    // finance syncs run on demand from chat or the Agents hub.
     model: "sonnet",
   },
   {
@@ -253,7 +259,8 @@ export const seedDefaultsForViewer = mutationGeneric({
         displayName: `PM: ${project.title ?? "project"}`,
         skillSlugs: ["harness-bootstrap", "project-manager"],
         connectorSlugs: [],
-        schedule: { kind: "daily", timesOfDay: ["23:30"], timeZone: OWNER_TIME_ZONE },
+        // No schedule (owner decision 2026-08-29): only Agenda runs on a
+        // clock; PM passes are kicked off on demand.
         model: "sonnet",
       });
     }
@@ -294,5 +301,123 @@ export const seedDefaultsForViewer = mutationGeneric({
     }
 
     return { created };
+  },
+});
+
+/* ------------------------------------------------------------------ */
+/* Runner: agent-pass claiming (docs/connectors.md → Claiming and     */
+/* leases). Host-token audience, same discipline as agentWorkbench's   */
+/* claimNextRun: atomic claim, lease + claimToken, heartbeat renewal.  */
+/* ------------------------------------------------------------------ */
+
+/** Matches agentWorkbench RUN_LEASE_MS; renewed by hostHeartbeat. */
+const AGENT_PASS_LEASE_MS = 150_000;
+
+// Same shape as agentWorkbench.makeToken (chats.ts already duplicates it —
+// a cross-file export would couple the modules for 6 lines).
+function makeClaimToken(prefix: string) {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  const body = btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  return `${prefix}_${body}`;
+}
+
+/**
+ * Atomically claim the next due, enabled agent config for this host.
+ * Advancing nextDueAt AT CLAIM TIME is the double-fire guard: a second poll
+ * finds nothing due while the pass runs, and missed slots collapse into one
+ * catch-up pass because nextAgentDueAt only returns future occurrences.
+ */
+export const claimNextAgentPass = mutationGeneric({
+  args: { hostToken: v.string() },
+  handler: async (ctx, { hostToken }) => {
+    const host = await requireHost(ctx, hostToken);
+    if (host.draining) return null;
+    const now = Date.now();
+    const harnesses: string[] = host.capabilities?.harnesses ?? [];
+
+    const due = await ctx.db
+      .query("agentConfigs")
+      .withIndex("by_brain_due", (q: any) =>
+        q.eq("brainInstanceId", host.brainInstanceId).eq("enabled", true).lte("nextDueAt", now),
+      )
+      .collect();
+    due.sort((a: any, b: any) => (a.nextDueAt ?? 0) - (b.nextDueAt ?? 0));
+
+    for (const config of due) {
+      // The lte range also matches configs with no nextDueAt at all
+      // (enabled but unscheduled): never claimable.
+      if (!config.nextDueAt || !config.schedule) continue;
+      // Restart safety: a live lease means another claim owns this pass.
+      if (config.leaseExpiresAt && config.leaseExpiresAt > now) continue;
+      const harness = config.preferredHarness ?? "claude";
+      if (!harnesses.includes(harness)) continue;
+
+      const claimToken = makeClaimToken("skippypass");
+      await ctx.db.patch(config._id, {
+        claimedByHostId: host._id,
+        claimToken,
+        claimVersion: config.claimVersion + 1,
+        leaseExpiresAt: now + AGENT_PASS_LEASE_MS,
+        nextDueAt: nextAgentDueAt(config.schedule as AgentSchedule, now),
+        lastRunStartedAt: now,
+        updatedAt: now,
+      });
+
+      // The role identity and budget — behavior lives in the skills, which
+      // the pass loads itself via get_skill (docs/connectors.md).
+      return {
+        configId: config._id,
+        claimToken,
+        roleKey: config.roleKey,
+        displayName: config.displayName,
+        skillSlugs: config.skillSlugs,
+        connectorSlugs: config.connectorSlugs,
+        harness,
+        model: config.model,
+      };
+    }
+    return null;
+  },
+});
+
+/** Release the lease and record the outcome. Stale claims (lease lapsed) are
+ * dropped silently — completion must be idempotent, never a duplicate. */
+export const completeAgentPass = mutationGeneric({
+  args: {
+    hostToken: v.string(),
+    configId: v.id("agentConfigs"),
+    claimToken: v.string(),
+    status: v.union(v.literal("completed"), v.literal("failed")),
+    summary: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const host = await requireHost(ctx, args.hostToken);
+    const config = await ctx.db.get(args.configId);
+    if (!config || config.brainInstanceId !== host.brainInstanceId) {
+      throw new Error("agent config not found");
+    }
+    if (config.claimToken !== args.claimToken || config.claimedByHostId !== host._id) {
+      return { status: "stale" };
+    }
+    const now = Date.now();
+    await ctx.db.patch(config._id, {
+      lastRunStatus: args.status,
+      claimedByHostId: undefined,
+      claimToken: undefined,
+      leaseExpiresAt: undefined,
+      updatedAt: now,
+    });
+    await ctx.db.insert("activityEvents", {
+      brainInstanceId: host.brainInstanceId,
+      activityType: args.status === "completed" ? "agent_pass_completed" : "agent_pass_failed",
+      actorType: "harness",
+      timestamp: now,
+      summary: `Agent pass ${args.status}: ${config.displayName} (${config.roleKey})${
+        args.summary ? ` — ${args.summary.slice(0, 200)}` : ""
+      }`,
+      metadata: { configId: config._id, role: config.roleKey, status: args.status },
+    });
+    return { status: "ok" };
   },
 });
