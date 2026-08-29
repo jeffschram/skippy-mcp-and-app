@@ -63,7 +63,7 @@ const STALL_MS = 15 * 60_000;
 const GRACE_MS = 2 * 60_000;
 
 function makePlane() {
-  const statusCalls: Array<{ status: string; extra?: Record<string, unknown> }> = [];
+  const statusCalls: Array<{ status: string; extra: Record<string, unknown> | undefined }> = [];
   const plane = {
     updateRunStatus: vi.fn(async (_runId: string, _token: string, status: string, extra?: Record<string, unknown>) => {
       statusCalls.push({ status, extra });
