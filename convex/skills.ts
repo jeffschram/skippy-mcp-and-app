@@ -277,6 +277,169 @@ const PROJECT_MANAGER_SCHEDULER_INSTRUCTIONS = [
   "https://skippy.jeffschram.dev/skills/project-manager",
 ].join("\n");
 
+// Reference skills below hold the long-form guidance that used to live inside
+// MCP tool descriptions. Every harness session pays for tool descriptions on
+// connect, but skills are fetched on demand via get_skill, so essay-length
+// rules belong here (docs/token-efficiency.md, Stage 2).
+
+const FINANCE_TAXONOMY_BODY = [
+  "# Skippy Finance Taxonomy (CSP)",
+  "",
+  "Reference for `record_financial_transactions`, `record_financial_balances`, and `upsert_financial_account`. Plaid data is ground truth: ingest it directly, never queue it for review. All amounts are INTEGER CENTS (positive magnitudes; txType determines direction).",
+  "",
+  "## Fixed type-category taxonomy",
+  "",
+  "Type-category pairing is enforced server-side; invalid pairs are rejected:",
+  "",
+  "- **Fixed Costs**: `Mortgage, HOA, Mortgage Loan` | `Recurring Bills` | `Debt Payments` | `Groceries` | `Subscriptions`",
+  "- **Investments**: `Retirement` | `Brokerage`",
+  "- **Savings**: `Emergency Fund` | `Goals`",
+  "- **Guilt-Free**: `Restaurants` | `Gas, Amazon, Home Depot, Etc` | `Misc.`",
+  "- **Income**: `Jeff` | `Holly`",
+  "- **Transfer**: `Transfers In` | `Transfers Out`",
+  "",
+  "## Rules that override merchant-name intuition",
+  "",
+  "- **Transfers**: money moving between the owner's own accounts — tracked or untracked, including business checking or a partner's external account — is txType `Transfer` with `Transfers In`/`Transfers Out`. Never Income, never an outgoing bucket. For Transfer the category IS the direction. Transfers are excluded from budget totals automatically.",
+  "- **Off-ledger 401k**: payroll-deducted retirement contributions that never touch checking are `offLedger: true` (txType `Investments` only) and require `contributionSource`. `employee` amounts are the owner's pre-tax pay and gross up the percent-of-income denominator used for CSP budget targets; `employer` match counts in Investments totals but is NOT income and never grosses up the denominator. Off-ledger rows are excluded from outgoing/net and from account balances.",
+  "- **Merchant judgment**: grocery stores map to `Groceries`; restaurants and coffee to `Restaurants`; gas, Amazon, and home improvement to `Gas, Amazon, Home Depot, Etc`; recognized paychecks to `Income` under the correct earner. When genuinely ambiguous, prefer `Guilt-Free` / `Misc.` over inventing a fixed cost.",
+  "",
+  "## Idempotency",
+  "",
+  "- Transactions: pass Plaid transaction_ids as `externalId` — an existing externalId updates the stored transaction instead of duplicating it. Returns {inserted, updated, skipped}.",
+  "- Accounts: pass the Plaid account_id as `plaidAccountId` so re-syncs update the same account. `mask` is the LAST 4 characters of the account number ONLY — never send full account numbers.",
+  "- Balances: one snapshot per account+day; re-sending a day updates it. Returns {inserted, updated}.",
+  "",
+  "## Balance derivation",
+  "",
+  "Compute end-of-day balances from the FULL raw Plaid transaction feed walked backward from the `/accounts/balance/get` current balance — including feed rows not recorded as budget transactions. NEVER derive balances by summing recorded budget transactions. Balances may be negative.",
+].join("\n");
+
+const FINANCE_TAXONOMY_USAGE_DESCRIPTION =
+  "Reference skill for the fixed Conscious Spending Plan taxonomy: type-category pairing, transfer rules, off-ledger 401k semantics, idempotency keys, and balance derivation.";
+
+const FINANCE_TAXONOMY_SCHEDULER_INSTRUCTIONS = [
+  "Before recording financial data with Skippy MCP tools:",
+  "Call `get_skill` with slug `finance-taxonomy`",
+  "",
+  "If that does not work, load the Skippy skill at:",
+  "https://skippy.jeffschram.dev/skills/finance-taxonomy",
+].join("\n");
+
+const MEMORY_RUBRIC_BODY = [
+  "# Skippy Memory And Importance Rubric",
+  "",
+  "Reference for the memory and ingestion write tools: `record_memory`, `record_decision`, `record_principle`, `capture_thought`, `submit_memory_review_candidate`, `ingest_object`, `submit_candidate_object`, and the `upsert_*` convenience tools.",
+  "",
+  "## Choosing a write path",
+  "",
+  "- **record_memory / record_decision / record_principle**: direct durable writes when you can explain why the item belongs. `memory` = stable preference, personal fact, or recurring context; `decision` = a choice, direction, or tradeoff clearly established; `principle` = durable operating rule about how Skippy or harnesses should behave, not a one-off observation. Direct memory writes require a `rubricDecision` explaining why the item clears the rubric.",
+  "- **capture_thought**: an explicit user thought to remember; `reviewBehavior` picks direct write vs review queue.",
+  "- **submit_memory_review_candidate**: only when genuinely unsure an item should be stored. Unreviewed candidates auto-archive after 14 days, so only queue items worth a durable memory.",
+  "- **ingest_object**: the primary write for source-derived typed knowledge (task, person, link, note, ...). Include `sourceRefs` and a concise `rubricDecision` naming the signal: deadline, money, relationship, commitment, focus relevance, security.",
+  "- **submit_candidate_object**: legacy fallback when you cannot decide whether a source item clears the rubric.",
+  "",
+  "## What NOT to store",
+  "",
+  "Never queue transient alerts — balance notifications, promo deadlines, ToS/policy notices, expiring offers. Skip them, or if genuinely useful, record directly with expiry context in the body. Do not store full raw emails or long private source text; sourceRef excerpts are short quotes only.",
+  "",
+  "## Links",
+  "",
+  "Links are reference material: status defaults to `saved` (no user interaction expected). Pass `unread` only for explicit read-later intent. If genuinely uncertain a link is valid or important, use submit_candidate_object so it lands in Review for a one-tap decision. `update_link_status` is for genuine lifecycle changes only — never fake user engagement.",
+  "",
+  "## Provenance",
+  "",
+  "Source-backed writes carry `sourceRefs` (sourceSystem plus IDs/links/excerpt). Related entity refs must be accepted entity IDs, never fallback review item IDs.",
+].join("\n");
+
+const MEMORY_RUBRIC_USAGE_DESCRIPTION =
+  "Reference skill for deciding what belongs in Skippy memory and accepted knowledge: write-path selection, rubricDecision expectations, transient-alert exclusions, link status defaults, and provenance rules.";
+
+const MEMORY_RUBRIC_SCHEDULER_INSTRUCTIONS = [
+  "Before writing memories or ingesting source-derived knowledge with Skippy MCP tools:",
+  "Call `get_skill` with slug `memory-rubric`",
+  "",
+  "If that does not work, load the Skippy skill at:",
+  "https://skippy.jeffschram.dev/skills/memory-rubric",
+].join("\n");
+
+const FILE_UPLOAD_BODY = [
+  "# Skippy Project File Upload Protocol",
+  "",
+  "Reference for the project library tools. Convex records are canonical; any local paths are temporary runner copies. Download URLs are always ephemeral — download promptly, never persist them.",
+  "",
+  "## Simple 2-step upload (chat/harness flow)",
+  "",
+  "1. `generate_project_file_upload_url` — returns a short-lived, single-use Convex storage POST URL (not project-scoped).",
+  "2. HTTP POST the raw file bytes to that URL with the file's Content-Type header; the response JSON contains `{storageId}`.",
+  "3. `register_project_file` with that storageId plus projectId, fileName, mimeType, and sizeBytes.",
+  "",
+  "Limits: max 25 MB (26214400 bytes). Allowed types: images, PDFs, text (plain/markdown/csv), JSON, and common office documents. Executables and arbitrary binaries are rejected.",
+  "",
+  "## Canonical task-run upload (begin/finalize/abort)",
+  "",
+  "For task runs producing durable artifacts, use `begin_project_file_upload` (creates a pending record with a stable fileId; reuse `uploadKey` when retrying the same logical upload), POST the bytes, then `finalize_project_file_upload` with storageId and SHA-256 (idempotent on replay). On failure, `abort_project_file_upload` marks the record failed and removes the orphan blob.",
+  "",
+  "## Library semantics",
+  "",
+  "- At task start, materialize needed library files into the project's effectiveAssetsPath (the `_library` folder) before working, skipping files already present locally with a matching size.",
+  "- Files found only locally are NOT in the library until registered.",
+  "- `list_project_files` / `get_project_file_manifest` list canonical records with fresh ephemeral URLs; `get_project_file` resolves one stable fileId.",
+  "- Attach task outputs by passing taskId at registration and reporting `artifactFileIds` in `record_task_result`.",
+].join("\n");
+
+const FILE_UPLOAD_USAGE_DESCRIPTION =
+  "Reference skill for the cloud-canonical project library: the 2-step upload protocol, the begin/finalize/abort task-run flow, size/type limits, and materialize/register semantics.";
+
+const FILE_UPLOAD_SCHEDULER_INSTRUCTIONS = [
+  "Before uploading or materializing project files with Skippy MCP tools:",
+  "Call `get_skill` with slug `file-upload`",
+  "",
+  "If that does not work, load the Skippy skill at:",
+  "https://skippy.jeffschram.dev/skills/file-upload",
+].join("\n");
+
+const RECURRENCE_SEMANTICS_BODY = [
+  "# Skippy Recurrence Semantics",
+  "",
+  "Reference for `upsert_recurrence`, `complete_recurrence`, and `list_recurrences`.",
+  "",
+  "## When to use a recurrence",
+  "",
+  "Use a recurrence — not a task with a due date — for anything that comes around again: furnace filter, oil change, rent, trash night, annual renewals. Completing a task destroys the record of when it was last done, which is usually the fact worth keeping.",
+  "",
+  "## Anchor semantics (this changes behavior)",
+  "",
+  "- **completion**: the next due date is measured from when the work is actually finished. Maintenance behaves this way — do it five weeks late and the cadence shifts with you.",
+  "- **schedule**: a fixed calendar date that ignores completion. Bills and dues behave this way.",
+  "",
+  "Because of this, `completedAt` on `complete_recurrence` is not cosmetic: backdating ('I did this last Tuesday') directly determines the next due date for completion-anchored recurrences.",
+  "",
+  "## Rules",
+  "",
+  "Two rule kinds:",
+  "",
+  "- **interval**: every N days (`{ kind: \"interval\", everyDays: N }`).",
+  "- **calendar**: a supported RRULE subset — `FREQ=DAILY|WEEKLY|MONTHLY|YEARLY` with optional `INTERVAL`, `BYDAY`, `BYMONTHDAY`, `BYMONTH` (`{ kind: \"calendar\", rrule: \"FREQ=MONTHLY;BYMONTHDAY=1\" }`).",
+  "",
+  "Wall-clock schedules anchor to the `timeZone` IANA zone; `leadTimeDays` surfaces the item early.",
+  "",
+  "## Task spawning",
+  "",
+  "`spawnTask: true` (the default) materializes a real task when due — chores want this. `spawnTask: false` keeps the item agenda-only — ambient things like trash night. In `list_agenda`, a recurrence that already spawned a task appears once, as the task.",
+].join("\n");
+
+const RECURRENCE_SEMANTICS_USAGE_DESCRIPTION =
+  "Reference skill for recurring obligations: completion vs schedule anchors, the supported RRULE subset, backdated completions, and task spawning behavior.";
+
+const RECURRENCE_SEMANTICS_SCHEDULER_INSTRUCTIONS = [
+  "Before creating or completing recurrences with Skippy MCP tools:",
+  "Call `get_skill` with slug `recurrence-semantics`",
+  "",
+  "If that does not work, load the Skippy skill at:",
+  "https://skippy.jeffschram.dev/skills/recurrence-semantics",
+].join("\n");
+
 const DEFAULT_SKILLS = [
   {
     slug: "task-heartbeat",
@@ -333,6 +496,54 @@ const DEFAULT_SKILLS = [
     usageDescription: PROJECT_MANAGER_USAGE_DESCRIPTION,
     usageLeadIn: "In your harness scheduler paste the following:",
     schedulerInstructions: PROJECT_MANAGER_SCHEDULER_INSTRUCTIONS,
+    visibility: "public" as const,
+    version: 1,
+  },
+  {
+    slug: "finance-taxonomy",
+    title: "Finance taxonomy",
+    description:
+      "Reference: the fixed CSP type-category taxonomy with transfer rules, off-ledger 401k semantics, idempotency keys, and balance derivation.",
+    body: FINANCE_TAXONOMY_BODY,
+    usageDescription: FINANCE_TAXONOMY_USAGE_DESCRIPTION,
+    usageLeadIn: "To load this reference in a harness:",
+    schedulerInstructions: FINANCE_TAXONOMY_SCHEDULER_INSTRUCTIONS,
+    visibility: "public" as const,
+    version: 1,
+  },
+  {
+    slug: "memory-rubric",
+    title: "Memory rubric",
+    description:
+      "Reference: which memory/ingestion write path to use, rubricDecision expectations, transient-alert exclusions, link status defaults, and provenance rules.",
+    body: MEMORY_RUBRIC_BODY,
+    usageDescription: MEMORY_RUBRIC_USAGE_DESCRIPTION,
+    usageLeadIn: "To load this reference in a harness:",
+    schedulerInstructions: MEMORY_RUBRIC_SCHEDULER_INSTRUCTIONS,
+    visibility: "public" as const,
+    version: 1,
+  },
+  {
+    slug: "file-upload",
+    title: "Project file upload",
+    description:
+      "Reference: the cloud-canonical project library — 2-step upload, begin/finalize/abort task-run flow, size/type limits, and materialize/register semantics.",
+    body: FILE_UPLOAD_BODY,
+    usageDescription: FILE_UPLOAD_USAGE_DESCRIPTION,
+    usageLeadIn: "To load this reference in a harness:",
+    schedulerInstructions: FILE_UPLOAD_SCHEDULER_INSTRUCTIONS,
+    visibility: "public" as const,
+    version: 1,
+  },
+  {
+    slug: "recurrence-semantics",
+    title: "Recurrence semantics",
+    description:
+      "Reference: recurring obligations — completion vs schedule anchors, the supported RRULE subset, backdated completions, and task spawning.",
+    body: RECURRENCE_SEMANTICS_BODY,
+    usageDescription: RECURRENCE_SEMANTICS_USAGE_DESCRIPTION,
+    usageLeadIn: "To load this reference in a harness:",
+    schedulerInstructions: RECURRENCE_SEMANTICS_SCHEDULER_INSTRUCTIONS,
     visibility: "public" as const,
     version: 1,
   },

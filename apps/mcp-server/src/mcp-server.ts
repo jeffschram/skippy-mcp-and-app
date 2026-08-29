@@ -38,7 +38,6 @@ import {
   TX_CATEGORIES,
   TX_SOURCES,
   TX_TYPES,
-  TX_TYPE_CATEGORIES,
   type CandidateObjectInput,
   type EntityType,
   type FocusSummary,
@@ -388,67 +387,66 @@ function buildHarnessBootstrapMessage({
   ].join("\n");
 }
 
+// Field names are the documentation here: every .describe() below is serialized
+// into the tools/list payload of dozens of tools, so keep only non-obvious
+// semantics (docs/token-efficiency.md, Stage 2).
 const sourceRefSchema = z.object({
-  sourceSystem: z
-    .string()
-    .describe("Origin system such as gmail, calendar, apple_reminders, imessage, chatgpt, claude, codex, hermes, or manual_conversation."),
-  externalId: z.string().optional().describe("Stable upstream ID when available."),
-  threadId: z.string().optional().describe("Conversation/thread ID for email or messaging sources."),
-  messageId: z.string().optional().describe("Specific message ID when the candidate came from an email/message."),
-  eventId: z.string().optional().describe("Specific calendar event ID when the candidate came from a calendar source."),
-  reminderId: z.string().optional().describe("Specific reminder/task ID from an external reminder system."),
-  sourceTimestamp: z.number().optional().describe("Source item timestamp in epoch milliseconds."),
-  participants: z.array(z.string()).optional().describe("Relevant sender/recipient/attendee names or addresses."),
-  url: z.string().optional().describe("Inspectable browser URL for the source item."),
-  deepLink: z.string().optional().describe("Best direct link back to the source item."),
-  excerpt: z.string().optional().describe("Short quoted excerpt only; do not include full raw emails or long private source text."),
-  summary: z.string().optional().describe("Concise source summary that explains why this source supports the candidate."),
+  sourceSystem: z.string().describe("Origin system, e.g. gmail, calendar, imessage, manual_conversation."),
+  externalId: z.string().optional(),
+  threadId: z.string().optional(),
+  messageId: z.string().optional(),
+  eventId: z.string().optional(),
+  reminderId: z.string().optional(),
+  sourceTimestamp: z.number().optional().describe("Epoch ms."),
+  participants: z.array(z.string()).optional(),
+  url: z.string().optional(),
+  deepLink: z.string().optional(),
+  excerpt: z.string().optional().describe("Short excerpt only; never full raw source text."),
+  summary: z.string().optional(),
 });
 
 const entityRefSchema = z.object({
-  entityType: z.enum(entityTypeValues).describe("Accepted Skippy entity type."),
-  entityId: z.string().describe("Existing accepted entity ID, not a fallback review item ID."),
+  entityType: z.enum(entityTypeValues),
+  entityId: z.string().describe("Accepted entity ID, not a review item ID."),
 });
 
 const memoryKindSchema = z
   .enum(memoryKindValues)
-  .describe("Memory category. Use memory for general durable preferences/facts, decision for choices made, principle for durable operating rules.");
+  .describe("memory = durable fact/preference, decision = choice made, principle = operating rule.");
 
-const interviewKindSchema = z
-  .enum(interviewKindValues)
-  .describe("Guided interview template to run inside the harness chat.");
+const interviewKindSchema = z.enum(interviewKindValues);
 
 const interviewMemoryKindSchema = z
   .enum(interviewMemoryKindValues)
-  .describe("Memory category for optional interview memory candidates. Interview-created memories are submitted to review.");
+  .describe("Interview-created memories always go to review.");
 
 const memoryReviewBehaviorSchema = z
   .enum(memoryReviewBehaviorValues)
-  .describe("accept writes directly, submit_for_review queues for user review, auto lets Skippy apply backend policy.");
+  .describe("accept = direct write, submit_for_review = queue for user review, auto = backend policy.");
 
 const memoryEvidenceSchema = {
-  captureReason: z.string().optional().describe("Why this thought belongs in long-term memory."),
-  rubricDecision: z.string().optional().describe("How this clears the user's memory/importance rubric."),
-  confidence: z.number().min(0).max(1).optional().describe("Confidence from 0 to 1."),
+  captureReason: z.string().optional(),
+  rubricDecision: z.string().optional().describe("How this clears the memory rubric (see memory-rubric skill)."),
+  confidence: z.number().min(0).max(1).optional(),
   reviewBehavior: memoryReviewBehaviorSchema.optional(),
-  sourceRefs: z.array(sourceRefSchema).optional().describe("Lightweight provenance records."),
-  sourceRefIds: z.array(z.string()).optional().describe("Existing source reference IDs."),
-  relatedEntityRefs: z.array(entityRefSchema).optional().describe("Accepted Skippy entities this memory should be associated with."),
-  createdBy: z.string().optional().describe("Harness/user identifier for audit logging."),
-  metadata: z.unknown().optional().describe("Small JSON metadata object. Avoid secrets and raw source dumps."),
+  sourceRefs: z.array(sourceRefSchema).optional(),
+  sourceRefIds: z.array(z.string()).optional(),
+  relatedEntityRefs: z.array(entityRefSchema).optional(),
+  createdBy: z.string().optional(),
+  metadata: z.unknown().optional().describe("Small JSON object; no secrets or raw dumps."),
 };
 
 const focusTopItemSchema = z.object({
-  entityRef: entityRefSchema.describe("Accepted entity that belongs in the focus summary."),
-  reason: z.string().describe("Human-readable reason this item matters now."),
-  priorityScore: z.number().optional().describe("Optional priority score from 0 to 1."),
-  urgencyScore: z.number().optional().describe("Optional urgency score from 0 to 1."),
-  importanceScore: z.number().optional().describe("Optional importance score from 0 to 1."),
+  entityRef: entityRefSchema,
+  reason: z.string().describe("Why this item matters now."),
+  priorityScore: z.number().optional(),
+  urgencyScore: z.number().optional(),
+  importanceScore: z.number().optional(),
 });
 
 const jsonObjectSchema = z
   .record(z.string(), z.unknown())
-  .describe("Plain JSON object. Prefer concise, typed fields such as title, summary, status, dueDate, url, companyName, personName, email, relationshipLabel, or sourceSummary.");
+  .describe("Plain JSON object with concise typed fields, e.g. title, summary, status, dueDate, url, email.");
 
 function toolResult(value: unknown) {
   return {
@@ -1299,10 +1297,10 @@ export function createMcpServer(
     {
       title: "Get Skippy-hosted skill",
       description:
-        "Read a portable Skippy-hosted harness skill by slug, such as task-heartbeat. Use this to load the latest canonical instructions instead of relying on copied prompt text.",
+        "Read a Skippy-hosted harness skill by slug for canonical long-form guidance, e.g. task-heartbeat, memory-rubric, finance-taxonomy, file-upload, recurrence-semantics.",
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: z.object({
-        slug: z.string().describe("Skill slug, for example task-heartbeat."),
+        slug: z.string(),
       }),
     },
     async (args) => toolResult(await tools.getSkill(stripUndefined(args) as { slug: string })),
@@ -1313,13 +1311,11 @@ export function createMcpServer(
     {
       title: "Capture free-form knowledge",
       description:
-        "Use for explicit user capture or quick free-form knowledge. Creates an accepted note directly with source provenance when available. Prefer ingest_object when you can extract a typed task, project, person, company, link, goal, or knowledge object.",
+        "Quick free-form capture: creates an accepted note directly. Prefer ingest_object when you can extract a typed object.",
       annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: true },
       inputSchema: z.object({
-        text: z
-          .string()
-          .describe("Concise captured thought or source summary. Avoid dumping full raw email/calendar/message bodies."),
-        sourceRef: sourceRefSchema.optional().describe("Lightweight provenance for where this capture came from."),
+        text: z.string().describe("Concise capture; never full raw source bodies."),
+        sourceRef: sourceRefSchema.optional(),
       }),
     },
     async (args) => {
@@ -1345,11 +1341,11 @@ export function createMcpServer(
     {
       title: "Capture thought",
       description:
-        "Capture an explicit user thought as second-brain memory. Use for durable preferences, reflections, decisions-in-progress, or context the user wants remembered. Include provenance and let reviewBehavior choose direct write versus review.",
+        "Capture an explicit user thought as second-brain memory (durable preferences, reflections, decisions-in-progress). reviewBehavior chooses direct write versus review; see the memory-rubric skill.",
       annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: true },
       inputSchema: z.object({
-        text: z.string().describe("Concise thought to remember. Avoid dumping full raw private source text."),
-        content: z.string().optional().describe("Optional normalized memory content when different from text."),
+        text: z.string().describe("Concise thought; never full raw source text."),
+        content: z.string().optional().describe("Normalized memory content when different from text."),
         proposedKind: memoryKindSchema.optional(),
         ...memoryEvidenceSchema,
       }),
@@ -1377,17 +1373,15 @@ export function createMcpServer(
     {
       title: "Record memory",
       description:
-        "Write a durable second-brain memory when the harness can explain why it belongs. Use for stable user preferences, personal facts, recurring context, and durable working notes. Use record_decision or record_principle for those specific kinds.",
+        "Write a durable second-brain memory (stable preferences, personal facts, recurring context) when you can explain why it belongs — see the memory-rubric skill. Use record_decision/record_principle for those kinds.",
       annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: true },
       inputSchema: z.object({
-        content: z.string().describe("Concise durable memory content."),
+        content: z.string(),
         kind: memoryKindSchema.optional(),
-        title: z.string().optional().describe("Optional short display title."),
-        summary: z.string().optional().describe("Optional one-sentence summary."),
+        title: z.string().optional(),
+        summary: z.string().optional(),
         ...memoryEvidenceSchema,
-        rubricDecision: z
-          .string()
-          .describe("Why this clears the user's memory/importance rubric. Required for direct memory writes."),
+        rubricDecision: z.string().describe("Why this clears the memory rubric; required for direct writes."),
       }),
     },
     async (args) => {
@@ -1403,12 +1397,12 @@ export function createMcpServer(
     {
       title: "Record decision",
       description:
-        "Write a durable decision memory. Use when the user or a source clearly establishes a choice, direction, commitment, or tradeoff that should be remembered later.",
+        "Write a durable decision memory when the user or a source clearly establishes a choice, commitment, or tradeoff worth remembering.",
       annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: true },
       inputSchema: z.object({
         content: z.string().describe("The decision, phrased concisely."),
-        title: z.string().optional().describe("Optional short display title."),
-        summary: z.string().optional().describe("Optional context summary."),
+        title: z.string().optional(),
+        summary: z.string().optional(),
         ...memoryEvidenceSchema,
         rubricDecision: z.string().describe("Why this decision is durable enough to store."),
       }),
@@ -1426,12 +1420,12 @@ export function createMcpServer(
     {
       title: "Record principle",
       description:
-        "Write a durable operating principle or preference. Use for stable guidance about how Skippy or harnesses should behave, not one-off observations.",
+        "Write a durable operating principle or preference — stable guidance for how Skippy or harnesses should behave, not one-off observations.",
       annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: true },
       inputSchema: z.object({
         content: z.string().describe("The principle or durable preference."),
-        title: z.string().optional().describe("Optional short display title."),
-        summary: z.string().optional().describe("Optional context summary."),
+        title: z.string().optional(),
+        summary: z.string().optional(),
         ...memoryEvidenceSchema,
         rubricDecision: z.string().describe("Why this principle should persist."),
       }),
@@ -1449,10 +1443,10 @@ export function createMcpServer(
     {
       title: "Submit memory review candidate",
       description:
-        "Queue a possible memory for user review when the harness is unsure it should be stored directly. Prefer record_memory, record_decision, or record_principle when the item clearly clears the rubric. Do NOT queue transient alerts (balance notifications, promo deadlines, ToS/policy notices, expiring offers): skip them, or if genuinely useful, record them directly with expiry context in the body. Unreviewed candidates auto-archive after 14 days, so only queue items worth a durable memory.",
+        "Queue a possible memory for user review when unsure it should be stored directly; prefer record_memory/record_decision/record_principle when it clearly clears the rubric. Never queue transient alerts — see the memory-rubric skill.",
       annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: true },
       inputSchema: z.object({
-        content: z.string().describe("Concise proposed memory content."),
+        content: z.string(),
         proposedKind: memoryKindSchema.optional(),
         ...memoryEvidenceSchema,
       }),
@@ -1479,15 +1473,15 @@ export function createMcpServer(
     {
       title: "List memory",
       description:
-        "Read-only memory search/list tool. Use to retrieve durable second-brain memories by query, kind, related entity, or archive state before answering or adding duplicates.",
+        "Read-only memory search/list. Check for existing memories before answering from memory or adding duplicates.",
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: z.object({
-        query: z.string().optional().describe("Search text for memory content/title/summary."),
-        memoryType: memoryKindSchema.optional().describe("Single memory kind filter. Use kinds for multiple values."),
-        kinds: z.array(memoryKindSchema).optional().describe("Optional memory kind filters."),
-        relatedEntityRefs: z.array(entityRefSchema).optional().describe("Only memories related to these accepted entities."),
-        includeArchived: z.boolean().optional().describe("Include archived/disabled memories. Defaults to false."),
-        limit: z.number().min(1).max(50).optional().describe("Maximum memories to return. Defaults to 20."),
+        query: z.string().optional(),
+        memoryType: memoryKindSchema.optional(),
+        kinds: z.array(memoryKindSchema).optional(),
+        relatedEntityRefs: z.array(entityRefSchema).optional(),
+        includeArchived: z.boolean().optional(),
+        limit: z.number().min(1).max(50).optional().describe("Default 20."),
       }),
     },
     async (args) => toolResult(await tools.listMemory(stripUndefined(args) as MemoryListInput)),
@@ -1498,12 +1492,12 @@ export function createMcpServer(
     {
       title: "Get memory detail",
       description:
-        "Read-only memory detail. Use when a list/search result needs provenance, related entities, or full stored detail before acting.",
+        "Read-only memory detail: provenance, related entities, and full stored content for one memory.",
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: z.object({
-        memoryId: z.string().describe("Memory ID returned by list_memory, capture_thought, or record_memory."),
-        includeSourceRefs: z.boolean().optional().describe("Include source refs/provenance if backend supports it."),
-        includeRelatedEntities: z.boolean().optional().describe("Include related accepted Skippy entities if backend supports it."),
+        memoryId: z.string(),
+        includeSourceRefs: z.boolean().optional(),
+        includeRelatedEntities: z.boolean().optional(),
       }),
     },
     async (args) => toolResult(await tools.getMemoryDetail(stripUndefined(args) as MemoryDetailInput)),
@@ -1514,17 +1508,17 @@ export function createMcpServer(
     {
       title: "Get context bundle",
       description:
-        "Read-only semantic-ish context bundle. Use to gather scored memories, source refs, and related project/task/person/company/note/link context for a query and/or accepted entity refs.",
+        "Read-only context bundle: scored memories, source refs, and related entity context for a query and/or entity refs.",
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: z.object({
-        query: z.string().optional().describe("Search text for memory and related entity context."),
-        memoryType: memoryKindSchema.optional().describe("Single memory kind filter. Use kinds for multiple values."),
-        kinds: z.array(memoryKindSchema).optional().describe("Optional memory kind filters."),
-        relatedEntityRefs: z.array(entityRefSchema).optional().describe("Accepted entities to anchor the bundle."),
-        includeArchived: z.boolean().optional().describe("Include archived/rejected memories. Defaults to false."),
-        memoryLimit: z.number().min(1).max(25).optional().describe("Maximum scored memories. Defaults to 8."),
-        entityLimit: z.number().min(1).max(40).optional().describe("Maximum related/matched entities. Defaults to 12."),
-        sourceLimit: z.number().min(1).max(40).optional().describe("Maximum provenance source refs. Defaults to 12."),
+        query: z.string().optional(),
+        memoryType: memoryKindSchema.optional(),
+        kinds: z.array(memoryKindSchema).optional(),
+        relatedEntityRefs: z.array(entityRefSchema).optional(),
+        includeArchived: z.boolean().optional(),
+        memoryLimit: z.number().min(1).max(25).optional().describe("Default 8."),
+        entityLimit: z.number().min(1).max(40).optional().describe("Default 12."),
+        sourceLimit: z.number().min(1).max(40).optional().describe("Default 12."),
       }),
     },
     async (args) => toolResult(await tools.getContextBundle(stripUndefined(args) as ContextBundleInput)),
@@ -1535,17 +1529,17 @@ export function createMcpServer(
     {
       title: "Link memory",
       description:
-        "Attach an existing memory to an accepted Skippy entity with a confidence-rated relationship. Use after you know both the memory ID and accepted entity ref.",
+        "Attach an existing memory to an accepted Skippy entity. Requires a known memory ID and accepted entity ref.",
       annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: false },
       inputSchema: z.object({
-        memoryId: z.string().describe("Existing memory ID."),
-        entityRef: entityRefSchema.describe("Accepted Skippy entity to relate to this memory."),
-        relationshipType: z.string().optional().describe("Relationship label. Defaults to related_to."),
-        reason: z.string().optional().describe("Short explanation for this link."),
-        confidence: z.number().min(0).max(1).optional().describe("Confidence from 0 to 1 for inferred relationships."),
-        sourceRefs: z.array(sourceRefSchema).optional().describe("Evidence source refs for the link."),
-        sourceRefIds: z.array(z.string()).optional().describe("Existing source ref IDs for the link."),
-        createdBy: z.string().optional().describe("Harness/user identifier for audit logging."),
+        memoryId: z.string(),
+        entityRef: entityRefSchema,
+        relationshipType: z.string().optional().describe("Defaults to related_to."),
+        reason: z.string().optional(),
+        confidence: z.number().min(0).max(1).optional(),
+        sourceRefs: z.array(sourceRefSchema).optional(),
+        sourceRefIds: z.array(z.string()).optional(),
+        createdBy: z.string().optional(),
       }),
     },
     async (args) => {
@@ -1561,7 +1555,7 @@ export function createMcpServer(
     {
       title: "List interview templates",
       description:
-        "Read the guided interview templates and assistantDisplayName. Use this before offering an interview in chat so the harness can say, for example, `Want to do a project interview for [assistantDisplayName]?`.",
+        "Read the guided interview templates and assistantDisplayName. Call before offering an interview in chat.",
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     async () => toolResult(withAbsoluteReviewUrl(await tools.listInterviewTemplates())),
@@ -1572,10 +1566,10 @@ export function createMcpServer(
     {
       title: "List interviews",
       description:
-        "Read active and recent guided interviews for the current Skippy brain. Use to resume an existing chat interview before starting a duplicate.",
+        "Read active and recent guided interviews. Resume an existing interview before starting a duplicate.",
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: z.object({
-        recentLimit: z.number().min(1).max(50).optional().describe("How many recent interviews to return. Defaults to 12."),
+        recentLimit: z.number().min(1).max(50).optional().describe("Default 12."),
       }),
     },
     async (args) => {
@@ -1589,14 +1583,14 @@ export function createMcpServer(
     {
       title: "Start interview",
       description:
-        "Start a guided second-brain interview that the harness should conduct one question at a time in chat. Use assistantDisplayName/suggestedPrompt from list_interview_templates or this result when offering the interview to the user.",
+        "Start a guided second-brain interview, conducted one question at a time in the harness chat.",
       annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: false },
       inputSchema: z.object({
         kind: interviewKindSchema,
-        title: z.string().optional().describe("Optional custom interview title."),
-        subjectLabel: z.string().optional().describe("Optional project, goal, person, or decision label for the interview subject."),
-        subjectEntityRef: entityRefSchema.optional().describe("Optional accepted Skippy entity this interview is about."),
-        startedBy: z.string().optional().describe("Harness/user identifier for audit logging."),
+        title: z.string().optional(),
+        subjectLabel: z.string().optional().describe("Project, goal, person, or decision label the interview is about."),
+        subjectEntityRef: entityRefSchema.optional(),
+        startedBy: z.string().optional(),
       }),
     },
     async (args) => {
@@ -1610,10 +1604,10 @@ export function createMcpServer(
     {
       title: "Get interview",
       description:
-        "Read an interview's current question, prior responses, progress, assistantDisplayName, and review URL. Use this to resume a chat interview.",
+        "Read an interview's current question, prior responses, and progress. Use to resume a chat interview.",
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: z.object({
-        interviewId: z.string().describe("Interview ID returned by start_interview or list_interviews."),
+        interviewId: z.string(),
       }),
     },
     async (args) => toolResult(withAbsoluteReviewUrl(await tools.getInterview(stripUndefined(args) as GetInterviewInput))),
@@ -1624,18 +1618,15 @@ export function createMcpServer(
     {
       title: "Answer interview question",
       description:
-        "Save the user's answer to the current interview question and return the next question for the harness to ask in chat. Only set createMemoryCandidate when the user explicitly wants this answer sent to Memory Inbox.",
+        "Save the user's answer to the current interview question and return the next question to ask in chat. Set createMemoryCandidate only when the user explicitly wants the answer sent to Memory Inbox.",
       annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: false },
       inputSchema: z.object({
-        interviewId: z.string().describe("Active interview ID."),
-        answerText: z.string().describe("The user's answer to the current question."),
+        interviewId: z.string(),
+        answerText: z.string(),
         answerValue: z.unknown().optional().describe("Optional structured representation of the answer."),
-        createMemoryCandidate: z
-          .boolean()
-          .optional()
-          .describe("When true, submit this answer to Memory Inbox if the template marks the question as memorable."),
+        createMemoryCandidate: z.boolean().optional(),
         memoryType: interviewMemoryKindSchema.optional(),
-        answeredBy: z.string().optional().describe("Harness/user identifier for audit logging."),
+        answeredBy: z.string().optional(),
       }),
     },
     async (args) =>
@@ -1647,17 +1638,14 @@ export function createMcpServer(
     {
       title: "Complete interview",
       description:
-        "Complete a guided interview after the chat questions are answered. Optionally submit a summary memory candidate to Memory Inbox when the user explicitly wants Skippy to retain the distilled interview.",
+        "Complete a guided interview after its questions are answered. Optionally submit a summary memory candidate when the user explicitly wants the distilled interview retained.",
       annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: false },
       inputSchema: z.object({
-        interviewId: z.string().describe("Interview ID to complete."),
-        summary: z.string().optional().describe("Optional concise interview summary."),
-        createSummaryMemoryCandidate: z
-          .boolean()
-          .optional()
-          .describe("When true, submit a distilled interview summary to Memory Inbox."),
+        interviewId: z.string(),
+        summary: z.string().optional(),
+        createSummaryMemoryCandidate: z.boolean().optional(),
         memoryType: interviewMemoryKindSchema.optional(),
-        completedBy: z.string().optional().describe("Harness/user identifier for audit logging."),
+        completedBy: z.string().optional(),
       }),
     },
     async (args) =>
@@ -1669,12 +1657,12 @@ export function createMcpServer(
     {
       title: "Archive interview",
       description:
-        "Archive a guided interview when the user cancels, abandons a test interview, or does not want to keep it active.",
+        "Archive a guided interview the user cancels, abandons, or no longer wants active.",
       annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: false },
       inputSchema: z.object({
-        interviewId: z.string().describe("Interview ID to archive."),
-        archiveReason: z.string().optional().describe("Short reason for archiving."),
-        archivedBy: z.string().optional().describe("Harness/user identifier for audit logging."),
+        interviewId: z.string(),
+        archiveReason: z.string().optional(),
+        archivedBy: z.string().optional(),
       }),
     },
     async (args) =>
@@ -1686,10 +1674,10 @@ export function createMcpServer(
     {
       title: "Ask Skippy",
       description:
-        "Read-only retrieval helper. Ask for structured context already stored in Skippy. Internal synthesis may be disabled, so expect available focus/context rather than a complete natural-language answer.",
+        "Read-only retrieval of structured context already stored in Skippy. Internal synthesis may be disabled, so expect structured context rather than a polished answer.",
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: z.object({
-        query: z.string().describe("Natural-language question or context request, e.g. 'what should Jeff focus on today?'"),
+        query: z.string().describe("Natural-language question or context request."),
       }),
     },
     async (args) => toolResult(await tools.ask(args)),
@@ -1700,7 +1688,7 @@ export function createMcpServer(
     {
       title: "Summarize focus",
       description:
-        "Read-only retrieval of the latest stored focus summary, if any. Use before generating a new focus summary or answering focus-related questions.",
+        "Read-only latest stored focus summary. Check before generating a new one or answering focus questions.",
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     async () => toolResult(await tools.summarizeFocus()),
@@ -1711,7 +1699,7 @@ export function createMcpServer(
     {
       title: "Get importance rubric",
       description:
-        "Read the user's current effective Skippy importance rubric: their manual policy text plus live context (active goals, in-progress projects, and favorited contacts whose email/calendar/messages should be treated as high-signal). Use this before source ingestion when deciding what belongs in Skippy and what should be ignored. Read renderedText for the full composed guidance.",
+        "Read the user's effective importance rubric (policy text plus live goals/projects/favorited contacts). Use before source ingestion; read renderedText for the full guidance.",
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     async () => toolResult(await tools.getImportanceRubric()),
@@ -1722,12 +1710,12 @@ export function createMcpServer(
     {
       title: "Refresh focus summary",
       description:
-        "Generate and store a fresh Skippy focus summary from accepted entities using the configured internal AI provider and embedding ranking. Use when the user asks what to focus on now or wants the dashboard refreshed. The user-facing Now list is for actionable next moves only; standing context, user identity, relationships, and assumptions should remain in memory/context rather than appearing as task-like bullets.",
+        "Generate and store a fresh focus summary from accepted entities using the internal AI provider. The Now list holds actionable next moves only — standing context stays in memory.",
       annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: false },
       inputSchema: z.object({
-        generatedAt: z.number().optional().describe("Epoch milliseconds to record as the generation time. Defaults to now."),
-        validUntil: z.number().optional().describe("Optional epoch milliseconds after which this summary should be considered stale."),
-        policyVersion: z.string().optional().describe("Optional policy/ranking version. Defaults to skippy-focus-summary-v1."),
+        generatedAt: z.number().optional().describe("Epoch ms; defaults to now."),
+        validUntil: z.number().optional().describe("Epoch ms after which the summary is stale."),
+        policyVersion: z.string().optional(),
       }),
     },
     async (args) =>
@@ -1743,22 +1731,20 @@ export function createMcpServer(
     {
       title: "Ingest accepted object",
       description:
-        "Primary write tool for source-derived knowledge under the user's importance rubric. Use when the harness can explain why the item is worth storing. Creates an accepted Skippy object directly; does not create a fallback review item. Include sourceRefs and a concise rubricDecision. Links ingested without an explicit status default to 'saved' (passive reference; no user interaction expected) — pass status 'unread' only for explicit read-later intent, and use submit_candidate_object when genuinely uncertain a link is valid or important.",
+        "Primary write for source-derived knowledge that clears the importance rubric: creates an accepted Skippy object directly, with sourceRefs and a concise rubricDecision. Links default to status 'saved'; pass 'unread' only for explicit read-later intent, and use submit_candidate_object when genuinely uncertain.",
       annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: true },
       inputSchema: z.object({
-        candidateEntityType: z
-          .enum(entityTypeValues)
-          .describe("The entity type to store directly in accepted Skippy knowledge."),
+        candidateEntityType: z.enum(entityTypeValues),
         candidatePayload: jsonObjectSchema.describe(
-          "Structured fields. Examples: task {title,status,dueDate,sourceSummary,priorityReason}; person {name,email,relationshipLabel}; link {title,url,summary}; note {title,body}.",
+          "Structured fields, e.g. task {title,status,dueDate}; person {name,email}; link {title,url,summary}; note {title,body}.",
         ),
         rubricDecision: z
           .string()
-          .describe("Why this clears the user's importance rubric. Mention the signal: deadline, money, relationship, commitment, focus relevance, security, etc."),
-        confidence: z.number().min(0).max(1).optional().describe("Confidence from 0 to 1."),
-        reviewReason: z.string().optional().describe("Optional human-readable reasoning or caveat."),
-        sourceRefs: z.array(sourceRefSchema).optional().describe("Lightweight provenance records."),
-        sourceRefIds: z.array(z.string()).optional().describe("Existing source reference IDs."),
+          .describe("Why this clears the importance rubric: deadline, money, relationship, commitment, focus, security, etc."),
+        confidence: z.number().min(0).max(1).optional(),
+        reviewReason: z.string().optional(),
+        sourceRefs: z.array(sourceRefSchema).optional(),
+        sourceRefIds: z.array(z.string()).optional(),
       }),
     },
     async (args) => {
@@ -1772,33 +1758,15 @@ export function createMcpServer(
     {
       title: "Submit candidate object",
       description:
-        "Legacy fallback for source-derived knowledge when the harness cannot decide whether it clears the user's importance rubric. Prefer ingest_object for important source-backed objects.",
+        "Review-queue fallback for source-derived knowledge when unsure it clears the importance rubric. Prefer ingest_object for clearly important items.",
       annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: true },
       inputSchema: z.object({
-        candidateEntityType: z
-          .enum(entityTypeValues)
-          .describe("The entity type this candidate may become if later accepted."),
-        candidatePayload: jsonObjectSchema.describe(
-          "Structured candidate fields. Examples: task {title,status,dueDate,sourceSummary}; person {name,email,relationshipLabel}; link {title,url,summary}; note {body}.",
-        ),
-        confidence: z
-          .number()
-          .min(0)
-          .max(1)
-          .optional()
-          .describe("Confidence from 0 to 1."),
-        reviewReason: z
-          .string()
-          .optional()
-          .describe("Short reason the user should review this candidate, including uncertainty or why it matters."),
-        sourceRefs: z
-          .array(sourceRefSchema)
-          .optional()
-          .describe("Inline lightweight provenance records. Prefer including at least one when candidate came from a source."),
-        sourceRefIds: z
-          .array(z.string())
-          .optional()
-          .describe("Existing source reference IDs, when source refs were already stored separately."),
+        candidateEntityType: z.enum(entityTypeValues),
+        candidatePayload: jsonObjectSchema,
+        confidence: z.number().min(0).max(1).optional(),
+        reviewReason: z.string().optional().describe("Why the user should review this candidate."),
+        sourceRefs: z.array(sourceRefSchema).optional(),
+        sourceRefIds: z.array(z.string()).optional(),
       }),
     },
     async (args) => {
@@ -1812,17 +1780,17 @@ export function createMcpServer(
     {
       title: "Create accepted project",
       description:
-        "Directly create an accepted project when the user explicitly asks to create/add a project. For source-derived project knowledge, prefer ingest_object with a rubricDecision and sourceRefs.",
+        "Create an accepted project when the user explicitly asks for one. For source-derived project knowledge, prefer ingest_object.",
       annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: false },
       inputSchema: z.object({
-        title: z.string().describe("Project title from the user's explicit instruction."),
-        summary: z.string().optional().describe("Short project summary."),
+        title: z.string(),
+        summary: z.string().optional(),
         status: z
           .enum(["idea", "planned", "in_progress", "paused", "completed", "cancelled", "archived"])
           .optional()
-          .describe("Project status. Defaults to planned."),
-        priorityReason: z.string().optional().describe("Why this project matters or belongs in the current roadmap."),
-        createdBy: z.string().optional().describe("Harness/user identifier for audit logging."),
+          .describe("Defaults to planned."),
+        priorityReason: z.string().optional(),
+        createdBy: z.string().optional(),
       }),
     },
     async (args) =>
@@ -1841,45 +1809,35 @@ export function createMcpServer(
     {
       title: "Create accepted task",
       description:
-        "Directly create an accepted task when the user explicitly asks to create/add a task. Optionally assign it to an accepted project by projectId. Project tasks are placed into the project's Plan: pass phaseId (from get_project_plan) to target a specific phase, or omit it to default into the project's last phase. For source-derived tasks, prefer ingest_object with a rubricDecision and sourceRefs.",
+        "Create an accepted task when the user explicitly asks for one; optionally place it in a project Plan phase via projectId/phaseId (omit phaseId to default into the last phase). For source-derived tasks, prefer ingest_object.",
       annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: false },
       inputSchema: z.object({
-        title: z.string().describe("Task title from the user's explicit instruction."),
-        description: z.string().optional().describe("Task description or acceptance detail."),
+        title: z.string(),
+        description: z.string().optional(),
         status: z
           .enum(["todo", "in_progress", "waiting", "done", "cancelled"])
           .optional()
-          .describe("Task status. Defaults to todo."),
+          .describe("Defaults to todo."),
         ownerType: z
           .enum(["owner", "agent"])
           .optional()
-          .describe("Who should do the task: owner means user-owned work; agent means the connected assistant/harness should work it."),
+          .describe("owner = user-owned work; agent = the harness should work it."),
         kind: z
           .enum(["coding", "review", "research", "design", "manual", "planning"])
-          .optional()
-          .describe("Task kind. Use review for one agent reviewing another agent's work."),
-        dueAt: z.number().optional().describe("Optional due date/time in epoch milliseconds."),
-        priorityReason: z.string().optional().describe("Why this task matters or its intended priority."),
-        projectId: z.string().optional().describe("Accepted project ID to assign the task to."),
-        phaseId: z
-          .string()
-          .optional()
-          .describe(
-            "Plan phase ID from get_project_plan. Requires projectId and must belong to that project. Omit to default into the project's last phase.",
-          ),
-        createdBy: z.string().optional().describe("Harness/user identifier for audit logging."),
+          .optional(),
+        dueAt: z.number().optional().describe("Epoch ms."),
+        priorityReason: z.string().optional(),
+        projectId: z.string().optional(),
+        phaseId: z.string().optional().describe("Phase ID from get_project_plan; requires projectId."),
+        createdBy: z.string().optional(),
         area: z
           .enum(["work", "personal", "household", "health", "finance", "social", "errand"])
           .optional()
-          .describe(
-            "Which part of life this belongs to. Distinct from kind, which is how the work gets executed.",
-          ),
+          .describe("Which part of life this belongs to (kind is how it gets executed)."),
         commitment: z
           .enum(["must", "want"])
           .optional()
-          .describe(
-            "must = an obligation that can be overdue and can nag. want = something the owner would enjoy (a restaurant to try, a book to read); these are browsable and never overdue. Defaults to must.",
-          ),
+          .describe("must (default) = obligation that can nag; want = enjoyable, browsable, never overdue."),
       }),
     },
     async (args) =>
@@ -1898,11 +1856,11 @@ export function createMcpServer(
     {
       title: "Create or update a repeating obligation",
       description:
-        "Record something that comes around again — furnace filter, oil change, rent, trash night, annual renewal. Use this instead of a task with a due date whenever the thing repeats: completing a task destroys the record of when it was last done, which is usually the fact worth keeping. Choose the anchor carefully, it changes the behavior: 'completion' measures the next due date from when the work is actually finished (maintenance — do it five weeks late and the cadence shifts with you), while 'schedule' is a fixed calendar date that ignores completion (bills and dues). Calendar rules use a supported RRULE subset: FREQ=DAILY|WEEKLY|MONTHLY|YEARLY with optional INTERVAL, BYDAY, BYMONTHDAY, BYMONTH.",
+        "Record something that comes around again (furnace filter, rent, renewals) instead of a dated task — completing a task destroys the record of when it was last done. Anchor 'completion' counts from when the work is finished; 'schedule' is a fixed calendar date. See the recurrence-semantics skill for anchor and RRULE details.",
       annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: false },
       inputSchema: z.object({
         recurrenceId: z.string().optional().describe("Existing recurrence ID to update."),
-        title: z.string().describe("What recurs, e.g. 'Change the furnace filter'."),
+        title: z.string(),
         description: z.string().optional(),
         area: z
           .enum(["work", "personal", "household", "health", "finance", "social", "errand"])
@@ -1912,21 +1870,17 @@ export function createMcpServer(
             z.object({ kind: z.literal("interval"), everyDays: z.number().int().min(1) }),
             z.object({ kind: z.literal("calendar"), rrule: z.string() }),
           ])
-          .describe("Either an every-N-days interval or an RRULE calendar rule."),
+          .describe("Every-N-days interval or an RRULE calendar rule (supported subset; see recurrence-semantics skill)."),
         anchor: z
           .enum(["completion", "schedule"])
-          .describe(
-            "completion = counted from when it is finished; schedule = a fixed date regardless of completion.",
-          ),
-        startAt: z.number().optional().describe("First due date in epoch milliseconds."),
+          .describe("completion = counted from when finished; schedule = fixed date regardless of completion."),
+        startAt: z.number().optional().describe("First due date, epoch ms."),
         leadTimeDays: z.number().optional().describe("Surface this many days early."),
         spawnTask: z
           .boolean()
           .optional()
-          .describe(
-            "true (default) materializes a real task when due; false keeps it on the agenda only. Chores want to be tasks; ambient things like trash night do not.",
-          ),
-        timeZone: z.string().optional().describe("IANA zone the wall-clock schedule is anchored to."),
+          .describe("true (default) materializes a task when due; false keeps it agenda-only (e.g. trash night)."),
+        timeZone: z.string().optional().describe("IANA zone."),
       }),
     },
     async (args) => toolResult(await tools.upsertRecurrence(stripUndefined(args) as UpsertRecurrenceInput)),
@@ -1937,14 +1891,11 @@ export function createMcpServer(
     {
       title: "Log a completion of a repeating obligation",
       description:
-        "Record that a recurring obligation was done, advancing its schedule and appending to its history. Pass completedAt to backdate ('I did this last Tuesday') — for a completion-anchored recurrence that timestamp directly determines the next due date, so it is not cosmetic.",
+        "Record that a recurring obligation was done, advancing its schedule. Pass completedAt to backdate — for completion-anchored recurrences it determines the next due date.",
       annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: false },
       inputSchema: z.object({
         recurrenceId: z.string(),
-        completedAt: z
-          .number()
-          .optional()
-          .describe("Epoch milliseconds. Defaults to now; pass an earlier value to backdate."),
+        completedAt: z.number().optional().describe("Epoch ms; defaults to now, earlier to backdate."),
         note: z.string().optional(),
       }),
     },
@@ -1956,7 +1907,7 @@ export function createMcpServer(
     {
       title: "List repeating obligations",
       description:
-        "Read-only. Every active or paused recurrence with its cadence, when it was last done, and when it is next due. Use dueOnly to get just what has surfaced.",
+        "Read-only. Active/paused recurrences with cadence, last-done, and next-due. dueOnly returns just what has surfaced.",
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: z.object({ dueOnly: z.boolean().optional() }),
     },
@@ -1968,15 +1919,12 @@ export function createMcpServer(
     {
       title: "List what is happening and what is due",
       description:
-        "Read-only. Calendar events, tasks with due dates, and firing recurrences merged into one chronological list over a date range. This is how to answer 'what does my day look like' or find free time — a recurrence that already spawned a task appears once, as the task.",
+        "Read-only. Calendar events, due tasks, and firing recurrences merged chronologically over a range — how to answer 'what does my day look like'. A recurrence that already spawned a task appears once, as the task.",
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: z.object({
-        from: z.number().describe("Range start, epoch milliseconds."),
-        to: z.number().describe("Range end, epoch milliseconds."),
-        includeProjectTasks: z
-          .boolean()
-          .optional()
-          .describe("Include project work too. Off by default: the agenda is about the day, not the roadmap."),
+        from: z.number().describe("Range start, epoch ms."),
+        to: z.number().describe("Range end, epoch ms."),
+        includeProjectTasks: z.boolean().optional().describe("Off by default: the agenda is about the day, not the roadmap."),
       }),
     },
     async (args) => toolResult(await tools.listAgenda(stripUndefined(args) as any)),
@@ -2005,7 +1953,7 @@ export function createMcpServer(
     {
       title: "Get the user's current app context",
       description:
-        "Read-only. Returns the page the user currently has open in the Skippy web app: activeRoute covers every page ('/' is Today/home, '/settings', '/review', '/finances', ...), and activeProject (id, title, kind, repoUrl, localPath, effectiveAssetsPath, effectiveOutputPath) is populated only on /projects/<id> pages. With multiple tabs or browsers open, the most-recently-focused one wins; updatedAt indicates freshness. Use this to resolve references like 'this project', 'this page', or 'add a task here' when the user does not name the target explicitly. effectiveAssetsPath is where user-provided inputs live; effectiveOutputPath is where generated artifacts belong. Returns null if nothing has been opened yet.",
+        "Read-only. Returns the page currently open in the Skippy web app (activeRoute, plus activeProject with paths on /projects/<id> pages). Use to resolve 'this project' / 'this page'; null if nothing has been opened.",
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: z.object({}),
     },
@@ -2017,9 +1965,9 @@ export function createMcpServer(
     {
       title: "Get a project's overview and ordered plan",
       description:
-        "Read-only. Returns the project Overview fields, ordered phases with Markdown descriptions, ordered tasks, progress, and the currently featured next task ordering. Call get_current_context first when the user says 'this project'.",
+        "Read-only. Project Overview, ordered phases and tasks, progress, and featured next-task ordering. Call get_current_context first when the user says 'this project'.",
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-      inputSchema: z.object({ projectId: z.string().describe("Accepted project ID.") }),
+      inputSchema: z.object({ projectId: z.string() }),
     },
     async (args) => toolResult(await tools.getProjectPlan({ projectId: args.projectId })),
   );
@@ -2029,15 +1977,15 @@ export function createMcpServer(
     {
       title: "Update a project's Overview",
       description:
-        "Update the project name, description, or relevant links shown in Overview. Omit fields that should stay unchanged; pass an empty string to clear an optional field.",
+        "Update a project's Overview name, description, or links. Omit fields to keep them; empty string clears an optional field.",
       annotations: { destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: z.object({
-        projectId: z.string().describe("Accepted project ID."),
+        projectId: z.string(),
         title: z.string().optional(),
-        summary: z.string().optional().describe("Project description."),
-        repoUrl: z.string().optional().describe("GitHub repository URL."),
-        vercelUrl: z.string().optional().describe("Vercel project or dashboard URL."),
-        liveUrl: z.string().optional().describe("Public live URL."),
+        summary: z.string().optional(),
+        repoUrl: z.string().optional(),
+        vercelUrl: z.string().optional(),
+        liveUrl: z.string().optional(),
       }),
     },
     async (args) =>
@@ -2053,12 +2001,12 @@ export function createMcpServer(
     {
       title: "Update a project phase",
       description:
-        "Update an existing phase title or its Markdown description. Use get_project_plan first to identify the phase ID. Omit fields that should stay unchanged; descriptionMd may be empty.",
+        "Update a phase title or Markdown description (get phase IDs from get_project_plan). Omit fields to keep them.",
       annotations: { destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: z.object({
-        phaseId: z.string().describe("Phase ID returned by get_project_plan."),
+        phaseId: z.string(),
         title: z.string().optional(),
-        descriptionMd: z.string().optional().describe("Full Markdown phase description."),
+        descriptionMd: z.string().optional(),
       }),
     },
     async (args) =>
@@ -2074,9 +2022,9 @@ export function createMcpServer(
     {
       title: "Read a project's Notes pad",
       description:
-        "Read-only. Returns the project's freeform Notes pad: one plain-text field where the owner dumps unstructured thoughts (often from phone). Use this when the owner asks to review their notes — read the pad, then fold actionable ideas into the Plan together in chat. Call get_current_context first when the user says 'this project'.",
+        "Read-only. The project's freeform plain-text Notes pad. Use when the owner asks to review notes: read the pad, then fold actionable ideas into the Plan together in chat.",
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-      inputSchema: z.object({ projectId: z.string().describe("Accepted project ID.") }),
+      inputSchema: z.object({ projectId: z.string() }),
     },
     async (args) => toolResult(await tools.getProjectNotes(stripUndefined(args) as { projectId: string })),
   );
@@ -2086,15 +2034,11 @@ export function createMcpServer(
     {
       title: "Overwrite a project's Notes pad",
       description:
-        "Replace the project's Notes pad with new plain text (the FULL pad content, stored verbatim; an empty string clears the pad). The pad is the owner's freeform space: by convention the harness only edits it at the close of an owner-requested notes review, and only after snapshot_project_notes has preserved the current pad. Plain text only — no markdown rendering, no entry structure.",
+        "Replace the project's Notes pad with new FULL plain text (last-write-wins; empty string clears it). Only edit at the close of an owner-requested notes review, after snapshot_project_notes has preserved the current pad.",
       annotations: { destructiveHint: true, idempotentHint: true, openWorldHint: false },
       inputSchema: z.object({
-        projectId: z.string().describe("Accepted project ID."),
-        notesPad: z
-          .string()
-          .describe(
-            "Full replacement pad text (last-write-wins). Usually the pruned remainder after a review; empty string clears the pad.",
-          ),
+        projectId: z.string(),
+        notesPad: z.string().describe("Full replacement pad text."),
       }),
     },
     async (args) =>
@@ -2110,14 +2054,11 @@ export function createMcpServer(
     {
       title: "Snapshot a project's Notes pad",
       description:
-        "Preserve the project's currently stored Notes pad as a timestamped snapshot (content + optional review summary). Use at the close of an owner-requested notes review, with the owner's explicit OK: snapshot first, then update_project_notes to prune the processed text from the live pad — the snapshot captures what is stored, so nothing is lost by the prune.",
+        "Preserve the currently stored Notes pad as a timestamped snapshot. Use with the owner's OK at the close of a notes review: snapshot first, then update_project_notes to prune the live pad.",
       annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: false },
       inputSchema: z.object({
-        projectId: z.string().describe("Accepted project ID."),
-        summary: z
-          .string()
-          .optional()
-          .describe("Optional one-line summary of the review session that produced this snapshot."),
+        projectId: z.string(),
+        summary: z.string().optional().describe("One-line review summary."),
       }),
     },
     async (args) =>
@@ -2133,12 +2074,12 @@ export function createMcpServer(
     {
       title: "Create a project Plan phase",
       description:
-        "Add a new phase to a project's Plan, appended after the existing phases. Use when the user wants a new section of work (e.g. a batch of related tasks). Follow with create_task using the returned phaseId to place tasks in it; update_phase edits it later.",
+        "Add a new phase to a project's Plan, appended after existing phases. Follow with create_task using the returned phaseId to place tasks in it.",
       annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: false },
       inputSchema: z.object({
-        projectId: z.string().describe("Accepted project ID."),
-        title: z.string().describe("Phase title, e.g. 'Phase 3' or a thematic name."),
-        descriptionMd: z.string().optional().describe("Optional Markdown phase description."),
+        projectId: z.string(),
+        title: z.string(),
+        descriptionMd: z.string().optional(),
       }),
     },
     async (args) =>
@@ -2154,11 +2095,11 @@ export function createMcpServer(
     {
       title: "Place a task in a Plan phase",
       description:
-        "Assign or move an existing project task into a Plan phase, appended after the phase's current tasks. Use get_project_plan first to identify phase IDs (and to spot tasks with no phaseId, which are exactly the ones missing from the phase-grouped Plan). The phase must belong to the task's project.",
+        "Assign or move a project task into a Plan phase, appended after the phase's current tasks. Get phase IDs from get_project_plan; the phase must belong to the task's project.",
       annotations: { destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: z.object({
-        taskId: z.string().describe("Task ID to place."),
-        phaseId: z.string().describe("Phase ID returned by get_project_plan."),
+        taskId: z.string(),
+        phaseId: z.string(),
       }),
     },
     async (args) =>
@@ -2174,11 +2115,11 @@ export function createMcpServer(
     {
       title: "Plan a project into tasks",
       description:
-        "Use Skippy's AI planner to decompose an accepted project into an ordered set of executable tasks, each with an execution brief, acceptance criteria, and dependency links. Skippy plans; a human or coding agent executes. Requires an LLM provider configured for the brain. Re-running adds a fresh plan version.",
+        "Use Skippy's AI planner to decompose a project into ordered executable tasks with briefs, acceptance criteria, and dependencies. Re-running adds a fresh plan version.",
       annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: true },
       inputSchema: z.object({
-        projectId: z.string().describe("Accepted project ID to plan."),
-        maxTasks: z.number().int().min(1).max(12).optional().describe("Maximum number of tasks to produce (default 10)."),
+        projectId: z.string(),
+        maxTasks: z.number().int().min(1).max(12).optional().describe("Default 10."),
       }),
     },
     async (args) => toolResult(await tools.planProject(stripUndefined(args) as { projectId: string; maxTasks?: number })),
@@ -2189,10 +2130,10 @@ export function createMcpServer(
     {
       title: "List ready-to-execute tasks",
       description:
-        "Read-only, dependency-aware queue of agent-owned tasks whose dependencies are all complete (execution state 'ready'). This is what a coding agent should pick up next. Each item includes the execution brief and acceptance criteria.",
+        "Read-only, dependency-aware queue of agent-owned tasks whose dependencies are all complete — what a coding agent should pick up next, with briefs and acceptance criteria.",
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: z.object({
-        limit: z.number().int().min(1).max(50).optional().describe("Maximum tasks to return (default 12)."),
+        limit: z.number().int().min(1).max(50).optional().describe("Default 12."),
       }),
     },
     async (args) => toolResult(await tools.listReadyTasks(stripUndefined(args) as { limit?: number })),
@@ -2203,10 +2144,10 @@ export function createMcpServer(
     {
       title: "List requested ready agent tasks",
       description:
-        "Read-only queue of Ready, agent-owned tasks that the user explicitly requested an agent/harness to execute. This is the safest queue for Codex heartbeat runs to poll.",
+        "Read-only queue of Ready, agent-owned tasks the user explicitly requested an agent to execute — the safest queue for heartbeat runs to poll.",
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: z.object({
-        limit: z.number().int().min(1).max(50).optional().describe("Maximum tasks to return (default 12)."),
+        limit: z.number().int().min(1).max(50).optional().describe("Default 12."),
       }),
     },
     async (args) => toolResult(await tools.listRequestedReadyTasks(stripUndefined(args) as { limit?: number })),
@@ -2217,32 +2158,24 @@ export function createMcpServer(
     {
       title: "List tasks in a given execution state",
       description:
-        "Read-only. Every accepted task currently sitting in one execution state — 'in_progress' to see what a harness already picked up, 'in_review' for work waiting on the owner, 'blocked' for what is stuck, 'briefed' for what is waiting to be promoted to Ready. Optionally narrow to one project, one owner type, or agent-requested tasks only. Unlike list_ready_tasks this does not re-check dependencies; it reports the stored state, so use list_ready_tasks when picking up new work.",
+        "Read-only. Tasks sitting in one stored execution state, optionally narrowed by project, owner type, or agent-request status. Reports stored state without re-checking dependencies — use list_ready_tasks when picking up new work.",
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: z.object({
-        executionState: z
-          .enum([
-            "proposed",
-            "unplanned",
-            "briefed",
-            "ready",
-            "in_progress",
-            "in_review",
-            "blocked",
-            "done",
-            "cancelled",
-          ])
-          .describe("Execution state to list."),
-        ownerType: z
-          .enum(["owner", "agent"])
-          .optional()
-          .describe("Narrow to tasks owned by the user ('owner') or by an agent."),
-        projectId: z.string().optional().describe("Narrow to a single project."),
-        agentRequestStatus: z
-          .enum(["requested", "cancelled"])
-          .optional()
-          .describe("Narrow to tasks the user explicitly requested an agent run, or cancelled requests."),
-        limit: z.number().int().min(1).max(200).optional().describe("Maximum tasks to return (default 25)."),
+        executionState: z.enum([
+          "proposed",
+          "unplanned",
+          "briefed",
+          "ready",
+          "in_progress",
+          "in_review",
+          "blocked",
+          "done",
+          "cancelled",
+        ]),
+        ownerType: z.enum(["owner", "agent"]).optional(),
+        projectId: z.string().optional(),
+        agentRequestStatus: z.enum(["requested", "cancelled"]).optional(),
+        limit: z.number().int().min(1).max(200).optional().describe("Default 25."),
       }),
     },
     async (args) => toolResult(await tools.listTasksByState(stripUndefined(args) as TasksByStateInput)),
@@ -2253,10 +2186,10 @@ export function createMcpServer(
     {
       title: "Get a task's execution brief",
       description:
-        "Read-only. Fetch the ready-to-hand-off brief for a single task: description, execution brief, acceptance criteria, owning project, and dependency status. Hand this to a coding agent to execute. The project includes effectiveAssetsPath and effectiveOutputPath: read user-provided inputs from effectiveAssetsPath and write generated artifacts/deliverables to effectiveOutputPath (explicit user instructions override; create folders with mkdir -p on first write; never write deliverables into the project's code repo unless they ARE the product).",
+        "Read-only. The hand-off brief for one task: description, execution brief, acceptance criteria, owning project (with effectiveAssetsPath for inputs and effectiveOutputPath for deliverables), and dependency status. Never write deliverables into the code repo unless they ARE the product.",
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: z.object({
-        taskId: z.string().describe("Task ID to fetch the brief for."),
+        taskId: z.string(),
       }),
     },
     async (args) => toolResult(await tools.getTaskBrief(stripUndefined(args) as { taskId: string })),
@@ -2267,28 +2200,18 @@ export function createMcpServer(
     {
       title: "Brief a proposed task",
       description:
-        "Write an execution brief for a proposed task and move it to 'briefed'. Ground the brief in the actual repo: name concrete files, existing patterns, and verification steps a coding agent can follow. Optionally sharpen the title, description, and kind. Briefed tasks wait for the owner to promote them to Ready.",
+        "Write an execution brief for a proposed task and move it to 'briefed'. Ground the brief in the actual repo (concrete files, patterns, verification steps); briefed tasks wait for the owner to promote them to Ready.",
       annotations: { destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: z.object({
-        taskId: z.string().describe("Proposed task ID to brief."),
+        taskId: z.string(),
         executionBrief: z
           .string()
-          .describe("Self-contained execution brief: approach, key files, steps, and how to verify the change."),
-        acceptanceCriteria: z
-          .array(z.string())
-          .describe("Concrete, verifiable acceptance criteria for the task."),
-        title: z.string().optional().describe("Optional sharper task title."),
-        description: z.string().optional().describe("Optional refreshed task description."),
-        kind: z
-          .enum(["coding", "review", "research", "design", "manual", "planning"])
-          .optional()
-          .describe("Optional task kind. Use coding for repo work."),
-        phaseId: z
-          .string()
-          .optional()
-          .describe(
-            "Optional Plan phase ID from get_project_plan to place the task in while briefing it. Must belong to the task's project.",
-          ),
+          .describe("Self-contained: approach, key files, steps, verification."),
+        acceptanceCriteria: z.array(z.string()),
+        title: z.string().optional(),
+        description: z.string().optional(),
+        kind: z.enum(["coding", "review", "research", "design", "manual", "planning"]).optional(),
+        phaseId: z.string().optional().describe("Plan phase to place the task in; must belong to the task's project."),
       }),
     },
     async (args) =>
@@ -2304,21 +2227,18 @@ export function createMcpServer(
     {
       title: "Record a task result",
       description:
-        "Report the outcome of an executed task back to Skippy for supervision. Provide a result summary and/or a PR/commit URL. By default the task moves to 'in_review' for the owner to approve; set markDone to complete it, which also unblocks dependent tasks.",
+        "Report an executed task's outcome (summary and/or PR/commit URL). By default the task moves to 'in_review' for owner approval; markDone completes it and unblocks dependents.",
       annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: false },
       inputSchema: z.object({
-        taskId: z.string().describe("Task ID that was executed."),
-        resultSummary: z.string().optional().describe("Short summary of what was done."),
+        taskId: z.string(),
+        resultSummary: z.string().optional(),
         resultUrl: z.string().optional().describe("PR, commit, or artifact URL."),
-        gitBranchName: z.string().optional().describe("Git branch used for this task, such as agent/task-abc-title."),
-        prUrl: z.string().optional().describe("GitHub pull request URL for reviewing this task."),
-        prNumber: z.number().optional().describe("GitHub pull request number."),
-        prStatus: z.enum(["open", "merged", "closed"]).optional().describe("Current pull request status."),
-        markDone: z
-          .boolean()
-          .optional()
-          .describe("If true, mark the task done immediately instead of leaving it for owner review."),
-        artifactFileIds: z.array(z.string()).optional().describe("Exact ready generated-artifact projectFiles IDs produced by this task."),
+        gitBranchName: z.string().optional(),
+        prUrl: z.string().optional(),
+        prNumber: z.number().optional(),
+        prStatus: z.enum(["open", "merged", "closed"]).optional(),
+        markDone: z.boolean().optional().describe("Mark done immediately instead of leaving for owner review."),
+        artifactFileIds: z.array(z.string()).optional().describe("Ready generated-artifact projectFiles IDs."),
       }),
     },
     async (args) =>
@@ -2344,11 +2264,11 @@ export function createMcpServer(
     {
       title: "Abandon a task",
       description:
-        "Abandon (cancel) a Skippy task that has NOT been executed. Use ONLY when the owner explicitly asks to abandon or cancel a task. Only proposed/unplanned/briefed/ready/blocked tasks can be abandoned; in_progress, in_review, and done tasks are rejected server-side — record their result instead. Restoring an abandoned task is done by the owner in the app (there is no restore tool).",
+        "Abandon a not-yet-executed task, ONLY when the owner explicitly asks. Executed states (in_progress/in_review/done) are rejected server-side — record their result instead; restoring is owner-only in the app.",
       annotations: { destructiveHint: true, idempotentHint: true, openWorldHint: false },
       inputSchema: z.object({
-        taskId: z.string().describe("Task ID to abandon."),
-        reason: z.string().optional().describe("Short reason recorded in the task's activity history."),
+        taskId: z.string(),
+        reason: z.string().optional(),
       }),
     },
     async (args) => {
@@ -2362,11 +2282,11 @@ export function createMcpServer(
     {
       title: "List project library files",
       description:
-        "Read-only. List the cloud-canonical project library files for a project (optionally scoped to one task), with fileName, sizeBytes, mimeType, taskId, note, and a downloadUrl per file plus a count. Download URLs are ephemeral — download promptly. At task start, materialize the files you need into the project's effectiveAssetsPath (the _library folder) before working, skipping files already present locally with a matching size. Files found only locally are not in the library unless registered with register_project_file.",
+        "Read-only. Cloud-canonical project library files (optionally scoped to one task) with metadata and ephemeral downloadUrls — download promptly. See the file-upload skill for the materialize/register workflow.",
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: z.object({
-        projectId: z.string().describe("Project ID whose library files to list."),
-        taskId: z.string().optional().describe("Optional task ID to list only files attached to that task."),
+        projectId: z.string(),
+        taskId: z.string().optional(),
       }),
     },
     async (args) => {
@@ -2412,13 +2332,10 @@ export function createMcpServer(
     {
       title: "Generate a project file upload URL",
       description:
-        "Step 1 of adding a file to the cloud-canonical project library. Returns a short-lived, single-use Convex storage POST URL. HTTP POST the raw file bytes to it (set the file's Content-Type header); the response JSON contains {storageId}. Then call register_project_file with that storageId to make the file part of the library.",
+        "Step 1 of the 2-step library upload: returns a short-lived, single-use Convex storage POST URL. POST the raw bytes, then call register_project_file with the returned {storageId}. See the file-upload skill.",
       annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: false },
       inputSchema: z.object({
-        projectId: z
-          .string()
-          .optional()
-          .describe("Optional project ID for chat context only; the upload URL itself is not project-scoped."),
+        projectId: z.string().optional().describe("Chat context only; the URL is not project-scoped."),
       }),
     },
     async (args) =>
@@ -2434,20 +2351,16 @@ export function createMcpServer(
     {
       title: "Register an uploaded project file",
       description:
-        `Step 2 of adding a file to the cloud-canonical project library: registers a file the harness already uploaded to Convex storage. Full flow: (1) call generate_project_file_upload_url, (2) HTTP POST the raw file bytes to the returned URL — the response JSON contains {storageId}, (3) call this tool with that storageId plus fileName, mimeType, and sizeBytes. Max ${PROJECT_FILE_MAX_BYTES} bytes (25 MB); allowed types are images, PDFs, text (plain/markdown/csv), JSON, and common office documents — executables and arbitrary binaries are rejected. Files found only locally in _library are not in the library until registered here.`,
+        "Step 2 of the 2-step library upload: registers bytes already POSTed to the upload URL, using the returned {storageId}. Max 25 MB; executables and arbitrary binaries are rejected. See the file-upload skill for the full flow and allowed types.",
       annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: false },
       inputSchema: z.object({
-        projectId: z.string().describe("Project ID the file belongs to."),
-        taskId: z.string().optional().describe("Optional task ID to attach the file to."),
-        fileName: z.string().describe("File name including extension, e.g. 'brand-guidelines.pdf'."),
-        mimeType: z.string().describe("MIME type of the uploaded bytes, e.g. 'application/pdf'."),
-        sizeBytes: z
-          .number()
-          .int()
-          .min(0)
-          .describe(`File size in bytes. Maximum ${PROJECT_FILE_MAX_BYTES} (25 MB).`),
-        storageId: z.string().describe("Convex storageId returned by POSTing the bytes to the upload URL."),
-        note: z.string().optional().describe("Optional short note about what the file is for."),
+        projectId: z.string(),
+        taskId: z.string().optional(),
+        fileName: z.string(),
+        mimeType: z.string(),
+        sizeBytes: z.number().int().min(0).describe(`Max ${PROJECT_FILE_MAX_BYTES} (25 MB).`),
+        storageId: z.string().describe("Convex storageId from the upload URL response."),
+        note: z.string().optional(),
       }),
     },
     async (args) => {
@@ -2461,13 +2374,10 @@ export function createMcpServer(
     {
       title: "List quick captures",
       description:
-        "Read-only. List the owner's Home quick-capture inbox: free-form thoughts, notes, URLs, and uploaded files dropped on the home page to be remembered later (default status 'pending'). During every source-ingestion run, inspect pending quick captures in addition to external sources: apply the importance rubric to each, create accepted or review-worthy Skippy objects with ingest_object (or record_memory, submit_candidate_object, etc.), then call mark_quick_capture_handled with 'processed' — or 'discarded' when nothing is worth storing. File captures include an ephemeral fileUrl download link — fetch promptly and never persist it. Captures the owner flagged with hold intent are private device-to-device transfers: they are never returned by this tool and must not be ingested.",
+        "Read-only. The owner's Home quick-capture inbox (default status 'pending'). Inspect pending captures during every source-ingestion run, create Skippy objects under the rubric, then call mark_quick_capture_handled. File fileUrls are ephemeral — fetch promptly, never persist.",
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: z.object({
-        status: z
-          .enum(["pending", "processed", "discarded"])
-          .optional()
-          .describe("Capture status to list. Defaults to pending — the unprocessed inbox."),
+        status: z.enum(["pending", "processed", "discarded"]).optional().describe("Defaults to pending."),
       }),
     },
     async (args) => {
@@ -2481,27 +2391,14 @@ export function createMcpServer(
     {
       title: "Mark a quick capture handled",
       description:
-        "Record that an ingestion harness handled a quick capture from the Home inbox. Call this after inspecting a pending capture during a source-ingestion run: use outcome 'processed' once useful Skippy objects were created from it (ingest_object, record_memory, etc.), or 'discarded' when the capture holds nothing worth storing under the importance rubric. Include a short processingNote saying what was created or why it was discarded, and pass relatedEntityRefs listing the accepted entities you created or updated from the capture (project, link, note, etc.) so the Home 'Actions taken' digest can deep-link to them. Pass the ingestion run ID from record_ingestion_run as sourceRunId when available. Only pending captures can be marked; already-handled captures are rejected server-side.",
+        "Record that a pending quick capture was handled: 'processed' when useful objects were created, 'discarded' when nothing cleared the rubric. Pass relatedEntityRefs for the entities created so the Home digest can deep-link to them; already-handled captures are rejected.",
       annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: false },
       inputSchema: z.object({
-        captureId: z.string().describe("Quick capture ID from list_quick_captures."),
-        outcome: z
-          .enum(["processed", "discarded"])
-          .describe("processed = useful Skippy objects were created from the capture; discarded = nothing worth storing."),
-        processingNote: z
-          .string()
-          .optional()
-          .describe("Short note on what was created from the capture or why it was discarded."),
-        relatedEntityRefs: z
-          .array(entityRefSchema)
-          .optional()
-          .describe(
-            "Accepted Skippy entities created or updated from this capture (e.g. the new project, link, or note). Surfaced as deep-links in the Home 'Actions taken' digest so the owner can jump to what was filed.",
-          ),
-        sourceRunId: z
-          .string()
-          .optional()
-          .describe("Ingestion run ID from record_ingestion_run that handled this capture."),
+        captureId: z.string(),
+        outcome: z.enum(["processed", "discarded"]),
+        processingNote: z.string().optional().describe("What was created, or why discarded."),
+        relatedEntityRefs: z.array(entityRefSchema).optional().describe("Entities created or updated from this capture."),
+        sourceRunId: z.string().optional().describe("Run ID from record_ingestion_run."),
       }),
     },
     async (args) => {
@@ -2511,8 +2408,8 @@ export function createMcpServer(
   );
 
   const upsertDescriptionNotes: Partial<Record<(typeof entityTypeValues)[number], string>> = {
-    link: " Links are reference material: status defaults to 'saved' (no user interaction expected). Pass status 'unread' only when the user explicitly wants to read it later; if genuinely uncertain the link is valid or important, use submit_candidate_object so it lands in Review for a one-tap decision.",
-    task: " This always creates a NEW standalone task and cannot update an existing one — for project tasks use create_task (projectId/phaseId aware), brief_task to update briefs, and set_task_phase to place a task in a Plan phase.",
+    link: " Link status defaults to 'saved'; pass 'unread' only for explicit read-later intent.",
+    task: " Always creates a NEW standalone task — use create_task for project tasks, brief_task/set_task_phase to update existing ones.",
   };
 
   for (const entityType of entityTypeValues) {
@@ -2520,7 +2417,7 @@ export function createMcpServer(
       `upsert_${entityType}`,
       {
         title: `Submit ${entityType}`,
-        description: `Convenience ingestion tool for a single accepted ${entityType}. This writes directly to accepted knowledge, so use it only when the item clearly clears the user's importance rubric. Prefer ingest_object when you can include sourceRefs and a specific rubricDecision.${upsertDescriptionNotes[entityType] ?? ""}`,
+        description: `Convenience direct-write ingestion for a single accepted ${entityType} that clearly clears the importance rubric. Prefer ingest_object when you can include sourceRefs and a rubricDecision.${upsertDescriptionNotes[entityType] ?? ""}`,
         annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: true },
         inputSchema: jsonObjectSchema,
       },
@@ -2558,14 +2455,12 @@ export function createMcpServer(
     {
       title: "Update link status",
       description:
-        "Update a stored link's lifecycle status. Use only for genuine lifecycle changes: mark 'read' after the harness has actually ingested or read the link's content (for example during a sync), 'saved' when reclassifying it as reference material, or 'discarded' when cleaning up dead or irrelevant links. Never use it to fake user engagement or clear the user's reading queue without cause.",
+        "Update a stored link's lifecycle status ('read' only after actually ingesting its content, 'saved' for reference material, 'discarded' for dead links). Never fake user engagement or clear the reading queue without cause.",
       annotations: { destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: z.object({
-        linkId: z.string().describe("Accepted link entity ID to update."),
-        status: z
-          .enum(["unread", "read", "saved", "discarded"])
-          .describe("New lifecycle status for the link."),
-        reason: z.string().optional().describe("Short reason recorded in the link's activity history."),
+        linkId: z.string(),
+        status: z.enum(["unread", "read", "saved", "discarded"]),
+        reason: z.string().optional(),
       }),
     },
     async (args) => {
@@ -2578,21 +2473,19 @@ export function createMcpServer(
     },
   );
 
-  const taxonomySummary = TX_TYPES.map((type) => `${type}: ${TX_TYPE_CATEGORIES[type].join(" | ")}`).join("; ");
-
   server.registerTool(
     "upsert_financial_account",
     {
       title: "Upsert financial account",
       description:
-        "Create or update a tracked financial account (accountType 'Jeff Personal' or 'Family Shared'). Idempotent: pass the Plaid account_id as plaidAccountId so re-syncs update the same account instead of duplicating it. mask is the LAST 4 characters of the account number ONLY — never send full account numbers.",
+        "Create or update a tracked financial account. Pass the Plaid account_id as plaidAccountId so re-syncs update instead of duplicating; mask is the LAST 4 characters only — never full account numbers.",
       annotations: { destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: z.object({
-        name: z.string().describe("Human-friendly account name, e.g. 'Chase Checking'."),
-        accountType: z.enum(FINANCIAL_ACCOUNT_TYPES).describe("Fixed account type."),
-        mask: z.string().max(4).describe("Last 4 characters of the account number ONLY. Never full account numbers."),
-        institution: z.string().optional().describe("Bank/institution name, e.g. 'Chase'."),
-        plaidAccountId: z.string().optional().describe("Plaid account_id for idempotent mapping across syncs."),
+        name: z.string().describe("e.g. 'Chase Checking'."),
+        accountType: z.enum(FINANCIAL_ACCOUNT_TYPES),
+        mask: z.string().max(4).describe("Last 4 characters ONLY."),
+        institution: z.string().optional(),
+        plaidAccountId: z.string().optional().describe("Plaid account_id for idempotent mapping."),
       }),
     },
     async (args) =>
@@ -2608,52 +2501,32 @@ export function createMcpServer(
     {
       title: "Record financial transactions (bulk)",
       description:
-        `Bulk-ingest financial transactions for a tracked account. Financial data from Plaid is ground truth — ingest it directly, never queue it for review. The harness maps Plaid data to the FIXED Conscious Spending Plan taxonomy at ingest time using its judgment (${taxonomySummary}); the type-category pairing is enforced and invalid pairs are rejected. Transfers between the owner's own accounts (tracked or untracked, e.g. business checking or a partner's external account) are txType 'Transfer' with category 'Transfers In' or 'Transfers Out' — never Income or an outgoing bucket — and are automatically excluded from budget totals. Payroll-deducted retirement contributions (e.g. pre-tax 401k) that never touch checking are recorded with offLedger: true (txType 'Investments' only) plus contributionSource: 'employee' amounts are the owner's pre-tax pay, so they gross up the percent-of-income denominator used for CSP budget targets; 'employer' match amounts count in Investments totals but are NOT income and never gross up the denominator. Off-ledger rows are excluded from outgoing/net and from account balances. Pass Plaid transaction_ids as externalIds for idempotency: an existing externalId updates the stored transaction instead of duplicating it. All amounts are INTEGER CENTS (positive magnitudes; txType determines direction — for Transfer the direction is the category). Returns {inserted, updated, skipped} counts.`,
+        "Bulk-ingest transactions for a tracked account. Plaid data is ground truth — ingest directly, never queue for review; map to the fixed CSP taxonomy per the finance-taxonomy skill (type-category pairing is enforced; transfers and off-ledger 401k have special rules there). Amounts are INTEGER CENTS; pass Plaid transaction_ids as externalIds for idempotent dedupe.",
       annotations: { destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: z.object({
-        accountId: z.string().describe("Financial account ID from upsert_financial_account."),
-        source: z
-          .enum(TX_SOURCES)
-          .optional()
-          .describe("Where the transactions came from. Defaults to plaid."),
+        accountId: z.string().describe("From upsert_financial_account."),
+        source: z.enum(TX_SOURCES).optional().describe("Defaults to plaid."),
         transactions: z
           .array(
             z.object({
-              date: z.number().describe("Transaction date in epoch milliseconds."),
-              amountCents: z
-                .number()
-                .int()
-                .describe("Integer cents (e.g. $12.34 -> 1234). Direction is determined by txType."),
-              description: z.string().describe("Merchant/transaction description."),
-              txType: z.enum(TX_TYPES).describe("Fixed transaction type."),
-              category: z
-                .enum(TX_CATEGORIES)
-                .describe("Category — must be valid for the txType under the fixed taxonomy."),
-              externalId: z
-                .string()
-                .optional()
-                .describe("Plaid transaction_id, used for idempotent dedupe across syncs."),
-              monthKey: z
-                .string()
-                .regex(MONTH_KEY_PATTERN)
-                .optional()
-                .describe("'YYYY-MM' month bucket. Derived from date (UTC) when omitted."),
+              date: z.number().describe("Epoch ms."),
+              amountCents: z.number().int().describe("Integer cents, positive magnitude; txType determines direction."),
+              description: z.string(),
+              txType: z.enum(TX_TYPES),
+              category: z.enum(TX_CATEGORIES).describe("Must be valid for the txType (finance-taxonomy skill)."),
+              externalId: z.string().optional().describe("Plaid transaction_id for idempotent dedupe."),
+              monthKey: z.string().regex(MONTH_KEY_PATTERN).optional().describe("'YYYY-MM'; derived from date when omitted."),
               offLedger: z
                 .boolean()
                 .optional()
-                .describe(
-                  "True for OFF-LEDGER contributions that never touched the account (payroll-deducted 401k). Must be txType 'Investments' with contributionSource. Counted in Investments totals but excluded from outgoing/net and account balances.",
-                ),
+                .describe("Payroll-deducted contributions that never touched the account; txType 'Investments' only, requires contributionSource."),
               contributionSource: z
                 .enum(CONTRIBUTION_SOURCES)
                 .optional()
-                .describe(
-                  "Required when offLedger. 'employee' = the owner's pre-tax pay (grosses up the percent-of-income denominator for CSP targets); 'employer' = match (counted in totals, never grosses up the denominator).",
-                ),
+                .describe("Required when offLedger; 'employee' grosses up the CSP income denominator, 'employer' never does."),
             }),
           )
-          .min(1)
-          .describe("Transactions to ingest."),
+          .min(1),
       }),
     },
     async (args) => {
@@ -2669,28 +2542,19 @@ export function createMcpServer(
     {
       title: "Record daily account balances (bulk)",
       description:
-        "Bulk-record end-of-day account balance snapshots, one per day. The harness computes these from the FULL raw Plaid transaction feed walked backward from the /accounts/balance/get current balance — including any feed rows not recorded as budget transactions — so NEVER derive balances by summing recorded budget transactions. Balances are INTEGER CENTS and may be negative. Idempotent upsert: one snapshot per account+day; re-sending a day updates the stored snapshot instead of duplicating it. Returns {inserted, updated} counts.",
+        "Bulk-record end-of-day balance snapshots (integer cents, may be negative; idempotent per account+day). Compute them from the FULL raw Plaid feed walked backward from the current balance — NEVER by summing recorded budget transactions (finance-taxonomy skill).",
       annotations: { destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: z.object({
-        accountId: z.string().describe("Financial account ID from upsert_financial_account."),
-        source: z
-          .enum(BALANCE_SOURCES)
-          .optional()
-          .describe("Where the snapshots came from. Defaults to plaid_derived."),
+        accountId: z.string().describe("From upsert_financial_account."),
+        source: z.enum(BALANCE_SOURCES).optional().describe("Defaults to plaid_derived."),
         balances: z
           .array(
             z.object({
-              date: z
-                .number()
-                .describe("Snapshot day in epoch milliseconds (normalized to UTC midnight server-side)."),
-              endOfDayBalanceCents: z
-                .number()
-                .int()
-                .describe("End-of-day balance in integer cents (e.g. $1,234.56 -> 123456). May be negative."),
+              date: z.number().describe("Epoch ms; normalized to UTC midnight."),
+              endOfDayBalanceCents: z.number().int(),
             }),
           )
-          .min(1)
-          .describe("End-of-day balance snapshots to record."),
+          .min(1),
       }),
     },
     async (args) => {
@@ -2706,11 +2570,11 @@ export function createMcpServer(
     {
       title: "Get monthly financial report",
       description:
-        "Read-only monthly report for one account, computed at read time from stored transactions: totals per category and type, outgoing (Fixed Costs+Investments+Savings+Guilt-Free), incoming (Income), net, percentages of outgoing, previous-month deltas, and the applicable budget (month-specific if present, else the default) with per-target deltas. Also includes stored daily balance snapshots plus the month's starting and ending balances (null when no snapshots exist). All amounts are integer cents.",
+        "Read-only monthly report for one account: totals per category/type, outgoing/incoming/net, previous-month deltas, applicable budget with per-target deltas, and daily balance snapshots. All amounts integer cents.",
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: z.object({
-        accountId: z.string().describe("Financial account ID."),
-        monthKey: z.string().regex(MONTH_KEY_PATTERN).describe("Month to report on, 'YYYY-MM'."),
+        accountId: z.string(),
+        monthKey: z.string().regex(MONTH_KEY_PATTERN).describe("'YYYY-MM'."),
       }),
     },
     async (args) => {
@@ -2724,7 +2588,7 @@ export function createMcpServer(
     {
       title: "Add source reference",
       description:
-        "Store reusable lightweight provenance without creating an accepted object. Prefer inline sourceRefs on ingest_object when storing a single source-backed object. Do not store full raw source bodies.",
+        "Store reusable provenance without creating an accepted object. Prefer inline sourceRefs on ingest_object for a single source-backed object; never store full raw source bodies.",
       annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: true },
       inputSchema: sourceRefSchema,
     },
@@ -2736,17 +2600,15 @@ export function createMcpServer(
     {
       title: "Link entities",
       description:
-        "Create a relationship between accepted Skippy entities only. Use after entities are accepted and you know their entity IDs; do not link fallback review item IDs. Relationships should be meaningful, sourced where possible, and confidence-rated when inferred.",
+        "Create a relationship between accepted Skippy entities (never fallback review item IDs). Relationships should be meaningful and confidence-rated when inferred.",
       annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: false },
       inputSchema: z.object({
-        from: entityRefSchema.describe("Source accepted entity."),
-        to: entityRefSchema.describe("Target accepted entity."),
-        type: z.enum(relationshipTypeValues).describe("Relationship type."),
-        confidence: z.number().min(0).max(1).optional().describe("Confidence from 0 to 1 for inferred relationships."),
-        reason: z.string().optional().describe("Short explanation or source-derived rationale."),
-        createdBy: z
-          .enum(["user", "harness", "skippy_ai", "system"])
-          .describe("Who/what created this relationship. External MCP callers usually use 'harness'."),
+        from: entityRefSchema,
+        to: entityRefSchema,
+        type: z.enum(relationshipTypeValues),
+        confidence: z.number().min(0).max(1).optional(),
+        reason: z.string().optional(),
+        createdBy: z.enum(["user", "harness", "skippy_ai", "system"]).describe("External MCP callers usually use 'harness'."),
       }),
     },
     async (args) => toolResult(await tools.linkEntities(stripUndefined(args) as RelationshipInput)),
@@ -2757,15 +2619,15 @@ export function createMcpServer(
     {
       title: "Generate focus summary",
       description:
-        "Store a synthesized focus summary for the user-facing dashboard. Use accepted entities and current context; do not invent tasks or entities here. Summary bullets should be actionable next moves only, not standing context, identity facts, relationship assumptions, or permission requests. The user's recently dismissed focus items (returned as recentlyDismissedItems by refresh_focus_summary context) are durable signal: do not generate bullets about those topics unless something materially new happened since the dismissal. When a bullet references an email, include a markdown link to it, e.g. [subject or sender](gmail-url), using the stored sourceRef deepLink or a Gmail link built from its messageId (https://mail.google.com/mail/u/0/#all/{messageId}); never invent URLs. If you discover new important items while summarizing, ingest them separately with sourceRefs and a rubricDecision.",
+        "Store a synthesized dashboard focus summary from accepted entities — actionable Now bullets only, never invented tasks, standing context, or topics the user recently dismissed. Link referenced emails via stored sourceRef deepLinks or Gmail messageId URLs; never invent URLs.",
       annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: false },
       inputSchema: z.object({
-        generatedAt: z.number().describe("Epoch milliseconds when this summary was generated."),
-        validUntil: z.number().optional().describe("Optional epoch milliseconds after which this summary should be considered stale."),
-        summaryText: z.string().describe("Concise human-facing focus summary containing actionable Now bullets only."),
-        topItems: z.array(focusTopItemSchema).describe("Accepted entities that explain the focus summary."),
-        sourceRunId: z.string().optional().describe("Optional ingestion/processing run ID that produced the summary."),
-        policyVersion: z.string().optional().describe("Optional policy/ranking version used by the harness."),
+        generatedAt: z.number().describe("Epoch ms."),
+        validUntil: z.number().optional().describe("Epoch ms after which this summary is stale."),
+        summaryText: z.string().describe("Actionable Now bullets only."),
+        topItems: z.array(focusTopItemSchema),
+        sourceRunId: z.string().optional(),
+        policyVersion: z.string().optional(),
       }),
     },
     async (args) => toolResult(await tools.generateFocusSummary(stripUndefined(args) as FocusSummary)),
@@ -2776,10 +2638,10 @@ export function createMcpServer(
     {
       title: "List pending actions",
       description:
-        "Read-only list of external actions waiting for approval or execution tracking. Pending actions represent side effects such as sending a message or completing an external reminder; they are separate from accepted knowledge.",
+        "Read-only list of external side-effect actions (send message, complete external reminder) waiting for approval or execution tracking; separate from accepted knowledge.",
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: z.object({
-        status: z.string().optional().describe("Optional status filter such as pending, approved, rejected, sent, failed, or completed."),
+        status: z.string().optional().describe("e.g. pending, approved, rejected, sent, failed, completed."),
       }),
     },
     async (args) => {
@@ -2793,23 +2655,23 @@ export function createMcpServer(
     {
       title: "Record accepted entity review",
       description:
-        "Record a review of an accepted Skippy entity during an existing-knowledge review run. Use for stale checks, changed priority, blockers, follow-ups, or status review. This updates safe fields such as task/project priority and valid status values, attaches source refs as evidence, and records an audit activity.",
+        "Record a review of an accepted entity (stale check, priority change, blocker, follow-up, status). Updates safe fields only, attaches evidence source refs, and records an audit activity.",
       annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: true },
       inputSchema: z.object({
-        entityRef: entityRefSchema.describe("Accepted Skippy entity to review."),
-        reviewType: z.enum(entityReviewTypeValues).describe("Kind of review performed."),
-        reviewSummary: z.string().describe("Concise audit summary of what changed or what was checked."),
-        reviewedBy: z.string().optional().describe("Harness/user identifier for audit logging."),
-        status: z.string().optional().describe("Optional new status. Applied only when valid for this entity type."),
-        confidence: z.number().min(0).max(1).optional().describe("Optional confidence for this reviewed entity."),
-        priorityScore: z.number().min(0).max(1).optional().describe("Optional task/project priority score."),
-        urgencyScore: z.number().min(0).max(1).optional().describe("Optional task/project urgency score."),
-        importanceScore: z.number().min(0).max(1).optional().describe("Optional task/project importance score."),
-        priorityReason: z.string().optional().describe("Short reason for priority/urgency changes."),
-        priorityComputedAt: z.number().optional().describe("Epoch milliseconds when priority was computed."),
-        priorityPolicyVersion: z.string().optional().describe("Optional review/ranking policy version."),
-        sourceRefs: z.array(sourceRefSchema).optional().describe("Evidence source refs discovered during the review."),
-        sourceRefIds: z.array(z.string()).optional().describe("Existing source ref IDs to attach as evidence."),
+        entityRef: entityRefSchema,
+        reviewType: z.enum(entityReviewTypeValues),
+        reviewSummary: z.string().describe("Concise audit summary of what changed or was checked."),
+        reviewedBy: z.string().optional(),
+        status: z.string().optional().describe("Applied only when valid for this entity type."),
+        confidence: z.number().min(0).max(1).optional(),
+        priorityScore: z.number().min(0).max(1).optional(),
+        urgencyScore: z.number().min(0).max(1).optional(),
+        importanceScore: z.number().min(0).max(1).optional(),
+        priorityReason: z.string().optional(),
+        priorityComputedAt: z.number().optional().describe("Epoch ms."),
+        priorityPolicyVersion: z.string().optional(),
+        sourceRefs: z.array(sourceRefSchema).optional(),
+        sourceRefIds: z.array(z.string()).optional(),
       }),
     },
     async (args) =>
@@ -2825,11 +2687,11 @@ export function createMcpServer(
     {
       title: "Mark task in progress",
       description:
-        "Mark an accepted Skippy task as in progress when a harness starts working on it. Use this before doing meaningful work on a task so the project board reflects active work.",
+        "Mark a task in progress before doing meaningful work on it, so the project board reflects active work.",
       annotations: { destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: z.object({
-        taskId: z.string().describe("Accepted task entity ID."),
-        startedBy: z.string().optional().describe("Harness/user identifier that started work."),
+        taskId: z.string(),
+        startedBy: z.string().optional(),
       }),
     },
     async (args) =>
@@ -2850,19 +2712,13 @@ export function createMcpServer(
     {
       title: "Mark task done",
       description:
-        "Mark an accepted Skippy task as done. Use only when the user explicitly completed the task or instructed the harness to mark it done. If an external reminder must also be completed, include its source ref ID so execution can be tracked separately.",
+        "Mark a task done, ONLY when the user explicitly completed it or instructed the harness to. Include externalReminderSourceRefId when an external reminder must also be completed.",
       annotations: { destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: z.object({
-        taskId: z.string().describe("Accepted task entity ID."),
-        completedBy: z
-          .string()
-          .optional()
-          .describe("Optional harness/user label for chat context. This is not persisted as a Convex user ID."),
-        completedByUserId: z.string().optional().describe("Optional Convex user ID to store as the completion actor."),
-        externalReminderSourceRefId: z
-          .string()
-          .optional()
-          .describe("Source ref ID for an external reminder/task that should be synced after approval/execution."),
+        taskId: z.string(),
+        completedBy: z.string().optional().describe("Chat-context label; not persisted as a Convex user ID."),
+        completedByUserId: z.string().optional().describe("Convex user ID to store as completion actor."),
+        externalReminderSourceRefId: z.string().optional().describe("External reminder to sync after approval/execution."),
       }),
     },
     async (args) =>
@@ -2885,14 +2741,14 @@ export function createMcpServer(
     {
       title: "Record pending action result",
       description:
-        "Record the result after an already-approved external action was executed elsewhere. Do not use this to request approval or to perform the external side effect itself.",
+        "Record the result after an already-approved external action was executed elsewhere. Never use this to request approval or perform the side effect itself.",
       annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: true },
       inputSchema: z.object({
-        pendingActionId: z.string().describe("Pending action ID from list_pending_actions."),
-        status: z.enum(["sent", "failed", "completed"]).describe("Execution outcome."),
-        executionProvider: z.string().optional().describe("Provider/system that performed the external action."),
-        externalMessageId: z.string().optional().describe("External ID returned by the provider, e.g. sent email/message ID."),
-        error: z.string().optional().describe("Failure summary when status is failed."),
+        pendingActionId: z.string().describe("From list_pending_actions."),
+        status: z.enum(["sent", "failed", "completed"]),
+        executionProvider: z.string().optional(),
+        externalMessageId: z.string().optional().describe("Provider-returned ID, e.g. sent message ID."),
+        error: z.string().optional(),
       }),
     },
     async (args) => {
@@ -2912,19 +2768,19 @@ export function createMcpServer(
     {
       title: "Update source sync status",
       description:
-        "Update the live source-ingestion status shown on the Skippy Home NOW area. Call with status=running before reading sources, heartbeat while long work continues, and completed or failed before ending the run.",
+        "Update the live source-ingestion status on the Skippy Home NOW area: status=running before reading sources, heartbeat during long work, completed or failed before ending the run.",
       annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: true },
       inputSchema: z.object({
-        statusKey: z.string().optional().describe("Stable key for this status row, e.g. google-and-imessage. Defaults to source-sync."),
-        harness: z.string().describe("Harness or automation name, e.g. codex_automation, chatgpt, claude, hermes."),
-        status: z.enum(["idle", "running", "completed", "failed"]).describe("Current lifecycle state."),
-        message: z.string().optional().describe("Short human-facing status message for the Home NOW area."),
-        sourceSystemsChecked: z.array(z.string()).describe("Sources in scope, e.g. gmail, calendar, imessage."),
-        startedAt: z.number().optional().describe("Epoch milliseconds when this run started."),
-        completedAt: z.number().optional().describe("Epoch milliseconds when this run completed or failed."),
-        lastHeartbeatAt: z.number().optional().describe("Epoch milliseconds for long-running heartbeat updates."),
-        errors: z.array(z.string()).optional().describe("Short error summaries; avoid secrets or raw source payloads."),
-        metadata: z.unknown().optional().describe("Small JSON metadata object for audit/debugging. Include role (e.g. \"agenda\") to attribute the sync to an agent role, separate from the harness. Avoid secrets and raw source dumps."),
+        statusKey: z.string().optional().describe("Stable status-row key. Defaults to source-sync."),
+        harness: z.string().describe("e.g. codex_automation, chatgpt, claude, hermes."),
+        status: z.enum(["idle", "running", "completed", "failed"]),
+        message: z.string().optional().describe("Short human-facing status message."),
+        sourceSystemsChecked: z.array(z.string()).describe("e.g. gmail, calendar, imessage."),
+        startedAt: z.number().optional().describe("Epoch ms."),
+        completedAt: z.number().optional().describe("Epoch ms."),
+        lastHeartbeatAt: z.number().optional().describe("Epoch ms."),
+        errors: z.array(z.string()).optional().describe("Short summaries; no secrets or raw payloads."),
+        metadata: z.unknown().optional().describe("Small JSON object; include role (e.g. \"agenda\") to attribute an agent role."),
       }),
     },
     async (args) =>
@@ -2951,19 +2807,19 @@ export function createMcpServer(
     {
       title: "Record ingestion run",
       description:
-        "Record metadata about a harness ingestion/review run. Use this around scheduled or batch reads of email, calendar, reminders, messages, or links so the user can audit source coverage and errors. When running under a named agent role (docs/agents.md), attribute the run with metadata.role, e.g. { role: \"agenda\" }.",
+        "Record metadata about a harness ingestion/review run (scheduled or batch source reads) so the user can audit coverage and errors. Attribute named agent roles with metadata.role, e.g. { role: \"agenda\" }.",
       annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: true },
       inputSchema: z.object({
-        harness: z.string().describe("Harness name, e.g. codex, chatgpt, claude, hermes, or scheduled_worker."),
-        status: z.enum(["running", "completed", "failed"]).describe("Run lifecycle status."),
-        sourceSystemsChecked: z.array(z.string()).describe("Sources checked, e.g. gmail, calendar, apple_reminders."),
-        startedAt: z.number().optional().describe("Epoch milliseconds when the run started."),
-        completedAt: z.number().optional().describe("Epoch milliseconds when the run completed."),
-        candidatesSubmitted: z.number().optional().describe("Legacy count of fallback review items submitted."),
-        objectsCreated: z.number().optional().describe("Number of accepted objects created, if known."),
-        objectsUpdated: z.number().optional().describe("Number of accepted objects updated, if known."),
-        errors: z.array(z.string()).optional().describe("Short error summaries; avoid secrets or raw source payloads."),
-        metadata: z.unknown().optional().describe("Small JSON metadata object for audit/debugging. Include role (e.g. \"agenda\") to attribute the run to an agent role, separate from the harness. Avoid secrets and raw source dumps."),
+        harness: z.string().describe("e.g. codex, chatgpt, claude, hermes, scheduled_worker."),
+        status: z.enum(["running", "completed", "failed"]),
+        sourceSystemsChecked: z.array(z.string()).describe("e.g. gmail, calendar, apple_reminders."),
+        startedAt: z.number().optional().describe("Epoch ms."),
+        completedAt: z.number().optional().describe("Epoch ms."),
+        candidatesSubmitted: z.number().optional().describe("Legacy fallback review item count."),
+        objectsCreated: z.number().optional(),
+        objectsUpdated: z.number().optional(),
+        errors: z.array(z.string()).optional().describe("Short summaries; no secrets or raw payloads."),
+        metadata: z.unknown().optional().describe("Small JSON object; include role (e.g. \"agenda\") to attribute an agent role."),
       }),
     },
     async (args) =>
@@ -2993,8 +2849,8 @@ export function createMcpServer(
         "Build and send approval-gated browser push notifications for urgent tasks and pending actions. Use dryRun first to preview candidates without sending.",
       annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: true },
       inputSchema: z.object({
-        dryRun: z.boolean().optional().describe("When true, return notification candidates without sending web push messages."),
-        limit: z.number().min(1).max(25).optional().describe("Maximum notification candidates to consider."),
+        dryRun: z.boolean().optional().describe("Return candidates without sending."),
+        limit: z.number().min(1).max(25).optional(),
       }),
     },
     async (args) =>
