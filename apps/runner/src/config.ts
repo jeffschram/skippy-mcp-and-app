@@ -55,6 +55,9 @@ export interface RunnerConfig {
   /** Bearer token for the Skippy MCP endpoint. Comes from the daemon
    * environment only — never committed, never read from .env.local. */
   skippyMcpToken: string;
+  /** Optional task-executor role token used only for task-run harness turns.
+   * When absent, adapters retain the full token above for compatibility. */
+  skippyMcpTaskToken?: string | undefined;
   /**
    * launchd service label for the runner itself, used by the post-merge
    * close-out job to schedule its deferred `launchctl kickstart -k` restart
@@ -155,6 +158,7 @@ export function loadConfig(): RunnerConfig {
     launchdLabel: process.env.SKIPPY_RUNNER_LAUNCHD_LABEL ?? "com.skippy.runner",
     skippyMcpUrl: required("SKIPPY_MCP_URL"),
     skippyMcpToken: required("SKIPPY_MCP_TOKEN"),
+    skippyMcpTaskToken: process.env.SKIPPY_MCP_TASK_TOKEN || undefined,
     chatBypassPermissions: ["1", "true"].includes(process.env.SKIPPY_CHAT_BYPASS_PERMISSIONS ?? ""),
   };
 }

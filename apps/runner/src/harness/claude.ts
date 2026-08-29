@@ -202,6 +202,14 @@ export interface ClaudeAdapterOptions {
   skippyMcpToken: string;
 }
 
+export function buildClaudeMcpServer(options: ClaudeAdapterOptions, mcpToken?: string | undefined) {
+  return {
+    type: "http",
+    url: options.skippyMcpUrl,
+    headers: { Authorization: `Bearer ${mcpToken ?? options.skippyMcpToken}` },
+  };
+}
+
 export class ClaudeAdapter implements HarnessAdapter {
   readonly harness = "claude" as const;
 
@@ -312,11 +320,7 @@ export class ClaudeAdapter implements HarnessAdapter {
       // SKIPPY_MCP_TOKEN). Options are rebuilt every turn, so resumed
       // sessions heal automatically after a config fix + restart.
       mcpServers: {
-        skippy: {
-          type: "http",
-          url: this.options.skippyMcpUrl,
-          headers: { Authorization: `Bearer ${this.options.skippyMcpToken}` },
-        },
+        skippy: buildClaudeMcpServer(this.options, request.mcpToken),
       },
       abortController: sdkAbort,
     };

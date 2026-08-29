@@ -47,6 +47,9 @@ export interface HarnessTurnRequest {
    * (chat is deliberately never tiered down).
    */
   model?: string | undefined;
+  /** Per-turn Skippy MCP bearer token. Task runs use a role-scoped token;
+   * absent means the adapter's configured full-access token. */
+  mcpToken?: string | undefined;
   /**
    * Run with harness permissions bypassed — no approval callbacks, no
    * sandbox. Only ever set for chat turns, by explicit runner config.

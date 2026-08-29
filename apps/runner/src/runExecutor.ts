@@ -145,6 +145,7 @@ export class RunExecutor {
         prompt,
         worktreePath: worktree.worktreePath,
         model: run.model,
+        mcpToken: config.skippyMcpTaskToken,
         signal: this.abort.signal,
         onEvent: (event) => this.emit(event),
         requestApproval: async (approval) => {
