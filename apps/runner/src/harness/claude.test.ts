@@ -1,8 +1,22 @@
 import { describe, expect, it } from "vitest";
-import { classifyCommand } from "./claude.js";
+import { buildClaudeMcpServer, classifyCommand } from "./claude.js";
 import { isHarnessTeardownError } from "./teardownErrors.js";
 
 const WORKTREE = "/Users/skippy/src/.skippy-worktrees/agent-task-x";
+
+describe("buildClaudeMcpServer", () => {
+  const options = { skippyMcpUrl: "https://mcp.example", skippyMcpToken: "full-owner-secret" };
+
+  it("uses a per-turn MCP token override", () => {
+    expect(buildClaudeMcpServer(options, "task-role-secret").headers.Authorization).toBe(
+      "Bearer task-role-secret",
+    );
+  });
+
+  it("falls back to the configured full-access token", () => {
+    expect(buildClaudeMcpServer(options).headers.Authorization).toBe("Bearer full-owner-secret");
+  });
+});
 
 describe("classifyCommand", () => {
   it("auto-allows simple allowlisted commands", () => {

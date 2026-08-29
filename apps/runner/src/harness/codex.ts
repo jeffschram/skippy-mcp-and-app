@@ -133,6 +133,13 @@ export interface CodexAdapterOptions {
   skippyMcpUrl?: string | undefined;
 }
 
+export function buildCodexSpawnEnv(
+  mcpToken: string | undefined,
+  baseEnv: NodeJS.ProcessEnv = process.env,
+): NodeJS.ProcessEnv {
+  return mcpToken ? { ...baseEnv, SKIPPY_MCP_TOKEN: mcpToken } : baseEnv;
+}
+
 export class CodexAdapter implements HarnessAdapter {
   readonly harness = "codex" as const;
 
@@ -157,7 +164,7 @@ export class CodexAdapter implements HarnessAdapter {
       const child = spawn("codex", args, {
         cwd: worktreePath,
         stdio: ["pipe", "pipe", "pipe"],
-        env: process.env,
+        env: buildCodexSpawnEnv(request.mcpToken),
       });
       let settled = false;
       const settle = (result: HarnessTurnResult) => {

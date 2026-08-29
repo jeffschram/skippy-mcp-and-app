@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildCodexArgs } from "./codex.js";
+import { buildCodexArgs, buildCodexSpawnEnv } from "./codex.js";
 
 describe("buildCodexArgs", () => {
   it("builds fresh-session arguments", () => {
@@ -107,5 +107,22 @@ describe("buildCodexArgs", () => {
       "019cafe-resume-session",
       "-",
     ]);
+  });
+});
+
+describe("buildCodexSpawnEnv", () => {
+  it("puts a per-turn MCP token in the spawned environment, never argv", () => {
+    const token = "task-role-secret";
+    const env = buildCodexSpawnEnv(token, { SKIPPY_MCP_TOKEN: "full-owner-secret" });
+    const args = buildCodexArgs({ worktreePath: "/tmp/skippy-task", skippyMcpUrl: "https://mcp.example" });
+
+    expect(env.SKIPPY_MCP_TOKEN).toBe(token);
+    expect(args.join(" ")).not.toContain(token);
+  });
+
+  it("falls back to the inherited full-access token when no override is supplied", () => {
+    const baseEnv = { SKIPPY_MCP_TOKEN: "full-owner-secret" };
+    expect(buildCodexSpawnEnv(undefined, baseEnv)).toBe(baseEnv);
+    expect(buildCodexSpawnEnv(undefined, baseEnv).SKIPPY_MCP_TOKEN).toBe("full-owner-secret");
   });
 });
