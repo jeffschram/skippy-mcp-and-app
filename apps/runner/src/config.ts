@@ -59,6 +59,15 @@ export interface RunnerConfig {
    * When absent, adapters retain the full token above for compatibility. */
   skippyMcpTaskToken?: string | undefined;
   /**
+   * Role-scoped MCP tokens for scheduled agent passes, keyed by roleKey
+   * (SKIPPY_MCP_AGENDA_TOKEN / SKIPPY_MCP_FINANCE_TOKEN / SKIPPY_MCP_PM_TOKEN;
+   * pm:{projectId} roles resolve to the shared "pm" entry). Plaintext lives
+   * only here on the mini per docs/connectors.md → Secrets — Convex stores
+   * token hashes, so it cannot hand plaintext to the claim payload. A role
+   * without an entry falls back to the full token, logged, like task runs.
+   */
+  agentRoleTokens: Record<string, string>;
+  /**
    * launchd service label for the runner itself, used by the post-merge
    * close-out job to schedule its deferred `launchctl kickstart -k` restart
    * (SKIPPY_RUNNER_LAUNCHD_LABEL). The restart is detached + delayed because
@@ -159,6 +168,11 @@ export function loadConfig(): RunnerConfig {
     skippyMcpUrl: required("SKIPPY_MCP_URL"),
     skippyMcpToken: required("SKIPPY_MCP_TOKEN"),
     skippyMcpTaskToken: process.env.SKIPPY_MCP_TASK_TOKEN || undefined,
+    agentRoleTokens: {
+      ...(process.env.SKIPPY_MCP_AGENDA_TOKEN ? { agenda: process.env.SKIPPY_MCP_AGENDA_TOKEN } : {}),
+      ...(process.env.SKIPPY_MCP_FINANCE_TOKEN ? { finance: process.env.SKIPPY_MCP_FINANCE_TOKEN } : {}),
+      ...(process.env.SKIPPY_MCP_PM_TOKEN ? { pm: process.env.SKIPPY_MCP_PM_TOKEN } : {}),
+    },
     chatBypassPermissions: ["1", "true"].includes(process.env.SKIPPY_CHAT_BYPASS_PERMISSIONS ?? ""),
   };
 }

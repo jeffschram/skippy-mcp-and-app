@@ -11,10 +11,12 @@ import os from "node:os";
 import { ensureCorepackShims, extendRunnerPath, loadConfig } from "./config.js";
 import {
   ControlPlane,
+  type ClaimedAgentPass,
   type ClaimedChatTurn,
   type ClaimedMaintenanceJob,
   type ClaimedRun,
 } from "./controlPlane.js";
+import { executeAgentPass } from "./agentPassExecutor.js";
 import { executeCloseoutJob } from "./closeoutExecutor.js";
 import { ClaudeAdapter } from "./harness/claude.js";
 import { CodexAdapter } from "./harness/codex.js";
@@ -107,12 +109,13 @@ async function main() {
   const activeRuns = new Map<string, Promise<void>>();
   const activeChatTurns = new Map<string, Promise<void>>();
   const activeMaintenanceJobs = new Map<string, Promise<void>>();
+  const activeAgentPasses = new Map<string, Promise<void>>();
   let draining = false;
   let stopping = false;
 
   const heartbeatTimer = setInterval(() => {
     void plane
-      .heartbeat([...activeRuns.keys()], [...activeChatTurns.keys()], [...activeMaintenanceJobs.keys()])
+      .heartbeat([...activeRuns.keys()], [...activeChatTurns.keys()], [...activeMaintenanceJobs.keys()], [...activeAgentPasses.keys()])
       .then((res) => {
         draining = res.draining;
       })
@@ -236,6 +239,35 @@ async function main() {
       .catch((error) => log("maintenance claim failed", { error: String(error) }));
   }, config.claimPollIntervalMs);
 
+  // Scheduled agent passes (docs/connectors.md): one at a time, independent
+  // of run/chat concurrency. The claim itself advances nextDueAt, so a slow
+  // pass never double-fires — the next slot simply finds nothing due.
+  const startAgentPass = (pass: ClaimedAgentPass) => {
+    const adapter = adapters.get(pass.harness);
+    if (!adapter) {
+      log("claimed agent pass with unsupported harness — this should be impossible", { roleKey: pass.roleKey });
+      return;
+    }
+    log("claimed agent pass", { roleKey: pass.roleKey, harness: pass.harness, model: pass.model });
+    const promise = executeAgentPass(config, plane, pass, adapter)
+      .catch((error) => log("agent pass crashed", { roleKey: pass.roleKey, error: String(error) }))
+      .finally(() => {
+        activeAgentPasses.delete(pass.configId);
+        log("agent pass finished", { roleKey: pass.roleKey });
+      });
+    activeAgentPasses.set(pass.configId, promise);
+  };
+  const agentPassTimer = setInterval(() => {
+    if (stopping || draining) return;
+    if (activeAgentPasses.size >= 1) return;
+    void plane
+      .claimNextAgentPass()
+      .then((pass) => {
+        if (pass) startAgentPass(pass);
+      })
+      .catch((error) => log("agent pass claim failed", { error: String(error) }));
+  }, config.claimPollIntervalMs);
+
   const shutdown = async (signalName: string) => {
     if (stopping) return;
     stopping = true;
@@ -245,7 +277,8 @@ async function main() {
     clearInterval(claimTimer);
     clearInterval(chatClaimTimer);
     clearInterval(maintenanceClaimTimer);
-    await Promise.allSettled([...activeRuns.values(), ...activeChatTurns.values(), ...activeMaintenanceJobs.values()]);
+    clearInterval(agentPassTimer);
+    await Promise.allSettled([...activeRuns.values(), ...activeChatTurns.values(), ...activeMaintenanceJobs.values(), ...activeAgentPasses.values()]);
     clearInterval(heartbeatTimer);
     process.exit(0);
   };
