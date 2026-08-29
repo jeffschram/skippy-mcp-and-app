@@ -103,8 +103,9 @@ async function main() {
     projectFileManifests: true,
     artifactUploads: true,
     isolatedChatAttachments: true,
+    connectors: config.connectors,
   });
-  log("registered host", { hostId: registration.hostId, harnesses: config.harnesses });
+  log("registered host", { hostId: registration.hostId, harnesses: config.harnesses, connectors: config.connectors });
 
   const activeRuns = new Map<string, Promise<void>>();
   const activeChatTurns = new Map<string, Promise<void>>();

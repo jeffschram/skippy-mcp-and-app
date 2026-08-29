@@ -141,7 +141,7 @@ export class ControlPlane {
     this.client = new ConvexHttpClient(convexUrl);
   }
 
-  registerHost(args: { harnesses: Harness[]; os: string; arch: string; maxConcurrency: number; projectFileManifests?: boolean; artifactUploads?: boolean; isolatedChatAttachments?: boolean }) {
+  registerHost(args: { harnesses: Harness[]; os: string; arch: string; maxConcurrency: number; projectFileManifests?: boolean; artifactUploads?: boolean; isolatedChatAttachments?: boolean; connectors?: string[] }) {
     return this.client.mutation(fns.registerHost, { hostToken: this.hostToken, ...args });
   }
 

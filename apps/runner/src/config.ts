@@ -28,6 +28,14 @@ export interface RunnerConfig {
   worktreeRoot: string;
   /** Harnesses this machine can execute. */
   harnesses: Array<"codex" | "claude">;
+  /**
+   * Connector slugs this host provides locally (docs/connectors.md), e.g.
+   * ["plaid", "imessage", "google"]. Advertised via registerHost so the
+   * connector inventory can show live availability. Only list a slug after
+   * its audited local server/data access is actually set up on this machine
+   * (docs/google-source.md, docs/plaid-financial-source.md).
+   */
+  connectors: string[];
   maxConcurrency: number;
   heartbeatIntervalMs: number;
   claimPollIntervalMs: number;
@@ -153,6 +161,12 @@ export function loadConfig(): RunnerConfig {
     .map((h) => h.trim())
     .filter((h): h is "codex" | "claude" => h === "codex" || h === "claude");
   if (!harnesses.length) throw new Error("SKIPPY_RUNNER_HARNESSES resolved to no valid harnesses");
+  // Comma-separated connector slugs (e.g. "plaid,imessage,google"). Empty by
+  // default: a host must opt in only once the local connector is set up.
+  const connectors = (process.env.SKIPPY_RUNNER_CONNECTORS ?? "")
+    .split(",")
+    .map((c) => c.trim())
+    .filter(Boolean);
   return {
     convexUrl: required("SKIPPY_CONVEX_URL"),
     hostToken: required("SKIPPY_RUNNER_HOST_TOKEN"),
@@ -160,6 +174,7 @@ export function loadConfig(): RunnerConfig {
     allowedRoot,
     worktreeRoot: path.resolve(process.env.SKIPPY_RUNNER_WORKTREE_ROOT ?? path.join(allowedRoot, ".skippy-worktrees")),
     harnesses,
+    connectors,
     maxConcurrency: Number(process.env.SKIPPY_RUNNER_MAX_CONCURRENCY ?? "1"),
     heartbeatIntervalMs: 30_000,
     claimPollIntervalMs: 5_000,
