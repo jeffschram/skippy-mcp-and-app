@@ -142,14 +142,34 @@ describe("buildChatPrompt", () => {
   });
 
   it("appends attachment lines after the bare message on resumed threads", () => {
-    const prompt = buildChatPrompt(makeTurn({ externalThreadId: "thread9" }), attachments);
+    const prompt = buildChatPrompt(makeTurn({
+      externalThreadId: "thread9",
+      historySummary: "Must not be replayed into a resumed native thread.",
+    }), attachments);
     expect(prompt.startsWith("Please look at this file")).toBe(true);
     expect(prompt).toContain("- spec.pdf — saved locally at /root/project/_library/spec.pdf");
     expect(prompt).not.toContain("Conversation so far:");
+    expect(prompt).not.toContain("Summary of earlier conversation:");
   });
 
   it("leaves prompts unchanged when there are no attachments", () => {
     expect(buildChatPrompt(makeTurn())).not.toContain("attached the following");
     expect(buildChatPrompt(makeTurn({ externalThreadId: "t" }))).toBe("Please look at this file");
+  });
+
+  it("renders an earlier-conversation summary before recent history", () => {
+    const prompt = buildChatPrompt(makeTurn({
+      historySummary: "The user chose the blue deployment strategy.",
+      history: [{ role: "assistant", content: "Next we reviewed rollout timing." }],
+    }));
+    expect(prompt).toContain(
+      "Summary of earlier conversation:\nThe user chose the blue deployment strategy.\n\nConversation so far:",
+    );
+  });
+
+  it("omits the summary block when no rolling summary is present", () => {
+    expect(buildChatPrompt(makeTurn({
+      history: [{ role: "user", content: "Keep this recent message." }],
+    }))).not.toContain("Summary of earlier conversation:");
   });
 });

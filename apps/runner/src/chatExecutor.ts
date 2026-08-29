@@ -187,6 +187,9 @@ export function buildChatPrompt(turn: ClaimedChatTurn, attachments: Materialized
     turn.scopeContext,
     "",
   ];
+  if (turn.historySummary) {
+    lines.push("Summary of earlier conversation:", turn.historySummary, "");
+  }
   if (turn.history.length) {
     lines.push("Conversation so far:");
     for (const message of turn.history) {
