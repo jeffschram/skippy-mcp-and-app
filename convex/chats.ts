@@ -21,7 +21,7 @@ import { effectiveProjectPaths, validateProjectFileInput } from "@skippy/shared"
 import { requireOwnedBrain } from "./auth";
 import { requireHost } from "./agentWorkbench";
 import { tokenUsage } from "./schema";
-import { chatHistoryWindow, shouldRefreshHistorySummary } from "./chat-history-helpers";
+import { chatHistoryWindow, shouldRefreshHistorySummary } from "./chatHistoryHelpers";
 
 const CHAT_LEASE_MS = 150_000;
 const MAX_MESSAGE_CHARS = 8000;

@@ -14,6 +14,8 @@ import type * as agentWorkbench from "../agentWorkbench.js";
 import type * as auth from "../auth.js";
 import type * as bootstrap from "../bootstrap.js";
 import type * as calendar from "../calendar.js";
+import type * as chatHistoryHelpers from "../chatHistoryHelpers.js";
+import type * as chatHistorySummary from "../chatHistorySummary.js";
 import type * as chats from "../chats.js";
 import type * as connectors from "../connectors.js";
 import type * as finances from "../finances.js";
@@ -47,6 +49,8 @@ declare const fullApi: ApiFromModules<{
   auth: typeof auth;
   bootstrap: typeof bootstrap;
   calendar: typeof calendar;
+  chatHistoryHelpers: typeof chatHistoryHelpers;
+  chatHistorySummary: typeof chatHistorySummary;
   chats: typeof chats;
   connectors: typeof connectors;
   finances: typeof finances;
