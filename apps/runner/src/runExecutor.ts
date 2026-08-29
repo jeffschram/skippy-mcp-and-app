@@ -30,6 +30,22 @@ import { accumulateUsage, normalizeUsage, type TokenUsage } from "./usage.js";
 const EVENT_FLUSH_INTERVAL_MS = 1_500;
 const CONTROL_POLL_INTERVAL_MS = 3_000;
 
+/**
+ * Stall watchdog (T4/T5/Google-connector strandings, 2026-08-27..29): harness
+ * sessions died or hung without ever reporting a terminal status. Because the
+ * run stayed in main.ts's activeRuns map, the heartbeat kept renewing its
+ * lease indefinitely, so the run looked "running" forever while the finished
+ * work sat stranded in the worktree. If a run makes no progress (no harness
+ * events) for RUN_STALL_TIMEOUT_MS, abort it; if the harness still has not
+ * shut down STALL_ABORT_GRACE_MS later, force-report `failed` so lease
+ * renewal stops and the owner sees a salvage pointer instead of a zombie run.
+ * 15 min comfortably exceeds the 10-min verify cap; approval waits are exempt
+ * (human-paced, separately bounded by config.approvalTimeoutMs).
+ */
+const RUN_STALL_TIMEOUT_MS = 15 * 60 * 1000;
+const STALL_CHECK_INTERVAL_MS = 30 * 1000;
+const STALL_ABORT_GRACE_MS = 2 * 60 * 1000;
+
 export class RunExecutor {
   private seq = 0;
   private pendingEvents: Array<{ seq: number; type: string; payload?: unknown }> = [];
@@ -43,6 +59,12 @@ export class RunExecutor {
   /** Session token totals, accumulated from harness usage events
    * (docs/token-efficiency.md lever 1) and persisted onto the run. */
   private usageTotal: TokenUsage | undefined;
+  /* Stall-watchdog state — see RUN_STALL_TIMEOUT_MS for the incident WHY. */
+  private lastProgressAt = Date.now();
+  private currentPhase = "starting";
+  private approvalWaits = 0;
+  private stallAbortedAt: number | undefined;
+  private worktreeInfo: { worktreePath: string; branchName: string } | undefined;
 
   constructor(
     private config: RunnerConfig,
@@ -52,6 +74,10 @@ export class RunExecutor {
   ) {}
 
   private emit(event: HarnessEvent) {
+    // Any harness/status event counts as run progress for the stall watchdog.
+    this.lastProgressAt = Date.now();
+    const phase = (event.payload as { phase?: unknown } | undefined)?.phase;
+    if (typeof phase === "string" && phase !== "stall") this.currentPhase = phase;
     if (event.type === "usage") {
       const sample = normalizeUsage((event.payload as { usage?: unknown } | undefined)?.usage);
       if (sample) this.usageTotal = accumulateUsage(this.usageTotal, sample);
@@ -80,7 +106,7 @@ export class RunExecutor {
   }
 
   async execute(): Promise<void> {
-    const { run, plane, config } = this;
+    const { run, plane } = this;
     const flusher = setInterval(() => void this.flushEvents(), EVENT_FLUSH_INTERVAL_MS);
     const controlWatcher = setInterval(() => {
       void plane
@@ -90,7 +116,70 @@ export class RunExecutor {
         })
         .catch(() => {});
     }, CONTROL_POLL_INTERVAL_MS);
+    let rejectStall: (error: Error) => void = () => {};
+    const stallRejection = new Promise<never>((_, reject) => {
+      rejectStall = reject;
+    });
+    // If the body settles in the same tick a stall fires, nobody is listening
+    // to the race anymore — pre-attach a catch so the rejection can never
+    // become an unhandled one.
+    void stallRejection.catch(() => {});
+    const watchdog = setInterval(() => this.checkStall(rejectStall), STALL_CHECK_INTERVAL_MS);
 
+    try {
+      await Promise.race([this.executeBody(), stallRejection]);
+    } catch (error: unknown) {
+      // Only a stall lands here: executeBody reports its own failures and
+      // never throws. Force a terminal status so the heartbeat stops renewing
+      // the lease and the run cannot sit "running" forever.
+      const message = (error instanceof Error ? error.message : String(error)).slice(0, 500);
+      console.error(`[skippy-runner] run ${run.runId} stalled:`, message);
+      this.emit({ type: "error", payload: { message, phase: "stall" } });
+      await this.flushEvents();
+      await plane
+        .updateRunStatus(run.runId, run.claimToken, "failed", {
+          errorCategory: "stalled",
+          errorMessage: message,
+        })
+        .catch(() => {});
+    } finally {
+      clearInterval(flusher);
+      clearInterval(controlWatcher);
+      clearInterval(watchdog);
+      await this.flushEvents();
+    }
+  }
+
+  /** Stall watchdog tick — see RUN_STALL_TIMEOUT_MS for the incident WHY. */
+  private checkStall(rejectStall: (error: Error) => void) {
+    // Approval waits are human-paced and separately bounded by
+    // config.approvalTimeoutMs — never a stall.
+    if (this.approvalWaits > 0) {
+      this.lastProgressAt = Date.now();
+      return;
+    }
+    const now = Date.now();
+    if (this.stallAbortedAt === undefined) {
+      if (now - this.lastProgressAt < RUN_STALL_TIMEOUT_MS) return;
+      this.stallAbortedAt = now;
+      this.emit({ type: "error", payload: { phase: "stall", message: this.stallMessage("aborting the harness") } });
+      this.abort.abort();
+      return;
+    }
+    if (now - this.stallAbortedAt >= STALL_ABORT_GRACE_MS) {
+      rejectStall(new Error(this.stallMessage("the harness did not shut down after abort")));
+    }
+  }
+
+  private stallMessage(detail: string): string {
+    const where = this.worktreeInfo
+      ? ` (worktree ${this.worktreeInfo.worktreePath}, branch ${this.worktreeInfo.branchName})`
+      : "";
+    return `run stalled: no progress for ${Math.round(RUN_STALL_TIMEOUT_MS / 60_000)} min during ${this.currentPhase}; ${detail}; completed work may be salvageable${where}`;
+  }
+
+  private async executeBody(): Promise<void> {
+    const { run, plane, config } = this;
     try {
       await plane.updateRunStatus(run.runId, run.claimToken, "preparing");
 
@@ -109,6 +198,7 @@ export class RunExecutor {
         await assertGitRepo(repoPath);
         worktree = await ensureWorktree({ repoPath, worktreeRoot: config.worktreeRoot, baseBranch: run.baseBranch, branchName });
       }
+      this.worktreeInfo = worktree; // salvage pointer for stall reports
       // Provision dependencies BEFORE the harness session starts, so runs
       // never rediscover the environment and improvise package-manager
       // bootstraps (2026-08-21 six-gate autopsy). A failure degrades
@@ -141,6 +231,7 @@ export class RunExecutor {
       const outputRoot = path.join(worktree.worktreePath, ".skippy", "outputs");
       await fsp.mkdir(outputRoot, { recursive: true, mode: 0o700 });
       const prompt = buildPrompt(run, materialized.inputRoot, outputRoot, materialized.files);
+      this.currentPhase = "harness_turn";
       const turn = await this.adapter.runTurn({
         prompt,
         worktreePath: worktree.worktreePath,
@@ -150,10 +241,18 @@ export class RunExecutor {
         onEvent: (event) => this.emit(event),
         requestApproval: async (approval) => {
           await plane.requestApproval(run.runId, run.claimToken, approval);
-          const decision = await plane.awaitApproval(run.runId, approval.harnessRequestId, {
-            signal: this.abort.signal,
-            timeoutMs: config.approvalTimeoutMs,
-          });
+          // Approval waits are exempt from the stall watchdog (human-paced).
+          this.approvalWaits += 1;
+          let decision!: Awaited<ReturnType<typeof plane.awaitApproval>>;
+          try {
+            decision = await plane.awaitApproval(run.runId, approval.harnessRequestId, {
+              signal: this.abort.signal,
+              timeoutMs: config.approvalTimeoutMs,
+            });
+          } finally {
+            this.approvalWaits -= 1;
+            this.lastProgressAt = Date.now();
+          }
           if (decision === "timed_out") {
             // The explicit approval timeout (config.approvalTimeoutMs). Mark
             // the approval doc cancelled with a reason, remember the command
@@ -188,6 +287,7 @@ export class RunExecutor {
         },
         ...(run.externalThreadId ? { externalThreadId: run.externalThreadId } : {}),
       });
+      this.lastProgressAt = Date.now(); // turn settled = progress
 
       if (turn.externalThreadId || this.usageTotal) {
         // Self-transition metadata update: session id + token totals recorded
@@ -204,6 +304,17 @@ export class RunExecutor {
         await plane.updateRunStatus(run.runId, run.claimToken, "failed", {
           errorCategory: "approval_timeout",
           errorMessage: `approval timed out: ${this.approvalTimedOutCommand}`.slice(0, 500),
+        });
+        return;
+      }
+      if (this.stallAbortedAt !== undefined) {
+        // The watchdog aborted a stalled turn and the harness shut down in
+        // time. Report an explicit stall failure — not "cancelled", which is
+        // reserved for user-requested cancels.
+        await this.flushEvents();
+        await plane.updateRunStatus(run.runId, run.claimToken, "failed", {
+          errorCategory: "stalled",
+          errorMessage: this.stallMessage("the harness shut down after abort").slice(0, 500),
         });
         return;
       }
@@ -241,6 +352,7 @@ export class RunExecutor {
         return;
       }
 
+      this.currentPhase = "verifying";
       await plane.updateRunStatus(run.runId, run.claimToken, "verifying");
       await commitAll(worktree.worktreePath, `Agent work for ${run.project.title ?? "task"}`);
       const summary = await diffSummary(worktree.worktreePath, run.baseBranch);
@@ -292,10 +404,18 @@ export class RunExecutor {
           verification: verifyLine.slice(0, 2000),
         },
       });
-      const publishDecision = await plane.awaitApproval(run.runId, publishRequestId, {
-        signal: this.abort.signal,
-        timeoutMs: config.approvalTimeoutMs,
-      });
+      // Approval waits are exempt from the stall watchdog (human-paced).
+      this.approvalWaits += 1;
+      let publishDecision!: Awaited<ReturnType<typeof plane.awaitApproval>>;
+      try {
+        publishDecision = await plane.awaitApproval(run.runId, publishRequestId, {
+          signal: this.abort.signal,
+          timeoutMs: config.approvalTimeoutMs,
+        });
+      } finally {
+        this.approvalWaits -= 1;
+        this.lastProgressAt = Date.now();
+      }
       if (publishDecision === "timed_out") {
         await plane
           .cancelApproval(
@@ -329,6 +449,7 @@ export class RunExecutor {
         return;
       }
 
+      this.currentPhase = "publishing"; // git push / gh pr can hang on the network
       await plane.updateRunStatus(run.runId, run.claimToken, "publishing");
       // A publish failure must not fail the run: the work is committed on the
       // branch, so preserve it, finish In Review, and record the error so the
@@ -368,10 +489,6 @@ export class RunExecutor {
           errorMessage: message.slice(0, 500),
         })
         .catch(() => {});
-    } finally {
-      clearInterval(flusher);
-      clearInterval(controlWatcher);
-      await this.flushEvents();
     }
   }
 }
