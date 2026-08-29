@@ -1480,6 +1480,9 @@ export default defineSchema({
     harness: v.optional(agentHarness),
     // Harness-native thread/session id (Codex thread, Claude session).
     externalThreadId: v.optional(v.string()),
+    // Rolling context for harness threads that must be rebuilt from scratch.
+    historySummary: v.optional(v.string()),
+    historySummaryThroughMessageCount: v.optional(v.number()),
     worktreePath: v.optional(v.string()),
     branchName: v.optional(v.string()),
     activeRunId: v.optional(v.id("agentRuns")),

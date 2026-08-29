@@ -107,6 +107,7 @@ export interface ClaimedChatTurn {
   cwd?: string;
   /** Project assets folder (_library) on this host, when the project is mapped. */
   assetsPath?: string;
+  historySummary?: string;
   history: Array<{ role: "user" | "assistant"; content: string }>;
   userContent: string;
   attachments?: ChatTurnAttachment[];

@@ -15,18 +15,19 @@
  * A chat is bound to ONE harness for its lifetime (conversation context lives
  * in the harness's own thread/session).
  */
-import { mutationGeneric, queryGeneric } from "convex/server";
+import { makeFunctionReference, mutationGeneric, queryGeneric } from "convex/server";
 import { v } from "convex/values";
 import { effectiveProjectPaths, validateProjectFileInput } from "@skippy/shared";
 import { requireOwnedBrain } from "./auth";
 import { requireHost } from "./agentWorkbench";
 import { tokenUsage } from "./schema";
+import { chatHistoryWindow, shouldRefreshHistorySummary } from "./chat-history-helpers";
 
 const CHAT_LEASE_MS = 150_000;
-const HISTORY_LIMIT = 20;
 const MAX_MESSAGE_CHARS = 8000;
 /** Max files attachable to a single chat message. */
 const MAX_MESSAGE_ATTACHMENTS = 8;
+const refreshChatHistorySummaryRef = makeFunctionReference<"action">("chatHistorySummary:refresh");
 
 const attachmentArg = v.union(
   v.object({ fileId: v.id("projectFiles") }),
@@ -479,15 +480,15 @@ export const claimNextChatTurn = mutationGeneric({
           .filter((sibling: any) => sibling.status === "completed")
           .flatMap((sibling: any) => [sibling.userMessageId, sibling.assistantMessageId]),
       );
-      const history = all
+      const eligibleHistory = all
         .filter(
           (m: any) =>
             m.status === "complete" &&
             m.content &&
             m._id !== turn.userMessageId &&
             (!resetHarnessThread || successfulMessageIds.has(m._id)),
-        )
-        .slice(-HISTORY_LIMIT)
+        );
+      const history = chatHistoryWindow(eligibleHistory)
         .map((m: any) => ({ role: m.role, content: m.content }));
 
       const claimToken = makeToken("skippychat");
@@ -509,6 +510,7 @@ export const claimNextChatTurn = mutationGeneric({
         scopeContext,
         cwd,
         assetsPath,
+        historySummary: chat.historySummary,
         history,
         userContent: userMessage?.content ?? "",
         // Attachment metadata plus short-lived download URLs so the runner
@@ -728,6 +730,20 @@ export const completeChatTurn = mutationGeneric({
       await ctx.db.patch(turn.chatId, { externalThreadId: undefined, updatedAt: now });
     } else if (args.externalThreadId) {
       await ctx.db.patch(turn.chatId, { externalThreadId: args.externalThreadId, updatedAt: now });
+    }
+    if (!failed) {
+      const chat = await ctx.db.get(turn.chatId);
+      const completeMessages = await ctx.db
+        .query("chatMessages")
+        .withIndex("by_chat", (q: any) => q.eq("chatId", turn.chatId))
+        .collect();
+      const completeMessageCount = completeMessages.filter((message: any) => message.status === "complete").length;
+      if (chat && shouldRefreshHistorySummary(completeMessageCount, chat.historySummaryThroughMessageCount ?? 0)) {
+        await ctx.scheduler.runAfter(0, refreshChatHistorySummaryRef, {
+          chatId: turn.chatId,
+          targetCompleteMessageCount: completeMessageCount,
+        });
+      }
     }
     // Nothing should stay waiting on a finished turn.
     const approvals = await ctx.db
