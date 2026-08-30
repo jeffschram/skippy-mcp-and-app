@@ -36,12 +36,20 @@ export function resolveAgentRoleToken(
 /** One-line bootstrap per docs/connectors.md: name the role and skills; the
  * pass fetches the skill bodies itself so behavior stays versioned in Convex. */
 export function buildAgentPassPrompt(
-  pass: Pick<ClaimedAgentPass, "roleKey" | "displayName" | "skillSlugs">,
+  pass: Pick<ClaimedAgentPass, "roleKey" | "displayName" | "skillSlugs" | "connectorSlugs">,
 ): string {
   const lines = [
     `You are "${pass.displayName}" (role ${pass.roleKey}), running one scheduled, unattended Skippy agent pass.`,
     `Load your operating instructions with the Skippy MCP get_skill tool — slugs: ${pass.skillSlugs.join(", ")} — then follow them for exactly one pass.`,
   ];
+  if (pass.connectorSlugs.length > 0) {
+    // 2026-08-30: without this line the agenda pass improvised its own scope
+    // and silently skipped imessage even though the connector was attached —
+    // "sources in scope" in the skill must be pinned by the host, not guessed.
+    lines.push(
+      `Local source connectors on this host — these define the sources in scope: ${pass.connectorSlugs.join(", ")}. Read all of them when your skill calls for source ingestion.`,
+    );
+  }
   if (pass.roleKey.startsWith("pm:")) {
     lines.push(`This pass manages project ${pass.roleKey.slice("pm:".length)}.`);
   }
