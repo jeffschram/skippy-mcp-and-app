@@ -129,6 +129,9 @@ const AGENDA_INGESTION_BODY = [
   "4. For each item, decide under the rubric:",
   "   - **Store**: clear deadline, money, commitment, relationship, focus-relevant, or security signal. Use `ingest_object` with a specific `rubricDecision` and at least one `sourceRef` (IDs, timestamp, one-line summary, shortest useful excerpt — never raw bodies).",
   "   - **Review**: genuinely uncertain but inspectable later. Use `submit_candidate_object`.",
+  // 2026-08-30: added after Knowmad beta feedback from a group text was stored as a
+  // floating review candidate instead of landing on the project it was clearly about.
+  "   - **Project-linked**: when an item clearly references one of the user's live projects (the rubric lists them), don't leave it floating — ingest the note, then `link_entities` (`belongs_to`) it to that project so feedback, ideas, and status land on the project itself. Only create a project task when the item is specifically actionable (a bug report, an explicitly requested change); suggestions, opinions, and half-formed ideas stay as notes on the project.",
   "   - **Ignore**: marketing, newsletters, shipping notices, generic confirmations, transient alerts, secrets/credentials. Write nothing.",
   "   - Durable preferences, decisions, or principles evidenced by a source go through `record_memory` / `record_decision` / `record_principle` with provenance.",
   "5. For each pending quick capture, create the useful objects, then call `mark_quick_capture_handled` with `processed` (listing `relatedEntityRefs` you created) or `discarded` with a short note.",
@@ -473,7 +476,7 @@ const DEFAULT_SKILLS = [
     usageLeadIn: "In your harness scheduler paste the following:",
     schedulerInstructions: AGENDA_INGESTION_SCHEDULER_INSTRUCTIONS,
     visibility: "public" as const,
-    version: 1,
+    version: 2,
   },
   {
     slug: "finance-sync",
