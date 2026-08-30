@@ -71,6 +71,18 @@ describe("buildAgentPassPrompt", () => {
     const prompt = buildAgentPassPrompt({ ...pass, roleKey: "pm:proj42" });
     expect(prompt).toContain("manages project proj42");
   });
+
+  it("pins the host's connectors as the sources in scope", () => {
+    // 2026-08-30: the agenda pass silently skipped imessage when scope was
+    // left implicit — the prompt must enumerate the host's connectors.
+    const prompt = buildAgentPassPrompt({ ...pass, connectorSlugs: ["google", "imessage"] });
+    expect(prompt).toContain("sources in scope: google, imessage");
+  });
+
+  it("omits the connector line when the host provides none", () => {
+    const prompt = buildAgentPassPrompt({ ...pass, connectorSlugs: [] });
+    expect(prompt).not.toContain("sources in scope");
+  });
 });
 
 describe("executeAgentPass", () => {
