@@ -6,7 +6,7 @@ import {
   makeFunctionReference,
 } from "convex/server";
 import { v } from "convex/values";
-import { summarizableMessageCount } from "./chat-history-helpers";
+import { summarizableMessageCount } from "./chatHistoryHelpers";
 
 const summaryContextRef = makeFunctionReference<"query">("chatHistorySummary:summaryContext");
 const storeSummaryRef = makeFunctionReference<"mutation">("chatHistorySummary:storeSummary");

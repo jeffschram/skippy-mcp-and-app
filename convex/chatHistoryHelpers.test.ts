@@ -4,7 +4,7 @@ import {
   chatHistoryWindow,
   shouldRefreshHistorySummary,
   summarizableMessageCount,
-} from "./chat-history-helpers";
+} from "./chatHistoryHelpers";
 
 describe("chat history window", () => {
   it("retains only the settled 30-message recent window", () => {
