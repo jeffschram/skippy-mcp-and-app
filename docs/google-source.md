@@ -31,10 +31,20 @@ pinning the audited commit, is the trust anchor, not popularity (same reasoning
 as `plaid-mcp`).
 
 Clones live in `~/src/` — outside this repo; the audited servers are never
-vendored here:
+vendored here (different languages, and vendoring would sever the upstream
+re-audit path):
 
 - `~/src/gmail-mcp-audit` — audited at commit `e054cf1efe82e386552bf8e1e6d0115f5ac86c3e`
 - `~/src/gcal-readonly-mcp-audit` — audited at commit `b75c062b51f10aebd5f865c15789bec1515478b2`
+
+Those commits are pinned machine-readably in **`scripts/connectors.json`**,
+which is the canonical pin; this document keeps the audit findings and security
+posture. `pnpm connectors:check` (= `node scripts/setup-connectors.mjs`)
+verifies a host against it: checkout at the pinned SHA, clean worktree, built
+artifact, credential files at mode 600, and MCP registration. `--install`
+reconciles clones and builds; `--register` adds missing MCP servers. Credential
+placement and OAuth consent stay manual, owner-only steps — the script reports
+them, never performs them.
 
 ## Audit findings
 
@@ -190,6 +200,8 @@ When either upstream repo ships something worth adopting:
    (`gmail.readonly` / `calendar.readonly` only), no new network destinations,
    no write-capable API calls or tools, credential paths still local-only.
 3. Check new/changed dependencies (`pyproject.toml` / `go.mod`) the same way.
-4. Check out the new commit, update the pinned hash + findings here, and note
-   the re-audit date. Owner sign-off is required again if any finding is
-   non-trivial.
+4. Check out the new commit, update the pinned hash + findings here **and in
+   `scripts/connectors.json`** (the two must never disagree — `pnpm
+   connectors:check` compares the host against the manifest, so a stale
+   manifest silently blesses unaudited code), and note the re-audit date. Owner
+   sign-off is required again if any finding is non-trivial.

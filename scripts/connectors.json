@@ -1,0 +1,95 @@
+{
+  "_comment": [
+    "Pinned inventory of the local MCP connector servers this host registers.",
+    "Audited third-party servers are NOT vendored into this repo (different",
+    "languages, upstream update path, see docs/google-source.md); they are cloned",
+    "at the exact audited commit instead. This file is the machine-readable pin —",
+    "docs/*.md keep the audit findings and security posture prose.",
+    "",
+    "Credentials are never described here beyond their expected path and mode.",
+    "OAuth consent is owner-only and is never automated by setup-connectors.mjs.",
+    "",
+    "Not listed: plaid (docs/plaid-financial-source.md) — audited on a previous",
+    "machine, never installed on this mini and not registered. Add an entry here",
+    "when it is stood up, with a pinned commit."
+  ],
+  "version": 1,
+  "connectors": [
+    {
+      "slug": "gmail",
+      "connectorSlug": "google",
+      "mcpServerName": "gmail",
+      "readOnly": true,
+      "docs": "docs/google-source.md",
+      "source": {
+        "kind": "git",
+        "repo": "https://github.com/Maheidem/gmail-mcp.git",
+        "commit": "e054cf1efe82e386552bf8e1e6d0115f5ac86c3e",
+        "installPath": "~/src/gmail-mcp-audit"
+      },
+      "build": {
+        "runtime": "python",
+        "steps": ["python3 -m venv .venv", "./.venv/bin/pip install -e ."],
+        "artifact": ".venv/bin/python"
+      },
+      "register": {
+        "command": "{{installDir}}/.venv/bin/python",
+        "args": ["-m", "gmail_mcp"]
+      },
+      "credentialFiles": [
+        { "path": "~/.gmail-mcp/gcp-oauth.keys.json", "mode": "600" },
+        { "path": "~/.gmail-mcp/token.json", "mode": "600" }
+      ]
+    },
+    {
+      "slug": "gcal",
+      "connectorSlug": "google",
+      "mcpServerName": "gcal",
+      "readOnly": true,
+      "docs": "docs/google-source.md",
+      "source": {
+        "kind": "git",
+        "repo": "https://github.com/geraldcroes/gcal-readonly-mcp.git",
+        "commit": "b75c062b51f10aebd5f865c15789bec1515478b2",
+        "installPath": "~/src/gcal-readonly-mcp-audit"
+      },
+      "build": {
+        "runtime": "go",
+        "steps": ["go build -o gcal-readonly-mcp ."],
+        "artifact": "gcal-readonly-mcp"
+      },
+      "register": {
+        "command": "{{installDir}}/gcal-readonly-mcp",
+        "args": []
+      },
+      "credentialFiles": [
+        { "path": "~/.config/gcal-readonly-mcp/credentials.json", "mode": "600" },
+        { "path": "~/.config/gcal-readonly-mcp/config.json", "mode": "600" }
+      ]
+    },
+    {
+      "slug": "imessage",
+      "connectorSlug": "imessage",
+      "mcpServerName": "imessage",
+      "readOnly": true,
+      "docs": "docs/imessage-source.md",
+      "source": {
+        "kind": "workspace",
+        "installPath": "apps/imessage-mcp"
+      },
+      "build": {
+        "runtime": "node",
+        "steps": ["pnpm --filter @skippy/imessage-mcp build"],
+        "artifact": "dist/stdio.js"
+      },
+      "register": {
+        "command": "node",
+        "args": ["{{installDir}}/dist/stdio.js"]
+      },
+      "credentialFiles": [],
+      "hostRequirements": [
+        "Full Disk Access granted to the node binary that launches this server (readonly ~/Library/Messages/chat.db)"
+      ]
+    }
+  ]
+}
