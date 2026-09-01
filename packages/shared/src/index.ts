@@ -1,21 +1,27 @@
+// Relative specifiers below carry explicit `.js` extensions. moduleResolution
+// is "Bundler", which does not require them, but tsc emits specifiers verbatim
+// and Node's ESM loader will not guess an extension — so dropping one makes
+// this package silently unimportable from a plain `node dist/...` process while
+// typecheck, vitest, and the Next bundler all stay green.
+
 // Recurring life obligations. Kept in its own module because the zoned
 // calendar arithmetic is substantial and self-contained.
-export * from "./recurrence";
+export * from "./recurrence.js";
 
 // Google Calendar mirror: identity, normalization, and echo-safe merge rules.
 // Its own module because the merge semantics are subtle enough to deserve
 // isolation from the generic entity-ingestion helpers below.
-export * from "./calendar";
+export * from "./calendar.js";
 
 // Agenda: merges events, due tasks, and firing recurrences into one timeline.
-export * from "./agenda";
+export * from "./agenda.js";
 
 // Waiting-on ledger: identity matching so replies clear entries automatically.
-export * from "./waiting";
+export * from "./waiting.js";
 
 // Agent-pass schedules (docs/connectors.md): minute-granular, schedule-anchored
 // cadences for named agents. Distinct from life recurrences by design.
-export * from "./agent-schedule";
+export * from "./agent-schedule.js";
 
 /* ------------------------------------------------------------------ */
 /* Project folder paths (assets/output)                                */
