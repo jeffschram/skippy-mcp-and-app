@@ -33,6 +33,20 @@ import {
   type TaskCommitment,
 } from "@skippy/shared";
 
+/** Args for staging a Google Calendar event Skippy wants to create. */
+export type ProposeCalendarEventInput = {
+  summary: string;
+  start: number;
+  end: number;
+  description?: string;
+  location?: string;
+  isAllDay?: boolean;
+  timeZone?: string;
+  calendarId?: string;
+  autoApprove?: boolean;
+  relatedEntityRefs?: Array<{ entityType: string; entityId: string }>;
+};
+
 /** Args for creating or updating a repeating life obligation. */
 export type UpsertRecurrenceInput = {
   recurrenceId?: string;
@@ -348,6 +362,21 @@ export type SkippyClient = {
   finalizeProjectFileUpload(brainInstanceId: string, input: { fileId: string; storageId: string; sha256: string }): Promise<unknown>;
   abortProjectFileUpload(brainInstanceId: string, input: { fileId: string; storageId?: string; reason?: string }): Promise<unknown>;
   listQuickCaptures(brainInstanceId: string, input: ListQuickCapturesInput): Promise<unknown>;
+  draftCalendarEvent(
+    brainInstanceId: string,
+    input: {
+      calendarId: string;
+      title: string;
+      description?: string | undefined;
+      location?: string | undefined;
+      startAt: number;
+      endAt: number;
+      isAllDay?: boolean | undefined;
+      timeZone?: string | undefined;
+      requireApproval?: boolean | undefined;
+      relatedEntityRefs?: Array<{ entityType: string; entityId: string }> | undefined;
+    },
+  ): Promise<unknown>;
   upsertRecurrence(brainInstanceId: string, input: UpsertRecurrenceInput): Promise<unknown>;
   completeRecurrence(
     brainInstanceId: string,
@@ -934,7 +963,16 @@ function normalizeRequiredText(value: string, fieldName: string) {
   return normalized;
 }
 
-export function createSkippyToolHandlers(client: SkippyClient, brainInstanceId: string) {
+export function createSkippyToolHandlers(
+  client: SkippyClient,
+  brainInstanceId: string,
+  /**
+   * Agent-role scope of the calling token (docs/agents.md). Undefined means the
+   * owner's full-access token. Only used where a tool's blast radius depends on
+   * who is calling — see proposeCalendarEvent.
+   */
+  role?: string | undefined,
+) {
   return {
     async capture(input: { text: string; sourceRef?: SourceRefInput }) {
       const normalizedText = normalizeRequiredText(input.text, "text");
@@ -1137,6 +1175,58 @@ export function createSkippyToolHandlers(client: SkippyClient, brainInstanceId: 
         title,
         createdBy: input.createdBy ?? "skippy_mcp",
       });
+    },
+
+    /**
+     * Stages a calendar event. Nothing reaches Google here — Convex writes the
+     * mirror row and a pending action; the runner executes it.
+     *
+     * `autoApprove` is honored ONLY for the owner's unscoped token. A
+     * role-scoped agent (agenda, pm, ...) always lands in the approval queue,
+     * no matter what it passes. This is the wall that keeps an autonomous
+     * ingestion pass from writing to the calendar unattended, and it is
+     * enforced here rather than by prompt instruction because a prompt is not
+     * a security boundary.
+     */
+    async proposeCalendarEvent(input: ProposeCalendarEventInput) {
+      const summary = input.summary?.trim();
+      if (!summary) {
+        throw new Error("summary is required");
+      }
+      if (!Number.isFinite(input.start) || !Number.isFinite(input.end)) {
+        throw new Error("start and end must be epoch milliseconds");
+      }
+      if (input.end <= input.start) {
+        throw new Error("end must be after start");
+      }
+
+      const ownerScoped = role === undefined || role === null || role === "";
+      const requireApproval = ownerScoped ? input.autoApprove !== true : true;
+
+      const staged = (await client.draftCalendarEvent(brainInstanceId, {
+        calendarId: input.calendarId ?? "primary",
+        title: summary,
+        description: input.description,
+        location: input.location,
+        startAt: input.start,
+        endAt: input.end,
+        isAllDay: input.isAllDay,
+        timeZone: input.timeZone,
+        requireApproval,
+        relatedEntityRefs: input.relatedEntityRefs,
+      })) as Record<string, unknown>;
+
+      return {
+        ...staged,
+        awaitingApproval: requireApproval,
+        // Say so plainly when a role-scoped caller asked to skip approval, so
+        // the agent reports "queued for Jeff" instead of claiming it created
+        // an event that is actually still sitting in /review.
+        approvalForced: requireApproval && input.autoApprove === true && !ownerScoped,
+        note: requireApproval
+          ? "Staged for approval. It appears in /review → Actions; the runner creates it in Google within seconds of approval."
+          : "Approved on creation. The runner creates it in Google within seconds.",
+      };
     },
 
     async upsertRecurrence(input: UpsertRecurrenceInput) {

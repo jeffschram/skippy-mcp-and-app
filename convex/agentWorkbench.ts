@@ -71,7 +71,7 @@ async function sha256Hex(value: string) {
     .join("");
 }
 
-function makeToken(prefix: string) {
+export function makeToken(prefix: string) {
   const bytes = new Uint8Array(32);
   crypto.getRandomValues(bytes);
   const body = btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");

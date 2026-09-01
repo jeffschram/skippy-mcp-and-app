@@ -21,6 +21,7 @@ import {
   type RecordFinancialBalancesInput,
   type RecordFinancialTransactionsInput,
   type RecordMemoryInput,
+  type ProposeCalendarEventInput,
   type RegisterProjectFileInput,
   type SkippyClient,
   type StartInterviewInput,
@@ -933,7 +934,10 @@ export function createMcpServer(
     };
   }
 
-  const tools = createSkippyToolHandlers(client, brainInstanceId);
+  // The role travels into the handlers, not just the allowlist: some tools are
+  // allowed for an agent but must behave more conservatively for one (see
+  // propose_calendar_event, where only the owner may skip approval).
+  const tools = createSkippyToolHandlers(client, brainInstanceId, options?.role);
 
   server.registerResource(
     "skippy_harness_guide",
@@ -1884,6 +1888,44 @@ export function createMcpServer(
       }),
     },
     async (args) => toolResult(await tools.upsertRecurrence(stripUndefined(args) as UpsertRecurrenceInput)),
+  );
+
+  server.registerTool(
+    "propose_calendar_event",
+    {
+      title: "Propose a Google Calendar event",
+      description:
+        "Stage an event for the owner's Google Calendar. Nothing reaches Google here: it lands in /review → Actions, and the runner creates it within seconds of approval. Agent roles always require approval — autoApprove is honored only for the owner.",
+      annotations: {
+        readOnlyHint: false,
+        // Staging only adds; approval and execution are separate steps.
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+      },
+      inputSchema: z.object({
+        summary: z.string().min(1).describe("Event title"),
+        start: z.number().describe("Start time, epoch milliseconds"),
+        end: z.number().describe("End time, epoch milliseconds; must be after start"),
+        description: z.string().optional(),
+        location: z.string().optional(),
+        isAllDay: z.boolean().optional().describe("All-day event; end is exclusive."),
+        timeZone: z.string().optional().describe("IANA zone, e.g. America/New_York."),
+        calendarId: z.string().optional().describe("Defaults to the owner's primary calendar."),
+        autoApprove: z
+          .boolean()
+          .optional()
+          .describe(
+            "Owner-only: skip the approval queue because the owner asked for this event directly in chat. Ignored for agent roles.",
+          ),
+        relatedEntityRefs: z
+          .array(z.object({ entityType: z.string(), entityId: z.string() }))
+          .optional()
+          .describe("Accepted entities this event came from, e.g. the task or person it serves."),
+      }),
+    },
+    async (args) =>
+      toolResult(await tools.proposeCalendarEvent(stripUndefined(args) as ProposeCalendarEventInput)),
   );
 
   server.registerTool(

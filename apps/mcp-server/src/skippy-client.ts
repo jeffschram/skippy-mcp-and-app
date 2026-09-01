@@ -101,6 +101,9 @@ const beginProjectFileUploadForBrainRef = makeFunctionReference<"mutation">("pro
 const finalizeProjectFileUploadForBrainRef = makeFunctionReference<"mutation">("projectFiles:finalizeUploadForBrain");
 const abortProjectFileUploadForBrainRef = makeFunctionReference<"mutation">("projectFiles:abortUploadForBrain");
 const listQuickCapturesForBrainRef = makeFunctionReference<"query">("knowledge:listQuickCapturesForBrain");
+// Calendar write path. Convex only stages the event; the runner executes it
+// against Google, because the OAuth token lives on the mini and nowhere else.
+const draftCalendarEventRef = makeFunctionReference<"mutation">("calendar:draftCalendarEvent");
 // Life layer.
 const upsertRecurrenceRef = makeFunctionReference<"mutation">("recurrences:upsertRecurrence");
 const completeRecurrenceRef = makeFunctionReference<"mutation">("recurrences:completeRecurrence");
@@ -254,6 +257,8 @@ export function createConvexSkippyClient(convexUrl: string, authToken?: string):
     abortProjectFileUpload: (brainInstanceId, input) => client.mutation(abortProjectFileUploadForBrainRef, { brainInstanceId, ...input }),
     listQuickCaptures: (brainInstanceId, input) =>
       client.query(listQuickCapturesForBrainRef, { brainInstanceId, ...input }),
+    draftCalendarEvent: (brainInstanceId, input) =>
+      client.mutation(draftCalendarEventRef, { brainInstanceId, ...input }),
     upsertRecurrence: (brainInstanceId, input) =>
       client.mutation(upsertRecurrenceRef, { brainInstanceId, ...input }),
     completeRecurrence: (brainInstanceId, input) =>

@@ -821,6 +821,16 @@ export default defineSchema({
     externalMessageId: v.optional(v.string()),
     executedAt: v.optional(v.number()),
     error: v.optional(v.string()),
+    // Lease-based claiming, mirroring runs/chat turns/maintenance jobs, so the
+    // runner executes an approved action once per lease. Unlike those, an
+    // expired lease here is safe to re-claim: a calendar insert carries a
+    // Skippy-minted event id and Google answers 409 for a repeat, so a
+    // duplicated execution settles as "already created" rather than
+    // double-booking the owner.
+    hostId: v.optional(v.id("agentHosts")),
+    claimToken: v.optional(v.string()),
+    claimedAt: v.optional(v.number()),
+    leaseExpiresAt: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number(),
   }).index("by_brain_status", ["brainInstanceId", "status"]),

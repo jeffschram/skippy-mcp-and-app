@@ -227,11 +227,57 @@ sitting beats a large thing we can only configure.
 
 ### Approval, not autonomy
 
-Nothing here decides *what* to create; this server is only the executor. Every
+Nothing here decides *what* to create; this package is only the executor. Every
 event travels as a `calendar_event_create` pendingAction the owner approves in
 `/review` (`convex/calendar.ts` `draftCalendarEvent`). The agent proposes, the
 owner approves, the runner executes; the MCP role allowlist grants agents the
 propose side only.
+
+### Write path (propose → approve → execute)
+
+1. **Propose.** `propose_calendar_event` on the Skippy MCP server
+   (`apps/mcp-server/src/tools.ts`) mints the event id and stages a
+   `calendar_event_create` pendingAction. Whether it needs approval is decided
+   by the **calling token's role**, not by the caller's arguments:
+
+   | Caller | Token | `autoApprove: true` honored? |
+   | --- | --- | --- |
+   | Owner in chat | `SKIPPY_MCP_TOKEN` (role `null`) | yes — staged already approved |
+   | Agent pass (e.g. agenda) | role-scoped token | **no** — forced to `pending_approval` |
+
+   The forcing happens in `createSkippyToolHandlers`, which receives the role
+   alongside the allowlist. A prompt is not a security boundary; an unattended
+   pass told to "just add it" still lands in `/review`.
+
+2. **Approve.** The owner taps Approve in `/review` → Actions
+   (`reviewPendingActionForViewer`), moving the action to `approved`. Nothing
+   calls Google yet — Convex holds no credentials and never will
+   (`docs/connectors.md`).
+
+3. **Execute.** The runner polls `calendar:claimNextCalendarAction` every 2s
+   (chat speed, not the 5s claim speed: the owner is standing in the app having
+   just tapped Approve). It leases the action for 150s exactly like runs and
+   maintenance jobs, inserts the event, then reports through
+   `calendar:recordCalendarActionResult`, which settles the pendingAction to
+   `completed`/`failed` and syncs `remoteState` on the calendarEvents row.
+
+   Re-claiming an expired lease is safe here, unlike elsewhere: the minted id
+   means a duplicate execution comes back 409 and settles as "already created".
+   A failure lands in `failed` with the Google error attached, where `/review`
+   already renders it as re-reviewable.
+
+   This loop only exists when `google_write` is in `SKIPPY_RUNNER_CONNECTORS`.
+   Credentials being on disk is deliberately *not* sufficient — a host that
+   offers Google reads must not start writing because a token file happens to
+   be there. Without the slug the runner logs that the loop is disabled and
+   approved actions simply wait.
+
+**The runner links `@skippy/gcal-write-mcp` as a library, not as an MCP
+server** (`apps/runner/src/calendarActionExecutor.ts`). The MCP wrapper exists
+so *harnesses* can create events; the runner is not a harness and a JSON-RPC
+hop would only add a subprocess, a protocol, and a failure mode between it and
+an HTTP POST. Both paths share the same insert and auth code, so the two cannot
+drift.
 
 ### Setup (owner)
 

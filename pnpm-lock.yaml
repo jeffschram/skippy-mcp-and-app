@@ -82,6 +82,9 @@ importers:
       '@anthropic-ai/claude-agent-sdk':
         specifier: ^0.1.0
         version: 0.1.77(zod@4.4.3)
+      '@skippy/gcal-write-mcp':
+        specifier: workspace:*
+        version: link:../gcal-write-mcp
       convex:
         specifier: ^1.40.0
         version: 1.40.0(react@19.2.7)

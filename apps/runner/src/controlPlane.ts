@@ -66,6 +66,26 @@ export interface ClaimedMaintenanceJob {
   project: { _id: string; title?: string; localPath: string };
 }
 
+/**
+ * An approved calendar event waiting to be inserted into Google.
+ *
+ * The event id was minted when the action was staged and travels with it, so a
+ * retried insert collides (409) instead of creating a second event.
+ */
+export interface ClaimedCalendarAction {
+  pendingActionId: string;
+  claimToken: string;
+  externalId: string;
+  calendarId: string;
+  summary: string;
+  description?: string;
+  location?: string;
+  start: number;
+  end: number;
+  isAllDay: boolean;
+  timeZone?: string;
+}
+
 export type ReportableStatus =
   | "preparing"
   | "running"
@@ -88,6 +108,8 @@ const chatFns = (anyApi as any).chats as Record<string, any>;
 const fileFns = (anyApi as any).projectFiles as Record<string, any>;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const agentFns = (anyApi as any).agentConfigs as Record<string, any>;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const calendarFns = (anyApi as any).calendar as Record<string, any>;
 
 /**
  * Claim payload for one scheduled agent pass (convex/agentConfigs.ts →
@@ -274,6 +296,35 @@ export class ControlPlane {
 
   claimNextMaintenanceJob(): Promise<ClaimedMaintenanceJob | null> {
     return this.client.mutation(fns.claimNextMaintenanceJob, { hostToken: this.hostToken });
+  }
+
+  /* ---- Calendar actions (approved in /review, executed here) ---- */
+
+  claimNextCalendarAction(): Promise<ClaimedCalendarAction | null> {
+    return this.client.mutation(calendarFns.claimNextCalendarAction, { hostToken: this.hostToken });
+  }
+
+  recordCalendarActionResult(
+    pendingActionId: string,
+    claimToken: string,
+    result: {
+      outcome: "created" | "conflict" | "failed";
+      etag?: string | undefined;
+      htmlLink?: string | undefined;
+      error?: string | undefined;
+    },
+  ): Promise<{ status: string; htmlLink?: string }> {
+    const payload: Record<string, unknown> = {
+      hostToken: this.hostToken,
+      pendingActionId,
+      claimToken,
+      outcome: result.outcome,
+    };
+    // Convex rejects explicit `undefined`, so only send what we actually have.
+    if (result.etag !== undefined) payload.etag = result.etag;
+    if (result.htmlLink !== undefined) payload.htmlLink = result.htmlLink;
+    if (result.error !== undefined) payload.error = result.error;
+    return this.client.mutation(calendarFns.recordCalendarActionResult, payload);
   }
 
   updateMaintenanceJob(

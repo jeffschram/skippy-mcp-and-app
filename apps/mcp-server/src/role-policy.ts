@@ -50,6 +50,10 @@ const AGENDA_TOOLS = [
   "summarize_focus",
   "ask",
   "list_agenda",
+  // Propose only, never execute. createSkippyToolHandlers forces
+  // requireApproval for any role-scoped token, so a pass can surface "want a
+  // calendar event for this?" in /review but cannot write to Google itself.
+  "propose_calendar_event",
   "list_recurrences",
   "list_life_tasks",
   "upsert_recurrence",

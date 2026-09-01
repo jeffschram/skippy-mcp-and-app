@@ -347,6 +347,7 @@ function createFakeClient(overrides: Partial<SkippyClient> = {}): SkippyClient {
     listRecurrences: async () => [],
     listAgenda: async () => [],
     listLifeTasks: async () => [],
+    draftCalendarEvent: async () => ({ status: "staged", externalId: "abc123", pendingActionId: "pa1" }),
   };
 
   return { ...client, ...overrides };
