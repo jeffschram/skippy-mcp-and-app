@@ -17,6 +17,7 @@ import {
   type ClaimedRun,
 } from "./controlPlane.js";
 import { executeAgentPass } from "./agentPassExecutor.js";
+import { createCalendarTokenSource, runCalendarActionOnce } from "./calendarActionExecutor.js";
 import { executeCloseoutJob } from "./closeoutExecutor.js";
 import { ClaudeAdapter } from "./harness/claude.js";
 import { CodexAdapter } from "./harness/codex.js";
@@ -269,6 +270,40 @@ async function main() {
       .catch((error) => log("agent pass claim failed", { error: String(error) }));
   }, config.claimPollIntervalMs);
 
+  /*
+   * Calendar actions the owner approved in /review.
+   *
+   * Gated on the google_write connector rather than merely on credentials
+   * existing: a host that offers Google *reads* must not silently start
+   * writing to the calendar because a token file happens to be on disk
+   * (docs/connectors.md). Absent the slug, this loop never starts and approved
+   * actions simply wait.
+   *
+   * Polled at chat speed, not claim speed. The owner is standing in the app
+   * having just tapped Approve, so this is the one loop where a five-second
+   * wait reads as "did that work?".
+   */
+  let calendarActionsBusy = false;
+  // Built on first use and then reused, so one in-memory access token serves
+  // every action instead of re-reading credentials from disk each poll.
+  let calendarTokenSource: ReturnType<typeof createCalendarTokenSource> | undefined;
+  const calendarTokens = () => (calendarTokenSource ??= createCalendarTokenSource(os.homedir()));
+  const calendarTimer = config.connectors.includes("google_write")
+    ? setInterval(() => {
+        if (stopping || draining) return;
+        if (calendarActionsBusy) return;
+        calendarActionsBusy = true;
+        void runCalendarActionOnce(plane, { tokens: calendarTokens(), log })
+          .catch((error) => log("calendar action failed", { error: String(error) }))
+          .finally(() => {
+            calendarActionsBusy = false;
+          });
+      }, 2_000)
+    : undefined;
+  if (!calendarTimer) {
+    log("calendar action execution disabled", { reason: "google_write not in SKIPPY_RUNNER_CONNECTORS" });
+  }
+
   const shutdown = async (signalName: string) => {
     if (stopping) return;
     stopping = true;
@@ -279,6 +314,7 @@ async function main() {
     clearInterval(chatClaimTimer);
     clearInterval(maintenanceClaimTimer);
     clearInterval(agentPassTimer);
+    if (calendarTimer) clearInterval(calendarTimer);
     await Promise.allSettled([...activeRuns.values(), ...activeChatTurns.values(), ...activeMaintenanceJobs.values(), ...activeAgentPasses.values()]);
     clearInterval(heartbeatTimer);
     process.exit(0);

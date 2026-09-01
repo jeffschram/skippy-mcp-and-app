@@ -110,6 +110,7 @@ function createFakeClient(): { client: SkippyClient; calls: Array<{ name: string
         record("listRecurrences", brainInstanceId, input),
       listAgenda: (brainInstanceId, input) => record("listAgenda", brainInstanceId, input),
       listLifeTasks: (brainInstanceId, input) => record("listLifeTasks", brainInstanceId, input),
+      draftCalendarEvent: (brainInstanceId, input) => record("draftCalendarEvent", brainInstanceId, input),
     },
   };
 }
@@ -1136,5 +1137,50 @@ describe("Skippy MCP tool handlers", () => {
       dispatchCount: 2,
       subscriptionCount: 1,
     });
+  });
+});
+
+describe("proposeCalendarEvent", () => {
+  const event = { summary: "Lunch with Helen", start: 1_756_000_000_000, end: 1_756_003_600_000 };
+
+  it("lets the owner's full-access token skip approval", async () => {
+    const { client, calls } = createFakeClient();
+    const tools = createSkippyToolHandlers(client, "brain_123");
+
+    const result = (await tools.proposeCalendarEvent({ ...event, autoApprove: true })) as Record<string, unknown>;
+
+    expect(result.awaitingApproval).toBe(false);
+    expect(calls.at(-1)?.args[1]).toMatchObject({ requireApproval: false, calendarId: "primary" });
+  });
+
+  it("defaults the owner to approval when autoApprove is not asked for", async () => {
+    const { client, calls } = createFakeClient();
+    const tools = createSkippyToolHandlers(client, "brain_123");
+
+    const result = (await tools.proposeCalendarEvent(event)) as Record<string, unknown>;
+
+    expect(result.awaitingApproval).toBe(true);
+    expect(calls.at(-1)?.args[1]).toMatchObject({ requireApproval: true });
+  });
+
+  // The security boundary: an unattended agent pass must never write to the
+  // owner's calendar, even if its prompt tells it to set autoApprove.
+  it("forces approval for a role-scoped token that asks to auto-approve", async () => {
+    const { client, calls } = createFakeClient();
+    const tools = createSkippyToolHandlers(client, "brain_123", "agenda");
+
+    const result = (await tools.proposeCalendarEvent({ ...event, autoApprove: true })) as Record<string, unknown>;
+
+    expect(result.awaitingApproval).toBe(true);
+    expect(result.approvalForced).toBe(true);
+    expect(calls.at(-1)?.args[1]).toMatchObject({ requireApproval: true });
+  });
+
+  it("rejects an event that ends before it starts", async () => {
+    const { client } = createFakeClient();
+    const tools = createSkippyToolHandlers(client, "brain_123");
+    await expect(tools.proposeCalendarEvent({ ...event, end: event.start })).rejects.toThrow(
+      "end must be after start",
+    );
   });
 });
