@@ -18,6 +18,7 @@ import {
 } from "./controlPlane.js";
 import { executeAgentPass } from "./agentPassExecutor.js";
 import { createCalendarTokenSource, runCalendarActionOnce } from "./calendarActionExecutor.js";
+import { runCalendarMirrorSyncOnce } from "./calendarMirrorSync.js";
 import { executeCloseoutJob } from "./closeoutExecutor.js";
 import { ClaudeAdapter } from "./harness/claude.js";
 import { CodexAdapter } from "./harness/codex.js";
@@ -304,6 +305,45 @@ async function main() {
     log("calendar action execution disabled", { reason: "google_write not in SKIPPY_RUNNER_CONNECTORS" });
   }
 
+  /*
+   * Calendar mirror sync: Google -> Convex, read-only.
+   *
+   * Without it `calendarEvents` holds nothing but Skippy's own writes, so a
+   * proposal cannot warn "you already have this" — which is how Jury duty and a
+   * JetBlue flight both got booked twice (2026-09). Same google_write gate as
+   * the executor above: the mirror uses that connector's token, and a host not
+   * trusted with the calendar should not be reading it either.
+   *
+   * Ten minutes, not two seconds. This is background context, not a user
+   * waiting on a tap, and the incremental syncToken makes each pass cheap.
+   * The staleness is real and documented: an event added on the phone in the
+   * last ten minutes may not be in the mirror yet.
+   */
+  const CALENDAR_MIRROR_INTERVAL_MS = 10 * 60 * 1000;
+  let calendarMirrorBusy = false;
+  const syncCalendarMirror = () => {
+    if (stopping || draining) return;
+    if (calendarMirrorBusy) return;
+    calendarMirrorBusy = true;
+    void runCalendarMirrorSyncOnce(plane, { tokens: calendarTokens(), log })
+      .catch((error) => log("calendar mirror sync failed", { error: String(error) }))
+      .finally(() => {
+        calendarMirrorBusy = false;
+      });
+  };
+  const calendarMirrorTimer = config.connectors.includes("google_write")
+    ? setInterval(syncCalendarMirror, CALENDAR_MIRROR_INTERVAL_MS)
+    : undefined;
+  if (calendarMirrorTimer) {
+    // Once shortly after startup so a freshly restarted runner does not leave
+    // the mirror ten minutes stale; delayed a little so it does not compete
+    // with host registration and the first claim polls.
+    const firstMirrorSync = setTimeout(syncCalendarMirror, 15_000);
+    firstMirrorSync.unref?.();
+  } else {
+    log("calendar mirror sync disabled", { reason: "google_write not in SKIPPY_RUNNER_CONNECTORS" });
+  }
+
   const shutdown = async (signalName: string) => {
     if (stopping) return;
     stopping = true;
@@ -315,6 +355,7 @@ async function main() {
     clearInterval(maintenanceClaimTimer);
     clearInterval(agentPassTimer);
     if (calendarTimer) clearInterval(calendarTimer);
+    if (calendarMirrorTimer) clearInterval(calendarMirrorTimer);
     await Promise.allSettled([...activeRuns.values(), ...activeChatTurns.values(), ...activeMaintenanceJobs.values(), ...activeAgentPasses.values()]);
     clearInterval(heartbeatTimer);
     process.exit(0);

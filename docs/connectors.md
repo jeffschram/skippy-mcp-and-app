@@ -183,6 +183,35 @@ mini** in the runner's local config (chmod-600, same treatment as host
 tokens and Plaid credentials). Connector credentials (Google OAuth refresh
 token) likewise never touch Convex.
 
+### A connector's credentials are not only for its tools
+
+`google_write` is the worked example. Its slug exists so read access never
+implies write access, and its OAuth token is held for one purpose: creating
+calendar events through `apps/gcal-write-mcp`.
+
+Since 2026-09 the runner also uses that same token to *read* the calendar —
+an `events.list` mirror sync into Convex, so a staged event can warn the owner
+"this overlaps something you already have" instead of silently double-booking
+it (it double-booked jury duty and a JetBlue flight before the mirror existed).
+See `docs/google-source.md` → Duplicate warnings and the calendar mirror.
+
+Three properties are what make that acceptable rather than scope creep, and
+they are the bar for any future reuse of a connector's credentials:
+
+1. **No new consent.** The `calendar.events` scope already granted read. If a
+   reuse would require re-prompting the owner, it is a new connector decision.
+2. **No new tool surface.** `listEvents` is a library export; nothing in the
+   MCP server wraps it, so no harness gained a capability. The tool-list test
+   in `apps/gcal-write-mcp/src/mcp-server.test.ts` still pins `["create_event"]`.
+3. **Same gate.** The mirror runs only when `google_write` is in
+   `SKIPPY_RUNNER_CONNECTORS`, exactly like the executor. A host not trusted to
+   write the calendar does not get to read it either.
+
+Credentials still never reach Convex; the mini reads Google and pushes the
+result up over its host token (`calendar:hostUpsertCalendarEvents`). The
+token-authed `/calendar-sync` HTTP endpoint remains as an alternate pusher for
+callers holding an MCP token instead.
+
 ## Settings UI
 
 Two additions to the settings hub (alongside the existing "Agent hosts" tab):

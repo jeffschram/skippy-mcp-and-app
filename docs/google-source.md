@@ -14,6 +14,13 @@ else. It has its own OAuth scope, its own credential files, and its own
 connector slug (`google_write`) so read access never implies write access. See
 [Calendar writes](#calendar-writes-gcal-write) below.
 
+**The write connector's token also drives the calendar mirror.** Since 2026-09
+the runner uses those same credentials for a read-only, library-only
+`events.list` sync into Convex, so a proposal can warn "you already have this".
+The `calendar.events` scope already allowed the read; the MCP surface is still
+create-only. See
+[Duplicate warnings and the calendar mirror](#duplicate-warnings-and-the-calendar-mirror).
+
 ## Survey and shortlist
 
 Community MCP servers surveyed (2026-08). Hard requirements: `gmail.readonly` +
@@ -279,6 +286,60 @@ hop would only add a subprocess, a protocol, and a failure mode between it and
 an HTTP POST. Both paths share the same insert and auth code, so the two cannot
 drift.
 
+### Duplicate warnings and the calendar mirror
+
+The write path above is idempotent for Skippy's *own* proposals — the minted id
+turns a retry into a 409 — but it was blind to events the calendar already had.
+In 2026-09 that booked "Jury duty" a second time on Oct 27, and stacked
+"JetBlue 1023 — JFK → LAX" on top of the "Flight to Los Angeles (B6 1023)" Gmail
+had already created. Warning about a pre-existing event requires having read the
+calendar, and `calendarEvents` — the mirror table built for exactly that — had
+never been populated by anything.
+
+**The mirror sync.** `apps/runner/src/calendarMirrorSync.ts` walks the primary
+calendar into Convex, incrementally via a stored `syncToken`
+(`sourceSyncStatuses`, key `google_calendar:<calendarId>`). Google answers 410
+Gone when a token expires; the runner drops it and re-walks a bounded window
+(now − 30 days → now + 400 days) — upserts are keyed on
+`(sourceSystem, externalId)`, so re-seeing every event is a no-op, not a
+duplicate. `singleEvents` is pinned `true` and never varies, because changing it
+mid-token invalidates the token; `showDeleted` is what carries Google-side
+deletions in as cancelled tombstones.
+
+**Same token, no new consent.** The read uses the `gcal-write` credentials. The
+`calendar.events` scope granted read from day one — this is not a widening, and
+the owner is not re-prompted. It runs behind the **same `google_write` gate** as
+the executor: a host not trusted with the calendar should not be reading it
+either. Absent the slug the runner logs that the sync is disabled.
+
+**Library-only, so the MCP surface is unchanged.** `listEvents` is exported from
+`@skippy/gcal-write-mcp` as a *function*; no MCP tool wraps it, so no harness can
+reach it. `src/mcp-server.test.ts` still pins the tool list to exactly
+`["create_event"]`, and there is still no update, patch, or delete anywhere in
+the package.
+
+**What the mirror buys.** `draftCalendarEvent` range-queries the mirror
+(`by_brain_start`, from proposed start − 26h through proposed end, capped at 50
+rows) and returns structured `conflicts`. The warning is persisted on the
+pending action as `reviewWarning` — a new field, deliberately not folded into
+`body` (the executor parses it as JSON) or `approvalNotes` (which belongs to the
+owner) — and rendered in gold above the Approve button in `/review` → Actions.
+`propose_calendar_event` returns the same conflicts so a proposing agent can say
+so out loud.
+
+**Staleness is real, and admitted.** The sync runs once ~15s after runner
+startup and every 10 minutes thereafter, so an event added on the phone in the
+last ten minutes may not be mirrored yet. More importantly, `draftCalendarEvent`
+returns `mirrorStatus: "never_synced"` when no sync has ever completed for that
+calendar, and says so on the card instead of staying silent — an absent warning
+must never be read as "I checked and it's clear", which is exactly the false
+confidence the pre-mirror pipeline projected.
+
+**`/calendar-sync` remains.** The token-authed HTTP endpoint (`convex/http.ts`)
+is still an alternate pusher for anything holding an MCP token rather than a
+host token; both paths land in the same `upsertCalendarEvents` logic, so echo
+detection cannot drift between them.
+
 ### Setup (owner)
 
 1. In the Google Cloud project, add `.../auth/calendar.events` to the OAuth
@@ -322,6 +383,12 @@ endpoint is a new capability, not a refactor: it needs an owner decision and an
 update to this section. `pnpm connectors:check` verifies the build and
 credential modes but cannot tell you the tool surface grew — the test in
 `src/mcp-server.test.ts` is what does that.
+
+The 2026-09 `events.list` addition is the one exercise of that rule so far, and
+it was approved on three grounds: it is library-only (no MCP tool reaches it),
+`calendar.events` already granted read so no new consent was requested, and it
+added no mutation — insert is still the only write. A future read that fails any
+of those three is a different decision.
 
 ## Security posture
 

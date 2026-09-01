@@ -35,6 +35,7 @@ import {
   pendingActionSideClass,
   projectRowClass,
   projectRowSideClass,
+  reviewWarningClass,
   sectionClass,
   selectClass,
   settingsRowClass,
@@ -2056,6 +2057,11 @@ function PendingActionItem({
           <p className={itemTitleClass}>{action.subject ?? action.actionType}</p>
           <p className={itemMetaClass}>{primaryText}</p>
         </div>
+        {/* Rendered above the form on purpose: the point of the warning is to be
+            read BEFORE the Approve button, not discovered after the tap. */}
+        {typeof action.reviewWarning === "string" && action.reviewWarning ? (
+          <p className={reviewWarningClass}>{action.reviewWarning}</p>
+        ) : null}
         {reviewable ? (
           <div className={formGridClass}>
             <div className={splitListClass}>
