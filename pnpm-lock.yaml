@@ -31,6 +31,18 @@ importers:
         specifier: ^4.0.14
         version: 4.1.8(@types/node@24.13.0)(vite@8.0.16)
 
+  apps/gcal-write-mcp:
+    dependencies:
+      '@modelcontextprotocol/sdk':
+        specifier: ^1.29.0
+        version: 1.29.0(zod@4.4.3)
+      '@skippy/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
+
   apps/imessage-mcp:
     dependencies:
       '@modelcontextprotocol/sdk':
