@@ -208,6 +208,17 @@ Two additions to the settings hub (alongside the existing "Agent hosts" tab):
    interim scheduler prompts. `/ingest` remains supported as an endpoint but
    has no scheduled caller.
 
+## Host-side reproducibility
+
+The Convex `connectors` table is *inventory*; it says a connector exists and
+which host offers it, not how to rebuild that host. The rebuild path lives in
+`scripts/connectors.json` — a pinned manifest of each locally registered MCP
+server (upstream repo + audited commit for third-party clones, workspace path
+for ones we wrote) — plus `scripts/setup-connectors.mjs` to install, register,
+and drift-check against it. Added 2026-08-31 after the Google connectors were
+stood up by hand: the audited clones live outside the repo, so without a pin a
+dead mini meant an unreproducible agenda pipeline.
+
 ## Non-goals
 
 - **No credential storage in Convex.** Inventory and state only.
