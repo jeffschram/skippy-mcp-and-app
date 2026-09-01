@@ -9,6 +9,10 @@
     "Credentials are never described here beyond their expected path and mode.",
     "OAuth consent is owner-only and is never automated by setup-connectors.mjs.",
     "",
+    "Every connector is readOnly except gcal-write, which can create calendar",
+    "events and nothing else. Adding another readOnly:false entry, or widening",
+    "an existing one, needs an audit note in docs/ and owner sign-off.",
+    "",
     "Not listed: plaid (docs/plaid-financial-source.md) — audited on a previous",
     "machine, never installed on this mini and not registered. Add an entry here",
     "when it is stood up, with a pinned commit."
@@ -65,6 +69,34 @@
       "credentialFiles": [
         { "path": "~/.config/gcal-readonly-mcp/credentials.json", "mode": "600" },
         { "path": "~/.config/gcal-readonly-mcp/config.json", "mode": "600" }
+      ]
+    },
+    {
+      "slug": "gcal-write",
+      "connectorSlug": "google_write",
+      "mcpServerName": "gcal-write",
+      "readOnly": false,
+      "docs": "docs/google-source.md",
+      "source": {
+        "kind": "workspace",
+        "installPath": "apps/gcal-write-mcp"
+      },
+      "build": {
+        "runtime": "node",
+        "steps": ["pnpm --filter @skippy/gcal-write-mcp build"],
+        "artifact": "dist/stdio.js"
+      },
+      "register": {
+        "command": "node",
+        "args": ["{{installDir}}/dist/stdio.js"]
+      },
+      "credentialFiles": [
+        { "path": "~/.config/gcal-write-mcp/credentials.json", "mode": "600" },
+        { "path": "~/.config/gcal-write-mcp/token.json", "mode": "600" }
+      ],
+      "hostRequirements": [
+        "Owner-only one-time consent: node apps/gcal-write-mcp/dist/stdio.js --authorize (scope: calendar.events)",
+        "Advertised as connector \"google_write\", separate from read-only \"google\" — a host offering reads must not implicitly grant writes"
       ]
     },
     {
