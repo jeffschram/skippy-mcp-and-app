@@ -7,7 +7,7 @@
  * occurrences.
  */
 
-import { zonedParts, zonedTimestamp } from "./recurrence";
+import { zonedParts, zonedTimestamp } from "./recurrence.js";
 
 export const DEFAULT_AGENT_SCHEDULE_TIME_ZONE = "UTC";
 
