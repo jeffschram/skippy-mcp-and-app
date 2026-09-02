@@ -27,7 +27,7 @@ import { requireOwnedBrain } from "./auth";
 import { requireHost } from "./agentWorkbench";
 import { tokenUsage } from "./schema";
 import { chatHistoryWindow, shouldRefreshHistorySummary } from "./chatHistoryHelpers";
-import { CHAT_LEASE_MS, isChatTurnLeaseExpired } from "./chatLeaseHelpers";
+import { CHAT_LEASE_MS, chatTurnLeaseExpiresAt, isChatTurnLeaseExpired } from "./chatLeaseHelpers";
 
 const MAX_MESSAGE_CHARS = 8000;
 /** Max files attachable to a single chat message. */
@@ -127,9 +127,16 @@ async function expireStaleChatTurns(ctx: any, brainInstanceId: any, now: number)
   ).flat();
 
   let expired = 0;
+  /** Which host stranded the turn, and how long its lease had been dead. */
+  const stranded: Array<{ turnId: string; hostId: string | null; lapsedMs: number }> = [];
   for (const turn of activeTurns) {
     if (!isChatTurnLeaseExpired(turn, now, CHAT_LEASE_MS)) continue;
     expired += 1;
+    stranded.push({
+      turnId: String(turn._id),
+      hostId: turn.hostId ? String(turn.hostId) : null,
+      lapsedMs: now - chatTurnLeaseExpiresAt(turn, CHAT_LEASE_MS),
+    });
 
     const errorMessage = "The runner connection was interrupted before this reply completed. Please try again.";
     const assistantMessage = await ctx.db.get(turn.assistantMessageId);
@@ -160,6 +167,15 @@ async function expireStaleChatTurns(ctx: any, brainInstanceId: any, now: number)
         await ctx.db.patch(approval._id, { status: "expired", updatedAt: now });
       }
     }
+  }
+  // Failing a turn is user-visible (the chat shows an error) but otherwise
+  // silent, so a dead host looked identical to a slow one during the
+  // 2026-09-02 incident. Log only when something was actually expired —
+  // `lapsedMs` well past CHAT_LEASE_MS means the host died rather than lagged.
+  if (expired > 0) {
+    console.warn(
+      `expired ${expired} stale chat turn(s): ${JSON.stringify(stranded)}`,
+    );
   }
   return expired;
 }
