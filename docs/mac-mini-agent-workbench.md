@@ -473,7 +473,7 @@ Approvals, cancellation, interruption, and user follow-up messages are written t
 - After creating a worktree, the runner runs `corepack pnpm install` (frozen lockfile when one exists) with the worktree as cwd before the harness session starts, emitting `provisioning` / `worktree_ready` status events. A provisioning failure degrades gracefully (the run continues against a bare worktree); it never fails the run.
 - On startup the runner extends its own process PATH with node's bin directory and a corepack shim directory (`~/.skippy-runner/corepack-shims`, materialized via `corepack enable`), so plain `pnpm` resolves in harness sessions without plist edits or PATH improvisation.
 - Task briefs can therefore just say `pnpm typecheck` / `pnpm --filter web test` — both allowlisted — instead of bootstrap incantations like `npx --yes pnpm@…` or `corepack pnpm …`.
-- After merging runner changes, rebuild and restart: `pnpm --filter @skippy/runner build`, then `launchctl kickstart -k gui/$(id -u)/com.skippy.runner`.
+- After merging runner changes, rebuild and restart: `pnpm --filter @skippy/runner build`, then `apps/runner/scripts/restart-runner.sh` (see "Restarting the runner" below). From a terminal `launchctl kickstart -k gui/$(id -u)/com.skippy.runner` is equivalent; from a chat turn or agent pass it is not.
 
 ### Publishing
 
@@ -555,6 +555,25 @@ No effect on execution. Convex remains the source of UI state, and the user can 
 ### Runner restart
 
 On startup, the runner lists its claimed, preparing, running, and waiting runs. It inspects the worktree and harness session, resumes when safe, or marks the run interrupted with a clear recovery action.
+
+### Restarting the runner (2026-09-02)
+
+Use `apps/runner/scripts/restart-runner.sh`. It is the only restart path safe to invoke from a chat turn or agent pass, because a harness session is a **child of the runner** — restarting naively kills the caller.
+
+What went wrong three times in one hour on 2026-09-02: a chat turn deployed Convex, then ran `launchctl bootout … ; sleep 2 ; launchctl bootstrap …` to pick up the new build.
+
+- `bootout` SIGTERMs the runner, which drains in-flight work before exiting — and the work it drains is the chat turn issuing the command. Neither side can finish.
+- launchd tears down the job's whole process group, killing the harness mid-`Bash`. The turn never reports a result, so its lease is stranded (see the cron sweep in `convex/crons.ts`).
+- `bootout` also *unloads* the job, and the `bootstrap` two seconds later fails against a still-draining process. `KeepAlive` cannot help an unloaded job — it stays dead until a human runs `launchctl bootstrap` from a terminal. One occurrence went unnoticed for 16 minutes.
+
+Rules the script encodes:
+
+- **Never `bootout`** to restart. `launchctl kickstart -k` keeps the job loaded and lets launchd own the relaunch. Reserve `bootout` for genuinely uninstalling.
+- **Detach the restart** (`spawn(..., { detached: true })` → `setsid`) so it survives the caller's process group being torn down.
+- **Return immediately.** The caller cannot wait for its own host to come back; blocking is what stranded the turns. Outcome is appended to `~/Library/Logs/skippy-runner-restart.log`.
+- **Delay the kill** (default 15s, `--delay`) so the requesting turn finishes and releases its lease before SIGTERM lands.
+
+`--wait` blocks until healthy, for terminal use only. From a terminal, plain `launchctl kickstart -k` remains fine.
 
 ### Mac offline
 
