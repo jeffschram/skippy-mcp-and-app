@@ -300,3 +300,185 @@ export function planCalendarEventWrite(
     },
   };
 }
+
+/* ------------------------------------------------------------------ */
+/* Duplicate / overlap detection                                       */
+/*                                                                     */
+/* Added 2026-09 after Skippy staged "Jury duty" on a day that already  */
+/* had a Google-side "Jury duty", and a hand-built JetBlue flight on    */
+/* top of Gmail's auto-created "Flight to Los Angeles (B6 1023)". The   */
+/* 409/minted-id guard cannot see either: it only stops the SAME        */
+/* proposal from executing twice. Catching a pre-existing Google event  */
+/* needs the mirror, and the comparison itself lives here so it is      */
+/* testable without a database.                                        */
+/*                                                                     */
+/* This warns; it never blocks. Double-booking is sometimes exactly     */
+/* what the owner wants (a flight and a reminder about the flight), so  */
+/* the decision stays with the human at /review.                       */
+/* ------------------------------------------------------------------ */
+
+/** How many conflicts are named before the warning switches to "and N more". */
+export const CALENDAR_CONFLICT_NAME_LIMIT = 3;
+
+/**
+ * Display fallback when a proposal carries no timeZone. Matches the owner zone
+ * in convex/agentConfigs.ts; duplicated rather than imported because this
+ * module is pure and must not depend on Convex.
+ */
+export const DEFAULT_CALENDAR_TIME_ZONE = "America/New_York";
+
+/** A mirror row, loosely typed so a Convex doc can be passed straight in. */
+export type CalendarOverlapCandidate = {
+  externalId?: string | undefined;
+  title?: string | undefined;
+  startAt: number;
+  endAt: number;
+  isAllDay?: boolean | undefined;
+  status?: string | undefined;
+  origin?: string | undefined;
+};
+
+export type CalendarOverlap = {
+  externalId?: string | undefined;
+  title: string;
+  startAt: number;
+  endAt: number;
+  isAllDay: boolean;
+  origin?: string | undefined;
+};
+
+/**
+ * Half-open interval end. A zero-length event (endAt === startAt, which
+ * normalizeGoogleEvent produces for a tombstone or a malformed end) would never
+ * overlap anything under strict inequality, so it is widened by a millisecond
+ * — an instant on the calendar is still something worth warning about.
+ */
+function effectiveEnd(startAt: number, endAt: number): number {
+  return endAt > startAt ? endAt : startAt + 1;
+}
+
+/**
+ * Returns the mirrored events that overlap a proposed time range.
+ *
+ * Half-open comparison (`end > proposedStart && start < proposedEnd`) so
+ * back-to-back events do not read as conflicts: a 2–3pm meeting followed by a
+ * 3–4pm one is a normal day, not a double booking.
+ *
+ * Matching is purely temporal — no title similarity. Both live misfires were
+ * near-duplicates with *different* titles ("JetBlue 1023 — JFK → LAX" vs
+ * "Flight to Los Angeles (B6 1023)"), so a title comparison would have caught
+ * neither, and it would collapse legitimately distinct events that happen to
+ * share a name.
+ */
+export function findOverlappingEvents(
+  candidates: readonly CalendarOverlapCandidate[],
+  proposed: { startAt: number; endAt: number; excludeExternalId?: string | undefined },
+): CalendarOverlap[] {
+  const proposedStart = proposed.startAt;
+  const proposedEnd = effectiveEnd(proposed.startAt, proposed.endAt);
+
+  const overlaps: CalendarOverlap[] = [];
+  for (const candidate of candidates) {
+    if (!candidate || typeof candidate.startAt !== "number" || typeof candidate.endAt !== "number") continue;
+    // A cancelled row is a tombstone Google sent so the mirror could forget the
+    // event; warning about it would be warning about nothing.
+    if (candidate.status === "cancelled") continue;
+    // The proposal writes its own mirror row before this check runs, so it
+    // would otherwise conflict with itself.
+    if (proposed.excludeExternalId && candidate.externalId === proposed.excludeExternalId) continue;
+
+    const end = effectiveEnd(candidate.startAt, candidate.endAt);
+    if (end <= proposedStart) continue;
+    if (candidate.startAt >= proposedEnd) continue;
+
+    overlaps.push({
+      externalId: candidate.externalId,
+      title: candidate.title?.trim() ? candidate.title.trim() : "(no title)",
+      startAt: candidate.startAt,
+      endAt: candidate.endAt,
+      isAllDay: candidate.isAllDay === true,
+      origin: candidate.origin,
+    });
+  }
+
+  overlaps.sort((a, b) => a.startAt - b.startAt || a.title.localeCompare(b.title));
+  return overlaps;
+}
+
+/**
+ * Formats a wall-clock label like "Jul 31, 4:16 PM".
+ *
+ * Assembled from formatToParts rather than a preset skeleton because ICU 72
+ * changed en-US medium date-time output to "Jul 31 at 4:16 PM"; building the
+ * string ourselves keeps it stable across Node/Convex ICU versions.
+ */
+export function formatCalendarConflictTime(
+  at: number,
+  options: { timeZone?: string | undefined; isAllDay?: boolean | undefined } = {},
+): string {
+  const timeZone = options.timeZone?.trim() || DEFAULT_CALENDAR_TIME_ZONE;
+  // All-day events are anchored at UTC midnight and are floating, so rendering
+  // them in a local zone would shift them to the previous evening.
+  const zone = options.isAllDay ? "UTC" : timeZone;
+
+  let formatter: Intl.DateTimeFormat;
+  try {
+    formatter = new Intl.DateTimeFormat("en-US", {
+      timeZone: zone,
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    });
+  } catch {
+    // An unknown IANA zone (a bad timeZone on a proposal) must not blow up a
+    // staging mutation; fall back rather than throw.
+    formatter = new Intl.DateTimeFormat("en-US", {
+      timeZone: "UTC",
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    });
+  }
+
+  const parts: Record<string, string> = {};
+  for (const part of formatter.formatToParts(new Date(at))) {
+    if (part.type !== "literal") parts[part.type] = part.value;
+  }
+
+  const date = `${parts["month"] ?? ""} ${parts["day"] ?? ""}`.trim();
+  if (options.isAllDay) return `${date}, all day`;
+  return `${date}, ${parts["hour"] ?? ""}:${parts["minute"] ?? ""} ${parts["dayPeriod"] ?? ""}`.trim();
+}
+
+/**
+ * Renders the human-facing warning stored on the pending action.
+ *
+ * Returns undefined for no conflicts so callers never persist an empty string —
+ * and, more importantly, so "no warning" is only ever written by a caller that
+ * actually checked. Absence must not be manufactured here.
+ */
+export function formatCalendarConflictWarning(
+  conflicts: readonly CalendarOverlap[],
+  options: { timeZone?: string | undefined; nameLimit?: number | undefined } = {},
+): string | undefined {
+  if (!conflicts.length) return undefined;
+
+  const limit = options.nameLimit ?? CALENDAR_CONFLICT_NAME_LIMIT;
+  const named = conflicts.slice(0, Math.max(limit, 1));
+  const rendered = named.map((conflict) => {
+    const when = formatCalendarConflictTime(conflict.startAt, {
+      timeZone: options.timeZone,
+      isAllDay: conflict.isAllDay,
+    });
+    return `"${conflict.title}" (${when})`;
+  });
+
+  const noun = conflicts.length === 1 ? "event" : "events";
+  const remainder = conflicts.length - named.length;
+  const tail = remainder > 0 ? ` and ${remainder} more` : "";
+  return `Overlaps ${conflicts.length} existing ${noun}: ${rendered.join(", ")}${tail}.`;
+}

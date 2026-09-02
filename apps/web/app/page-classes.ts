@@ -72,6 +72,13 @@ export const checkboxFieldClass =
   "inline-flex min-h-10 items-center gap-2 font-bold text-foreground [&_input]:size-4 [&_input]:accent-primary";
 export const checkboxFieldBottomClass = "self-end";
 export const errorTextClass = "m-0 text-[13px] font-bold text-red";
+/**
+ * Machine-authored caution on a review card (`pendingActions.reviewWarning`).
+ * Gold, not red: it is a "look at this before you approve", not a failure —
+ * the action is still perfectly approvable once the owner has read it.
+ */
+export const reviewWarningClass =
+  "m-0 rounded-lg border border-gold/40 bg-gold/10 px-2.5 py-2 text-[13px] font-bold text-gold";
 
 /* ---- misc ---- */
 export const toolbarClass = "flex flex-wrap gap-2";

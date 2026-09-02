@@ -1216,6 +1216,22 @@ export function createSkippyToolHandlers(
         relatedEntityRefs: input.relatedEntityRefs,
       })) as Record<string, unknown>;
 
+      // `staged` already carries `conflicts` / `mirrorStatus` from Convex, but
+      // a model reads the prose, not the array. Duplicate warnings existed as
+      // structured data on the pending action and still got announced as "done"
+      // — so the note says it out loud (2026-09: Jury duty, JetBlue 1023).
+      const conflicts = Array.isArray(staged.conflicts) ? staged.conflicts : [];
+      const conflictNote =
+        conflicts.length > 0
+          ? ` WARNING: this overlaps ${conflicts.length} event(s) already on the calendar` +
+            ` (${conflicts
+              .slice(0, 3)
+              .map((c) => `"${(c as { title?: string }).title ?? "untitled"}"`)
+              .join(", ")}). Tell the owner before claiming it is scheduled.`
+          : staged.mirrorStatus === "never_synced"
+            ? " Skippy has not mirrored this Google calendar yet, so this was NOT checked against existing events — do not claim it is conflict-free."
+            : "";
+
       return {
         ...staged,
         awaitingApproval: requireApproval,
@@ -1223,9 +1239,10 @@ export function createSkippyToolHandlers(
         // the agent reports "queued for Jeff" instead of claiming it created
         // an event that is actually still sitting in /review.
         approvalForced: requireApproval && input.autoApprove === true && !ownerScoped,
-        note: requireApproval
-          ? "Staged for approval. It appears in /review → Actions; the runner creates it in Google within seconds of approval."
-          : "Approved on creation. The runner creates it in Google within seconds.",
+        note:
+          (requireApproval
+            ? "Staged for approval. It appears in /review → Actions; the runner creates it in Google within seconds of approval."
+            : "Approved on creation. The runner creates it in Google within seconds.") + conflictNote,
       };
     },
 

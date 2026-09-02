@@ -817,6 +817,12 @@ export default defineSchema({
     approvedBy: v.optional(v.id("users")),
     approvedAt: v.optional(v.number()),
     approvalNotes: v.optional(v.string()),
+    // Machine-authored caution rendered on the review card — today, "this event
+    // overlaps something already on your calendar". Deliberately NOT folded
+    // into `approvalNotes` (which belongs to the owner) or `body` (which the
+    // executor parses as JSON): a warning that rewrites the payload or
+    // clobbers the owner's own note is a bug waiting to happen.
+    reviewWarning: v.optional(v.string()),
     executionProvider: v.optional(v.string()),
     externalMessageId: v.optional(v.string()),
     executedAt: v.optional(v.number()),

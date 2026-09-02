@@ -1895,7 +1895,7 @@ export function createMcpServer(
     {
       title: "Propose a Google Calendar event",
       description:
-        "Stage an event for the owner's Google Calendar. Nothing reaches Google here: it lands in /review → Actions, and the runner creates it within seconds of approval. Agent roles always require approval — autoApprove is honored only for the owner.",
+        "Stage an event for the owner's Google Calendar. Nothing reaches Google here: it lands in /review → Actions, and the runner creates it within seconds of approval. Agent roles always require approval — autoApprove is honored only for the owner. The result reports `conflicts` with events already on the calendar; relay them instead of claiming the time is free.",
       annotations: {
         readOnlyHint: false,
         // Staging only adds; approval and execution are separate steps.

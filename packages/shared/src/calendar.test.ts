@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   CALENDAR_DESCRIPTION_LIMIT,
+  findOverlappingEvents,
+  formatCalendarConflictWarning,
   CALENDAR_MAX_ATTENDEES,
   GOOGLE_EVENT_ID_ALPHABET,
   SKIPPY_EVENT_ID_PREFIX,
@@ -280,5 +282,150 @@ describe("planCalendarEventWrite", () => {
     // Each resolves against its own row, so neither collapses into the other.
     expect(planCalendarEventWrite(null, first, NOW).action).toBe("insert");
     expect(planCalendarEventWrite(null, second, NOW).action).toBe("insert");
+  });
+});
+
+describe("findOverlappingEvents", () => {
+  const LA_FLIGHT = {
+    externalId: "gmail_flight",
+    title: "Flight to Los Angeles (B6 1023)",
+    startAt: Date.UTC(2026, 6, 31, 20, 16),
+    endAt: Date.UTC(2026, 6, 31, 23, 45),
+    status: "confirmed",
+    origin: "google",
+  };
+
+  it("finds an event covering the proposed range", () => {
+    // The live misfire: a hand-built "JetBlue 1023 — JFK → LAX" staged on top
+    // of Gmail's auto-created flight event.
+    const conflicts = findOverlappingEvents([LA_FLIGHT], {
+      startAt: Date.UTC(2026, 6, 31, 20, 16),
+      endAt: Date.UTC(2026, 6, 31, 23, 45),
+    });
+    expect(conflicts).toHaveLength(1);
+    expect(conflicts[0]?.title).toBe("Flight to Los Angeles (B6 1023)");
+  });
+
+  it("ignores back-to-back events", () => {
+    // Half-open: a 2-3pm meeting followed by a 3-4pm one is a normal day.
+    expect(
+      findOverlappingEvents([LA_FLIGHT], {
+        startAt: LA_FLIGHT.endAt,
+        endAt: LA_FLIGHT.endAt + 3_600_000,
+      }),
+    ).toEqual([]);
+    expect(
+      findOverlappingEvents([LA_FLIGHT], {
+        startAt: LA_FLIGHT.startAt - 3_600_000,
+        endAt: LA_FLIGHT.startAt,
+      }),
+    ).toEqual([]);
+  });
+
+  it("ignores cancelled tombstones", () => {
+    expect(
+      findOverlappingEvents([{ ...LA_FLIGHT, status: "cancelled" }], {
+        startAt: LA_FLIGHT.startAt,
+        endAt: LA_FLIGHT.endAt,
+      }),
+    ).toEqual([]);
+  });
+
+  it("excludes the row the proposal just wrote for itself", () => {
+    // draftCalendarEvent inserts its mirror row before checking, so without
+    // this the proposal always conflicts with itself.
+    expect(
+      findOverlappingEvents([LA_FLIGHT], {
+        startAt: LA_FLIGHT.startAt,
+        endAt: LA_FLIGHT.endAt,
+        excludeExternalId: "gmail_flight",
+      }),
+    ).toEqual([]);
+  });
+
+  it("matches a zero-length event that sits inside the range", () => {
+    const point = { ...LA_FLIGHT, endAt: LA_FLIGHT.startAt };
+    expect(
+      findOverlappingEvents([point], {
+        startAt: LA_FLIGHT.startAt - 60_000,
+        endAt: LA_FLIGHT.startAt + 60_000,
+      }),
+    ).toHaveLength(1);
+  });
+
+  it("returns conflicts oldest first", () => {
+    const later = { ...LA_FLIGHT, externalId: "b", title: "B", startAt: LA_FLIGHT.startAt + 60_000 };
+    const conflicts = findOverlappingEvents([later, LA_FLIGHT], {
+      startAt: LA_FLIGHT.startAt,
+      endAt: LA_FLIGHT.endAt,
+    });
+    expect(conflicts.map((c) => c.externalId)).toEqual(["gmail_flight", "b"]);
+  });
+
+  it("skips rows with unusable times instead of throwing", () => {
+    const conflicts = findOverlappingEvents(
+      [{ externalId: "junk", title: "Junk" } as never, LA_FLIGHT],
+      { startAt: LA_FLIGHT.startAt, endAt: LA_FLIGHT.endAt },
+    );
+    expect(conflicts.map((c) => c.externalId)).toEqual(["gmail_flight"]);
+  });
+});
+
+describe("formatCalendarConflictWarning", () => {
+  const conflict = (title: string, startAt: number, isAllDay = false) => ({
+    title,
+    startAt,
+    endAt: startAt + 3_600_000,
+    isAllDay,
+  });
+
+  it("returns undefined when nothing overlaps", () => {
+    // Callers must never persist an empty warning — and "no warning" has to
+    // come from an actual check, not from this formatter inventing one.
+    expect(formatCalendarConflictWarning([])).toBeUndefined();
+  });
+
+  it("names a single conflict with its local time", () => {
+    expect(
+      formatCalendarConflictWarning(
+        [conflict("Flight to Los Angeles (B6 1023)", Date.UTC(2026, 6, 31, 20, 16))],
+        { timeZone: "America/New_York" },
+      ),
+    ).toBe('Overlaps 1 existing event: "Flight to Los Angeles (B6 1023)" (Jul 31, 4:16 PM).');
+  });
+
+  it("renders all-day conflicts by day, not by a shifted local instant", () => {
+    // All-day rows are anchored at UTC midnight and are floating; rendering
+    // them in America/New_York would report the previous evening.
+    expect(
+      formatCalendarConflictWarning([conflict("Jury duty", Date.UTC(2026, 9, 27), true)], {
+        timeZone: "America/New_York",
+      }),
+    ).toBe('Overlaps 1 existing event: "Jury duty" (Oct 27, all day).');
+  });
+
+  it("caps the names and counts the rest", () => {
+    const base = Date.UTC(2026, 6, 31, 20, 0);
+    const warning = formatCalendarConflictWarning(
+      [
+        conflict("A", base),
+        conflict("B", base + 60_000),
+        conflict("C", base + 120_000),
+        conflict("D", base + 180_000),
+        conflict("E", base + 240_000),
+      ],
+      { timeZone: "UTC" },
+    );
+    expect(warning).toContain("Overlaps 5 existing events:");
+    expect(warning).toContain("and 2 more.");
+    expect(warning).not.toContain('"D"');
+  });
+
+  it("falls back rather than throwing on an unusable time zone", () => {
+    expect(
+      formatCalendarConflictWarning([conflict("X", Date.UTC(2026, 6, 31, 20, 16))], {
+        timeZone: "Not/AZone",
+      }),
+    ).toContain('"X"');
   });
 });

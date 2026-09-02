@@ -327,6 +327,44 @@ export class ControlPlane {
     return this.client.mutation(calendarFns.recordCalendarActionResult, payload);
   }
 
+  /* ---- Calendar mirror sync (Google -> Convex, read-only) ---- */
+
+  getCalendarSyncToken(calendarId: string): Promise<{ syncToken: string | null }> {
+    return this.client.query(calendarFns.hostCalendarSyncToken, {
+      hostToken: this.hostToken,
+      calendarId,
+    });
+  }
+
+  upsertCalendarEvents(
+    calendarId: string,
+    events: unknown[],
+  ): Promise<{ inserted: number; updated: number; echoes: number; cancelled: number; skipped: number }> {
+    return this.client.mutation(calendarFns.hostUpsertCalendarEvents, {
+      hostToken: this.hostToken,
+      calendarId,
+      events,
+    });
+  }
+
+  recordCalendarSyncToken(
+    calendarId: string,
+    syncToken: string | null,
+    meta?: { status?: "completed" | "failed"; message?: string; errors?: string[] },
+  ): Promise<{ statusKey: string; updated: boolean }> {
+    const payload: Record<string, unknown> = {
+      hostToken: this.hostToken,
+      calendarId,
+      // null is meaningful here (it clears an expired token), so unlike the
+      // optional fields below it is always sent.
+      syncToken,
+    };
+    if (meta?.status !== undefined) payload.status = meta.status;
+    if (meta?.message !== undefined) payload.message = meta.message;
+    if (meta?.errors !== undefined) payload.errors = meta.errors;
+    return this.client.mutation(calendarFns.hostRecordCalendarSyncToken, payload);
+  }
+
   updateMaintenanceJob(
     jobId: string,
     claimToken: string,

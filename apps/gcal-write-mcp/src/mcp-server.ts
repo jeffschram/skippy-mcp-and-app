@@ -1,10 +1,21 @@
 // Write-capable Google Calendar MCP server (docs/google-source.md).
 //
-// ONE tool: create_event. There is no list, update, patch, or delete anywhere
-// in this package — reads stay with the audited read-only `gcal` server, so a
-// compromised or confused agent holding this connector can add an event and
-// nothing else. Keep it that way; adding a second tool changes the risk profile
-// of the whole host and needs owner sign-off.
+// ONE tool: create_event. There is no update, patch, or delete anywhere in this
+// package, and the MCP surface exposes no read either — so a compromised or
+// confused agent holding this connector can add an event and nothing else. Keep
+// it that way; adding a second tool changes the risk profile of the whole host
+// and needs owner sign-off. `src/mcp-server.test.ts` pins the tool list to
+// exactly ["create_event"].
+//
+// 2026-09 amendment — the LIBRARY (not this MCP surface) gained a read.
+// `listEvents` in google.ts exists so the runner can mirror the owner's Google
+// calendar into Convex (apps/runner/src/calendarMirrorSync.ts); without a
+// mirror, a staged proposal cannot tell the owner "you already have this",
+// which is how Skippy double-booked jury duty and a JetBlue flight. Three
+// things keep the risk profile unchanged: no MCP tool wraps it, so harnesses
+// cannot reach it; the `calendar.events` scope already granted read, so no new
+// consent was requested; and it is still create-only for mutations — no update,
+// patch, or delete was added.
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
