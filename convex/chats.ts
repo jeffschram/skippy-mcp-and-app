@@ -15,15 +15,20 @@
  * A chat is bound to ONE harness for its lifetime (conversation context lives
  * in the harness's own thread/session).
  */
-import { makeFunctionReference, mutationGeneric, queryGeneric } from "convex/server";
+import {
+  internalMutationGeneric,
+  makeFunctionReference,
+  mutationGeneric,
+  queryGeneric,
+} from "convex/server";
 import { v } from "convex/values";
 import { effectiveProjectPaths, validateProjectFileInput } from "@skippy/shared";
 import { requireOwnedBrain } from "./auth";
 import { requireHost } from "./agentWorkbench";
 import { tokenUsage } from "./schema";
 import { chatHistoryWindow, shouldRefreshHistorySummary } from "./chatHistoryHelpers";
+import { CHAT_LEASE_MS, isChatTurnLeaseExpired } from "./chatLeaseHelpers";
 
-const CHAT_LEASE_MS = 150_000;
 const MAX_MESSAGE_CHARS = 8000;
 /** Max files attachable to a single chat message. */
 const MAX_MESSAGE_ATTACHMENTS = 8;
@@ -121,9 +126,10 @@ async function expireStaleChatTurns(ctx: any, brainInstanceId: any, now: number)
     )
   ).flat();
 
+  let expired = 0;
   for (const turn of activeTurns) {
-    const leaseExpiresAt = turn.leaseExpiresAt ?? turn.updatedAt + CHAT_LEASE_MS;
-    if (leaseExpiresAt > now) continue;
+    if (!isChatTurnLeaseExpired(turn, now, CHAT_LEASE_MS)) continue;
+    expired += 1;
 
     const errorMessage = "The runner connection was interrupted before this reply completed. Please try again.";
     const assistantMessage = await ctx.db.get(turn.assistantMessageId);
@@ -155,7 +161,32 @@ async function expireStaleChatTurns(ctx: any, brainInstanceId: any, now: number)
       }
     }
   }
+  return expired;
 }
+
+/**
+ * Cron entry point (convex/crons.ts) — sweep every brain, not just the one a
+ * host is polling for.
+ *
+ * Incident 2026-09-02: expireStaleChatTurns only ran inside claimNextChatTurn,
+ * so the sweep required a live runner. When a chat turn restarted the runner
+ * that owned it, the turn died with its host and nothing was left to expire it:
+ * the chat panel spun indefinitely and the turn held a claimed lease for as
+ * long as the runner stayed down (16+ minutes, three times over). Expiry must
+ * not depend on the thing that failed.
+ */
+export const sweepStaleChatTurns = internalMutationGeneric({
+  args: {},
+  handler: async (ctx) => {
+    const now = Date.now();
+    const brains = await ctx.db.query("brainInstances").collect();
+    let expired = 0;
+    for (const brain of brains) {
+      expired += await expireStaleChatTurns(ctx, brain._id, now);
+    }
+    return { brains: brains.length, expired };
+  },
+});
 
 /* ------------------------------------------------------------------ */
 /* Viewer surface                                                     */
