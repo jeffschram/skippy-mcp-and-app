@@ -186,6 +186,21 @@ export class ControlPlane {
     return this.client.mutation(agentFns.claimNextAgentPass, { hostToken: this.hostToken });
   }
 
+  /**
+   * Last COMPLETED ingestion run for a role — the read cursor for incremental
+   * source ingestion (2026-09-03: without it every hourly agenda pass re-read
+   * the same Gmail/iMessage content and re-proposed the same calendar events).
+   * Failed runs never advance the cursor.
+   */
+  lastCompletedIngestionRun(
+    roleKey: string,
+  ): Promise<{ completedAt: number; startedAt: number } | null> {
+    return this.client.query(agentFns.hostLastCompletedIngestionRun, {
+      hostToken: this.hostToken,
+      roleKey,
+    });
+  }
+
   completeAgentPass(
     configId: string,
     claimToken: string,

@@ -11,6 +11,7 @@
 import type { RunnerConfig } from "./config.js";
 import type { ClaimedAgentPass, ControlPlane } from "./controlPlane.js";
 import type { HarnessAdapter } from "./harness/types.js";
+import { buildIngestionCursorBlock, resolveIngestionCursor } from "./ingestionCursor-helpers.js";
 
 /**
  * Hard ceiling per pass. Agenda runs hourly; a pass still going after this is
@@ -37,6 +38,7 @@ export function resolveAgentRoleToken(
  * pass fetches the skill bodies itself so behavior stays versioned in Convex. */
 export function buildAgentPassPrompt(
   pass: Pick<ClaimedAgentPass, "roleKey" | "displayName" | "skillSlugs" | "connectorSlugs">,
+  ingestionCursorBlock?: string,
 ): string {
   const lines = [
     `You are "${pass.displayName}" (role ${pass.roleKey}), running one scheduled, unattended Skippy agent pass.`,
@@ -49,6 +51,12 @@ export function buildAgentPassPrompt(
     lines.push(
       `Local source connectors on this host — these define the sources in scope: ${pass.connectorSlugs.join(", ")}. Read all of them when your skill calls for source ingestion.`,
     );
+    if (ingestionCursorBlock) {
+      // 2026-09-03: same pinned-by-the-host philosophy as the scope line above,
+      // but for TIME — without it every pass re-read the same messages and the
+      // approval queue collected 24 duplicate calendar proposals.
+      lines.push(ingestionCursorBlock);
+    }
   }
   if (pass.roleKey.startsWith("pm:")) {
     lines.push(`This pass manages project ${pass.roleKey.slice("pm:".length)}.`);
@@ -76,8 +84,27 @@ export async function executeAgentPass(
         `[skippy-runner] agent pass ${pass.roleKey}: no scoped token configured — using full MCP token`,
       );
     }
+    let ingestionCursorBlock: string | undefined;
+    if (pass.connectorSlugs.length > 0) {
+      // Only source-ingesting passes (those with pinned connectors) get a read
+      // cursor. A fetch failure degrades to the capped 48h window instead of
+      // failing the pass — conservative and bounded beats skipping the run.
+      const now = Date.now();
+      let lastCompletedAt: number | null = null;
+      try {
+        const run = await plane.lastCompletedIngestionRun(pass.roleKey);
+        lastCompletedAt = run?.completedAt ?? null;
+      } catch (error: unknown) {
+        console.log(
+          `[skippy-runner] agent pass ${pass.roleKey}: ingestion cursor fetch failed (${
+            error instanceof Error ? error.message : String(error)
+          }) — falling back to 48h window`,
+        );
+      }
+      ingestionCursorBlock = buildIngestionCursorBlock(resolveIngestionCursor(lastCompletedAt, now));
+    }
     const result = await adapter.runTurn({
-      prompt: buildAgentPassPrompt(pass),
+      prompt: buildAgentPassPrompt(pass, ingestionCursorBlock),
       worktreePath: config.allowedRoot,
       // Budget knobs (docs/token-efficiency.md §4): the agent's configured
       // model and role-scoped token; absent model = harness default.

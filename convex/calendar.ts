@@ -4,13 +4,20 @@ import {
   GOOGLE_CALENDAR_SOURCE_SYSTEM,
   findOverlappingEvents,
   formatCalendarConflictWarning,
+  formatStagedProposalWarning,
   isValidGoogleEventId,
   mintGoogleEventId,
   normalizeGoogleEvent,
+  partitionCalendarOverlaps,
   planCalendarEventWrite,
 } from "@skippy/shared";
 import { requireOwnedBrain } from "./auth";
 import { makeToken, requireHost } from "./agentWorkbench";
+import {
+  findDuplicatePendingProposal,
+  groupDuplicatePendingCalendarActions,
+  type PendingCalendarProposal,
+} from "./calendarDedupeHelpers";
 
 /* ------------------------------------------------------------------ */
 /* Calendar mirror                                                     */
@@ -306,6 +313,62 @@ const CONFLICT_LOOKBACK_MS = 26 * 60 * 60 * 1000;
  * already produced a warning worth reading. */
 const CONFLICT_SCAN_LIMIT = 50;
 
+/**
+ * Statuses that mean "staged but not yet settled by the owner". `approved` is
+ * deliberately excluded: an approved action is the owner's explicit yes and is
+ * about to execute — a new proposal colliding with it will surface through the
+ * mirror conflict warning once the event lands.
+ */
+const PENDING_PROPOSAL_STATUSES = ["pending_approval", "drafted"] as const;
+
+/**
+ * Loads unsettled calendar_event_create actions with their bodies decoded into
+ * comparable proposals. Shared by draftCalendarEvent's dedupe check and
+ * hostSweepDuplicatePendingActions so both apply the SAME similarity rules —
+ * two definitions of "duplicate" would eventually disagree.
+ */
+async function loadPendingCalendarProposals(
+  db: any,
+  brainInstanceId: any,
+): Promise<Array<{ action: any; proposal: PendingCalendarProposal }>> {
+  const rows: any[] = [];
+  for (const status of PENDING_PROPOSAL_STATUSES) {
+    const batch = await db
+      .query("pendingActions")
+      .withIndex("by_brain_status", (q: any) =>
+        q.eq("brainInstanceId", brainInstanceId).eq("status", status),
+      )
+      .collect();
+    rows.push(...batch);
+  }
+  const out: Array<{ action: any; proposal: PendingCalendarProposal }> = [];
+  for (const action of rows) {
+    if (action.actionType !== "calendar_event_create") continue;
+    let payload: any;
+    try {
+      payload = JSON.parse(action.body ?? "{}");
+    } catch {
+      // Unparseable bodies are claimNextCalendarAction's problem; they cannot
+      // participate in content comparison.
+      continue;
+    }
+    if (typeof payload.start !== "number" || typeof payload.end !== "number") continue;
+    out.push({
+      action,
+      proposal: {
+        id: String(action._id),
+        calendarId: typeof payload.calendarId === "string" ? payload.calendarId : "primary",
+        summary:
+          typeof payload.summary === "string" ? payload.summary : (action.subject ?? ""),
+        start: payload.start,
+        end: payload.end,
+        createdAt: action.createdAt,
+      },
+    });
+  }
+  return out;
+}
+
 async function findMirrorConflicts(
   db: any,
   brainInstanceId: any,
@@ -321,7 +384,12 @@ async function findMirrorConflicts(
     )
     .take(CONFLICT_SCAN_LIMIT);
 
-  return findOverlappingEvents(rows, proposed);
+  // 2026-09-03: split real Google events from Skippy's own staged rows. The
+  // pre-insert mirror write (the echo-loop defense below) means unapproved
+  // drafts live in this table too, and counting them as "existing events"
+  // reported "Overlaps 13 existing events" when Google held zero — each new
+  // duplicate inflated the warning on the next one.
+  return partitionCalendarOverlaps(findOverlappingEvents(rows, proposed));
 }
 
 /**
@@ -376,6 +444,31 @@ export const draftCalendarEvent = mutationGeneric({
       return { status: "already_staged", calendarEventId: duplicate._id, externalId };
     }
 
+    // 2026-09-03: the guard above only catches a re-staged id — a fresh
+    // proposal for the same real-world event mints a NEW id every time, which
+    // is how the hourly agenda pass stacked 24 duplicate proposals (one event
+    // proposed 15 times). Compare content against unsettled proposals BEFORE
+    // writing anything, including on the autoApprove path: an owner-requested
+    // event that duplicates a staged one should point at the original, not
+    // race it to Google.
+    const pendingProposals = await loadPendingCalendarProposals(db, args.brainInstanceId);
+    const duplicatePending = findDuplicatePendingProposal(
+      { calendarId: args.calendarId, summary: args.title, start: args.startAt, end: args.endAt },
+      pendingProposals.map((entry) => entry.proposal),
+    );
+    if (duplicatePending) {
+      const existingAction = pendingProposals.find(
+        (entry) => entry.proposal.id === duplicatePending.id,
+      )?.action;
+      return {
+        status: "duplicate_pending",
+        pendingActionId: duplicatePending.id,
+        externalId: existingAction?.externalMessageId,
+        subject: duplicatePending.summary,
+        pendingStatus: existingAction?.status,
+      };
+    }
+
     // Does the owner already have something here? The 409/eventId guard above
     // only catches Skippy re-staging its OWN proposal; it is blind to events
     // Google already holds. That blind spot booked "Jury duty" twice on Oct 27
@@ -387,18 +480,28 @@ export const draftCalendarEvent = mutationGeneric({
       args.brainInstanceId,
       args.calendarId,
     );
-    const conflicts = await findMirrorConflicts(db, args.brainInstanceId, {
-      startAt: args.startAt,
-      endAt: args.endAt,
-      excludeExternalId: externalId,
-    });
-    // Warn on overlap; when the mirror has never synced, say so instead —
-    // silence on this card must never read as "I checked and it's clear."
-    const reviewWarning =
+    const { real: conflicts, stagedProposals } = await findMirrorConflicts(
+      db,
+      args.brainInstanceId,
+      {
+        startAt: args.startAt,
+        endAt: args.endAt,
+        excludeExternalId: externalId,
+      },
+    );
+    // Warn on overlap with REAL events; when the mirror has never synced, say
+    // so instead — silence on this card must never read as "I checked and it's
+    // clear." Same-window staged proposals (different enough in summary to
+    // survive the dedupe above) get their own sentence, not a seat in the
+    // existing-events count.
+    const conflictWarning =
       formatCalendarConflictWarning(conflicts, { timeZone: args.timeZone }) ??
       (mirrorStatus === "never_synced"
         ? "Skippy has not synced this Google calendar yet, so it could not check for an existing event at this time."
         : undefined);
+    const stagedWarning = formatStagedProposalWarning(stagedProposals.length);
+    const reviewWarning =
+      [conflictWarning, stagedWarning].filter(Boolean).join(" ") || undefined;
 
     const calendarEventId = await db.insert("calendarEvents", {
       brainInstanceId: args.brainInstanceId,
@@ -451,7 +554,9 @@ export const draftCalendarEvent = mutationGeneric({
       calendarEventId,
       pendingActionId,
       externalId,
+      // Real Google-side overlaps only; staged proposals travel separately.
       conflicts,
+      stagedProposalCount: stagedProposals.length,
       mirrorStatus,
       lastSyncedAt,
     };
@@ -670,6 +775,96 @@ export const recordCalendarActionResult = mutationGeneric({
       status: succeeded ? ("completed" as const) : ("failed" as const),
       calendarEventId,
       htmlLink: args.htmlLink,
+    };
+  },
+});
+
+/* ------------------------------------------------------------------ */
+/* One-off maintenance: sweep the duplicate backlog                     */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Cleans up the duplicate proposals that accumulated BEFORE the draft-time
+ * dedupe existed (2026-09-03: 24 of them, one event proposed 15 times).
+ *
+ * Groups unsettled calendar_event_create actions with the exact similarity
+ * rules draftCalendarEvent now applies, keeps the newest of each group, and
+ * rejects the rest through the same status transition the /review reject
+ * button uses — so the swept cards render normally in the UI instead of
+ * landing in some invented state. The staged mirror row of each swept action
+ * is cancelled too, or it would keep showing up as a phantom event in
+ * calendarEventsInRange forever.
+ *
+ * Not scheduled anywhere. Run it once by hand (dryRun first), e.g.:
+ *   npx convex run calendar:hostSweepDuplicatePendingActions \
+ *     '{"hostToken":"<token>","dryRun":true}'
+ */
+export const hostSweepDuplicatePendingActions = mutationGeneric({
+  args: { hostToken: v.string(), dryRun: v.optional(v.boolean()) },
+  handler: async (ctx, args) => {
+    const host = await requireHost(ctx, args.hostToken);
+    const now = Date.now();
+    const dryRun = args.dryRun === true;
+
+    const pending = await loadPendingCalendarProposals(ctx.db, host.brainInstanceId);
+    const groups = groupDuplicatePendingCalendarActions(pending.map((entry) => entry.proposal));
+
+    const swept: Array<{ pendingActionId: string; supersededBy: string; subject: string }> = [];
+    for (const group of groups) {
+      for (const duplicateProposal of group.sweep) {
+        swept.push({
+          pendingActionId: duplicateProposal.id,
+          supersededBy: group.keep.id,
+          subject: duplicateProposal.summary,
+        });
+        if (dryRun) continue;
+
+        const entry = pending.find((row) => row.proposal.id === duplicateProposal.id);
+        if (!entry) continue;
+        const approvalNotes = `auto-swept duplicate (2026-09-03): superseded by ${group.keep.id}`;
+        await ctx.db.patch(entry.action._id, {
+          status: "rejected",
+          approvalNotes,
+          updatedAt: now,
+        });
+        // Same audit trail as reviewPendingActionForViewer's reject path, with
+        // a system actor since no human clicked anything.
+        await ctx.db.insert("activityEvents", {
+          brainInstanceId: host.brainInstanceId,
+          activityType: "pending_action_rejected",
+          actorType: "system",
+          timestamp: now,
+          summary: `Pending action rejected: ${entry.action.actionType} (duplicate sweep)`,
+          pendingActionId: entry.action._id,
+          metadata: { action: "reject", approvalNotes },
+          sourceRefIds: entry.action.sourceRefIds,
+        });
+
+        // Cancel the staged mirror row so the never-approved draft stops
+        // rendering as an event in agenda views.
+        if (entry.action.externalMessageId) {
+          const mirrorRow = await findByExternalId(
+            ctx.db,
+            host.brainInstanceId,
+            GOOGLE_CALENDAR_SOURCE_SYSTEM,
+            entry.action.externalMessageId,
+          );
+          if (
+            mirrorRow &&
+            mirrorRow.origin === "skippy" &&
+            mirrorRow.remoteState === "pending_remote"
+          ) {
+            await ctx.db.patch(mirrorRow._id, { status: "cancelled", updatedAt: now });
+          }
+        }
+      }
+    }
+
+    return {
+      dryRun,
+      scanned: pending.length,
+      duplicateGroups: groups.length,
+      swept,
     };
   },
 });
