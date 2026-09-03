@@ -125,7 +125,11 @@ const AGENDA_INGESTION_BODY = [
   "",
   "1. Call `update_source_sync_status` with status `running`, harness set to your engine name, and the sources in scope (for example `gmail`, `calendar`, `imessage`). Include `metadata.role: \"agenda\"`.",
   "2. Call `get_importance_rubric` and read `renderedText` before judging any item.",
-  "3. Read the sources in scope since the last successful run. Also call `list_quick_captures` for pending Home quick captures — they are part of every ingestion pass.",
+  // 2026-09-03 (v3): "since the last successful run" used to be aspirational —
+  // nothing told the pass when that was, so every hourly pass re-read the same
+  // content and staged 24 duplicate calendar proposals. The runner now injects
+  // the exact cutoff into the pass prompt; the skill defers to it.
+  "3. Read the sources in scope since the last successful run. Your pass prompt includes the exact cutoff timestamp and the per-connector parameters to apply (`since` on iMessage tools, `after:` in Gmail searches, `time_min` on calendar reads) — use them mechanically; do not improvise a wider window. If the prompt says no recent completed pass is on record, read the last 48 hours only. Also call `list_quick_captures` for pending Home quick captures — they are part of every ingestion pass.",
   "4. For each item, decide under the rubric:",
   "   - **Store**: clear deadline, money, commitment, relationship, focus-relevant, or security signal. Use `ingest_object` with a specific `rubricDecision` and at least one `sourceRef` (IDs, timestamp, one-line summary, shortest useful excerpt — never raw bodies).",
   "   - **Review**: genuinely uncertain but inspectable later. Use `submit_candidate_object`.",
@@ -476,7 +480,8 @@ const DEFAULT_SKILLS = [
     usageLeadIn: "In your harness scheduler paste the following:",
     schedulerInstructions: AGENDA_INGESTION_SCHEDULER_INSTRUCTIONS,
     visibility: "public" as const,
-    version: 2,
+    // v3 (2026-09-03): step 3 now defers to the runner-injected read cursor.
+    version: 3,
   },
   {
     slug: "finance-sync",

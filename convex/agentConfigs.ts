@@ -381,6 +381,46 @@ export const claimNextAgentPass = mutationGeneric({
   },
 });
 
+/**
+ * How many recent ingestionRuns rows the cursor read walks. Hourly agenda
+ * plus finance and nightly PM passes produce well under 50 rows in 48 hours,
+ * and anything older than 48 hours falls into the runner's capped-lookback
+ * fallback anyway — a deeper scan buys nothing.
+ */
+const INGESTION_CURSOR_SCAN_LIMIT = 100;
+
+/**
+ * The most recent COMPLETED ingestion run for one agent role.
+ *
+ * This is the read-side incremental cursor (2026-09-03): before each pass the
+ * runner asks "when did this role last finish successfully?" and injects the
+ * answer into the pass prompt, so an hourly agenda pass reads an hour of
+ * Gmail/iMessage instead of re-reading everything and re-proposing the same
+ * calendar events. Completed runs only — a failed run must never advance the
+ * cursor past content it did not actually process.
+ */
+export const hostLastCompletedIngestionRun = queryGeneric({
+  args: { hostToken: v.string(), roleKey: v.string() },
+  handler: async (ctx, args) => {
+    const host = await requireHost(ctx, args.hostToken);
+    const recent = await ctx.db
+      .query("ingestionRuns")
+      .withIndex("by_brain_started", (q: any) => q.eq("brainInstanceId", host.brainInstanceId))
+      .order("desc")
+      .take(INGESTION_CURSOR_SCAN_LIMIT);
+    const run = recent.find(
+      (row: any) => row.status === "completed" && row.metadata?.role === args.roleKey,
+    );
+    if (!run) return null;
+    return {
+      // Older completed rows may predate completedAt being set reliably;
+      // startedAt is a safe (earlier, therefore wider-window) fallback.
+      completedAt: run.completedAt ?? run.startedAt,
+      startedAt: run.startedAt,
+    };
+  },
+});
+
 /** Release the lease and record the outcome. Stale claims (lease lapsed) are
  * dropped silently — completion must be idempotent, never a duplicate. */
 export const completeAgentPass = mutationGeneric({

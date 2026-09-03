@@ -25,9 +25,13 @@ const config = {
   chatBypassPermissions: true,
 } as unknown as RunnerConfig;
 
-function fakePlane() {
-  return { completeAgentPass: vi.fn().mockResolvedValue({ status: "ok" }) } as unknown as ControlPlane & {
+function fakePlane(lastRun: { completedAt: number; startedAt: number } | null = null) {
+  return {
+    completeAgentPass: vi.fn().mockResolvedValue({ status: "ok" }),
+    lastCompletedIngestionRun: vi.fn().mockResolvedValue(lastRun),
+  } as unknown as ControlPlane & {
     completeAgentPass: ReturnType<typeof vi.fn>;
+    lastCompletedIngestionRun: ReturnType<typeof vi.fn>;
   };
 }
 
@@ -82,6 +86,23 @@ describe("buildAgentPassPrompt", () => {
   it("omits the connector line when the host provides none", () => {
     const prompt = buildAgentPassPrompt({ ...pass, connectorSlugs: [] });
     expect(prompt).not.toContain("sources in scope");
+  });
+
+  it("pins the ingestion cursor block after the connector scope line", () => {
+    // 2026-09-03: the read window must be pinned by the host like the scope
+    // line — improvised windows re-read the same sources every hour.
+    const prompt = buildAgentPassPrompt(pass, "Only read source content newer than X.");
+    const lines = prompt.split("\n");
+    const scopeIndex = lines.findIndex((line) => line.includes("sources in scope"));
+    expect(lines[scopeIndex + 1]).toBe("Only read source content newer than X.");
+  });
+
+  it("drops the cursor block when there are no connectors to read", () => {
+    const prompt = buildAgentPassPrompt(
+      { ...pass, connectorSlugs: [] },
+      "Only read source content newer than X.",
+    );
+    expect(prompt).not.toContain("newer than X");
   });
 });
 
@@ -152,5 +173,35 @@ describe("executeAgentPass", () => {
     };
     await executeAgentPass(config, plane, pass, adapter);
     expect(decision).toBe("declined");
+  });
+
+  it("injects the completed-run cursor into the prompt for connector passes", async () => {
+    const completedAt = Date.now() - 60 * 60_000;
+    const plane = fakePlane({ completedAt, startedAt: completedAt - 5 * 60_000 });
+    const { adapter, requests } = fakeAdapter({ outcome: "completed" });
+    await executeAgentPass(config, plane, pass, adapter);
+    expect(plane.lastCompletedIngestionRun).toHaveBeenCalledWith("agenda");
+    expect(requests[0]?.prompt).toContain(
+      `Last successful pass completed ${new Date(completedAt).toISOString()}`,
+    );
+    expect(requests[0]?.prompt).toContain("Do not improvise a wider window.");
+  });
+
+  it("falls back to the 48h window when the cursor fetch throws", async () => {
+    // The cursor is an optimization; a Convex hiccup must not fail the pass.
+    const plane = fakePlane();
+    plane.lastCompletedIngestionRun.mockRejectedValue(new Error("network down"));
+    const { adapter, requests } = fakeAdapter({ outcome: "completed" });
+    await executeAgentPass(config, plane, pass, adapter);
+    expect(requests[0]?.prompt).toContain("read the last 48 hours only");
+    expect(plane.completeAgentPass).toHaveBeenCalledWith("cfg1", "tok1", { status: "completed" });
+  });
+
+  it("skips the cursor fetch entirely for passes without connectors", async () => {
+    const plane = fakePlane();
+    const { adapter, requests } = fakeAdapter({ outcome: "completed" });
+    await executeAgentPass(config, plane, { ...pass, connectorSlugs: [] }, adapter);
+    expect(plane.lastCompletedIngestionRun).not.toHaveBeenCalled();
+    expect(requests[0]?.prompt).not.toContain("48 hours");
   });
 });
