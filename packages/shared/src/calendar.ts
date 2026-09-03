@@ -336,6 +336,7 @@ export type CalendarOverlapCandidate = {
   isAllDay?: boolean | undefined;
   status?: string | undefined;
   origin?: string | undefined;
+  remoteState?: string | undefined;
 };
 
 export type CalendarOverlap = {
@@ -345,7 +346,43 @@ export type CalendarOverlap = {
   endAt: number;
   isAllDay: boolean;
   origin?: string | undefined;
+  remoteState?: string | undefined;
 };
+
+/**
+ * Whether a mirror row describes an event that actually exists on Google:
+ * Google created it, or Skippy created it and the insert (or its echo) was
+ * confirmed. A Skippy row still `pending_remote` is a staged proposal the
+ * owner may never approve, and `remote_failed` means Google refused it —
+ * neither is on the calendar.
+ *
+ * Added 2026-09-03: the overlap warning counted Skippy's own unapproved
+ * drafts as existing events, so 13 stacked duplicates of one proposal read as
+ * "Overlaps 13 existing events" when Google held zero.
+ */
+export function isMirroredFromGoogle(candidate: {
+  origin?: string | undefined;
+  remoteState?: string | undefined;
+}): boolean {
+  return candidate.origin === "google" || candidate.remoteState === "synced";
+}
+
+/**
+ * Splits overlaps into events that are real on Google versus Skippy's own
+ * staged-but-unconfirmed proposals, so the two can be reported as what they
+ * are instead of blended into one inflated count.
+ */
+export function partitionCalendarOverlaps(overlaps: readonly CalendarOverlap[]): {
+  real: CalendarOverlap[];
+  stagedProposals: CalendarOverlap[];
+} {
+  const real: CalendarOverlap[] = [];
+  const stagedProposals: CalendarOverlap[] = [];
+  for (const overlap of overlaps) {
+    (isMirroredFromGoogle(overlap) ? real : stagedProposals).push(overlap);
+  }
+  return { real, stagedProposals };
+}
 
 /**
  * Half-open interval end. A zero-length event (endAt === startAt, which
@@ -398,6 +435,7 @@ export function findOverlappingEvents(
       endAt: candidate.endAt,
       isAllDay: candidate.isAllDay === true,
       origin: candidate.origin,
+      remoteState: candidate.remoteState,
     });
   }
 
@@ -481,4 +519,19 @@ export function formatCalendarConflictWarning(
   const remainder = conflicts.length - named.length;
   const tail = remainder > 0 ? ` and ${remainder} more` : "";
   return `Overlaps ${conflicts.length} existing ${noun}: ${rendered.join(", ")}${tail}.`;
+}
+
+/**
+ * Separate line for same-window proposals still sitting in /review.
+ *
+ * 2026-09-03: these used to be folded into "existing events", which is a lie
+ * in both directions — it inflated the conflict count ("Overlaps 13 existing
+ * events" when Google held zero) AND hid that the real problem was a pile of
+ * unapproved duplicates. Kept as its own sentence so the owner sees which
+ * situation they are in.
+ */
+export function formatStagedProposalWarning(count: number): string | undefined {
+  if (count <= 0) return undefined;
+  const noun = count === 1 ? "proposal" : "proposals";
+  return `${count} unapproved Skippy ${noun} for this window already await${count === 1 ? "s" : ""} review.`;
 }

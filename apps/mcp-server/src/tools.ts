@@ -1216,6 +1216,20 @@ export function createSkippyToolHandlers(
         relatedEntityRefs: input.relatedEntityRefs,
       })) as Record<string, unknown>;
 
+      // 2026-09-03: nothing was created — an equivalent proposal is already
+      // waiting in /review. Say so bluntly, or the agent re-proposes it next
+      // pass and the queue grows (24 duplicates before the dedupe existed).
+      if (staged.status === "duplicate_pending") {
+        return {
+          ...staged,
+          awaitingApproval: false,
+          note:
+            "NOT staged: an equivalent proposal for this event is already awaiting review " +
+            `(pending action ${String(staged.pendingActionId ?? "unknown")}). ` +
+            "Do not re-propose it; the owner will approve or reject the existing one in /review → Actions.",
+        };
+      }
+
       // `staged` already carries `conflicts` / `mirrorStatus` from Convex, but
       // a model reads the prose, not the array. Duplicate warnings existed as
       // structured data on the pending action and still got announced as "done"
@@ -1231,6 +1245,15 @@ export function createSkippyToolHandlers(
           : staged.mirrorStatus === "never_synced"
             ? " Skippy has not mirrored this Google calendar yet, so this was NOT checked against existing events — do not claim it is conflict-free."
             : "";
+      // 2026-09-03: `conflicts` now means real Google events only. Same-window
+      // proposals still in /review are reported separately so they no longer
+      // masquerade as "existing events".
+      const stagedProposalCount =
+        typeof staged.stagedProposalCount === "number" ? staged.stagedProposalCount : 0;
+      const stagedNote =
+        stagedProposalCount > 0
+          ? ` NOTE: ${stagedProposalCount} unapproved proposal(s) for this window already await review.`
+          : "";
 
       return {
         ...staged,
@@ -1242,7 +1265,9 @@ export function createSkippyToolHandlers(
         note:
           (requireApproval
             ? "Staged for approval. It appears in /review → Actions; the runner creates it in Google within seconds of approval."
-            : "Approved on creation. The runner creates it in Google within seconds.") + conflictNote,
+            : "Approved on creation. The runner creates it in Google within seconds.") +
+          conflictNote +
+          stagedNote,
       };
     },
 

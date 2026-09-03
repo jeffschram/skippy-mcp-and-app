@@ -3,6 +3,9 @@ import {
   CALENDAR_DESCRIPTION_LIMIT,
   findOverlappingEvents,
   formatCalendarConflictWarning,
+  formatStagedProposalWarning,
+  isMirroredFromGoogle,
+  partitionCalendarOverlaps,
   CALENDAR_MAX_ATTENDEES,
   GOOGLE_EVENT_ID_ALPHABET,
   SKIPPY_EVENT_ID_PREFIX,
@@ -427,5 +430,75 @@ describe("formatCalendarConflictWarning", () => {
         timeZone: "Not/AZone",
       }),
     ).toContain('"X"');
+  });
+});
+
+describe("isMirroredFromGoogle / partitionCalendarOverlaps", () => {
+  const overlap = (overrides: Record<string, any> = {}) => ({
+    title: "Dinner",
+    startAt: Date.UTC(2026, 8, 10, 18),
+    endAt: Date.UTC(2026, 8, 10, 19),
+    isAllDay: false,
+    ...overrides,
+  });
+
+  it("counts google-origin rows as real", () => {
+    expect(isMirroredFromGoogle({ origin: "google", remoteState: "synced" })).toBe(true);
+    // Legacy rows from before remoteState existed still carry origin.
+    expect(isMirroredFromGoogle({ origin: "google" })).toBe(true);
+  });
+
+  it("counts a confirmed skippy insert as real", () => {
+    expect(isMirroredFromGoogle({ origin: "skippy", remoteState: "synced" })).toBe(true);
+  });
+
+  it("does not count staged or failed skippy rows as real", () => {
+    // 2026-09-03: these were the rows behind "Overlaps 13 existing events"
+    // when Google held zero — unapproved drafts are not on the calendar.
+    expect(isMirroredFromGoogle({ origin: "skippy", remoteState: "pending_remote" })).toBe(false);
+    expect(isMirroredFromGoogle({ origin: "skippy", remoteState: "remote_failed" })).toBe(false);
+    expect(isMirroredFromGoogle({})).toBe(false);
+  });
+
+  it("partitions real events from staged proposals", () => {
+    const real = overlap({ origin: "google", remoteState: "synced", title: "Real" });
+    const staged = overlap({ origin: "skippy", remoteState: "pending_remote", title: "Draft" });
+    const result = partitionCalendarOverlaps([real, staged] as any);
+    expect(result.real.map((o) => o.title)).toEqual(["Real"]);
+    expect(result.stagedProposals.map((o) => o.title)).toEqual(["Draft"]);
+  });
+});
+
+describe("findOverlappingEvents remoteState passthrough", () => {
+  it("carries remoteState so callers can partition the result", () => {
+    const overlaps = findOverlappingEvents(
+      [
+        {
+          externalId: "skpdraft",
+          title: "Draft",
+          startAt: Date.UTC(2026, 8, 10, 18),
+          endAt: Date.UTC(2026, 8, 10, 19),
+          origin: "skippy",
+          remoteState: "pending_remote",
+        },
+      ],
+      { startAt: Date.UTC(2026, 8, 10, 18, 30), endAt: Date.UTC(2026, 8, 10, 19, 30) },
+    );
+    expect(overlaps[0]?.remoteState).toBe("pending_remote");
+  });
+});
+
+describe("formatStagedProposalWarning", () => {
+  it("returns undefined for zero", () => {
+    expect(formatStagedProposalWarning(0)).toBeUndefined();
+  });
+
+  it("renders singular and plural", () => {
+    expect(formatStagedProposalWarning(1)).toBe(
+      "1 unapproved Skippy proposal for this window already awaits review.",
+    );
+    expect(formatStagedProposalWarning(3)).toBe(
+      "3 unapproved Skippy proposals for this window already await review.",
+    );
   });
 });
