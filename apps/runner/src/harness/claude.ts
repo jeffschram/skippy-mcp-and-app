@@ -51,6 +51,9 @@ const AUTO_ALLOWED_COMMAND_PREFIXES = [
   "npm ls",
   "pnpm test",
   "pnpm run",
+  // The repo's canonical verify command (CLAUDE.md); fired an approval gate
+  // on every well-behaved run until 2026-09-05.
+  "pnpm check",
   "pnpm typecheck",
   "pnpm build",
   "pnpm --filter",
