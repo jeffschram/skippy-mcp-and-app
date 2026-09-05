@@ -56,6 +56,7 @@ import {
 } from "./page-classes";
 import { agentRoleDisplayName, agentRoleFromMetadata } from "../lib/display";
 import { focusItemKey, focusSummaryBullets, focusSummaryPresentation } from "./focus-summary";
+import { contactDetailFields, contactMetaLabel } from "./contact-helpers";
 import { formatEventWhen, parseCalendarActionBody } from "./pending-action-helpers";
 import { triageMetaLabel } from "./triage-helpers";
 import { LiveGate } from "./live-auth";
@@ -1131,40 +1132,98 @@ function ContactList({
   labelField: string;
   onToggleFavorite?: (id: string, favorite: boolean) => void;
 }) {
-  const Icon = icons[icon];
   return (
     <section>
       <h2>{title}</h2>
       <div className={itemListClass}>
         {items.length === 0 ? <p className={mutedClass}>No accepted records yet.</p> : null}
         {items.map((item) => (
-          <article className={itemClass} key={item._id}>
-            <span className={itemIconClass}>
-              <Icon size={17} aria-hidden />
-            </span>
-            <div>
-              <p className={itemTitleClass}>{item[labelField]}</p>
-              <p className={itemMetaClass}>{item.relationshipContext ?? item.notes ?? item.domain ?? "Accepted"}</p>
-            </div>
-            <span className={projectRowSideClass}>
-              {onToggleFavorite ? (
-                <button
-                  className={cn(iconButtonClass, item.favorite && iconButtonFavoriteClass)}
-                  type="button"
-                  title={item.favorite ? "Unfavorite contact" : "Favorite contact"}
-                  aria-pressed={Boolean(item.favorite)}
-                  aria-label={`${item.favorite ? "Unfavorite" : "Favorite"} ${item[labelField]}`}
-                  onClick={() => onToggleFavorite(item._id, !item.favorite)}
-                >
-                  <icons.Star size={17} fill={item.favorite ? "currentColor" : "none"} aria-hidden />
-                </button>
-              ) : null}
-              <span className={badgeClass}>{item.relationshipLabel ?? item.roleTitle ?? "Contact"}</span>
-            </span>
-          </article>
+          <ContactRow key={item._id} item={item} icon={icon} labelField={labelField} onToggleFavorite={onToggleFavorite} />
         ))}
       </div>
     </section>
+  );
+}
+
+function ContactRow({
+  item,
+  icon,
+  labelField,
+  onToggleFavorite,
+}: {
+  item: AnyRecord;
+  icon: "UserRound" | "LinkIcon";
+  labelField: string;
+  onToggleFavorite?: ((id: string, favorite: boolean) => void) | undefined;
+}) {
+  const Icon = icons[icon];
+  const name = item[labelField];
+  // Read card by default (Phase 2 pattern, mirrors GoalRow/TriageItem): long
+  // bios previously rendered unclamped and squeezed into a one-word-per-line
+  // column next to the side badges (docs/ui-audit). Tap the card (or More) to
+  // expand the full record inline; no side panel needed at this scope.
+  const [expanded, setExpanded] = useState(false);
+  const details = contactDetailFields(item);
+  return (
+    <article
+      className={cn(itemClass, "cursor-pointer")}
+      onClick={(event: MouseEvent<HTMLElement>) => {
+        // Tap anywhere on the card to toggle, but let the favorite star and
+        // More/Less buttons handle their own clicks.
+        if ((event.target as HTMLElement).closest("button, a, input, select, textarea, label")) {
+          return;
+        }
+        setExpanded((value) => !value);
+      }}
+    >
+      <span className={itemIconClass}>
+        <Icon size={17} aria-hidden />
+      </span>
+      {/* min-w-0 lets the 1fr grid track shrink below the text's intrinsic
+          min-content width — without it long unbroken context forces the
+          one-word-per-line squeeze the clamp alone can't fix. */}
+      <div className="min-w-0">
+        <p className={itemTitleClass}>{name}</p>
+        {expanded ? (
+          details.length === 0 ? (
+            <p className={itemMetaClass}>Accepted</p>
+          ) : (
+            <div className="grid gap-1">
+              {details.map((field) => (
+                <p key={field.label} className={itemMetaClass}>
+                  <span className="font-bold">{field.label}:</span> {field.value}
+                </p>
+              ))}
+            </div>
+          )
+        ) : (
+          <p className={cn(itemMetaClass, "line-clamp-2")}>{contactMetaLabel(item)}</p>
+        )}
+      </div>
+      <span className={taskSideClass}>
+        {onToggleFavorite ? (
+          <button
+            className={cn(iconButtonClass, item.favorite && iconButtonFavoriteClass)}
+            type="button"
+            title={item.favorite ? "Unfavorite contact" : "Favorite contact"}
+            aria-pressed={Boolean(item.favorite)}
+            aria-label={`${item.favorite ? "Unfavorite" : "Favorite"} ${name}`}
+            onClick={() => onToggleFavorite(item._id, !item.favorite)}
+          >
+            <icons.Star size={17} fill={item.favorite ? "currentColor" : "none"} aria-hidden />
+          </button>
+        ) : null}
+        <span className={badgeClass}>{item.relationshipLabel ?? item.roleTitle ?? "Contact"}</span>
+        <CardActions
+          label={`Contact actions for ${name}`}
+          actions={[
+            expanded
+              ? { label: "Less", ariaLabel: `Collapse details for ${name}`, onClick: () => setExpanded(false) }
+              : { label: "More", ariaLabel: `Show details for ${name}`, onClick: () => setExpanded(true) },
+          ]}
+        />
+      </span>
+    </article>
   );
 }
 
