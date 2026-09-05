@@ -7,6 +7,7 @@ export async function insertKnowledgeForMemory(db: any, memory: any) {
     body: memory.body,
     summary: memory.summary,
     memoryType: memory.memoryType,
+    status: memory.status,
     processingState:
       memory.status === "accepted"
         ? "accepted"

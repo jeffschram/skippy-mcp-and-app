@@ -610,6 +610,18 @@ export default defineSchema({
     url: v.optional(v.string()),
     normalizedUrl: v.optional(v.string()),
     whyItMatters: v.optional(v.string()),
+    status: v.optional(
+      v.union(
+        v.literal("inbox"),
+        v.literal("accepted"),
+        v.literal("rejected"),
+        v.literal("archived"),
+        v.literal("unread"),
+        v.literal("read"),
+        v.literal("saved"),
+        v.literal("discarded"),
+      ),
+    ),
     objectType: v.optional(v.string()),
     properties: v.optional(v.any()),
     memoryType: v.optional(memoryType),
