@@ -5,6 +5,7 @@ import { useMemo } from "react";
 import { useQuery } from "convex/react";
 import { CalendarDays, MapPin, Video } from "lucide-react";
 import { groupAgendaByDay, type AgendaItem } from "@skippy/shared";
+import { sectionAgendaDays } from "./agenda-helpers";
 import { api } from "../../lib/skippy-api";
 import { Badge, EmptyState, LoadingRow, Section } from "../components";
 import { useViewerReady } from "./use-viewer";
@@ -37,25 +38,6 @@ function timeLabel(item: AgendaItem, timeZone: string): string {
   }).format(new Date(item.at));
 }
 
-function dayLabel(dayKey: string, timeZone: string): string {
-  // dayKey is a plain calendar date; render it as one rather than as an
-  // instant, so it cannot drift a day in either direction.
-  const [year = 0, month = 1, day = 1] = dayKey.split("-").map(Number);
-  const at = Date.UTC(year, month - 1, day, 12);
-  const today = new Intl.DateTimeFormat("en-CA", { timeZone }).format(new Date());
-
-  if (dayKey === today) return "Today";
-  if (dayKey === new Intl.DateTimeFormat("en-CA", { timeZone }).format(new Date(Date.now() + DAY_MS)))
-    return "Tomorrow";
-
-  return new Intl.DateTimeFormat("en-US", {
-    timeZone: "UTC",
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-  }).format(new Date(at));
-}
-
 const SOURCE_LABELS: Record<AgendaItem["source"], string> = {
   event: "Event",
   task: "Due",
@@ -69,10 +51,24 @@ const rowClass =
 const linkRowClass = `${rowClass} hover:rounded-lg hover:bg-secondary focus-visible:rounded-lg focus-visible:bg-secondary`;
 const metaItemClass = "inline-flex min-w-0 items-center gap-[3px] [overflow-wrap:anywhere]";
 
-function AgendaRow({ item, timeZone }: { item: AgendaItem; timeZone: string }) {
+function AgendaRow({
+  item,
+  timeZone,
+  dayPrefix,
+}: {
+  item: AgendaItem;
+  timeZone: string;
+  /** Short weekday marker ("Wed") shown before the time on This-week rows. */
+  dayPrefix?: string | undefined;
+}) {
   const body = (
     <>
-      <span className="flex-[0_0_64px] text-xs tabular-nums text-muted-foreground">{timeLabel(item, timeZone)}</span>
+      <span
+        className={`${dayPrefix ? "flex-[0_0_96px]" : "flex-[0_0_64px]"} text-xs tabular-nums text-muted-foreground`}
+      >
+        {dayPrefix ? `${dayPrefix} · ` : null}
+        {timeLabel(item, timeZone)}
+      </span>
       <span className="grid min-w-0 flex-auto gap-0.5">
         <span className="text-sm [overflow-wrap:anywhere]">{item.title}</span>
         <span className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
@@ -126,8 +122,10 @@ export function AgendaSection({ days = 7 }: { days?: number }) {
     | AgendaItem[]
     | undefined;
 
-  const grouped = useMemo(
-    () => (items ? groupAgendaByDay(items, timeZone) : []),
+  // Day groups collapse into pinned sections: Overdue (pulled out of its
+  // day, red accent) → Today → Tomorrow → This week (far days merged).
+  const sections = useMemo(
+    () => (items ? sectionAgendaDays(groupAgendaByDay(items, timeZone), timeZone) : []),
     [items, timeZone],
   );
 
@@ -146,7 +144,7 @@ export function AgendaSection({ days = 7 }: { days?: number }) {
     >
       {items === undefined ? (
         <LoadingRow label="Loading agenda…" />
-      ) : grouped.length === 0 ? (
+      ) : sections.length === 0 ? (
         <EmptyState
           icon={<CalendarDays size={18} />}
           title="Nothing scheduled"
@@ -155,16 +153,31 @@ export function AgendaSection({ days = 7 }: { days?: number }) {
         </EmptyState>
       ) : (
         <div className="grid gap-3.5">
-          {grouped.map((day) => (
-            <div key={day.dayKey} className="grid gap-1">
-              <p className="m-0 text-xs font-bold uppercase tracking-[0.04em] text-muted-foreground">{dayLabel(day.dayKey, timeZone)}</p>
-              <div className="grid gap-px">
-                {day.items.map((item) => (
-                  <AgendaRow key={`${item.source}-${item.id}`} item={item} timeZone={timeZone} />
-                ))}
+          {sections.map((section) => {
+            const isOverdue = section.key === "overdue";
+            return (
+              <div
+                key={section.key}
+                className={isOverdue ? "grid gap-1 border-l-2 border-red pl-2.5" : "grid gap-1"}
+              >
+                <p
+                  className={`m-0 text-xs font-bold uppercase tracking-[0.04em] ${isOverdue ? "text-red" : "text-muted-foreground"}`}
+                >
+                  {section.label}
+                </p>
+                <div className="grid gap-px">
+                  {section.items.map(({ item, dayPrefix }) => (
+                    <AgendaRow
+                      key={`${item.source}-${item.id}`}
+                      item={item}
+                      timeZone={timeZone}
+                      dayPrefix={dayPrefix}
+                    />
+                  ))}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </Section>
