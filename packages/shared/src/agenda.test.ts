@@ -147,6 +147,70 @@ describe("buildAgenda", () => {
     expect(items).toMatchObject([{ source: "recurrence", id: "rec_1" }]);
   });
 
+  it("collapses duplicate calendar copies with the same time and similar title", () => {
+    const items = buildAgenda(
+      {
+        events: [
+          event({ _id: "first", title: "Norwalk, CT" }),
+          event({ _id: "copy", title: "Norwalk CT event" }),
+        ],
+      },
+      FROM,
+      TO,
+      NOW,
+    );
+
+    expect(items.map((item) => item.id)).toEqual(["first"]);
+  });
+
+  it("collapses an event and its matching task, preferring the event row", () => {
+    const at = Date.parse("2026-07-28T17:00:00.000Z");
+    const items = buildAgenda(
+      {
+        events: [event({ _id: "appointment", title: "Dentist appointment", startAt: at })],
+        tasks: [task({ _id: "attend", title: "Attend dentist appointment", dueAt: at })],
+      },
+      FROM,
+      TO,
+      NOW,
+    );
+
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ source: "event", id: "appointment" });
+  });
+
+  it("keeps similarly titled events at different times and distinct events at the same time", () => {
+    const items = buildAgenda(
+      {
+        events: [
+          event({ _id: "dentist", title: "Dentist" }),
+          event({ _id: "dentist-later", title: "Dentist reminder", startAt: event().startAt + DAY }),
+          event({ _id: "lunch", title: "Lunch", startAt: event().startAt }),
+        ],
+      },
+      FROM,
+      TO,
+      NOW,
+    );
+
+    expect(items.map((item) => item.id).sort()).toEqual(["dentist", "dentist-later", "lunch"]);
+  });
+
+  it("does not collapse a separate task based on one shared title word", () => {
+    const at = event().startAt;
+    const items = buildAgenda(
+      {
+        events: [event({ title: "Dentist", startAt: at })],
+        tasks: [task({ title: "Call dentist", dueAt: at })],
+      },
+      FROM,
+      TO,
+      NOW,
+    );
+
+    expect(items).toHaveLength(2);
+  });
+
   it("ignores paused and retired recurrences", () => {
     const items = buildAgenda(
       {
