@@ -227,7 +227,7 @@ export const reviewSuggestionsForViewer = queryGeneric({
       .first();
     const thresholds = reviewThresholdDays(config?.recallPreferences?.cadence);
 
-    const [memories, projects, tasks, people, followUpRelationships, waitingRelationships] = await Promise.all([
+    const [memories, projects, tasks, people, followUpRelationships, waitingRelationships, mentionRelationships] = await Promise.all([
       acceptedMemories(ctx.db, brain._id, 220),
       acceptedEntities(ctx.db, brain._id, "projects", 90),
       acceptedEntities(ctx.db, brain._id, "tasks", 180),
@@ -240,7 +240,21 @@ export const reviewSuggestionsForViewer = queryGeneric({
         .query("relationships")
         .withIndex("by_brain_type", (q: any) => q.eq("brainInstanceId", brain._id).eq("type", "waiting_on"))
         .take(80),
+      ctx.db
+        .query("relationships")
+        .withIndex("by_brain_type", (q: any) => q.eq("brainInstanceId", brain._id).eq("type", "mentions"))
+        .take(500),
     ]);
+
+    for (const memory of memories) {
+      memory.relatedEntityRefs = mentionRelationships
+        .filter(
+          (relationship) =>
+            relationship.from.entityType === "knowledgeObject" &&
+            relationship.from.entityId === String(memory._id),
+        )
+        .map((relationship) => relationship.to);
+    }
 
     const suggestions: Suggestion[] = [];
     const sourceContexts = new Map<string, any>();
