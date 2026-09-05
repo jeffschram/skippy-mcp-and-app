@@ -46,6 +46,12 @@ const AUTO_ALLOWED_COMMAND_PREFIXES = [
   "tail",
   "wc",
   "node",
+  // Same trust boundary as `node`/`sed` (2026-08-21 six-gate autopsy): under
+  // acceptEdits the session already edits worktree files freely, so an
+  // interpreter adds no new capability. Prefix match covers `python3` too;
+  // DESTRUCTIVE_PATTERNS still sees the full line, so `python x.py && rm -rf`
+  // or `sudo python …` compounds keep asking.
+  "python",
   "npm test",
   "npm run",
   "npm ls",
