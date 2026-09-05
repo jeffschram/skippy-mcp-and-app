@@ -525,7 +525,9 @@ export default defineSchema({
     focusSnoozedUntil: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number(),
-  }).index("by_brain_state", ["brainInstanceId", "processingState"]),
+  })
+    .index("by_brain_state", ["brainInstanceId", "processingState"])
+    .index("by_brain_created", ["brainInstanceId", "createdAt"]),
 
   people: defineTable({
     brainInstanceId: v.id("brainInstances"),
@@ -583,7 +585,8 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_brain_state", ["brainInstanceId", "processingState"])
-    .index("by_brain_url", ["brainInstanceId", "normalizedUrl"]),
+    .index("by_brain_url", ["brainInstanceId", "normalizedUrl"])
+    .index("by_brain_created", ["brainInstanceId", "createdAt"]),
 
   knowledgeObjects: defineTable({
     brainInstanceId: v.id("brainInstances"),
@@ -594,7 +597,9 @@ export default defineSchema({
     ...processingMetadata,
     createdAt: v.number(),
     updatedAt: v.number(),
-  }).index("by_brain_state", ["brainInstanceId", "processingState"]),
+  })
+    .index("by_brain_state", ["brainInstanceId", "processingState"])
+    .index("by_brain_created", ["brainInstanceId", "createdAt"]),
 
   knowledge: defineTable({
     brainInstanceId: v.id("brainInstances"),
