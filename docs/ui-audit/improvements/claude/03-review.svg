@@ -1,0 +1,170 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="1260" viewBox="0 0 960 1260" font-family="Helvetica, Arial, sans-serif">
+  <rect width="960" height="1260" fill="#101014"/>
+
+  <!-- Nav rail -->
+  <rect x="0" y="0" width="150" height="1260" fill="#16161c"/>
+  <text x="20" y="40" fill="#4a9eff" font-size="14" font-weight="bold">Skippy</text>
+  <g fill="#9a9aa5" font-size="13">
+    <text x="20" y="82">⌂ Home</text>
+    <text x="20" y="122">▦ Agenda</text>
+    <text x="20" y="158">$ Finance</text>
+    <rect x="10" y="174" width="130" height="30" rx="6" fill="#26262e"/>
+    <text x="20" y="194" fill="#e8e8ec">☑ Review</text>
+    <rect x="106" y="178" width="26" height="20" rx="10" fill="#4a9eff"/>
+    <text x="113" y="192" fill="#101014" font-size="11" font-weight="bold">12</text>
+    <text x="20" y="230">◉ Brain</text>
+    <text x="20" y="266">▤ Projects</text>
+    <text x="20" y="1200">⚙ Settings</text>
+  </g>
+
+  <!-- Header: no tabs anymore -->
+  <text x="175" y="48" fill="#e8e8ec" font-size="22" font-weight="bold">Review</text>
+  <text x="855" y="48" fill="#9a9aa5" font-size="12">History ›</text>
+  <text x="175" y="76" fill="#9a9aa5" font-size="12">Everything waiting on you, in one list — highest stakes first. Nothing changes until you say so.</text>
+
+  <!-- Filter chips (replace the old Signals/Actions/Routines tabs) -->
+  <g font-size="12">
+    <rect x="175" y="94" width="60" height="26" rx="13" fill="#26262e"/>
+    <text x="192" y="111" fill="#e8e8ec">All 12</text>
+    <rect x="243" y="94" width="100" height="26" rx="13" fill="#16161c" stroke="#2a2a32"/>
+    <text x="257" y="111" fill="#9a9aa5">Approvals 2</text>
+    <rect x="351" y="94" width="72" height="26" rx="13" fill="#16161c" stroke="#2a2a32"/>
+    <text x="365" y="111" fill="#9a9aa5">Finds 7</text>
+    <rect x="431" y="94" width="82" height="26" rx="13" fill="#16161c" stroke="#2a2a32"/>
+    <text x="445" y="111" fill="#9a9aa5">Revisit 3</text>
+  </g>
+  <text x="640" y="111" fill="#5a5a66" font-size="10">chips filter the one list — no tab-to-tab hopping</text>
+
+  <!-- ============ APPROVALS (pinned to top) ============ -->
+  <text x="175" y="152" fill="#e8e8ec" font-size="13" font-weight="bold">APPROVALS · 2</text>
+  <text x="290" y="152" fill="#5a5a66" font-size="11">— Skippy asking to touch the real world; always first</text>
+
+  <!-- Approval card 1: with conflict -->
+  <rect x="175" y="164" width="760" height="200" rx="10" fill="#1a1a20" stroke="#2a2a32"/>
+  <rect x="192" y="180" width="140" height="22" rx="11" fill="#26262e"/>
+  <text x="204" y="195" fill="#4a9eff" font-size="11">📅 New calendar event</text>
+
+  <text x="192" y="228" fill="#e8e8ec" font-size="17" font-weight="bold">Movie night with Holly</text>
+  <text x="192" y="252" fill="#e8e8ec" font-size="13">📅 Wednesday, Sep 10 · 6:30 – 9:00 PM  ·  📍 Cedar Point Yacht Club</text>
+  <text x="192" y="274" fill="#9a9aa5" font-size="12">Holly suggested this in a text on Sep 3 — "you in?"</text>
+
+  <!-- Conflict banner -->
+  <rect x="192" y="288" width="726" height="30" rx="6" fill="#2e2415" stroke="#e8a33d"/>
+  <text x="204" y="308" fill="#e8a33d" font-size="12">⚠️ You already have "Jury duty" that day, 8:00 AM – 4:00 PM — evening looks clear</text>
+
+  <g font-size="13">
+    <rect x="192" y="328" width="100" height="30" rx="15" fill="#2b4a6e"/>
+    <text x="218" y="348" fill="#e8e8ec" font-weight="bold">Approve</text>
+    <rect x="300" y="328" width="88" height="30" rx="15" fill="#16161c" stroke="#2a2a32"/>
+    <text x="322" y="348" fill="#9a9aa5">Reject</text>
+  </g>
+  <text x="410" y="348" fill="#5a5a66" font-size="11">→ on your calendar in ~2 seconds</text>
+  <text x="700" y="348" fill="#5a5a66" font-size="11">from the Agenda agent · iMessage</text>
+
+  <!-- Approval card 2: clean, no conflict -->
+  <rect x="175" y="376" width="760" height="150" rx="10" fill="#1a1a20" stroke="#2a2a32"/>
+  <rect x="192" y="392" width="140" height="22" rx="11" fill="#26262e"/>
+  <text x="204" y="407" fill="#4a9eff" font-size="11">📅 New calendar event</text>
+  <text x="192" y="440" fill="#e8e8ec" font-size="17" font-weight="bold">Dentist — 6-month cleaning</text>
+  <text x="192" y="464" fill="#e8e8ec" font-size="13">📅 Monday, Sep 15 · 10:00 – 11:00 AM  ·  📍 Norwalk Dental Associates</text>
+  <text x="192" y="486" fill="#3ecf8e" font-size="12">✓ No conflicts — that morning is free</text>
+  <g font-size="13">
+    <rect x="700" y="480" width="100" height="30" rx="15" fill="#2b4a6e"/>
+    <text x="726" y="500" fill="#e8e8ec" font-weight="bold">Approve</text>
+    <rect x="808" y="480" width="88" height="30" rx="15" fill="#16161c" stroke="#2a2a32"/>
+    <text x="830" y="500" fill="#9a9aa5">Reject</text>
+  </g>
+  <text x="192" y="512" fill="#5a5a66" font-size="11">from the Agenda agent · Gmail</text>
+
+  <!-- ============ FINDS ============ -->
+  <text x="175" y="566" fill="#e8e8ec" font-size="13" font-weight="bold">FINDS · 7</text>
+  <text x="255" y="566" fill="#5a5a66" font-size="11">— things Skippy found but wasn't sure about (Brain Inbox lives here too)</text>
+
+  <!-- Find card 1: task -->
+  <rect x="175" y="578" width="760" height="72" rx="10" fill="#1a1a20" stroke="#2a2a32"/>
+  <rect x="192" y="592" width="52" height="22" rx="11" fill="#26262e"/>
+  <text x="203" y="607" fill="#4a9eff" font-size="11">Task?</text>
+  <text x="256" y="608" fill="#e8e8ec" font-size="14">Follow up on the Marco Polo partnership intro</text>
+  <text x="256" y="628" fill="#9a9aa5" font-size="11">From a Marco Polo email, Aug 30 — mentions a call "sometime next week"</text>
+  <g font-size="12">
+    <rect x="676" y="610" width="72" height="28" rx="14" fill="#2b4a6e"/>
+    <text x="694" y="629" fill="#e8e8ec">Accept</text>
+    <rect x="756" y="610" width="60" height="28" rx="14" fill="#26262e"/>
+    <text x="769" y="629" fill="#e8e8ec">Edit…</text>
+    <rect x="824" y="610" width="76" height="28" rx="14" fill="#16161c" stroke="#2a2a32"/>
+    <text x="838" y="629" fill="#9a9aa5">Dismiss</text>
+  </g>
+
+  <!-- Find card 2: memory -->
+  <rect x="175" y="662" width="760" height="72" rx="10" fill="#1a1a20" stroke="#2a2a32"/>
+  <rect x="192" y="676" width="72" height="22" rx="11" fill="#26262e"/>
+  <text x="203" y="691" fill="#3ecf8e" font-size="11">Memory?</text>
+  <text x="276" y="692" fill="#e8e8ec" font-size="14">Holly prefers Wednesday evenings for movie nights</text>
+  <text x="276" y="712" fill="#9a9aa5" font-size="11">From two iMessage threads with Holly, Aug 20 &amp; Sep 2</text>
+  <g font-size="12">
+    <rect x="676" y="694" width="72" height="28" rx="14" fill="#2b4a6e"/>
+    <text x="694" y="713" fill="#e8e8ec">Accept</text>
+    <rect x="756" y="694" width="60" height="28" rx="14" fill="#26262e"/>
+    <text x="769" y="713" fill="#e8e8ec">Edit…</text>
+    <rect x="824" y="694" width="76" height="28" rx="14" fill="#16161c" stroke="#2a2a32"/>
+    <text x="838" y="713" fill="#9a9aa5">Dismiss</text>
+  </g>
+
+  <!-- Find card 3: grouped duplicates -->
+  <rect x="175" y="746" width="760" height="72" rx="10" fill="#1a1a20" stroke="#2a2a32"/>
+  <rect x="192" y="760" width="56" height="22" rx="11" fill="#26262e"/>
+  <text x="203" y="775" fill="#e8a33d" font-size="11">Link?</text>
+  <text x="260" y="776" fill="#e8e8ec" font-size="14">2 similar finds — articles about heat-pump rebates</text>
+  <text x="260" y="796" fill="#9a9aa5" font-size="11">Both from the same newsletter, Sep 1 · tap to see each one</text>
+  <g font-size="12">
+    <rect x="650" y="778" width="98" height="28" rx="14" fill="#2b4a6e"/>
+    <text x="664" y="797" fill="#e8e8ec">Accept both</text>
+    <rect x="756" y="778" width="60" height="28" rx="14" fill="#26262e"/>
+    <text x="770" y="797" fill="#e8e8ec">Split…</text>
+    <rect x="824" y="778" width="76" height="28" rx="14" fill="#16161c" stroke="#2a2a32"/>
+    <text x="838" y="797" fill="#9a9aa5">Dismiss</text>
+  </g>
+
+  <text x="175" y="842" fill="#5a5a66" font-size="11">+ 4 more finds ▾   ·   "Edit…" expands a card in place into the full form — editing is opt-in, not the default view</text>
+
+  <!-- ============ REVISIT (bottom of the scroll) ============ -->
+  <text x="175" y="890" fill="#e8e8ec" font-size="13" font-weight="bold">REVISIT · 3</text>
+  <text x="278" y="890" fill="#5a5a66" font-size="11">— old assumptions worth a second look; suggestions only, never above real work</text>
+
+  <!-- Revisit card 1 -->
+  <rect x="175" y="902" width="760" height="76" rx="10" fill="#1a1a20" stroke="#2a2a32"/>
+  <text x="192" y="928" fill="#e8e8ec" font-size="14">"Hold off on the kitchen remodel until spring"</text>
+  <text x="192" y="948" fill="#9a9aa5" font-size="11">Decided in March. Since then: contractor quotes dropped and the Emergency Fund hit its target.</text>
+  <g font-size="12">
+    <rect x="700" y="934" width="60" height="28" rx="14" fill="#26262e"/>
+    <text x="716" y="953" fill="#e8e8ec">Keep</text>
+    <rect x="768" y="934" width="68" height="28" rx="14" fill="#2b4a6e"/>
+    <text x="782" y="953" fill="#e8e8ec">Revise</text>
+    <rect x="844" y="934" width="64" height="28" rx="14" fill="#16161c" stroke="#2a2a32"/>
+    <text x="857" y="953" fill="#9a9aa5">Retire</text>
+  </g>
+
+  <!-- Revisit card 2 -->
+  <rect x="175" y="990" width="760" height="76" rx="10" fill="#1a1a20" stroke="#2a2a32"/>
+  <text x="192" y="1016" fill="#e8e8ec" font-size="14">"Jeff prefers morning meetings"</text>
+  <text x="192" y="1036" fill="#9a9aa5" font-size="11">Saved 8 months ago. Your last 6 accepted meetings were all afternoons — still true?</text>
+  <g font-size="12">
+    <rect x="700" y="1022" width="60" height="28" rx="14" fill="#26262e"/>
+    <text x="716" y="1041" fill="#e8e8ec">Keep</text>
+    <rect x="768" y="1022" width="68" height="28" rx="14" fill="#2b4a6e"/>
+    <text x="782" y="1041" fill="#e8e8ec">Revise</text>
+    <rect x="844" y="1022" width="64" height="28" rx="14" fill="#16161c" stroke="#2a2a32"/>
+    <text x="857" y="1041" fill="#9a9aa5">Retire</text>
+  </g>
+
+  <text x="175" y="1094" fill="#5a5a66" font-size="12">+ 1 more · Keep = leave as is · Revise = quick edit · Retire = archive (never silent delete)</text>
+
+  <!-- Footer notes -->
+  <rect x="175" y="1114" width="760" height="90" rx="8" fill="#16161c" stroke="#2a2a32"/>
+  <text x="192" y="1138" fill="#5a5a66" font-size="11">Was: three tabs (Signals / Actions / Routines) plus a fourth inbox hiding in Brain — four places to check.</text>
+  <text x="192" y="1156" fill="#5a5a66" font-size="11">Now: ONE list. Order carries priority: Approvals pinned first, Finds in the middle, Revisit last.</text>
+  <text x="192" y="1174" fill="#5a5a66" font-size="11">Chips filter, one nav badge counts everything, settled approvals live behind the quiet History link.</text>
+  <text x="192" y="1192" fill="#5a5a66" font-size="11">Per-type card designs are unchanged — they just stack on a single page.</text>
+
+  <text x="175" y="1240" fill="#5a5a66" font-size="11">Wireframe — structure and copy tone only.</text>
+</svg>

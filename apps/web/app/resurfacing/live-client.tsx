@@ -134,28 +134,32 @@ export function LiveResurfacingContent() {
     <LiveGate>
       {data === undefined ? (
         <section className={cn(cardClass, sectionClass)}>
-          <h2>Loading routines</h2>
-          <p className={mutedClass}>Checking accepted memories, tasks, projects, people, questions, source refs, and settings.</p>
+          <h2>Checking for things to revisit</h2>
+          <p className={mutedClass}>Looking through your memories, tasks, projects, and contacts.</p>
         </section>
       ) : data.empty ? (
         <section className={cn(cardClass, sectionClass)}>
-          <h2>No resurfacing suggestions</h2>
-          <p className={mutedClass}>The bounded first-pass routines did not find stale assumptions, open loops, follow-ups, or context gaps.</p>
+          <h2>Nothing to revisit</h2>
+          <p className={mutedClass}>Nothing here looks stale or forgotten right now.</p>
         </section>
       ) : (
         <>
           <section className={cn(cardClass, sectionClass)}>
-            <p className={eyebrowClass}>Read-only routine pass</p>
+            <p className={eyebrowClass}>Worth a second look</p>
             <h2>{data.suggestions?.length ?? 0} suggestions</h2>
             <p className={mutedClass}>
-              Generated {formatGeneratedAt(data.generatedAt)} using recall cadence{" "}
-              <span className={cn(badgeClass, badgeBlueClass)}>{data.recallCadence}</span>. Nothing is created automatically.
+              Checked {formatGeneratedAt(data.generatedAt)}. These are suggestions only — nothing changes unless
+              you act on it.
             </p>
           </section>
           <div className={itemListClass}>
-            {(data.groups ?? []).map((group: AnyRecord) => (
-              <SuggestionGroup key={group.type} group={group} />
-            ))}
+            {/* Hide routines that found nothing (docs/ui-audit fix: empty sections
+                added noise without helping the owner decide anything). */}
+            {(data.groups ?? [])
+              .filter((group: AnyRecord) => ((group.suggestions ?? []) as AnyRecord[]).length > 0)
+              .map((group: AnyRecord) => (
+                <SuggestionGroup key={group.type} group={group} />
+              ))}
           </div>
         </>
       )}

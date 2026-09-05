@@ -1698,6 +1698,29 @@ export const listPendingTriage = queryGeneric({
   },
 });
 
+/**
+ * Cheap counts for the Review nav badge (docs/ui-audit fix: surface how many
+ * decisions are waiting without paying for dashboardForViewer on every page).
+ * Bounded takes keep this O(small); the badge caps its display anyway.
+ */
+export const reviewCountsForViewer = queryGeneric({
+  args: {},
+  handler: async (ctx) => {
+    const { brain } = await requireOwnedBrain(ctx);
+    const finds = await ctx.db
+      .query("triageItems")
+      .filter((q) => q.and(q.eq(q.field("brainInstanceId"), brain._id), q.eq(q.field("status"), "pending")))
+      .take(100);
+    const approvals = await ctx.db
+      .query("pendingActions")
+      .filter((q) =>
+        q.and(q.eq(q.field("brainInstanceId"), brain._id), q.eq(q.field("status"), "pending_approval")),
+      )
+      .take(100);
+    return { finds: finds.length, approvals: approvals.length };
+  },
+});
+
 export const dashboardForViewer = queryGeneric({
   args: {},
   handler: async (ctx) => {
