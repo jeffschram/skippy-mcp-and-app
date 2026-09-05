@@ -60,8 +60,9 @@ import { contactDetailFields, contactMetaLabel } from "./contact-helpers";
 import { formatEventWhen, parseCalendarActionBody } from "./pending-action-helpers";
 import { triageMetaLabel } from "./triage-helpers";
 import { LiveGate } from "./live-auth";
+import { SuggestionGroup } from "./resurfacing/live-client";
 import { icons } from "./ui";
-import { IconButton, InlineMarkdown, useToast } from "./components";
+import { IconButton, InlineMarkdown, Tabs, useToast } from "./components";
 
 type AnyRecord = Record<string, any>;
 type MergeOption = AnyRecord & {
@@ -426,7 +427,7 @@ export function LiveHomeContent() {
               <h2>Needs your review</h2>
               <div className={itemListClass}>
                 {unclearSignalCount > 0 ? (
-                  <Link href="/review" className={cn(itemClass, projectRowClass)}>
+                  <Link href="/review?filter=finds" className={cn(itemClass, projectRowClass)}>
                     <span className={itemIconClass}>
                       <icons.Archive size={17} aria-hidden />
                     </span>
@@ -440,7 +441,7 @@ export function LiveHomeContent() {
                   </Link>
                 ) : null}
                 {pendingActionCount > 0 ? (
-                  <Link href="/review" className={cn(itemClass, projectRowClass)}>
+                  <Link href="/review?filter=approvals" className={cn(itemClass, projectRowClass)}>
                     <span className={itemIconClass}>
                       <icons.MessageSquareText size={17} aria-hidden />
                     </span>
@@ -1498,115 +1499,6 @@ function RelatedEntityList({ entities }: { entities: AnyRecord[] }) {
   );
 }
 
-export function LiveMemoryInboxContent() {
-  const viewerReady = useViewerReady();
-  const toast = useToast();
-  const data = useQuery(expectedMemoryApi.listMemoryInboxForViewer, viewerReady ? { limit: 50 } : "skip") as
-    | AnyRecord
-    | AnyRecord[]
-    | undefined;
-  const items = collectionItems(data);
-  const expireStaleCandidates = useMutation(expectedMemoryApi.expireStaleMemoryCandidatesForViewer);
-  const bulkResolveCandidates = useMutation(expectedMemoryApi.bulkResolveMemoryCandidatesForViewer);
-  const [bulkBusy, setBulkBusy] = useState(false);
-
-  const hasStaleCandidates = items.some(
-    (memory) =>
-      memoryIsPendingReview(memory) &&
-      typeof memory.createdAt === "number" &&
-      memory.createdAt < Date.now() - MEMORY_REVIEW_EXPIRY_MS,
-  );
-
-  const expiryTriggered = useRef(false);
-  useEffect(() => {
-    if (!viewerReady || !hasStaleCandidates || expiryTriggered.current) {
-      return;
-    }
-    expiryTriggered.current = true;
-    void (async () => {
-      try {
-        const result = (await expireStaleCandidates({})) as AnyRecord | undefined;
-        const expiredCount = Number(result?.expiredCount ?? 0);
-        if (expiredCount > 0) {
-          toast(`Auto-archived ${expiredCount} stale review ${expiredCount === 1 ? "candidate" : "candidates"}.`);
-        }
-      } catch {
-        // Auto-expiry is best-effort; the inbox stays usable if it fails.
-      }
-    })();
-  }, [viewerReady, hasStaleCandidates, expireStaleCandidates, toast]);
-
-  const bulkResolve = async (resolution: "accept" | "archive") => {
-    if (bulkBusy) {
-      return;
-    }
-    setBulkBusy(true);
-    try {
-      const result = (await bulkResolveCandidates({ resolution })) as AnyRecord | undefined;
-      const resolvedCount = Number(result?.resolvedCount ?? 0);
-      toast(
-        resolution === "accept"
-          ? `Accepted ${resolvedCount} review ${resolvedCount === 1 ? "candidate" : "candidates"}.`
-          : `Archived ${resolvedCount} review ${resolvedCount === 1 ? "candidate" : "candidates"}.`,
-        "success",
-      );
-    } catch (error) {
-      toast(error instanceof Error ? error.message : "Bulk action failed.", "error");
-    } finally {
-      setBulkBusy(false);
-    }
-  };
-
-  const pendingCount = items.filter((memory) => memoryIsPendingReview(memory)).length;
-
-  return (
-    <LiveGate>
-      {!data ? (
-        <section className={cn(cardClass, sectionClass)}>
-          <h2>Loading memory inbox</h2>
-          <p className={mutedClass}>Waiting for suggested memories and review states from Convex.</p>
-        </section>
-      ) : items.length === 0 ? (
-        <section className={cn(cardClass, sectionClass)}>
-          <h2>Inbox clear</h2>
-          <p className={mutedClass}>No captured memory objects need review right now.</p>
-        </section>
-      ) : (
-        <>
-          {pendingCount > 0 ? (
-            <div className={toolbarClass} style={{ marginBottom: 12 }}>
-              <button
-                className={cn(textButtonClass, textButtonCompactClass)}
-                type="button"
-                disabled={bulkBusy}
-                onClick={() => void bulkResolve("accept")}
-              >
-                Accept all
-              </button>
-              <button
-                className={cn(textButtonClass, textButtonCompactClass)}
-                type="button"
-                disabled={bulkBusy}
-                onClick={() => void bulkResolve("archive")}
-              >
-                Archive all
-              </button>
-              <span className={mutedClass}>
-                Unreviewed candidates auto-archive after {Math.round(MEMORY_REVIEW_EXPIRY_MS / (24 * 60 * 60 * 1000))} days.
-              </span>
-            </div>
-          ) : null}
-          <div className={itemListClass}>
-            {items.map((memory) => (
-              <MemoryRow key={textValue(memory._id, memory.id, memoryTitle(memory))} memory={memory} variant="inbox" />
-            ))}
-          </div>
-        </>
-      )}
-    </LiveGate>
-  );
-}
-
 export function LiveMemoryContent({ objectTypes, emptyMessage }: MemoryCollectionFilter = {}) {
   const viewerReady = useViewerReady();
   const memoryType = objectTypes?.length === 1 ? objectTypes[0] : undefined;
@@ -1749,25 +1641,184 @@ export function LiveMemoryDetailContent({ memoryId }: { memoryId: string }) {
   );
 }
 
-export function LiveTriageContent() {
+export type ReviewQueueFilter = "all" | "approvals" | "finds" | "revisit";
+
+export function isReviewQueueFilter(value: unknown): value is ReviewQueueFilter {
+  return value === "all" || value === "approvals" || value === "finds" || value === "revisit";
+}
+
+function ReviewSectionHeader({ label, count, hint }: { label: string; count: number; hint: string }) {
+  return (
+    <div className="mb-2.5">
+      <p className={eyebrowClass}>
+        {label} · {count}
+      </p>
+      <p className={mutedClass}>{hint}</p>
+    </div>
+  );
+}
+
+/**
+ * The one Review queue (owner decision Sep 4, ui-ux-improvement-plan.md):
+ * Approvals pinned first, then Finds — triage signals plus the old Brain Inbox
+ * memory candidates, merged so there is one review surface — then Revisit at
+ * the bottom. Filter chips replace the Signals/Actions/Routines tabs; order,
+ * not tabs, carries the priority. Empty sections vanish instead of rendering
+ * headers, and settled approvals live behind /review/history because a queue
+ * is not a log.
+ */
+export function LiveReviewQueueContent({ initialFilter = "all" }: { initialFilter?: ReviewQueueFilter }) {
   const viewerReady = useViewerReady();
+  const toast = useToast();
   const viewer = useQuery(api.auth.viewer, viewerReady ? {} : "skip") as AnyRecord | undefined;
-  const items = useQuery(api.knowledge.triageForViewer, viewerReady ? {} : "skip") as AnyRecord[] | undefined;
+  const triageItems = useQuery(api.knowledge.triageForViewer, viewerReady ? {} : "skip") as AnyRecord[] | undefined;
   const entityOptions = useQuery(api.knowledge.acceptedEntityOptionsForViewer, viewerReady ? {} : "skip") as AnyRecord[] | undefined;
+  const actions = useQuery(api.knowledge.pendingActionsForViewer, viewerReady ? { scope: "open" } : "skip") as
+    | AnyRecord[]
+    | undefined;
+  const memoryData = useQuery(expectedMemoryApi.listMemoryInboxForViewer, viewerReady ? { limit: 50 } : "skip") as
+    | AnyRecord
+    | AnyRecord[]
+    | undefined;
+  const revisitData = useQuery(
+    (api as AnyRecord).resurfacing.reviewSuggestionsForViewer,
+    viewerReady ? { limit: 35 } : "skip",
+  ) as AnyRecord | undefined;
+  const reviewPendingActionMutation = useMutation(api.knowledge.reviewPendingActionForViewer);
+  const reviewPendingAction = async (args: AnyRecord) => reviewPendingActionMutation(args as any);
+  const expireStaleCandidates = useMutation(expectedMemoryApi.expireStaleMemoryCandidatesForViewer);
+
+  const [filter, setFilter] = useState<ReviewQueueFilter>(initialFilter);
   const displayLabels = displayLabelsFrom(viewer);
+  const memoryCandidates = collectionItems(memoryData);
+
+  // Auto-archive stale memory candidates — carried over from the old Brain
+  // Inbox when it merged into Finds so the housekeeping didn't get lost.
+  const hasStaleCandidates = memoryCandidates.some(
+    (memory) =>
+      memoryIsPendingReview(memory) &&
+      typeof memory.createdAt === "number" &&
+      memory.createdAt < Date.now() - MEMORY_REVIEW_EXPIRY_MS,
+  );
+  const expiryTriggered = useRef(false);
+  useEffect(() => {
+    if (!viewerReady || !hasStaleCandidates || expiryTriggered.current) {
+      return;
+    }
+    expiryTriggered.current = true;
+    void (async () => {
+      try {
+        const result = (await expireStaleCandidates({})) as AnyRecord | undefined;
+        const expiredCount = Number(result?.expiredCount ?? 0);
+        if (expiredCount > 0) {
+          toast(`Auto-archived ${expiredCount} stale review ${expiredCount === 1 ? "candidate" : "candidates"}.`);
+        }
+      } catch {
+        // Auto-expiry is best-effort; the queue stays usable if it fails.
+      }
+    })();
+  }, [viewerReady, hasStaleCandidates, expireStaleCandidates, toast]);
+
+  const loading = !triageItems || !entityOptions || !actions || memoryData === undefined || revisitData === undefined;
+  if (loading) {
+    return (
+      <LiveGate>
+        <section className={cn(cardClass, sectionClass)}>
+          <h2>Loading your review queue</h2>
+          <p className={mutedClass}>Gathering approvals, finds, and revisit suggestions.</p>
+        </section>
+      </LiveGate>
+    );
+  }
+
+  const approvalsCount = actions.length;
+  const findsCount = triageItems.length + memoryCandidates.length;
+  const revisitGroups = arrayValue(revisitData?.groups).filter((group) => arrayValue(group.suggestions).length > 0);
+  const revisitCount = arrayValue(revisitData?.suggestions).length;
+  const total = approvalsCount + findsCount + revisitCount;
+
+  const chips = [
+    { key: "all", label: "All", count: total },
+    { key: "approvals", label: "Approvals", count: approvalsCount },
+    { key: "finds", label: "Finds", count: findsCount },
+    { key: "revisit", label: "Revisit", count: revisitCount },
+  ];
+
+  // A section renders when it matches the filter and has items; on "All" the
+  // empty ones disappear entirely — no headers over nothing.
+  const showApprovals = filter === "approvals" || (filter === "all" && approvalsCount > 0);
+  const showFinds = filter === "finds" || (filter === "all" && findsCount > 0);
+  const showRevisit = filter === "revisit" || (filter === "all" && revisitCount > 0);
 
   return (
     <LiveGate>
-      {!items || !entityOptions ? (
+      <div className="mb-[18px]">
+        <Tabs items={chips} active={filter} onChange={(key) => setFilter(isReviewQueueFilter(key) ? key : "all")} />
+      </div>
+      {filter === "all" && total === 0 ? (
         <section className={cn(cardClass, sectionClass)}>
-          <h2>Loading review items</h2>
+          <h2>Review zero</h2>
+          <p className={mutedClass}>Nothing needs a decision right now.</p>
         </section>
       ) : (
-        <div className={itemListClass}>
-          {items.length === 0 ? <p className={mutedClass}>No unclear signals need review.</p> : null}
-          {items.map((item) => (
-            <TriageItem key={item._id} item={item} entityOptions={entityOptions} displayLabels={displayLabels} />
-          ))}
+        <div className="grid gap-7">
+          {showApprovals ? (
+            <section aria-label="Approvals">
+              <ReviewSectionHeader
+                label="Approvals"
+                count={approvalsCount}
+                hint="Things Skippy wants to do in the real world — highest stakes, always first."
+              />
+              {approvalsCount === 0 ? (
+                <p className={mutedClass}>Nothing waiting for approval.</p>
+              ) : (
+                <div className={itemListClass}>
+                  {actions.map((action) => (
+                    <PendingActionItem key={action._id} action={action} reviewPendingAction={reviewPendingAction} />
+                  ))}
+                </div>
+              )}
+            </section>
+          ) : null}
+          {showFinds ? (
+            <section aria-label="Finds">
+              <ReviewSectionHeader
+                label="Finds"
+                count={findsCount}
+                hint="Things Skippy found but wasn't sure about — candidate memories live here too."
+              />
+              {findsCount === 0 ? (
+                <p className={mutedClass}>No finds waiting for a yes or no.</p>
+              ) : (
+                <div className={itemListClass}>
+                  {triageItems.map((item) => (
+                    <TriageItem key={item._id} item={item} entityOptions={entityOptions} displayLabels={displayLabels} />
+                  ))}
+                  {memoryCandidates.map((memory) => (
+                    <MemoryRow key={textValue(memory._id, memory.id, memoryTitle(memory))} memory={memory} variant="inbox" />
+                  ))}
+                </div>
+              )}
+            </section>
+          ) : null}
+          {showRevisit ? (
+            <section aria-label="Revisit">
+              <ReviewSectionHeader
+                label="Revisit"
+                count={revisitCount}
+                hint="Old assumptions, open questions, and past decisions worth a second look. Suggestions only — nothing changes without you."
+              />
+              {revisitCount === 0 ? (
+                <p className={mutedClass}>Nothing here looks stale or forgotten right now.</p>
+              ) : (
+                <div className={itemListClass}>
+                  {revisitGroups.map((group) => (
+                    <SuggestionGroup key={textValue(group.type, group.label)} group={group} />
+                  ))}
+                </div>
+              )}
+            </section>
+          ) : null}
         </div>
       )}
     </LiveGate>
@@ -2102,22 +2153,36 @@ function PayloadEditor({
   );
 }
 
-export function LivePendingActionsContent() {
+/**
+ * Settled approvals (approved / executed / rejected) behind the quiet History
+ * link. Read-only by construction: PendingActionItem renders settled statuses
+ * without review buttons.
+ */
+export function LiveApprovalHistoryContent() {
   const viewerReady = useViewerReady();
-  const actions = useQuery(api.knowledge.pendingActionsForViewer, viewerReady ? {} : "skip") as AnyRecord[] | undefined;
+  const actions = useQuery(api.knowledge.pendingActionsForViewer, viewerReady ? { scope: "settled" } : "skip") as
+    | AnyRecord[]
+    | undefined;
   const reviewPendingActionMutation = useMutation(api.knowledge.reviewPendingActionForViewer);
   const reviewPendingAction = async (args: AnyRecord) => reviewPendingActionMutation(args as any);
+  const sorted = (actions ?? [])
+    .slice()
+    .sort((a, b) => Number(b.updatedAt ?? b.createdAt ?? 0) - Number(a.updatedAt ?? a.createdAt ?? 0));
 
   return (
     <LiveGate>
       {!actions ? (
         <section className={cn(cardClass, sectionClass)}>
-          <h2>Loading pending actions</h2>
+          <h2>Loading history</h2>
+        </section>
+      ) : sorted.length === 0 ? (
+        <section className={cn(cardClass, sectionClass)}>
+          <h2>No settled approvals yet</h2>
+          <p className={mutedClass}>Approvals you approve or reject move here, out of the queue.</p>
         </section>
       ) : (
         <div className={itemListClass}>
-          {actions.length === 0 ? <p className={mutedClass}>Nothing waiting for approval.</p> : null}
-          {actions.map((action) => (
+          {sorted.map((action) => (
             <PendingActionItem key={action._id} action={action} reviewPendingAction={reviewPendingAction} />
           ))}
         </div>

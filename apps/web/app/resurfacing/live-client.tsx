@@ -100,7 +100,9 @@ function SuggestionItem({ suggestion }: { suggestion: AnyRecord }) {
   );
 }
 
-function SuggestionGroup({ group }: { group: AnyRecord }) {
+// Exported for the unified Review queue (Revisit section) — the one-queue
+// decision folded this page's groups into /review as the bottom section.
+export function SuggestionGroup({ group }: { group: AnyRecord }) {
   const suggestions = (group.suggestions ?? []) as AnyRecord[];
 
   return (
