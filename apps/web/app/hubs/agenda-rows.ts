@@ -1,3 +1,4 @@
+import { agendaItemsAreDuplicates } from "@skippy/shared";
 import { areaLabel, type LifeTask } from "./life-tasks-helpers";
 
 /* ------------------------------------------------------------------ */
@@ -157,7 +158,29 @@ export function buildAgendaRows(
     });
   }
 
-  return rows.sort(compareAgendaRows);
+  const collapsed: AgendaRow[] = [];
+  for (const row of rows) {
+    if (typeof row.at !== "number") {
+      collapsed.push(row);
+      continue;
+    }
+
+    const duplicateIndex = collapsed.findIndex(
+      (candidate) =>
+        typeof candidate.at === "number" &&
+        agendaItemsAreDuplicates(
+          { source: candidate.kind, title: candidate.title, at: candidate.at },
+          { source: row.kind, title: row.title, at: row.at! },
+        ),
+    );
+    if (duplicateIndex < 0) {
+      collapsed.push(row);
+    } else if (row.kind === "event" && collapsed[duplicateIndex]?.kind !== "event") {
+      collapsed[duplicateIndex] = row;
+    }
+  }
+
+  return collapsed.sort(compareAgendaRows);
 }
 
 /** Areas present across the merged rows, for the filter chips. */

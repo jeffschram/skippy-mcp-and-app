@@ -36,6 +36,77 @@ export type AgendaInputs = {
 
 const DAY_MS = 86_400_000;
 
+type AgendaDedupeCandidate = {
+  source: AgendaSource;
+  title: string;
+  at: number;
+};
+
+function normalizedAgendaTitle(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/\b(?:calendar|event|task|reminder|attend|join|go to|the|a|an|to)\b/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+/**
+ * Display-only duplicate detection for agenda rows.
+ *
+ * Calendar ingestion intentionally preserves separate records by external id,
+ * because two real events can overlap. At render time we can be narrower: two
+ * event-shaped rows are the same item only when their times are identical and
+ * their normalized titles are equal or one merely adds a little context. A
+ * recurrence is never fuzzy-matched; its explicit task linkage remains the
+ * authority for that pair.
+ */
+export function agendaItemsAreDuplicates(
+  left: AgendaDedupeCandidate,
+  right: AgendaDedupeCandidate,
+): boolean {
+  if (left.at !== right.at) return false;
+  if (left.source === "recurrence" || right.source === "recurrence") return false;
+  if (left.source !== "event" && right.source !== "event") return false;
+
+  const a = normalizedAgendaTitle(left.title);
+  const b = normalizedAgendaTitle(right.title);
+  if (!a || !b) return false;
+  if (a === b) return true;
+
+  const aWords = new Set(a.split(" "));
+  const bWords = new Set(b.split(" "));
+  const aNumbers = [...aWords].filter((word) => /^\d+$/.test(word));
+  const bNumbers = [...bWords].filter((word) => /^\d+$/.test(word));
+  if (aNumbers.length && bNumbers.length && !aNumbers.some((word) => bWords.has(word))) {
+    return false;
+  }
+
+  let overlap = 0;
+  for (const word of aWords) if (bWords.has(word)) overlap += 1;
+  // One shared word is too weak ("Dentist" and "Call dentist" can be two
+  // separate obligations at the same time). Exact normalized matches were
+  // handled above; fuzzy matches need at least two corroborating words.
+  return overlap >= 2 && overlap / Math.min(aWords.size, bWords.size) >= 0.75;
+}
+
+/** Keep one display row per item, preferring the richer calendar event row. */
+export function collapseAgendaDuplicates(items: AgendaItem[]): AgendaItem[] {
+  const collapsed: AgendaItem[] = [];
+  for (const item of items) {
+    const duplicateIndex = collapsed.findIndex((candidate) =>
+      agendaItemsAreDuplicates(candidate, item),
+    );
+    if (duplicateIndex < 0) {
+      collapsed.push(item);
+    } else if (item.source === "event" && collapsed[duplicateIndex]?.source !== "event") {
+      collapsed[duplicateIndex] = item;
+    }
+  }
+  return collapsed;
+}
+
 /**
  * Sort key that places all-day items at the top of their own day rather than
  * at midnight-local, and never lets them read as a 00:00 meeting.
@@ -132,7 +203,7 @@ export function buildAgenda(
     });
   }
 
-  return items.sort((a, b) => {
+  return collapseAgendaDuplicates(items).sort((a, b) => {
     const keyDelta = agendaSortKey(a) - agendaSortKey(b);
     if (keyDelta !== 0) return keyDelta;
     // Within the same slot, all-day context comes before timed commitments.

@@ -124,6 +124,44 @@ describe("buildAgendaRows", () => {
     expect(rows).toHaveLength(0);
   });
 
+  it("collapses duplicate events with the same time and similar titles", () => {
+    const rows = buildAgendaRows(
+      [],
+      [
+        event({ _id: "first", title: "Norwalk, CT" }),
+        event({ _id: "copy", title: "Norwalk CT event" }),
+      ],
+      [],
+      NOW,
+    );
+
+    expect(rows.map((row) => row.id)).toEqual(["first"]);
+  });
+
+  it("collapses an event and its spawned task, preferring the event row", () => {
+    const at = NOW + DAY;
+    const rows = buildAgendaRows(
+      [task({ _id: "task-copy", title: "Attend dentist appointment", dueAt: at })],
+      [event({ _id: "event", title: "Dentist appointment", startAt: at })],
+      [],
+      NOW,
+    );
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ kind: "event", id: "event" });
+  });
+
+  it("does not collapse distinct rows that only share a time", () => {
+    const rows = buildAgendaRows(
+      [task({ _id: "call", title: "Call the dentist", dueAt: NOW + DAY })],
+      [event({ _id: "lunch", title: "Lunch", startAt: NOW + DAY })],
+      [],
+      NOW,
+    );
+
+    expect(rows).toHaveLength(2);
+  });
+
   /* --- wants keep their no-pressure treatment inside the shared table --- */
 
   it("sorts wants last, even against undated obligations", () => {
