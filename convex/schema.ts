@@ -92,6 +92,13 @@ const memoryReviewState = v.union(
   v.literal("archived"),
 );
 
+const knowledgeKind = v.union(
+  v.literal("note"),
+  v.literal("link"),
+  v.literal("knowledgeObject"),
+  v.literal("memory"),
+);
+
 const processingMetadata = {
   processingState,
   rejectedAt: v.optional(v.number()),
@@ -588,6 +595,30 @@ export default defineSchema({
     createdAt: v.number(),
     updatedAt: v.number(),
   }).index("by_brain_state", ["brainInstanceId", "processingState"]),
+
+  knowledge: defineTable({
+    brainInstanceId: v.id("brainInstances"),
+    kind: knowledgeKind,
+    title: v.optional(v.string()),
+    body: v.optional(v.string()),
+    summary: v.optional(v.string()),
+    url: v.optional(v.string()),
+    normalizedUrl: v.optional(v.string()),
+    whyItMatters: v.optional(v.string()),
+    objectType: v.optional(v.string()),
+    properties: v.optional(v.any()),
+    memoryType: v.optional(memoryType),
+    ...processingMetadata,
+    sourceRefIds,
+    relatedEntityRefs: v.optional(v.array(entityRef)),
+    rubricDecision: v.optional(v.string()),
+    captureReason: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_brain_kind_state", ["brainInstanceId", "kind", "processingState"])
+    .index("by_brain_kind_created", ["brainInstanceId", "kind", "createdAt"])
+    .index("by_brain_updated", ["brainInstanceId", "updatedAt"]),
 
   memories: defineTable({
     brainInstanceId: v.id("brainInstances"),
