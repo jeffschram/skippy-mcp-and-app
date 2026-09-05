@@ -1005,45 +1005,86 @@ export function LiveGoalsContent() {
 
 function GoalRow({ goal }: { goal: AnyRecord }) {
   const updateGoal = useMutation(api.knowledge.updateGoalForViewer);
+  // Read card by default (Phase 2 pattern, mirrors TriageItem): the always-open
+  // title/description/status form made the Goals list read as a wall of inputs.
+  const [editing, setEditing] = useState(false);
   const save = (patch: AnyRecord) => void updateGoal({ goalId: goal._id, ...patch } as any);
 
   return (
-    <article className={itemClass}>
+    <article
+      className={cn(itemClass, !editing && "cursor-pointer")}
+      onClick={
+        editing
+          ? undefined
+          : (event: MouseEvent<HTMLElement>) => {
+              // Tap anywhere on the card to edit, but let the explicit Edit
+              // button (and any future controls) handle their own clicks.
+              if ((event.target as HTMLElement).closest("button, a, input, select, textarea, label")) {
+                return;
+              }
+              setEditing(true);
+            }
+      }
+    >
       <span className={cn(itemIconClass, goal.status === "achieved" && itemIconActiveClass)}>
         <icons.Target size={17} aria-hidden />
       </span>
-      <div className={formGridClass}>
-        <input
-          className={inputClass}
-          defaultValue={goal.title}
-          onBlur={(event) => {
-            const value = event.target.value.trim();
-            if (value && value !== goal.title) {
-              save({ title: value });
-            }
-          }}
-        />
-        <textarea
-          className={textareaClass}
-          placeholder="Description"
-          defaultValue={goal.description ?? ""}
-          onBlur={(event) => {
-            if (event.target.value !== (goal.description ?? "")) {
-              save({ description: event.target.value });
-            }
-          }}
-        />
-      </div>
-      <label className={fieldClass}>
-        <span>Status</span>
-        <select className={selectClass} defaultValue={goal.status} onChange={(event) => save({ status: event.target.value })}>
-          {(statusOptions.goal ?? []).map((statusValue) => (
-            <option key={statusValue} value={statusValue}>
-              {statusValue}
-            </option>
-          ))}
-        </select>
-      </label>
+      {editing ? (
+        <>
+          <div className={formGridClass}>
+            <input
+              className={inputClass}
+              defaultValue={goal.title}
+              onBlur={(event) => {
+                const value = event.target.value.trim();
+                if (value && value !== goal.title) {
+                  save({ title: value });
+                }
+              }}
+            />
+            <textarea
+              className={textareaClass}
+              placeholder="Description"
+              defaultValue={goal.description ?? ""}
+              onBlur={(event) => {
+                if (event.target.value !== (goal.description ?? "")) {
+                  save({ description: event.target.value });
+                }
+              }}
+            />
+            <label className={fieldClass}>
+              <span>Status</span>
+              <select className={selectClass} defaultValue={goal.status} onChange={(event) => save({ status: event.target.value })}>
+                {(statusOptions.goal ?? []).map((statusValue) => (
+                  <option key={statusValue} value={statusValue}>
+                    {statusValue}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <CardActions
+            label={`Goal actions for ${goal.title}`}
+            actions={[
+              { label: "Done", ariaLabel: `Done editing ${goal.title}`, primary: true, onClick: () => setEditing(false) },
+            ]}
+          />
+        </>
+      ) : (
+        <>
+          <div>
+            <p className={itemTitleClass}>{goal.title}</p>
+            {goal.description ? <p className={cn(itemMetaClass, "line-clamp-2")}>{goal.description}</p> : null}
+          </div>
+          <span className={taskSideClass}>
+            <span className={cn(badgeClass, goal.status === "achieved" ? badgeGreenClass : badgeBlueClass)}>{goal.status}</span>
+            <CardActions
+              label={`Goal actions for ${goal.title}`}
+              actions={[{ label: "Edit", ariaLabel: `Edit ${goal.title}`, onClick: () => setEditing(true) }]}
+            />
+          </span>
+        </>
+      )}
     </article>
   );
 }
