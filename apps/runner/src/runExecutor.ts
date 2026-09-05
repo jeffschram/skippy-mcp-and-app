@@ -12,7 +12,7 @@ import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
 import { Readable } from "node:stream";
-import { collectArtifacts, materializeManifest } from "./fileWorkspace.js";
+import { collectArtifacts, materializeManifest, type ArtifactCandidate } from "./fileWorkspace.js";
 import {
   assertGitRepo,
   assertInsideAllowedRoot,
@@ -557,13 +557,32 @@ function buildPrompt(run: ClaimedRun, inputRoot?: string, outputRoot?: string, f
   return lines.join("\n");
 }
 
+/**
+ * Pick mutation args explicitly — spreading the ArtifactCandidate leaked the
+ * local-only absolutePath into the payload, and Convex validators reject extra
+ * fields (2026-09-05: five runs completed their work then died at final
+ * upload on this). Spread-in-literal bypasses tsc's excess-property check, so
+ * typecheck never caught it.
+ */
+export function artifactUploadArgs(artifact: ArtifactCandidate, required: boolean | undefined) {
+  const args: { fileName: string; mimeType: string; sizeBytes: number; sha256: string; relativePath: string; required?: boolean } = {
+    fileName: artifact.fileName,
+    mimeType: artifact.mimeType,
+    sizeBytes: artifact.sizeBytes,
+    sha256: artifact.sha256,
+    relativePath: artifact.relativePath,
+  };
+  if (required !== undefined) args.required = required;
+  return args;
+}
+
 async function uploadRunArtifacts(plane: ControlPlane, run: ClaimedRun, outputRoot: string) {
   if (!run.outputPolicy?.enabled) return [];
   const artifacts = await collectArtifacts(outputRoot, { maxFiles: run.outputPolicy.maxFiles, maxFileBytes: run.outputPolicy.maxFileBytes, maxTotalBytes: run.outputPolicy.maxTotalBytes });
   if (run.outputPolicy.required && artifacts.length === 0) throw new Error("required artifact output directory is empty");
   const fileIds: string[] = [];
   for (const artifact of artifacts) {
-    const begun = await plane.beginArtifactUpload(run.runId, run.claimToken, { ...artifact, required: run.outputPolicy.required });
+    const begun = await plane.beginArtifactUpload(run.runId, run.claimToken, artifactUploadArgs(artifact, run.outputPolicy.required));
     if (begun.status === "ready") { fileIds.push(begun.fileId); continue; }
     if (!begun.uploadUrl) throw new Error(`upload URL unavailable for artifact ${artifact.relativePath}`);
     const response = await fetch(begun.uploadUrl, { method: "POST", headers: { "Content-Type": artifact.mimeType }, body: Readable.toWeb(fs.createReadStream(artifact.absolutePath)) as any, duplex: "half" } as any);
