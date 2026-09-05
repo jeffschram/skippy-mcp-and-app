@@ -1,4 +1,10 @@
-import { internalMutationGeneric, mutationGeneric, queryGeneric } from "convex/server";
+import {
+  internalMutationGeneric,
+  makeFunctionReference,
+  mutationGeneric,
+  paginationOptsValidator,
+  queryGeneric,
+} from "convex/server";
 import { v } from "convex/values";
 import {
   GOAL_STATUSES,
@@ -18,7 +24,6 @@ import {
   taskTitleLooksDuplicate,
 } from "@skippy/shared";
 import { requireOwnedBrain } from "./auth";
-import { insertKnowledgeForMemory } from "./knowledgeDualWrite";
 import { advanceDependentsAfterDone } from "./taskExecution";
 import { phaseAppendOrderIndex } from "./taskOrder";
 
@@ -149,11 +154,11 @@ const entityTableByType = {
   goal: "goals",
   project: "projects",
   task: "tasks",
-  note: "notes",
+  note: "knowledge",
   person: "people",
   company: "companies",
-  link: "links",
-  knowledgeObject: "knowledgeObjects",
+  link: "knowledge",
+  knowledgeObject: "knowledge",
 } as const;
 
 const legacyTableByKnowledgeKind = {
@@ -469,7 +474,6 @@ async function createAcceptedEntity(
   actorType: "user" | "harness" | "skippy_ai" | "system" = "harness",
   actorId?: string,
 ) {
-  const tableName = entityTableByType[entityTypeName];
   const sourceRefIds = triageItem.sourceRefIds ?? [];
   const normalizedPayload = normalizeAcceptedEntityPayload(entityTypeName, payload);
   const duplicateEntity = await findAcceptedEntityDuplicate(
@@ -504,8 +508,7 @@ async function createAcceptedEntity(
     updatedAt: now,
   };
 
-  const entityId = await db.insert(tableName, entityDocument);
-  await insertKnowledgeForEntity(
+  const entityId = await insertEntity(
     db,
     triageItem.brainInstanceId,
     entityTypeName,
@@ -556,9 +559,19 @@ function memoryTitleFor(memoryTypeName: string, title: string | undefined, body:
   return fallback || `${memoryTypeName.slice(0, 1).toUpperCase()}${memoryTypeName.slice(1)}`;
 }
 
-const dualWriteEntityKinds = new Set(["note", "link", "knowledgeObject"]);
+function processingStateForMemoryStatus(status: string) {
+  return status === "accepted"
+    ? "accepted"
+    : status === "rejected"
+      ? "rejected"
+      : status === "archived"
+        ? "archived"
+        : "suggested";
+}
 
-async function insertKnowledgeForEntity(
+const unifiedKnowledgeEntityKinds = new Set(["note", "link", "knowledgeObject"]);
+
+async function insertEntity(
   db: any,
   brainInstanceId: any,
   entityTypeName: keyof typeof entityTableByType,
@@ -567,11 +580,11 @@ async function insertKnowledgeForEntity(
   now: number,
   rubricDecision?: string,
 ) {
-  if (!dualWriteEntityKinds.has(entityTypeName)) {
-    return;
+  if (!unifiedKnowledgeEntityKinds.has(entityTypeName)) {
+    return await db.insert(entityTableByType[entityTypeName], payload);
   }
 
-  await db.insert("knowledge", {
+  return await db.insert("knowledge", {
     brainInstanceId,
     kind: entityTypeName,
     title: optionalTrimmed(payload.title),
@@ -1502,7 +1515,6 @@ export const ingestObject = mutationGeneric({
       createdAt: now,
       updatedAt: now,
     };
-    const tableName = entityTableByType[entityTypeName];
     const duplicateEntity = await findAcceptedEntityDuplicate(db, args.brainInstanceId, entityTypeName, normalizedPayload);
     if (duplicateEntity) {
       await mergeIntoDuplicateEntity(
@@ -1531,8 +1543,7 @@ export const ingestObject = mutationGeneric({
       };
     }
 
-    const entityId = await db.insert(tableName, entityDocument);
-    await insertKnowledgeForEntity(
+    const entityId = await insertEntity(
       db,
       args.brainInstanceId,
       entityTypeName,
@@ -1630,6 +1641,175 @@ export const verifyKnowledgeDualWriteCounts = queryGeneric({
       limit,
     };
   },
+});
+
+const backfillResult = v.object({
+  isDone: v.boolean(),
+  continueCursor: v.string(),
+  migrated: v.number(),
+  skipped: v.number(),
+});
+
+function legacyKnowledgeDocument(kind: "note" | "link" | "knowledgeObject" | "memory", row: any) {
+  if (kind === "memory") {
+    return {
+      brainInstanceId: row.brainInstanceId,
+      kind,
+      title: row.title,
+      body: row.body,
+      summary: row.summary,
+      memoryType: row.memoryType,
+      status: row.status,
+      processingState: processingStateForMemoryStatus(row.status),
+      confidence: row.confidence,
+      sourceRefIds: row.sourceRefIds,
+      relatedEntityRefs: row.relatedEntityRefs,
+      rubricDecision: row.rubricDecision,
+      captureReason: row.captureReason,
+      reviewState: row.reviewState,
+      reviewedBy: row.reviewedBy,
+      reviewedAt: row.reviewedAt,
+      acceptedAt: row.acceptedAt,
+      rejectedAt: row.rejectedAt,
+      rejectionReason: row.rejectionReason,
+      archivedAt: row.archivedAt,
+      archiveReason: row.archiveReason,
+      legacyId: String(row._id),
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    };
+  }
+
+  return {
+    brainInstanceId: row.brainInstanceId,
+    kind,
+    title: row.title,
+    body: row.body,
+    summary: row.summary,
+    url: row.url,
+    normalizedUrl: row.normalizedUrl,
+    whyItMatters: row.whyItMatters,
+    status: kind === "link" ? row.status : undefined,
+    objectType: row.objectType,
+    properties: row.properties,
+    processingState: row.processingState,
+    rejectedAt: row.rejectedAt,
+    rejectionReason: row.rejectionReason,
+    rejectedBy: row.rejectedBy,
+    confidence: row.confidence,
+    reviewReason: row.reviewReason,
+    legacyId: String(row._id),
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+function legacyRowMatchesKnowledge(kind: "note" | "link" | "knowledgeObject" | "memory", row: any, item: any) {
+  if (kind === "note") {
+    return item.title === row.title && item.body === row.body;
+  }
+  if (kind === "link") {
+    return item.url === row.url && item.normalizedUrl === row.normalizedUrl;
+  }
+  if (kind === "knowledgeObject") {
+    return item.objectType === row.objectType && item.title === row.title;
+  }
+  return item.memoryType === row.memoryType && item.title === row.title && item.body === row.body;
+}
+
+async function backfillLegacyPage(
+  ctx: any,
+  table: "notes" | "links" | "knowledgeObjects" | "memories",
+  kind: "note" | "link" | "knowledgeObject" | "memory",
+  paginationOpts: { cursor: string | null; numItems: number },
+  continuation: any,
+) {
+  const page = await ctx.db.query(table).paginate(paginationOpts);
+  let migrated = 0;
+  let skipped = 0;
+
+  for (const row of page.page) {
+    const existing = await ctx.db
+      .query("knowledge")
+      .withIndex("by_brain_kind_legacy_id", (q: any) =>
+        q.eq("brainInstanceId", row.brainInstanceId).eq("kind", kind).eq("legacyId", String(row._id)),
+      )
+      .first();
+    if (existing) {
+      skipped += 1;
+      continue;
+    }
+
+    // Step 3 dual-writes predate `legacyId`. Adopt an exact timestamp/content
+    // match instead of inserting a second canonical row during the backfill.
+    const dualWrittenCandidates = await ctx.db
+      .query("knowledge")
+      .withIndex("by_brain_kind_created", (q: any) =>
+        q.eq("brainInstanceId", row.brainInstanceId).eq("kind", kind).eq("createdAt", row.createdAt),
+      )
+      .take(10);
+    const dualWritten = dualWrittenCandidates.find((item: any) => legacyRowMatchesKnowledge(kind, row, item));
+    if (dualWritten) {
+      await ctx.db.patch(dualWritten._id, {
+        ...legacyKnowledgeDocument(kind, row),
+        legacyId: String(row._id),
+      });
+      migrated += 1;
+      continue;
+    }
+    await ctx.db.insert("knowledge", legacyKnowledgeDocument(kind, row));
+    migrated += 1;
+  }
+
+  if (!page.isDone) {
+    await ctx.scheduler.runAfter(0, continuation, {
+      paginationOpts: { cursor: page.continueCursor, numItems: paginationOpts.numItems },
+    });
+  }
+
+  return { isDone: page.isDone, continueCursor: page.continueCursor, migrated, skipped };
+}
+
+/** Run once after deploying step 4; it self-schedules bounded pages to completion. */
+const backfillNotesRef = makeFunctionReference<"mutation">("knowledge:backfillNotesToKnowledge");
+const backfillLinksRef = makeFunctionReference<"mutation">("knowledge:backfillLinksToKnowledge");
+const backfillKnowledgeObjectsRef = makeFunctionReference<"mutation">(
+  "knowledge:backfillKnowledgeObjectsToKnowledge",
+);
+const backfillMemoriesRef = makeFunctionReference<"mutation">("knowledge:backfillMemoriesToKnowledge");
+
+export const backfillNotesToKnowledge = internalMutationGeneric({
+  args: { paginationOpts: paginationOptsValidator },
+  returns: backfillResult,
+  handler: async (ctx, args) =>
+    await backfillLegacyPage(ctx, "notes", "note", args.paginationOpts, backfillNotesRef),
+});
+
+export const backfillLinksToKnowledge = internalMutationGeneric({
+  args: { paginationOpts: paginationOptsValidator },
+  returns: backfillResult,
+  handler: async (ctx, args) =>
+    await backfillLegacyPage(ctx, "links", "link", args.paginationOpts, backfillLinksRef),
+});
+
+export const backfillKnowledgeObjectsToKnowledge = internalMutationGeneric({
+  args: { paginationOpts: paginationOptsValidator },
+  returns: backfillResult,
+  handler: async (ctx, args) =>
+    await backfillLegacyPage(
+      ctx,
+      "knowledgeObjects",
+      "knowledgeObject",
+      args.paginationOpts,
+      backfillKnowledgeObjectsRef,
+    ),
+});
+
+export const backfillMemoriesToKnowledge = internalMutationGeneric({
+  args: { paginationOpts: paginationOptsValidator },
+  returns: backfillResult,
+  handler: async (ctx, args) =>
+    await backfillLegacyPage(ctx, "memories", "memory", args.paginationOpts, backfillMemoriesRef),
 });
 
 export const approveTriageItem = mutationGeneric({
@@ -1882,9 +2062,10 @@ export const reviewCountsForViewer = queryGeneric({
     // ui-ux-improvement-plan.md): candidate memories count as finds so the one
     // nav badge covers the whole queue.
     const memoryCandidates = await ctx.db
-      .query("memories")
-      .withIndex("by_brain_status", (q) => q.eq("brainInstanceId", brain._id))
-      .filter((q) => q.eq(q.field("status"), "inbox"))
+      .query("knowledge")
+      .withIndex("by_brain_kind_status", (q: any) =>
+        q.eq("brainInstanceId", brain._id).eq("kind", "memory").eq("status", "inbox"),
+      )
       .take(100);
     // Mirrors the reviewable statuses on the approval card: drafted and failed
     // actions still need the owner, not just pending_approval.
@@ -1962,10 +2143,21 @@ export const dashboardForViewer = queryGeneric({
     const companies = await ctx.db.query("companies").filter(acceptedFilter).take(20);
     // Links auto-age: unread links older than the cutoff stop feeding focus context
     // (they stay stored and searchable in the Brain's Links tab).
-    const links = (
-      await ctx.db.query("links").filter(acceptedFilter).take(20)
-    ).filter((link) => isLinkFocusCandidate(link));
-    const notes = await ctx.db.query("notes").filter(acceptedFilter).take(20);
+    const [links, notes] = await Promise.all([
+      ctx.db
+        .query("knowledge")
+        .withIndex("by_brain_kind_state", (q: any) =>
+          q.eq("brainInstanceId", brain._id).eq("kind", "link").eq("processingState", "accepted"),
+        )
+        .take(20),
+      ctx.db
+        .query("knowledge")
+        .withIndex("by_brain_kind_state", (q: any) =>
+          q.eq("brainInstanceId", brain._id).eq("kind", "note").eq("processingState", "accepted"),
+        )
+        .take(20),
+    ]);
+    const focusLinks = links.filter((link) => isLinkFocusCandidate(link));
     // Read-time self-heal: a "running" row whose harness died stops
     // heartbeating; once past the staleness window it is filtered out here so
     // no consumer can pin the "Updating" pill forever. A new run reusing the
@@ -2014,7 +2206,7 @@ export const dashboardForViewer = queryGeneric({
       tasks,
       people,
       companies,
-      links,
+      links: focusLinks,
       notes,
       quickCaptures,
     };
@@ -2636,7 +2828,7 @@ async function applyLinkStatusUpdate(
   metadata?: Record<string, unknown>,
 ) {
   const link = await db.get(linkId);
-  if (!link || link.brainInstanceId !== brainInstanceId) {
+  if (!link || link.brainInstanceId !== brainInstanceId || link.kind !== "link") {
     throw new Error("link not found");
   }
   const now = Date.now();
@@ -2763,9 +2955,10 @@ export const listMemoryInboxForViewer = queryGeneric({
   handler: async (ctx, args) => {
     const { brain } = await requireOwnedBrain(ctx);
     const memories = await ctx.db
-      .query("memories")
-      .withIndex("by_brain_status", (q) => q.eq("brainInstanceId", brain._id))
-      .filter((q) => q.eq(q.field("status"), "inbox"))
+      .query("knowledge")
+      .withIndex("by_brain_kind_status", (q: any) =>
+        q.eq("brainInstanceId", brain._id).eq("kind", "memory").eq("status", "inbox"),
+      )
       .order("desc")
       .take(args.limit ?? 50);
 
@@ -2781,9 +2974,10 @@ export const listMemoryReviewItemsForViewer = queryGeneric({
   handler: async (ctx, args) => {
     const { brain } = await requireOwnedBrain(ctx);
     const memories = await ctx.db
-      .query("memories")
-      .withIndex("by_brain_review_state", (q) => q.eq("brainInstanceId", brain._id))
-      .filter((q) => q.eq(q.field("reviewState"), "pending_review"))
+      .query("knowledge")
+      .withIndex("by_brain_kind_review_state", (q: any) =>
+        q.eq("brainInstanceId", brain._id).eq("kind", "memory").eq("reviewState", "pending_review"),
+      )
       .order("desc")
       .take(args.limit ?? 50);
 
@@ -2907,8 +3101,11 @@ export const captureThoughtForViewer = mutationGeneric({
       createdAt: now,
       updatedAt: now,
     };
-    const memoryId = await ctx.db.insert("memories", memoryDocument);
-    await insertKnowledgeForMemory(ctx.db, memoryDocument);
+    const memoryId = await ctx.db.insert("knowledge", {
+      ...memoryDocument,
+      kind: "memory",
+      processingState: processingStateForMemoryStatus(memoryDocument.status),
+    });
 
     await ctx.db.insert("activityEvents", {
       brainInstanceId: brain._id,
@@ -2975,8 +3172,11 @@ export const recordDurableMemoryForViewer = mutationGeneric({
       createdAt: now,
       updatedAt: now,
     };
-    const memoryId = await ctx.db.insert("memories", memoryDocument);
-    await insertKnowledgeForMemory(ctx.db, memoryDocument);
+    const memoryId = await ctx.db.insert("knowledge", {
+      ...memoryDocument,
+      kind: "memory",
+      processingState: processingStateForMemoryStatus(memoryDocument.status),
+    });
 
     await ctx.db.insert("activityEvents", {
       brainInstanceId: brain._id,
@@ -3044,8 +3244,11 @@ export const submitMemoryReviewCandidateForViewer = mutationGeneric({
       createdAt: now,
       updatedAt: now,
     };
-    const memoryId = await ctx.db.insert("memories", memoryDocument);
-    await insertKnowledgeForMemory(ctx.db, memoryDocument);
+    const memoryId = await ctx.db.insert("knowledge", {
+      ...memoryDocument,
+      kind: "memory",
+      processingState: processingStateForMemoryStatus(memoryDocument.status),
+    });
 
     await ctx.db.insert("activityEvents", {
       brainInstanceId: brain._id,
@@ -3069,7 +3272,7 @@ export const submitMemoryReviewCandidateForViewer = mutationGeneric({
 
 export const acceptMemoryForViewer = mutationGeneric({
   args: {
-    memoryId: v.id("memories"),
+    memoryId: v.id("knowledge"),
     memoryType: v.optional(memoryType),
     title: v.optional(v.string()),
     summary: v.optional(v.string()),
@@ -3084,7 +3287,7 @@ export const acceptMemoryForViewer = mutationGeneric({
   handler: async (ctx, args) => {
     const { user, brain } = await requireOwnedBrain(ctx);
     const memory = await ctx.db.get(args.memoryId);
-    if (!memory || memory.brainInstanceId !== brain._id) {
+    if (!memory || memory.brainInstanceId !== brain._id || memory.kind !== "memory") {
       throw new Error("memory not found");
     }
     if (memory.status === "archived") {
@@ -3117,6 +3320,7 @@ export const acceptMemoryForViewer = mutationGeneric({
       summary: args.summary === undefined ? memory.summary : optionalTrimmed(args.summary),
       body,
       status: "accepted",
+      processingState: "accepted",
       reviewState: "accepted",
       confidence: args.confidence ?? memory.confidence,
       sourceRefIds,
@@ -3146,19 +3350,20 @@ export const acceptMemoryForViewer = mutationGeneric({
 
 export const rejectMemoryForViewer = mutationGeneric({
   args: {
-    memoryId: v.id("memories"),
+    memoryId: v.id("knowledge"),
     rejectionReason: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const { user, brain } = await requireOwnedBrain(ctx);
     const memory = await ctx.db.get(args.memoryId);
-    if (!memory || memory.brainInstanceId !== brain._id) {
+    if (!memory || memory.brainInstanceId !== brain._id || memory.kind !== "memory") {
       throw new Error("memory not found");
     }
 
     const now = Date.now();
     await ctx.db.patch(args.memoryId, {
       status: "rejected",
+      processingState: "rejected",
       reviewState: "rejected",
       reviewedBy: user._id,
       reviewedAt: now,
@@ -3184,19 +3389,20 @@ export const rejectMemoryForViewer = mutationGeneric({
 
 export const archiveMemoryForViewer = mutationGeneric({
   args: {
-    memoryId: v.id("memories"),
+    memoryId: v.id("knowledge"),
     archiveReason: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const { user, brain } = await requireOwnedBrain(ctx);
     const memory = await ctx.db.get(args.memoryId);
-    if (!memory || memory.brainInstanceId !== brain._id) {
+    if (!memory || memory.brainInstanceId !== brain._id || memory.kind !== "memory") {
       throw new Error("memory not found");
     }
 
     const now = Date.now();
     await ctx.db.patch(args.memoryId, {
       status: "archived",
+      processingState: "archived",
       reviewState: "archived",
       archivedAt: now,
       archiveReason: optionalTrimmed(args.archiveReason),
@@ -3224,9 +3430,9 @@ export const MEMORY_REVIEW_EXPIRY_MS = 14 * 24 * 60 * 60 * 1000;
 
 async function pendingReviewMemoriesForBrain(db: any, brainInstanceId: any) {
   return await db
-    .query("memories")
-    .withIndex("by_brain_review_state", (q: any) =>
-      q.eq("brainInstanceId", brainInstanceId).eq("reviewState", "pending_review"),
+    .query("knowledge")
+    .withIndex("by_brain_kind_review_state", (q: any) =>
+      q.eq("brainInstanceId", brainInstanceId).eq("kind", "memory").eq("reviewState", "pending_review"),
     )
     .collect();
 }
@@ -3246,6 +3452,7 @@ export const expireStaleMemoryCandidatesForViewer = mutationGeneric({
     for (const memory of stale) {
       await ctx.db.patch(memory._id, {
         status: "archived",
+        processingState: "archived",
         reviewState: "archived",
         archivedAt: now,
         archiveReason: `Auto-expired after ${Math.round(maxAgeMs / (24 * 60 * 60 * 1000))} days pending review`,
@@ -3280,6 +3487,7 @@ export const bulkResolveMemoryCandidatesForViewer = mutationGeneric({
       if (args.resolution === "accept") {
         await ctx.db.patch(memory._id, {
           status: "accepted",
+          processingState: "accepted",
           reviewState: "accepted",
           reviewedBy: user._id,
           reviewedAt: now,
@@ -3289,6 +3497,7 @@ export const bulkResolveMemoryCandidatesForViewer = mutationGeneric({
       } else {
         await ctx.db.patch(memory._id, {
           status: "archived",
+          processingState: "archived",
           reviewState: "archived",
           archivedAt: now,
           archiveReason: "Bulk archived from memory inbox",
@@ -3317,7 +3526,7 @@ export const bulkResolveMemoryCandidatesForViewer = mutationGeneric({
 
 export const linkMemoryToEntitiesForViewer = mutationGeneric({
   args: {
-    memoryId: v.id("memories"),
+    memoryId: v.id("knowledge"),
     relatedEntityRefs: v.array(entityRef),
     mode: v.optional(v.union(v.literal("add"), v.literal("replace"))),
     reason: v.optional(v.string()),
@@ -3325,7 +3534,7 @@ export const linkMemoryToEntitiesForViewer = mutationGeneric({
   handler: async (ctx, args) => {
     const { user, brain } = await requireOwnedBrain(ctx);
     const memory = await ctx.db.get(args.memoryId);
-    if (!memory || memory.brainInstanceId !== brain._id) {
+    if (!memory || memory.brainInstanceId !== brain._id || memory.kind !== "memory") {
       throw new Error("memory not found");
     }
 
@@ -3363,7 +3572,7 @@ export const linkMemoryToEntitiesForViewer = mutationGeneric({
 export const updateLinkStatusForBrain = mutationGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
-    linkId: v.id("links"),
+    linkId: v.id("knowledge"),
     status: linkStatusValidator,
     reason: v.optional(v.string()),
     actorId: v.optional(v.string()),
@@ -3472,8 +3681,11 @@ export const captureThoughtForBrain = mutationGeneric({
       createdAt: now,
       updatedAt: now,
     };
-    const memoryId = await db.insert("memories", memoryDocument);
-    await insertKnowledgeForMemory(db, memoryDocument);
+    const memoryId = await db.insert("knowledge", {
+      ...memoryDocument,
+      kind: "memory",
+      processingState: processingStateForMemoryStatus(memoryDocument.status),
+    });
 
     await db.insert("activityEvents", {
       brainInstanceId: args.brainInstanceId,
@@ -3560,8 +3772,11 @@ export const recordMemoryForBrain = mutationGeneric({
       createdAt: now,
       updatedAt: now,
     };
-    const memoryId = await db.insert("memories", memoryDocument);
-    await insertKnowledgeForMemory(db, memoryDocument);
+    const memoryId = await db.insert("knowledge", {
+      ...memoryDocument,
+      kind: "memory",
+      processingState: processingStateForMemoryStatus(memoryDocument.status),
+    });
 
     await db.insert("activityEvents", {
       brainInstanceId: args.brainInstanceId,
@@ -3636,8 +3851,11 @@ export const submitMemoryReviewCandidateForBrain = mutationGeneric({
       createdAt: now,
       updatedAt: now,
     };
-    const memoryId = await db.insert("memories", memoryDocument);
-    await insertKnowledgeForMemory(db, memoryDocument);
+    const memoryId = await db.insert("knowledge", {
+      ...memoryDocument,
+      kind: "memory",
+      processingState: processingStateForMemoryStatus(memoryDocument.status),
+    });
 
     await db.insert("activityEvents", {
       brainInstanceId: args.brainInstanceId,
@@ -4559,9 +4777,9 @@ export const aiContextForBrain = queryGeneric({
     // synthesis LLM. Fresh candidates carry an ageDays hint so the model can weigh recency.
     const links = (
       await db
-        .query("links")
-        .filter((q) =>
-          q.and(q.eq(q.field("brainInstanceId"), brainInstanceId), q.eq(q.field("processingState"), "accepted")),
+        .query("knowledge")
+        .withIndex("by_brain_kind_state", (q: any) =>
+          q.eq("brainInstanceId", brainInstanceId).eq("kind", "link").eq("processingState", "accepted"),
         )
         .take(20)
     )
@@ -4571,9 +4789,9 @@ export const aiContextForBrain = queryGeneric({
         return ageDays === undefined ? link : { ...link, ageDays };
       });
     const notes = await db
-      .query("notes")
-      .filter((q) =>
-        q.and(q.eq(q.field("brainInstanceId"), brainInstanceId), q.eq(q.field("processingState"), "accepted")),
+      .query("knowledge")
+      .withIndex("by_brain_kind_state", (q: any) =>
+        q.eq("brainInstanceId", brainInstanceId).eq("kind", "note").eq("processingState", "accepted"),
       )
       .take(20);
     const embeddings = await db

@@ -22,11 +22,11 @@ const entityTableByType = {
   goal: "goals",
   project: "projects",
   task: "tasks",
-  note: "notes",
+  note: "knowledge",
   person: "people",
   company: "companies",
-  link: "links",
-  knowledgeObject: "knowledgeObjects",
+  link: "knowledge",
+  knowledgeObject: "knowledge",
 } as const;
 
 const relationshipTypes = [
@@ -206,9 +206,10 @@ export const contextualMapForViewer = queryGeneric({
       acceptedRows(ctx.db, brain._id, "people", contactLimit),
       acceptedRows(ctx.db, brain._id, "companies", contactLimit),
       ctx.db
-        .query("memories")
-        .withIndex("by_brain_status", (q: any) => q.eq("brainInstanceId", brain._id))
-        .filter((q: any) => q.eq(q.field("status"), "accepted"))
+        .query("knowledge")
+        .withIndex("by_brain_kind_status", (q: any) =>
+          q.eq("brainInstanceId", brain._id).eq("kind", "memory").eq("status", "accepted"),
+        )
         .order("desc")
         .take(160),
     ]);

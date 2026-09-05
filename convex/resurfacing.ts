@@ -23,11 +23,11 @@ const entityTableByType = {
   goal: "goals",
   project: "projects",
   task: "tasks",
-  note: "notes",
+  note: "knowledge",
   person: "people",
   company: "companies",
-  link: "links",
-  knowledgeObject: "knowledgeObjects",
+  link: "knowledge",
+  knowledgeObject: "knowledge",
 } as const;
 
 type RoutineType = (typeof ROUTINE_ORDER)[number];
@@ -204,10 +204,12 @@ async function acceptedEntities(db: any, brainInstanceId: any, tableName: string
 
 async function acceptedMemories(db: any, brainInstanceId: any, limit: number) {
   return await db
-    .query("memories")
-    .withIndex("by_brain_updated", (q: any) => q.eq("brainInstanceId", brainInstanceId))
+    .query("knowledge")
+    .withIndex("by_brain_kind_updated", (q: any) =>
+      q.eq("brainInstanceId", brainInstanceId).eq("kind", "memory"),
+    )
     .order("desc")
-    .filter((q: any) => q.eq(q.field("status"), "accepted"))
+    .filter((q: any) => q.eq(q.field("processingState"), "accepted"))
     .take(limit);
 }
 
