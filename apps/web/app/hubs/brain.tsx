@@ -6,7 +6,6 @@ import { Tabs } from "../components";
 import {
   LiveContactsContent,
   LiveGoalsContent,
-  LiveMemoryInboxContent,
   LiveMemoryContent,
 } from "../live-pages";
 import { LiveContextMapContent } from "../context-map/context-map-content";
@@ -14,9 +13,11 @@ import { LiveInterviewsIndex } from "../interviews/ui";
 import { LiveLinksAndNotesContent } from "../links-notes";
 import { eyebrowClass, mutedClass, pageHeaderClass } from "../page-classes";
 
+// No Inbox tab: candidate memories merged into Review → Finds (owner decision
+// Sep 4, ui-ux-improvement-plan.md) so there is one review surface. Brain is
+// purely "what Skippy knows"; /brain/inbox redirects to the queue.
 const TABS = [
   { key: "memory", label: "Memory" },
-  { key: "inbox", label: "Inbox" },
   { key: "links", label: "Links" },
   { key: "contacts", label: "Contacts" },
   { key: "goals", label: "Goals" },
@@ -60,7 +61,6 @@ export function BrainContent({ section }: { section?: string | undefined }) {
       </div>
 
       {tab === "memory" ? <LiveMemoryContent /> : null}
-      {tab === "inbox" ? <LiveMemoryInboxContent /> : null}
       {tab === "links" ? <LiveLinksAndNotesContent /> : null}
       {tab === "contacts" ? <LiveContactsContent /> : null}
       {tab === "goals" ? <LiveGoalsContent /> : null}

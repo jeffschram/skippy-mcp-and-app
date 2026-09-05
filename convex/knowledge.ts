@@ -1707,17 +1707,34 @@ export const reviewCountsForViewer = queryGeneric({
   args: {},
   handler: async (ctx) => {
     const { brain } = await requireOwnedBrain(ctx);
-    const finds = await ctx.db
+    const triage = await ctx.db
       .query("triageItems")
       .filter((q) => q.and(q.eq(q.field("brainInstanceId"), brain._id), q.eq(q.field("status"), "pending")))
       .take(100);
+    // Brain Inbox merged into Review Finds (owner decision Sep 4,
+    // ui-ux-improvement-plan.md): candidate memories count as finds so the one
+    // nav badge covers the whole queue.
+    const memoryCandidates = await ctx.db
+      .query("memories")
+      .withIndex("by_brain_status", (q) => q.eq("brainInstanceId", brain._id))
+      .filter((q) => q.eq(q.field("status"), "inbox"))
+      .take(100);
+    // Mirrors the reviewable statuses on the approval card: drafted and failed
+    // actions still need the owner, not just pending_approval.
     const approvals = await ctx.db
       .query("pendingActions")
       .filter((q) =>
-        q.and(q.eq(q.field("brainInstanceId"), brain._id), q.eq(q.field("status"), "pending_approval")),
+        q.and(
+          q.eq(q.field("brainInstanceId"), brain._id),
+          q.or(
+            q.eq(q.field("status"), "pending_approval"),
+            q.eq(q.field("status"), "drafted"),
+            q.eq(q.field("status"), "failed"),
+          ),
+        ),
       )
       .take(100);
-    return { finds: finds.length, approvals: approvals.length };
+    return { finds: triage.length + memoryCandidates.length, approvals: approvals.length };
   },
 });
 
@@ -3607,14 +3624,29 @@ export const linkMemoryForBrain = mutationGeneric({
   },
 });
 
+// Statuses still waiting on the owner vs. already settled. The Review queue only
+// shows "open" actions; settled ones live behind the History link because a
+// queue is not a log (ui-ux-improvement-plan.md, one-queue decision Sep 4).
+const OPEN_PENDING_ACTION_STATUSES = ["drafted", "pending_approval", "failed"];
+
 export const pendingActionsForViewer = queryGeneric({
-  args: {},
-  handler: async (ctx) => {
+  args: {
+    // Omitted = everything, which keeps older callers working unchanged.
+    scope: v.optional(v.union(v.literal("open"), v.literal("settled"))),
+  },
+  handler: async (ctx, { scope }) => {
     const { brain } = await requireOwnedBrain(ctx);
-    return await ctx.db
+    const actions = await ctx.db
       .query("pendingActions")
       .filter((q) => q.eq(q.field("brainInstanceId"), brain._id))
       .collect();
+    if (scope === "open") {
+      return actions.filter((action) => OPEN_PENDING_ACTION_STATUSES.includes(action.status));
+    }
+    if (scope === "settled") {
+      return actions.filter((action) => !OPEN_PENDING_ACTION_STATUSES.includes(action.status));
+    }
+    return actions;
   },
 });
 

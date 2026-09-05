@@ -826,7 +826,11 @@ export function TodayContent() {
               ) : (
                 <div style={{ display: "grid", gap: 8 }}>
                   {unclear > 0 ? (
-                    <Link className={cn(itemClass, projectRowClass)} href="/review" style={{ gridTemplateColumns: "auto 1fr auto" }}>
+                    <Link
+                      className={cn(itemClass, projectRowClass)}
+                      href="/review?filter=finds"
+                      style={{ gridTemplateColumns: "auto 1fr auto" }}
+                    >
                       <span className={itemIconClass}>
                         <Inbox size={17} aria-hidden />
                       </span>
@@ -838,7 +842,11 @@ export function TodayContent() {
                     </Link>
                   ) : null}
                   {pending > 0 ? (
-                    <Link className={cn(itemClass, projectRowClass)} href="/review" style={{ gridTemplateColumns: "auto 1fr auto" }}>
+                    <Link
+                      className={cn(itemClass, projectRowClass)}
+                      href="/review?filter=approvals"
+                      style={{ gridTemplateColumns: "auto 1fr auto" }}
+                    >
                       <span className={itemIconClass}>
                         <ShieldCheck size={17} aria-hidden />
                       </span>
