@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { prTitle, RunExecutor } from "./runExecutor.js";
+import { artifactUploadArgs, prTitle, RunExecutor } from "./runExecutor.js";
 import type { ClaimedRun, ControlPlane } from "./controlPlane.js";
 import type { HarnessAdapter, HarnessTurnRequest, HarnessTurnResult } from "./harness/types.js";
 import type { RunnerConfig } from "./config.js";
@@ -184,5 +184,30 @@ describe("stall watchdog", () => {
     const last = statusCalls.at(-1);
     expect(last?.status).toBe("in_review");
     expect(String(last?.extra?.resultSummary)).toContain("declined");
+  });
+});
+
+describe("artifactUploadArgs", () => {
+  it("never forwards local-only fields to the control plane", () => {
+    const candidate = {
+      relativePath: "report/summary.md",
+      absolutePath: "/wt/run/.skippy-output/report/summary.md",
+      fileName: "summary.md",
+      sizeBytes: 42,
+      sha256: "abc123",
+      mimeType: "text/markdown",
+    };
+    const args = artifactUploadArgs(candidate, true);
+    // Convex validators reject extra fields; a leaked absolutePath failed
+    // five completed runs at their final upload step (2026-09-05).
+    expect(args).toEqual({
+      fileName: "summary.md",
+      mimeType: "text/markdown",
+      sizeBytes: 42,
+      sha256: "abc123",
+      relativePath: "report/summary.md",
+      required: true,
+    });
+    expect("absolutePath" in args).toBe(false);
   });
 });
