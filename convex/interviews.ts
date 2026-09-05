@@ -1,7 +1,6 @@
 import { mutationGeneric, queryGeneric } from "convex/server";
 import { v } from "convex/values";
 import { requireOwnedBrain } from "./auth";
-import { insertKnowledgeForMemory } from "./knowledgeDualWrite";
 
 const interviewKind = v.union(
   v.literal("project"),
@@ -282,15 +281,15 @@ function tableForEntityType(entityTypeName: string) {
     case "task":
       return "tasks";
     case "note":
-      return "notes";
+      return "knowledge";
     case "person":
       return "people";
     case "company":
       return "companies";
     case "link":
-      return "links";
+      return "knowledge";
     case "knowledgeObject":
-      return "knowledgeObjects";
+      return "knowledge";
     default:
       throw new Error("unsupported entity type");
   }
@@ -380,8 +379,11 @@ async function createMemoryReviewCandidate(db: any, args: {
     createdAt: args.now,
     updatedAt: args.now,
   };
-  const memoryId = await db.insert("memories", memoryDocument);
-  await insertKnowledgeForMemory(db, memoryDocument);
+  const memoryId = await db.insert("knowledge", {
+    ...memoryDocument,
+    kind: "memory",
+    processingState: "suggested",
+  });
 
   await db.insert("activityEvents", {
     brainInstanceId: args.brainInstanceId,

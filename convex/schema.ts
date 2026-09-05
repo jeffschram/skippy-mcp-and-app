@@ -517,6 +517,8 @@ export default defineSchema({
     .index("by_brain_next_due", ["brainInstanceId", "nextDueAt"])
     .index("by_brain_status", ["brainInstanceId", "status"]),
 
+  // DEPRECATED (brain refactor step 4): retained read-only during the soak.
+  // New writes and reads use `knowledge`; owner approval is required to delete.
   notes: defineTable({
     brainInstanceId: v.id("brainInstances"),
     title: v.optional(v.string()),
@@ -567,6 +569,7 @@ export default defineSchema({
     updatedAt: v.number(),
   }).index("by_brain_state", ["brainInstanceId", "processingState"]),
 
+  // DEPRECATED (brain refactor step 4): retained read-only during the soak.
   links: defineTable({
     brainInstanceId: v.id("brainInstances"),
     url: v.string(),
@@ -588,6 +591,7 @@ export default defineSchema({
     .index("by_brain_url", ["brainInstanceId", "normalizedUrl"])
     .index("by_brain_created", ["brainInstanceId", "createdAt"]),
 
+  // DEPRECATED (brain refactor step 4): retained read-only during the soak.
   knowledgeObjects: defineTable({
     brainInstanceId: v.id("brainInstances"),
     objectType: v.string(),
@@ -625,6 +629,14 @@ export default defineSchema({
     objectType: v.optional(v.string()),
     properties: v.optional(v.any()),
     memoryType: v.optional(memoryType),
+    // Stable provenance makes legacy backfills idempotent and auditable.
+    legacyId: v.optional(v.string()),
+    reviewState: v.optional(memoryReviewState),
+    reviewedBy: v.optional(v.id("users")),
+    reviewedAt: v.optional(v.number()),
+    acceptedAt: v.optional(v.number()),
+    archivedAt: v.optional(v.number()),
+    archiveReason: v.optional(v.string()),
     ...processingMetadata,
     sourceRefIds,
     relatedEntityRefs: v.optional(v.array(entityRef)),
@@ -634,9 +646,15 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_brain_kind_state", ["brainInstanceId", "kind", "processingState"])
+    .index("by_brain_kind_status", ["brainInstanceId", "kind", "status"])
+    .index("by_brain_kind_review_state", ["brainInstanceId", "kind", "reviewState"])
     .index("by_brain_kind_created", ["brainInstanceId", "kind", "createdAt"])
+    .index("by_brain_kind_updated", ["brainInstanceId", "kind", "updatedAt"])
+    .index("by_brain_kind_legacy_id", ["brainInstanceId", "kind", "legacyId"])
     .index("by_brain_updated", ["brainInstanceId", "updatedAt"]),
 
+  // DEPRECATED (brain refactor step 4): retained read-only during the soak.
+  // The unified `knowledge` table is canonical; deletion remains owner-gated.
   memories: defineTable({
     brainInstanceId: v.id("brainInstances"),
     memoryType,
@@ -701,7 +719,8 @@ export default defineSchema({
     prompt: v.string(),
     answerText: v.string(),
     answerValue: v.optional(v.any()),
-    memoryCandidateId: v.optional(v.id("memories")),
+    // Legacy interview rows may still point at the deprecated memories table.
+    memoryCandidateId: v.optional(v.union(v.id("memories"), v.id("knowledge"))),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
