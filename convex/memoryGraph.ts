@@ -224,6 +224,16 @@ export const contextualMapForViewer = queryGeneric({
       ),
     );
     const relationships = relationshipGroups.flat();
+    for (const memory of acceptedMemories) {
+      memory.relatedEntityRefs = relationships
+        .filter(
+          (relationship) =>
+            relationship.type === "mentions" &&
+            relationship.from.entityType === "knowledgeObject" &&
+            relationship.from.entityId === String(memory._id),
+        )
+        .map((relationship) => relationship.to);
+    }
 
     const sourceRefCache = new Map<string, any>();
     async function hydrateSources(memories: any[]) {

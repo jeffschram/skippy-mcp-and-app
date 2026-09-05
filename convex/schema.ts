@@ -639,7 +639,6 @@ export default defineSchema({
     archiveReason: v.optional(v.string()),
     ...processingMetadata,
     sourceRefIds,
-    relatedEntityRefs: v.optional(v.array(entityRef)),
     rubricDecision: v.optional(v.string()),
     captureReason: v.optional(v.string()),
     createdAt: v.number(),

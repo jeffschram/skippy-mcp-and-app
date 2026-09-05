@@ -659,6 +659,94 @@ async function requireRelatedEntityRefsForBrain(
   return deduped;
 }
 
+function knowledgeEntityRef(knowledge: { _id: any; kind: string }) {
+  // The relationship graph predates the unified knowledge table, so retain
+  // the public semantic entity type while pointing at the canonical row ID.
+  return {
+    entityType: knowledge.kind === "memory" ? "knowledgeObject" : knowledge.kind,
+    entityId: knowledge._id,
+  } as { entityType: keyof typeof entityTableByType; entityId: string };
+}
+
+async function relatedEntityRefsForKnowledge(db: any, brainInstanceId: any, knowledge: any) {
+  const from = knowledgeEntityRef(knowledge);
+  const rows = await db
+    .query("relationships")
+    .withIndex("by_brain_from", (q: any) => q.eq("brainInstanceId", brainInstanceId).eq("from.entityId", from.entityId))
+    .filter((q: any) => q.eq(q.field("from.entityType"), from.entityType))
+    .filter((q: any) => q.eq(q.field("type"), "mentions"))
+    .collect();
+  return dedupeEntityRefs(rows.map((row: any) => row.to));
+}
+
+async function replaceKnowledgeRelationships(
+  db: any,
+  brainInstanceId: any,
+  knowledge: any,
+  refs: Array<{ entityType: string; entityId: string }>,
+  createdBy: "user" | "harness" | "skippy_ai" | "system",
+  now: number,
+) {
+  const from = knowledgeEntityRef(knowledge);
+  const existing = await db
+    .query("relationships")
+    .withIndex("by_brain_from", (q: any) => q.eq("brainInstanceId", brainInstanceId).eq("from.entityId", from.entityId))
+    .filter((q: any) => q.eq(q.field("from.entityType"), from.entityType))
+    .filter((q: any) => q.eq(q.field("type"), "mentions"))
+    .collect();
+  const wanted = new Map(dedupeEntityRefs(refs).map((ref) => [refKey(ref), ref]));
+  for (const edge of existing) {
+    if (!wanted.delete(refKey(edge.to))) await db.delete(edge._id);
+  }
+  for (const ref of wanted.values()) {
+    await db.insert("relationships", {
+      brainInstanceId,
+      from,
+      to: ref,
+      type: "mentions",
+      reason: "Knowledge explicitly linked to this entity.",
+      createdBy,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+}
+
+async function addKnowledgeRelationships(
+  db: any,
+  brainInstanceId: any,
+  knowledge: any,
+  refs: Array<{ entityType: string; entityId: string }>,
+  createdBy: "user" | "harness" | "skippy_ai" | "system",
+  now: number,
+) {
+  const existing = await relatedEntityRefsForKnowledge(db, brainInstanceId, knowledge);
+  await replaceKnowledgeRelationships(db, brainInstanceId, knowledge, [...existing, ...refs], createdBy, now);
+}
+
+async function insertMemoryKnowledge(
+  db: any,
+  document: Record<string, any>,
+  relatedEntityRefs: Array<{ entityType: string; entityId: string }>,
+  createdBy: "user" | "harness" | "skippy_ai" | "system",
+) {
+  const { relatedEntityRefs: _legacyRefs, ...storedDocument } = document;
+  const memoryId = await db.insert("knowledge", {
+    ...storedDocument,
+    kind: "memory",
+    processingState: processingStateForMemoryStatus(document.status),
+  });
+  await replaceKnowledgeRelationships(
+    db,
+    document.brainInstanceId,
+    { _id: memoryId, kind: "memory" },
+    relatedEntityRefs,
+    createdBy,
+    document.createdAt,
+  );
+  return memoryId;
+}
+
 async function memorySourceRefIdsFromArgs(
   db: any,
   brainInstanceId: any,
@@ -997,20 +1085,22 @@ async function searchMemoriesForBrainId(
     if (!memoryMatchesType(memory, args)) {
       continue;
     }
-    if (!hasRequestedRelatedRefs(memory, args.relatedEntityRefs)) {
+    const relatedEntityRefs = await relatedEntityRefsForKnowledge(db, brainInstanceId, memory);
+    const memoryWithRelationships = { ...memory, relatedEntityRefs };
+    if (!hasRequestedRelatedRefs(memoryWithRelationships, args.relatedEntityRefs)) {
       continue;
     }
 
     const [sourceRefs, relatedEntities] = await Promise.all([
       sourceRefsForMemory(db, brainInstanceId, memory.sourceRefIds),
-      relatedEntitiesForMemory(db, brainInstanceId, memory.relatedEntityRefs as any),
+      relatedEntitiesForMemory(db, brainInstanceId, relatedEntityRefs as any),
     ]);
-    const scored = scoreMemoryResult(memory, sourceRefs, relatedEntities, args);
+    const scored = scoreMemoryResult(memoryWithRelationships, sourceRefs, relatedEntities, args);
     if (queryTokens.length && scored.score <= 0) {
       continue;
     }
     hydrated.push({
-      memory: knowledgeMemoryForReader(memory),
+      memory: knowledgeMemoryForReader(memoryWithRelationships),
       ...scored,
       sourceRefs,
       relatedEntities: relatedEntities.map((item) => entityDisplay(item.ref, item.entity)),
@@ -1663,7 +1753,6 @@ function legacyKnowledgeDocument(kind: "note" | "link" | "knowledgeObject" | "me
       processingState: processingStateForMemoryStatus(row.status),
       confidence: row.confidence,
       sourceRefIds: row.sourceRefIds,
-      relatedEntityRefs: row.relatedEntityRefs,
       rubricDecision: row.rubricDecision,
       captureReason: row.captureReason,
       reviewState: row.reviewState,
@@ -1754,10 +1843,19 @@ async function backfillLegacyPage(
         ...legacyKnowledgeDocument(kind, row),
         legacyId: String(row._id),
       });
+      await addKnowledgeRelationships(ctx.db, row.brainInstanceId, dualWritten, row.relatedEntityRefs ?? [], "system", row.updatedAt);
       migrated += 1;
       continue;
     }
-    await ctx.db.insert("knowledge", legacyKnowledgeDocument(kind, row));
+    const knowledgeId = await ctx.db.insert("knowledge", legacyKnowledgeDocument(kind, row));
+    await addKnowledgeRelationships(
+      ctx.db,
+      row.brainInstanceId,
+      { _id: knowledgeId, kind },
+      row.relatedEntityRefs ?? [],
+      "system",
+      row.updatedAt,
+    );
     migrated += 1;
   }
 
@@ -1777,6 +1875,39 @@ const backfillKnowledgeObjectsRef = makeFunctionReference<"mutation">(
   "knowledge:backfillKnowledgeObjectsToKnowledge",
 );
 const backfillMemoriesRef = makeFunctionReference<"mutation">("knowledge:backfillMemoriesToKnowledge");
+const backfillKnowledgeRelationshipsRef = makeFunctionReference<"mutation">(
+  "knowledge:backfillKnowledgeRelationships",
+);
+
+/**
+ * Migration step 5. Converts the old embedded refs to idempotent `mentions`
+ * edges, then removes the embedded field. Safe to rerun and self-schedules.
+ */
+export const backfillKnowledgeRelationships = internalMutationGeneric({
+  args: { paginationOpts: paginationOptsValidator },
+  returns: backfillResult,
+  handler: async (ctx, args) => {
+    const page = await ctx.db.query("knowledge").paginate(args.paginationOpts);
+    let migrated = 0;
+    let skipped = 0;
+    for (const row of page.page) {
+      const refs = (row as any).relatedEntityRefs ?? [];
+      if (!refs.length) {
+        skipped += 1;
+        continue;
+      }
+      await addKnowledgeRelationships(ctx.db, row.brainInstanceId, row, refs, "system", row.updatedAt);
+      await ctx.db.patch(row._id, { relatedEntityRefs: undefined } as any);
+      migrated += 1;
+    }
+    if (!page.isDone) {
+      await ctx.scheduler.runAfter(0, backfillKnowledgeRelationshipsRef, {
+        paginationOpts: { cursor: page.continueCursor, numItems: args.paginationOpts.numItems },
+      });
+    }
+    return { isDone: page.isDone, continueCursor: page.continueCursor, migrated, skipped };
+  },
+});
 
 export const backfillNotesToKnowledge = internalMutationGeneric({
   args: { paginationOpts: paginationOptsValidator },
@@ -3049,12 +3180,13 @@ export const getMemoryDetailForViewer = queryGeneric({
       return null;
     }
 
+    const relationshipRefs = await relatedEntityRefsForKnowledge(ctx.db, brain._id, memory);
     const [sourceRefs, relatedEntities] = await Promise.all([
       sourceRefsForMemory(ctx.db, brain._id, memory.sourceRefIds),
-      relatedEntitiesForMemory(ctx.db, brain._id, memory.relatedEntityRefs as any),
+      relatedEntitiesForMemory(ctx.db, brain._id, relationshipRefs as any),
     ]);
 
-    return { memory: knowledgeMemoryForReader(memory), sourceRefs, relatedEntities };
+    return { memory: knowledgeMemoryForReader({ ...memory, relatedEntityRefs: relationshipRefs }), sourceRefs, relatedEntities };
   },
 });
 
@@ -3101,11 +3233,7 @@ export const captureThoughtForViewer = mutationGeneric({
       createdAt: now,
       updatedAt: now,
     };
-    const memoryId = await ctx.db.insert("knowledge", {
-      ...memoryDocument,
-      kind: "memory",
-      processingState: processingStateForMemoryStatus(memoryDocument.status),
-    });
+    const memoryId = await insertMemoryKnowledge(ctx.db, memoryDocument, relatedEntityRefs, "user");
 
     await ctx.db.insert("activityEvents", {
       brainInstanceId: brain._id,
@@ -3172,11 +3300,7 @@ export const recordDurableMemoryForViewer = mutationGeneric({
       createdAt: now,
       updatedAt: now,
     };
-    const memoryId = await ctx.db.insert("knowledge", {
-      ...memoryDocument,
-      kind: "memory",
-      processingState: processingStateForMemoryStatus(memoryDocument.status),
-    });
+    const memoryId = await insertMemoryKnowledge(ctx.db, memoryDocument, relatedEntityRefs, "user");
 
     await ctx.db.insert("activityEvents", {
       brainInstanceId: brain._id,
@@ -3244,11 +3368,7 @@ export const submitMemoryReviewCandidateForViewer = mutationGeneric({
       createdAt: now,
       updatedAt: now,
     };
-    const memoryId = await ctx.db.insert("knowledge", {
-      ...memoryDocument,
-      kind: "memory",
-      processingState: processingStateForMemoryStatus(memoryDocument.status),
-    });
+    const memoryId = await insertMemoryKnowledge(ctx.db, memoryDocument, relatedEntityRefs, "user");
 
     await ctx.db.insert("activityEvents", {
       brainInstanceId: brain._id,
@@ -3307,10 +3427,9 @@ export const acceptMemoryForViewer = mutationGeneric({
       args.sourceRefs,
       now,
     );
-    const relatedEntityRefs =
-      args.relatedEntityRefs === undefined
-        ? memory.relatedEntityRefs
-        : await requireRelatedEntityRefsForBrain(ctx.db, brain._id, args.relatedEntityRefs as any);
+    const relatedEntityRefs = args.relatedEntityRefs === undefined
+      ? await relatedEntityRefsForKnowledge(ctx.db, brain._id, memory)
+      : await requireRelatedEntityRefsForBrain(ctx.db, brain._id, args.relatedEntityRefs as any);
     const sourceRefIds = dedupeIds([...(memory.sourceRefIds ?? []), ...newSourceRefIds]);
     const title = memoryTitleFor(memoryTypeName, args.title ?? memory.title, body);
 
@@ -3324,7 +3443,6 @@ export const acceptMemoryForViewer = mutationGeneric({
       reviewState: "accepted",
       confidence: args.confidence ?? memory.confidence,
       sourceRefIds,
-      relatedEntityRefs,
       rubricDecision: args.rubricDecision === undefined ? memory.rubricDecision : optionalTrimmed(args.rubricDecision),
       captureReason: args.captureReason === undefined ? memory.captureReason : optionalTrimmed(args.captureReason),
       reviewedBy: user._id,
@@ -3332,6 +3450,7 @@ export const acceptMemoryForViewer = mutationGeneric({
       acceptedAt: memory.acceptedAt ?? now,
       updatedAt: now,
     });
+    await replaceKnowledgeRelationships(ctx.db, brain._id, memory, relatedEntityRefs as any, "user", now);
 
     await ctx.db.insert("activityEvents", {
       brainInstanceId: brain._id,
@@ -3540,15 +3659,10 @@ export const linkMemoryToEntitiesForViewer = mutationGeneric({
 
     const now = Date.now();
     const requestedRefs = await requireRelatedEntityRefsForBrain(ctx.db, brain._id, args.relatedEntityRefs as any);
-    const relatedEntityRefs =
-      args.mode === "replace"
-        ? requestedRefs
-        : dedupeEntityRefs([...(memory.relatedEntityRefs ?? []), ...requestedRefs]);
-
-    await ctx.db.patch(args.memoryId, {
-      relatedEntityRefs,
-      updatedAt: now,
-    });
+    const existingRefs = await relatedEntityRefsForKnowledge(ctx.db, brain._id, memory);
+    const relatedEntityRefs = args.mode === "replace" ? requestedRefs : dedupeEntityRefs([...existingRefs, ...requestedRefs]);
+    await replaceKnowledgeRelationships(ctx.db, brain._id, memory, relatedEntityRefs as any, "user", now);
+    await ctx.db.patch(args.memoryId, { updatedAt: now });
 
     await ctx.db.insert("activityEvents", {
       brainInstanceId: brain._id,
@@ -3681,11 +3795,7 @@ export const captureThoughtForBrain = mutationGeneric({
       createdAt: now,
       updatedAt: now,
     };
-    const memoryId = await db.insert("knowledge", {
-      ...memoryDocument,
-      kind: "memory",
-      processingState: processingStateForMemoryStatus(memoryDocument.status),
-    });
+    const memoryId = await insertMemoryKnowledge(db, memoryDocument, relatedEntityRefs, "harness");
 
     await db.insert("activityEvents", {
       brainInstanceId: args.brainInstanceId,
@@ -3772,11 +3882,7 @@ export const recordMemoryForBrain = mutationGeneric({
       createdAt: now,
       updatedAt: now,
     };
-    const memoryId = await db.insert("knowledge", {
-      ...memoryDocument,
-      kind: "memory",
-      processingState: processingStateForMemoryStatus(memoryDocument.status),
-    });
+    const memoryId = await insertMemoryKnowledge(db, memoryDocument, relatedEntityRefs, "harness");
 
     await db.insert("activityEvents", {
       brainInstanceId: args.brainInstanceId,
@@ -3851,11 +3957,7 @@ export const submitMemoryReviewCandidateForBrain = mutationGeneric({
       createdAt: now,
       updatedAt: now,
     };
-    const memoryId = await db.insert("knowledge", {
-      ...memoryDocument,
-      kind: "memory",
-      processingState: processingStateForMemoryStatus(memoryDocument.status),
-    });
+    const memoryId = await insertMemoryKnowledge(db, memoryDocument, relatedEntityRefs, "harness");
 
     await db.insert("activityEvents", {
       brainInstanceId: args.brainInstanceId,
@@ -3951,12 +4053,13 @@ export const memoryDetailForBrain = queryGeneric({
       return null;
     }
 
+    const relationshipRefs = await relatedEntityRefsForKnowledge(db, args.brainInstanceId, memory);
     const [sourceRefs, relatedEntities] = await Promise.all([
       args.includeSourceRefs === false ? [] : sourceRefsForMemory(db, args.brainInstanceId, memory.sourceRefIds),
-      args.includeRelatedEntities === false ? [] : relatedEntitiesForMemory(db, args.brainInstanceId, memory.relatedEntityRefs as any),
+      args.includeRelatedEntities === false ? [] : relatedEntitiesForMemory(db, args.brainInstanceId, relationshipRefs as any),
     ]);
 
-    return { memory: knowledgeMemoryForReader(memory), sourceRefs, relatedEntities };
+    return { memory: knowledgeMemoryForReader({ ...memory, relatedEntityRefs: relationshipRefs }), sourceRefs, relatedEntities };
   },
 });
 
@@ -3980,15 +4083,17 @@ export const linkMemoryForBrain = mutationGeneric({
 
     const now = Date.now();
     const [entityRefToAdd] = await requireRelatedEntityRefsForBrain(db, args.brainInstanceId, [args.entityRef] as any);
+    if (!entityRefToAdd) throw new Error("entity ref is required");
     const newSourceRefIds = await memorySourceRefIdsFromArgs(db, args.brainInstanceId, args.sourceRefIds, args.sourceRefs, now);
-    const relatedEntityRefs = dedupeEntityRefs([...(memory.relatedEntityRefs ?? []), entityRefToAdd]);
+    const existingRefs = await relatedEntityRefsForKnowledge(db, args.brainInstanceId, memory);
+    const relatedEntityRefs = dedupeEntityRefs([...existingRefs, entityRefToAdd]);
     const sourceRefIds = dedupeIds([...(memory.sourceRefIds ?? []), ...newSourceRefIds]);
 
     await db.patch(args.memoryId, {
-      relatedEntityRefs,
       sourceRefIds,
       updatedAt: now,
     });
+    await replaceKnowledgeRelationships(db, args.brainInstanceId, memory, relatedEntityRefs as any, "harness", now);
 
     await db.insert("activityEvents", {
       brainInstanceId: args.brainInstanceId,
