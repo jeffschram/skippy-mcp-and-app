@@ -50,6 +50,9 @@ export const badgeClass =
 export const badgeBlueClass = "bg-blue/10 text-blue";
 export const badgeGoldClass = "bg-gold/10 text-gold";
 export const badgeRedClass = "bg-red/10 text-red";
+// One chip palette everywhere (docs/ui-audit): blue = type info, gold = needs
+// attention, green = done/approved/accepted, red = rejected/failed.
+export const badgeGreenClass = "bg-green/10 text-green";
 
 /* ---- buttons ---- */
 export const textButtonClass =

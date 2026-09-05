@@ -10,6 +10,7 @@ import {
   badgeBlueClass,
   badgeClass,
   badgeGoldClass,
+  badgeGreenClass,
   badgeRedClass,
   cardClass,
   checkboxFieldBottomClass,
@@ -55,6 +56,7 @@ import {
 } from "./page-classes";
 import { agentRoleDisplayName, agentRoleFromMetadata } from "../lib/display";
 import { focusItemKey, focusSummaryBullets, focusSummaryPresentation } from "./focus-summary";
+import { formatEventWhen, parseCalendarActionBody } from "./pending-action-helpers";
 import { LiveGate } from "./live-auth";
 import { icons } from "./ui";
 import { IconButton, InlineMarkdown, useToast } from "./components";
@@ -412,38 +414,42 @@ export function LiveHomeContent() {
                 </ul>
               ) : (
                 <p className={cn(mutedClass, "mb-0 max-w-[680px] text-xl leading-[1.42] text-foreground")}>
-                  New source items and remaining focus bullets will appear here when they need attention.
+                  All caught up. New items will show up here when they need attention.
                 </p>
               )}
             </div>
           </section>
           {hasDecisionQueueItems ? (
             <section className={cn(span4Class, sectionClass)}>
-              <h2>Decision queue</h2>
+              <h2>Needs your review</h2>
               <div className={itemListClass}>
                 {unclearSignalCount > 0 ? (
-                  <div className={itemClass}>
+                  <Link href="/review" className={cn(itemClass, projectRowClass)}>
                     <span className={itemIconClass}>
                       <icons.Archive size={17} aria-hidden />
                     </span>
                     <div>
-                      <p className={itemTitleClass}>{unclearSignalCount} unclear signals</p>
-                      <p className={itemMetaClass}>Fallback items that need a rubric decision.</p>
+                      <p className={itemTitleClass}>
+                        {unclearSignalCount} {unclearSignalCount === 1 ? "find" : "finds"} waiting for a yes or no
+                      </p>
+                      <p className={itemMetaClass}>Things Skippy pulled from your sources but wasn&apos;t sure about.</p>
                     </div>
                     <span className={cn(badgeClass, badgeGoldClass)}>Review</span>
-                  </div>
+                  </Link>
                 ) : null}
                 {pendingActionCount > 0 ? (
-                  <div className={itemClass}>
+                  <Link href="/review" className={cn(itemClass, projectRowClass)}>
                     <span className={itemIconClass}>
                       <icons.MessageSquareText size={17} aria-hidden />
                     </span>
                     <div>
-                      <p className={itemTitleClass}>{pendingActionCount} pending actions</p>
-                      <p className={itemMetaClass}>External effects stay separated until reviewed.</p>
+                      <p className={itemTitleClass}>
+                        {pendingActionCount} {pendingActionCount === 1 ? "thing" : "things"} Skippy wants to do
+                      </p>
+                      <p className={itemMetaClass}>Nothing happens until you approve it.</p>
                     </div>
-                    <span className={cn(badgeClass, badgeRedClass)}>Approval</span>
-                  </div>
+                    <span className={cn(badgeClass, badgeGoldClass)}>Approve</span>
+                  </Link>
                 ) : null}
               </div>
             </section>
@@ -1997,7 +2003,7 @@ export function LivePendingActionsContent() {
         </section>
       ) : (
         <div className={itemListClass}>
-          {actions.length === 0 ? <p className={mutedClass}>No pending external actions.</p> : null}
+          {actions.length === 0 ? <p className={mutedClass}>Nothing waiting for approval.</p> : null}
           {actions.map((action) => (
             <PendingActionItem key={action._id} action={action} reviewPendingAction={reviewPendingAction} />
           ))}
@@ -2018,6 +2024,10 @@ function PendingActionItem({
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const reviewable = ["drafted", "pending_approval", "failed"].includes(action.status);
+  // Calendar actions store the executor payload as JSON in `body`; decode it
+  // for display instead of dumping it (docs/ui-audit). Null falls through to
+  // the raw text so a malformed payload stays visible.
+  const calendarEvent = parseCalendarActionBody(action);
   const primaryText = textValue(action.body, action.messageBody, action.approvalNotes, action.status);
 
   function update(field: string, value: string) {
@@ -2050,19 +2060,44 @@ function PendingActionItem({
   return (
     <article className={cn(itemClass, pendingActionItemClass)}>
       <span className={itemIconClass}>
-        <icons.MessageSquareText size={17} aria-hidden />
+        {calendarEvent ? <icons.CalendarDays size={17} aria-hidden /> : <icons.MessageSquareText size={17} aria-hidden />}
       </span>
       <div className={formGridClass}>
         <div>
-          <p className={itemTitleClass}>{action.subject ?? action.actionType}</p>
-          <p className={itemMetaClass}>{primaryText}</p>
+          <p className={itemTitleClass}>{calendarEvent?.summary ?? action.subject ?? action.actionType}</p>
+          {calendarEvent ? (
+            <>
+              <p className={itemMetaClass}>{formatEventWhen(calendarEvent)}</p>
+              {calendarEvent.location ? (
+                <p className={itemMetaClass}>
+                  <icons.MapPin size={13} aria-hidden className="mr-1 inline-block align-[-2px]" />
+                  {calendarEvent.location}
+                </p>
+              ) : null}
+              {calendarEvent.description ? <p className={itemMetaClass}>{calendarEvent.description}</p> : null}
+            </>
+          ) : (
+            <p className={itemMetaClass}>{primaryText}</p>
+          )}
         </div>
         {/* Rendered above the form on purpose: the point of the warning is to be
             read BEFORE the Approve button, not discovered after the tap. */}
         {typeof action.reviewWarning === "string" && action.reviewWarning ? (
           <p className={reviewWarningClass}>{action.reviewWarning}</p>
         ) : null}
-        {reviewable ? (
+        {!reviewable ? (
+          <p className={mutedClass}>{statusDescription(action)}</p>
+        ) : calendarEvent ? (
+          /* No payload form for calendar actions: the executor parses `body`
+             as JSON, so the only safe edit here is the owner's own note. */
+          <div className={formGridClass}>
+            <label className={fieldClass}>
+              <span>Review notes</span>
+              <input className={inputClass} value={draft.approvalNotes} onChange={(event) => update("approvalNotes", event.target.value)} />
+            </label>
+            {error ? <p className={errorTextClass}>{error}</p> : null}
+          </div>
+        ) : (
           <div className={formGridClass}>
             <div className={splitListClass}>
               <label className={fieldClass}>
@@ -2084,8 +2119,6 @@ function PendingActionItem({
             </label>
             {error ? <p className={errorTextClass}>{error}</p> : null}
           </div>
-        ) : (
-          <p className={mutedClass}>{statusDescription(action)}</p>
         )}
       </div>
       <div className={pendingActionSideClass}>
@@ -2093,34 +2126,33 @@ function PendingActionItem({
         {reviewable ? (
           <div className={toolbarClass} aria-label={`Review actions for ${action.subject ?? action.actionType}`}>
             <button
-              className={iconButtonClass}
+              className={cn(textButtonClass, textButtonCompactClass, "border-primary")}
               type="button"
-              title="Approve action"
               aria-label={`Approve ${action.subject ?? action.actionType}`}
               disabled={Boolean(busyAction)}
               onClick={() => void submit("approve")}
             >
-              <icons.Check size={17} aria-hidden />
+              Approve
             </button>
+            {!calendarEvent ? (
+              <button
+                className={cn(textButtonClass, textButtonCompactClass)}
+                type="button"
+                aria-label={`Save revisions for ${action.subject ?? action.actionType}`}
+                disabled={Boolean(busyAction)}
+                onClick={() => void submit("revise")}
+              >
+                Save changes
+              </button>
+            ) : null}
             <button
-              className={iconButtonClass}
+              className={cn(textButtonClass, textButtonCompactClass)}
               type="button"
-              title="Save revisions"
-              aria-label={`Save revisions for ${action.subject ?? action.actionType}`}
-              disabled={Boolean(busyAction)}
-              onClick={() => void submit("revise")}
-            >
-              <icons.CircleCheck size={17} aria-hidden />
-            </button>
-            <button
-              className={iconButtonClass}
-              type="button"
-              title="Reject action"
               aria-label={`Reject ${action.subject ?? action.actionType}`}
               disabled={Boolean(busyAction)}
               onClick={() => void submit("reject")}
             >
-              <icons.X size={17} aria-hidden />
+              Reject
             </button>
           </div>
         ) : null}
@@ -2165,8 +2197,10 @@ function parseRecipients(recipients: string) {
 }
 
 function badgeForPendingAction(status: string) {
+  // Palette lanes (docs/ui-audit): green = settled/approved, red = rejected or
+  // failed, gold = still needs the owner's attention.
   if (status === "approved" || status === "sent" || status === "completed") {
-    return badgeBlueClass;
+    return badgeGreenClass;
   }
   if (status === "rejected" || status === "failed") {
     return badgeRedClass;
@@ -2176,7 +2210,9 @@ function badgeForPendingAction(status: string) {
 
 function statusDescription(action: AnyRecord) {
   if (action.status === "approved") {
-    return "Approved and waiting for execution.";
+    return action.actionType === "calendar_event_create"
+      ? "Approved — on its way to your calendar."
+      : "Approved and waiting for execution.";
   }
   if (action.status === "sent" || action.status === "completed") {
     return `Recorded${action.executedAt ? ` ${formatDate(action.executedAt)}` : ""}.`;

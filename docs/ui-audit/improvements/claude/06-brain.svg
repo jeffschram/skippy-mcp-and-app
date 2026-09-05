@@ -1,0 +1,100 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="820" viewBox="0 0 960 820" font-family="Helvetica, Arial, sans-serif">
+  <rect width="960" height="820" fill="#101014"/>
+
+  <!-- Nav rail -->
+  <rect x="0" y="0" width="150" height="820" fill="#16161c"/>
+  <text x="20" y="40" fill="#4a9eff" font-size="14" font-weight="bold">Skippy</text>
+  <g fill="#9a9aa5" font-size="13">
+    <text x="20" y="82">⌂ Home</text>
+    <text x="20" y="122">▦ Agenda</text>
+    <text x="20" y="158">$ Finance</text>
+    <text x="20" y="194">☑ Review</text>
+    <rect x="10" y="210" width="130" height="30" rx="6" fill="#26262e"/>
+    <text x="20" y="230" fill="#e8e8ec">◉ Brain</text>
+    <text x="20" y="266">▤ Projects</text>
+    <text x="20" y="760">⚙ Settings</text>
+  </g>
+
+  <!-- Header + 5 tabs (was 7) -->
+  <text x="175" y="48" fill="#e8e8ec" font-size="22" font-weight="bold">Brain</text>
+  <g font-size="13">
+    <text x="175" y="82" fill="#4a9eff" font-weight="bold">Memory</text>
+    <rect x="175" y="90" width="60" height="3" fill="#4a9eff"/>
+    <text x="265" y="82" fill="#9a9aa5">Library</text>
+    <text x="345" y="82" fill="#9a9aa5">People</text>
+    <text x="425" y="82" fill="#9a9aa5">Goals</text>
+    <text x="495" y="82" fill="#9a9aa5">Check-ins</text>
+  </g>
+  <text x="640" y="82" fill="#5a5a66" font-size="10">was 7 tabs — Inbox → Review · Notes joins Links as Library · Map → project pages</text>
+
+  <!-- Search bar (moved from Map) -->
+  <rect x="175" y="104" width="560" height="38" rx="8" fill="#111116" stroke="#2a2a32"/>
+  <text x="192" y="128" fill="#5a5a66" font-size="13">🔎 Search everything Skippy knows…</text>
+
+  <!-- Kind filter chips -->
+  <g font-size="12">
+    <rect x="751" y="110" width="46" height="26" rx="13" fill="#26262e"/>
+    <text x="764" y="127" fill="#e8e8ec">All</text>
+    <rect x="175" y="156" width="72" height="26" rx="13" fill="#26262e"/>
+    <text x="190" y="173" fill="#e8e8ec">All · 42</text>
+    <rect x="255" y="156" width="80" height="26" rx="13" fill="#16161c" stroke="#2a2a32"/>
+    <text x="269" y="173" fill="#9a9aa5">Facts · 24</text>
+    <rect x="343" y="156" width="104" height="26" rx="13" fill="#16161c" stroke="#2a2a32"/>
+    <text x="357" y="173" fill="#9a9aa5">Decisions · 12</text>
+    <rect x="455" y="156" width="104" height="26" rx="13" fill="#16161c" stroke="#2a2a32"/>
+    <text x="469" y="173" fill="#9a9aa5">Principles · 6</text>
+  </g>
+
+  <!-- Compact memory rows -->
+  <text x="175" y="212" fill="#9a9aa5" font-size="11" letter-spacing="2">RECENT</text>
+
+  <rect x="175" y="222" width="760" height="44" rx="8" fill="#1a1a20" stroke="#2a2a32"/>
+  <text x="192" y="249" fill="#e8e8ec" font-size="13">Holly prefers Wednesday evenings for movie nights</text>
+  <rect x="700" y="232" width="52" height="22" rx="11" fill="#26262e"/>
+  <text x="713" y="247" fill="#3ecf8e" font-size="11">Fact</text>
+  <text x="800" y="248" fill="#5a5a66" font-size="11">Sep 4</text>
+
+  <rect x="175" y="274" width="760" height="44" rx="8" fill="#1a1a20" stroke="#2a2a32"/>
+  <text x="192" y="301" fill="#e8e8ec" font-size="13">Hold off on the kitchen remodel until spring</text>
+  <rect x="680" y="284" width="76" height="22" rx="11" fill="#26262e"/>
+  <text x="692" y="299" fill="#4a9eff" font-size="11">Decision</text>
+  <text x="800" y="300" fill="#5a5a66" font-size="11">Mar 12</text>
+
+  <!-- Expanded row -->
+  <rect x="175" y="326" width="760" height="150" rx="8" fill="#1a1a20" stroke="#4a9eff"/>
+  <text x="192" y="353" fill="#e8e8ec" font-size="13">Reading is free; writing is guarded — approvals required for anything external</text>
+  <rect x="672" y="336" width="80" height="22" rx="11" fill="#26262e"/>
+  <text x="684" y="351" fill="#e8a33d" font-size="11">Principle</text>
+  <text x="838" y="352" fill="#4a9eff" font-size="11">▴ collapse</text>
+
+  <rect x="192" y="368" width="726" height="94" rx="6" fill="#111116"/>
+  <text x="208" y="392" fill="#9a9aa5" font-size="12">Full text: Skippy may read Gmail, Calendar, and iMessage freely, but any change to the</text>
+  <text x="208" y="410" fill="#9a9aa5" font-size="12">outside world stops at the Actions queue for approval. Enforced in code, not just policy.</text>
+  <text x="208" y="436" fill="#5a5a66" font-size="11">Source: set up in chat, Jul 18 · Confidence 95% · Linked to: Calendar write project</text>
+  <text x="208" y="454" fill="#5a5a66" font-size="11">Edit · Archive</text>
+
+  <rect x="175" y="484" width="760" height="44" rx="8" fill="#1a1a20" stroke="#2a2a32"/>
+  <text x="192" y="511" fill="#e8e8ec" font-size="13">Jeff's mortgage is with Chase, auto-pays on the 1st</text>
+  <rect x="700" y="494" width="52" height="22" rx="11" fill="#26262e"/>
+  <text x="713" y="509" fill="#3ecf8e" font-size="11">Fact</text>
+  <text x="800" y="510" fill="#5a5a66" font-size="11">Aug 2</text>
+
+  <rect x="175" y="536" width="760" height="44" rx="8" fill="#1a1a20" stroke="#2a2a32"/>
+  <text x="192" y="563" fill="#e8e8ec" font-size="13">Use pnpm, never npm, in the Skippy monorepo</text>
+  <rect x="672" y="546" width="80" height="22" rx="11" fill="#26262e"/>
+  <text x="684" y="561" fill="#e8a33d" font-size="11">Principle</text>
+  <text x="800" y="562" fill="#5a5a66" font-size="11">Jun 30</text>
+
+  <rect x="175" y="588" width="760" height="36" rx="8" fill="#16161c" stroke="#2a2a32"/>
+  <text x="192" y="611" fill="#9a9aa5" font-size="12">▸ 37 more — keep scrolling or search</text>
+
+  <!-- Footer notes -->
+  <rect x="175" y="644" width="760" height="110" rx="8" fill="#16161c" stroke="#2a2a32"/>
+  <text x="192" y="668" fill="#5a5a66" font-size="11">Was: 7 tabs (Memory · Inbox · Links · Contacts · Goals · Interviews · Map), full cards with</text>
+  <text x="192" y="686" fill="#5a5a66" font-size="11">confidence %, IDs, and metadata always visible. Now: 5 tabs, compact rows (title · kind · date),</text>
+  <text x="192" y="704" fill="#5a5a66" font-size="11">details on tap. Confidence and provenance live in the expanded view, not the list.</text>
+  <text x="192" y="722" fill="#5a5a66" font-size="11">Inbox → merged into Review Signals. Notes + Links → "Library". Contacts → "People".</text>
+  <text x="192" y="740" fill="#5a5a66" font-size="11">Interviews → "Check-ins". Map's search moved here; the graph folds into project pages.</text>
+
+  <text x="175" y="792" fill="#5a5a66" font-size="11">Wireframe — structure and copy tone only.</text>
+</svg>

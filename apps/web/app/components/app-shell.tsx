@@ -101,23 +101,45 @@ const navSubLinkClass =
 const mobileLinkClass =
   "inline-flex min-h-9 items-center gap-1.5 whitespace-nowrap rounded-lg px-[11px] text-sm font-bold text-muted-foreground hover:text-foreground";
 
+/**
+ * Small count pinned to a nav icon (docs/ui-audit fix: the Review queue should
+ * announce how many decisions are waiting from anywhere in the app). Overlaid
+ * on the icon so it survives the collapsed desktop rail, which hides labels.
+ */
+function NavBadge({ count }: { count: number }) {
+  if (count <= 0) {
+    return null;
+  }
+  return (
+    <span
+      className="absolute -right-1.5 -top-1.5 grid h-4 min-w-4 place-items-center rounded-full bg-gold px-1 text-[10px] font-bold leading-none text-white"
+      aria-label={`${count} waiting for review`}
+    >
+      {count > 99 ? "99+" : count}
+    </span>
+  );
+}
+
 function NavLinks({
   pathname,
   projects = [],
   hubs,
   mobile,
   alwaysShowProjects,
+  badges,
 }: {
   pathname: string;
   projects?: NavProject[];
   hubs: Hub[];
   mobile?: boolean;
   alwaysShowProjects?: boolean;
+  badges?: Record<string, number>;
 }) {
   return (
     <>
       {hubs.map((hub) => {
         const active = hub.match(pathname);
+        const badgeCount = badges?.[hub.href] ?? 0;
         const showProjectSubmenu = !mobile && hub.href === "/projects" && projects.length > 0;
         const projectSubmenuOpen = showProjectSubmenu && (alwaysShowProjects || active);
         if (showProjectSubmenu) {
@@ -166,7 +188,10 @@ function NavLinks({
             aria-current={active ? "page" : undefined}
             title={hub.label}
           >
-            <hub.icon className="shrink-0" size={mobile ? 15 : 18} aria-hidden />
+            <span className="relative shrink-0 inline-flex">
+              <hub.icon className="shrink-0" size={mobile ? 15 : 18} aria-hidden />
+              <NavBadge count={badgeCount} />
+            </span>
             {mobile ? hub.label : <span className="whitespace-nowrap hidden transition-opacity group-hover/sidebar:block">{hub.label}</span>}
           </Link>
         );
@@ -182,6 +207,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const activeProjects = useQuery(api.projects.activeProjectsForViewer, isAuthenticated ? {} : "skip") as
     | NavProject[]
     | undefined;
+  const reviewCounts = useQuery(api.knowledge.reviewCountsForViewer, isAuthenticated ? {} : "skip") as
+    | { finds: number; approvals: number }
+    | undefined;
+  const navBadges = {
+    "/review": (reviewCounts?.finds ?? 0) + (reviewCounts?.approvals ?? 0),
+  };
 
   return (
     <ToastProvider>
@@ -195,7 +226,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <span className="whitespace-nowrap hidden transition-opacity group-hover/sidebar:block">Skippy</span>
           </div>
           <nav className="grid gap-[3px]" aria-label="Primary">
-            <NavLinks pathname={pathname} hubs={primaryHubs} projects={activeProjects ?? []} alwaysShowProjects />
+            <NavLinks pathname={pathname} hubs={primaryHubs} projects={activeProjects ?? []} alwaysShowProjects badges={navBadges} />
           </nav>
           <div className="mt-auto grid gap-2.5">
             <nav className="grid gap-[3px]" aria-label="Secondary">
@@ -211,7 +242,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <header className="sticky top-0 z-20 grid items-center gap-2.5 border-b bg-background/90 px-4 py-2.5 backdrop-blur-lg desk:hidden">
             <AuthStatus />
             <nav className="flex flex-1 gap-1 overflow-x-auto" aria-label="Primary">
-              <NavLinks pathname={pathname} hubs={hubs} mobile />
+              <NavLinks pathname={pathname} hubs={hubs} mobile badges={navBadges} />
             </nav>
           </header>
           <main className={cn("w-full", projectDetail ? "p-0" : "mx-auto px-[30px] pb-16 pt-[22px] desk:pt-[30px]")}>{children}</main>

@@ -1,0 +1,104 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="820" viewBox="0 0 960 820" font-family="Helvetica, Arial, sans-serif">
+  <rect width="960" height="820" fill="#101014"/>
+
+  <!-- Nav rail -->
+  <rect x="0" y="0" width="150" height="820" fill="#16161c"/>
+  <text x="20" y="40" fill="#4a9eff" font-size="14" font-weight="bold">Skippy</text>
+  <g fill="#9a9aa5" font-size="13">
+    <text x="20" y="82">⌂ Home</text>
+    <rect x="10" y="102" width="130" height="30" rx="6" fill="#26262e"/>
+    <text x="20" y="122" fill="#e8e8ec">▦ Agenda</text>
+    <text x="20" y="158">$ Finance</text>
+    <text x="20" y="194">☑ Review</text>
+    <text x="20" y="230">◉ Brain</text>
+    <text x="20" y="266">▤ Projects</text>
+    <text x="20" y="760">⚙ Settings</text>
+  </g>
+
+  <!-- Header + filter chips with counts -->
+  <text x="175" y="48" fill="#e8e8ec" font-size="22" font-weight="bold">Agenda</text>
+  <g font-size="12">
+    <rect x="175" y="66" width="66" height="26" rx="13" fill="#26262e"/>
+    <text x="190" y="83" fill="#e8e8ec">All · 14</text>
+    <rect x="249" y="66" width="94" height="26" rx="13" fill="#16161c" stroke="#2a2a32"/>
+    <text x="262" y="83" fill="#9a9aa5">Personal · 6</text>
+    <rect x="351" y="66" width="80" height="26" rx="13" fill="#16161c" stroke="#2a2a32"/>
+    <text x="364" y="83" fill="#9a9aa5">Work · 3</text>
+    <rect x="439" y="66" width="94" height="26" rx="13" fill="#16161c" stroke="#2a2a32"/>
+    <text x="452" y="83" fill="#9a9aa5">Finance · 4</text>
+    <rect x="541" y="66" width="102" height="26" rx="13" fill="#16161c" stroke="#2a2a32"/>
+    <text x="554" y="83" fill="#9a9aa5">Unsorted · 1</text>
+    <rect x="627" y="61" width="14" height="14" rx="7" fill="#e8a33d"/>
+  </g>
+  <text x="660" y="83" fill="#5a5a66" font-size="10">badge = strays to sort</text>
+
+  <!-- OVERDUE: pinned, red accent -->
+  <text x="175" y="122" fill="#e05c5c" font-size="11" letter-spacing="2">OVERDUE — PINNED TO TOP</text>
+  <rect x="175" y="132" width="760" height="42" rx="8" fill="#1a1a20" stroke="#e05c5c"/>
+  <text x="192" y="158" fill="#e8e8ec" font-size="13">☐ Renew car registration</text>
+  <text x="420" y="158" fill="#e05c5c" font-size="12">3 days overdue</text>
+  <rect x="700" y="140" width="86" height="24" rx="12" fill="#26262e"/>
+  <text x="714" y="156" fill="#9a9aa5" font-size="11">Personal</text>
+  <text x="805" y="156" fill="#5a5a66" font-size="11">Done · Snooze</text>
+
+  <!-- TODAY -->
+  <text x="175" y="204" fill="#3ecf8e" font-size="11" letter-spacing="2">TODAY — THU, SEP 4</text>
+  <rect x="175" y="214" width="760" height="52" rx="8" fill="#1a1a20" stroke="#2a2a32"/>
+  <text x="192" y="236" fill="#e8e8ec" font-size="13">📅 6:30 PM · Norwalk Film Festival — "The Best Summer"</text>
+  <text x="214" y="254" fill="#9a9aa5" font-size="11">Cedar Point Yacht Club, Westport CT</text>
+  <rect x="700" y="226" width="86" height="24" rx="12" fill="#26262e"/>
+  <text x="714" y="242" fill="#9a9aa5" font-size="11">Personal</text>
+
+  <rect x="175" y="272" width="760" height="42" rx="8" fill="#1a1a20" stroke="#2a2a32"/>
+  <text x="192" y="298" fill="#e8e8ec" font-size="13">☐ Reply to Marco Polo email</text>
+  <rect x="700" y="280" width="86" height="24" rx="12" fill="#26262e"/>
+  <text x="726" y="296" fill="#9a9aa5" font-size="11">Work</text>
+  <text x="805" y="296" fill="#5a5a66" font-size="11">Done · Snooze</text>
+  <text x="805" y="308" fill="#5a5a66" font-size="9">(labeled on hover — no mystery icons)</text>
+
+  <!-- TOMORROW -->
+  <text x="175" y="346" fill="#9a9aa5" font-size="11" letter-spacing="2">TOMORROW — FRI, SEP 5</text>
+  <rect x="175" y="356" width="760" height="42" rx="8" fill="#1a1a20" stroke="#2a2a32"/>
+  <text x="192" y="382" fill="#e8e8ec" font-size="13">🔁 GEICO auto-pay processes</text>
+  <rect x="700" y="364" width="86" height="24" rx="12" fill="#26262e"/>
+  <text x="717" y="380" fill="#9a9aa5" font-size="11">Finance</text>
+
+  <!-- THIS WEEK -->
+  <text x="175" y="430" fill="#9a9aa5" font-size="11" letter-spacing="2">THIS WEEK</text>
+  <rect x="175" y="440" width="760" height="42" rx="8" fill="#1a1a20" stroke="#2a2a32"/>
+  <text x="192" y="466" fill="#e8e8ec" font-size="13">☐ Submit Biddle v. Disney claim</text>
+  <text x="430" y="466" fill="#9a9aa5" font-size="11">due Tue, Sep 8</text>
+  <rect x="700" y="448" width="86" height="24" rx="12" fill="#26262e"/>
+  <text x="717" y="464" fill="#9a9aa5" font-size="11">Finance</text>
+
+  <rect x="175" y="488" width="760" height="42" rx="8" fill="#1a1a20" stroke="#2a2a32"/>
+  <text x="192" y="514" fill="#e8e8ec" font-size="13">📅 Wed 6:30 PM · Movie night with Holly</text>
+  <rect x="700" y="496" width="86" height="24" rx="12" fill="#26262e"/>
+  <text x="714" y="512" fill="#9a9aa5" font-size="11">Personal</text>
+
+  <!-- LATER (collapsed) -->
+  <text x="175" y="562" fill="#9a9aa5" font-size="11" letter-spacing="2">LATER</text>
+  <rect x="175" y="572" width="760" height="36" rx="8" fill="#16161c" stroke="#2a2a32"/>
+  <text x="192" y="595" fill="#9a9aa5" font-size="12">▸ 7 more items — collapsed by default</text>
+
+  <!-- UNSORTED strays -->
+  <text x="175" y="646" fill="#e8a33d" font-size="11" letter-spacing="2">UNSORTED — QUICK SORT</text>
+  <rect x="175" y="656" width="760" height="46" rx="8" fill="#1a1a20" stroke="#e8a33d"/>
+  <text x="192" y="678" fill="#e8e8ec" font-size="13">☐ Look into gutter guards</text>
+  <g font-size="11">
+    <rect x="560" y="666" width="80" height="24" rx="12" fill="#26262e"/>
+    <text x="574" y="682" fill="#e8e8ec">Personal</text>
+    <rect x="648" y="666" width="60" height="24" rx="12" fill="#26262e"/>
+    <text x="663" y="682" fill="#e8e8ec">Work</text>
+    <rect x="716" y="666" width="76" height="24" rx="12" fill="#26262e"/>
+    <text x="729" y="682" fill="#e8e8ec">Finance</text>
+  </g>
+  <text x="192" y="697" fill="#5a5a66" font-size="10">one tap sorts it — no edit form needed</text>
+
+  <!-- Row anatomy legend -->
+  <rect x="175" y="726" width="760" height="56" rx="8" fill="#16161c" stroke="#2a2a32"/>
+  <text x="192" y="748" fill="#5a5a66" font-size="11">Row anatomy: type icon (📅 event · ☐ task · 🔁 routine) + title + time/place + ONE category chip.</text>
+  <text x="192" y="766" fill="#5a5a66" font-size="11">No IDs, no raw metadata, no per-row dropdowns. Actions appear labeled on hover.</text>
+
+  <text x="175" y="806" fill="#5a5a66" font-size="11">Wireframe — structure and copy tone only.</text>
+</svg>
