@@ -8,7 +8,6 @@ import {
   LiveGoalsContent,
   LiveMemoryContent,
 } from "../live-pages";
-import { LiveContextMapContent } from "../context-map/context-map-content";
 import { LiveInterviewsIndex } from "../interviews/ui";
 import { LiveLinksAndNotesContent } from "../links-notes";
 import { eyebrowClass, mutedClass, pageHeaderClass } from "../page-classes";
@@ -18,11 +17,10 @@ import { eyebrowClass, mutedClass, pageHeaderClass } from "../page-classes";
 // purely "what Skippy knows"; /brain/inbox redirects to the queue.
 const TABS = [
   { key: "memory", label: "Memory" },
-  { key: "links", label: "Links" },
-  { key: "contacts", label: "Contacts" },
+  { key: "library", label: "Library" },
+  { key: "people", label: "People" },
   { key: "goals", label: "Goals" },
-  { key: "interviews", label: "Interviews" },
-  { key: "map", label: "Map" },
+  { key: "check-ins", label: "Check-ins" },
 ];
 
 const TAB_KEYS = new Set(TABS.map((tab) => tab.key));
@@ -51,7 +49,7 @@ export function BrainContent({ section }: { section?: string | undefined }) {
           <p className={eyebrowClass}>Second brain</p>
           <h1>Everything Skippy knows.</h1>
           <p className={`${mutedClass} max-w-[560px]`}>
-            Accepted knowledge, contacts, goals, guided check-ins, and the relationship map — all connected.
+            Accepted knowledge, saved resources, people, goals, and guided check-ins — all connected.
           </p>
         </div>
       </div>
@@ -61,11 +59,10 @@ export function BrainContent({ section }: { section?: string | undefined }) {
       </div>
 
       {tab === "memory" ? <LiveMemoryContent /> : null}
-      {tab === "links" ? <LiveLinksAndNotesContent /> : null}
-      {tab === "contacts" ? <LiveContactsContent /> : null}
+      {tab === "library" ? <LiveLinksAndNotesContent /> : null}
+      {tab === "people" ? <LiveContactsContent /> : null}
       {tab === "goals" ? <LiveGoalsContent /> : null}
-      {tab === "interviews" ? <LiveInterviewsIndex /> : null}
-      {tab === "map" ? <LiveContextMapContent /> : null}
+      {tab === "check-ins" ? <LiveInterviewsIndex /> : null}
     </LiveGate>
   );
 }

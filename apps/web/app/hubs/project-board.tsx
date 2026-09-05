@@ -29,6 +29,7 @@ import {
   Archive,
   ArchiveRestore,
   Bot,
+  BookOpen,
   Check,
   CheckCircle2,
   ExternalLink,
@@ -531,7 +532,60 @@ function ProjectOverview({
           </p>
         )}
       </section>
+
+      <ProjectContext projectId={project._id} />
     </div>
+  );
+}
+
+function ProjectContext({ projectId }: { projectId: string }) {
+  const data = useQuery(api.knowledge.getContextBundleForViewer, {
+    relatedEntityRefs: [{ entityType: "project", entityId: projectId }],
+    memoryLimit: 12,
+    entityLimit: 12,
+    sourceLimit: 12,
+  } as any) as AnyRecord | undefined;
+  const memories: AnyRecord[] = data?.memories ?? [];
+  const sources: AnyRecord[] = data?.sourceRefs ?? [];
+
+  return (
+    <section>
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div>
+          <h2 className="text-lg">Context</h2>
+          <p className="mt-1 text-sm text-muted-foreground">Memory and sources connected to this project.</p>
+        </div>
+        {data ? <Badge tone="blue">{memories.length} memories</Badge> : null}
+      </div>
+      {!data ? (
+        <LoadingRow label="Loading context…" />
+      ) : memories.length === 0 && sources.length === 0 ? (
+        <p className="rounded-xl border border-dashed p-4 text-sm text-muted-foreground">No context connected here yet.</p>
+      ) : (
+        <div className="grid gap-2">
+          {memories.map((result) => {
+            const memory = result.memory ?? result;
+            return (
+              <Link
+                key={String(memory._id)}
+                href={`/memory/${encodeURIComponent(String(memory._id))}`}
+                className="flex items-start gap-3 rounded-xl border bg-card p-3 text-foreground no-underline hover:border-primary"
+              >
+                <BookOpen size={17} className="mt-0.5 shrink-0 text-primary" aria-hidden />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-bold">{memory.title ?? "Untitled memory"}</span>
+                  {memory.summary ? <span className="mt-1 line-clamp-2 block text-xs text-muted-foreground">{memory.summary}</span> : null}
+                </span>
+                <Badge tone="blue">{memory.memoryType === "memory" ? "Fact" : memory.memoryType ?? "Memory"}</Badge>
+              </Link>
+            );
+          })}
+          {sources.length ? (
+            <p className="mt-1 text-xs text-muted-foreground">{sources.length} supporting source{sources.length === 1 ? "" : "s"}</p>
+          ) : null}
+        </div>
+      )}
+    </section>
   );
 }
 
