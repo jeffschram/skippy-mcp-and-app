@@ -18,6 +18,7 @@ import {
   taskTitleLooksDuplicate,
 } from "@skippy/shared";
 import { requireOwnedBrain } from "./auth";
+import { insertKnowledgeForMemory } from "./knowledgeDualWrite";
 import { advanceDependentsAfterDone } from "./taskExecution";
 import { phaseAppendOrderIndex } from "./taskOrder";
 
@@ -91,6 +92,13 @@ const memoryReviewBehavior = v.union(
   v.literal("auto"),
 );
 
+const knowledgeKind = v.union(
+  v.literal("note"),
+  v.literal("link"),
+  v.literal("knowledgeObject"),
+  v.literal("memory"),
+);
+
 const entityEmbeddingInput = {
   brainInstanceId: v.id("brainInstances"),
   entityRef,
@@ -146,6 +154,13 @@ const entityTableByType = {
   company: "companies",
   link: "links",
   knowledgeObject: "knowledgeObjects",
+} as const;
+
+const legacyTableByKnowledgeKind = {
+  note: "notes",
+  link: "links",
+  knowledgeObject: "knowledgeObjects",
+  memory: "memories",
 } as const;
 
 function statusAllowedForEntity(entityTypeName: keyof typeof entityTableByType, status: string | undefined) {
@@ -490,6 +505,14 @@ async function createAcceptedEntity(
   };
 
   const entityId = await db.insert(tableName, entityDocument);
+  await insertKnowledgeForEntity(
+    db,
+    triageItem.brainInstanceId,
+    entityTypeName,
+    entityDocument,
+    sourceRefIds,
+    now,
+  );
 
   await linkSourceRefsToEntity(
     db,
@@ -531,6 +554,42 @@ function memoryTitleFor(memoryTypeName: string, title: string | undefined, body:
 
   const fallback = body.replace(/\s+/g, " ").trim().slice(0, 80);
   return fallback || `${memoryTypeName.slice(0, 1).toUpperCase()}${memoryTypeName.slice(1)}`;
+}
+
+const dualWriteEntityKinds = new Set(["note", "link", "knowledgeObject"]);
+
+async function insertKnowledgeForEntity(
+  db: any,
+  brainInstanceId: any,
+  entityTypeName: keyof typeof entityTableByType,
+  payload: any,
+  sourceRefIds: any[],
+  now: number,
+  rubricDecision?: string,
+) {
+  if (!dualWriteEntityKinds.has(entityTypeName)) {
+    return;
+  }
+
+  await db.insert("knowledge", {
+    brainInstanceId,
+    kind: entityTypeName,
+    title: optionalTrimmed(payload.title),
+    body: optionalTrimmed(payload.body),
+    summary: optionalTrimmed(payload.summary),
+    url: optionalTrimmed(payload.url),
+    normalizedUrl: optionalTrimmed(payload.normalizedUrl),
+    whyItMatters: optionalTrimmed(payload.whyItMatters),
+    objectType: optionalTrimmed(payload.objectType),
+    properties: payload.properties,
+    processingState: payload.processingState ?? "accepted",
+    confidence: payload.confidence,
+    reviewReason: payload.reviewReason,
+    sourceRefIds,
+    rubricDecision: optionalTrimmed(rubricDecision),
+    createdAt: now,
+    updatedAt: now,
+  });
 }
 
 function dedupeIds(ids: any[]) {
@@ -1436,6 +1495,15 @@ export const ingestObject = mutationGeneric({
     }
 
     const entityId = await db.insert(tableName, entityDocument);
+    await insertKnowledgeForEntity(
+      db,
+      args.brainInstanceId,
+      entityTypeName,
+      entityDocument,
+      sourceRefIds,
+      now,
+      args.rubricDecision,
+    );
     const acceptedEntityRef = { entityType: entityTypeName, entityId };
 
     await linkSourceRefsToEntity(db, args.brainInstanceId, acceptedEntityRef, sourceRefIds, "created_from", now);
@@ -1461,6 +1529,68 @@ export const ingestObject = mutationGeneric({
       title: displayPayload.title ?? displayPayload.name ?? displayPayload.url ?? displayPayload.body,
       sourceRefIds,
       rubricDecision: args.rubricDecision,
+    };
+  },
+});
+
+/**
+ * Migration-step verification for the legacy -> knowledge dual write.
+ * Run once per kind with the same [startAt, endAt) window. The bounded result
+ * makes an unexpectedly busy window explicit instead of returning a partial
+ * count that looks authoritative.
+ */
+export const verifyKnowledgeDualWriteCounts = queryGeneric({
+  args: {
+    brainInstanceId: v.id("brainInstances"),
+    kind: knowledgeKind,
+    startAt: v.number(),
+    endAt: v.number(),
+    limit: v.optional(v.number()),
+  },
+  handler: async ({ db }, args) => {
+    if (args.endAt <= args.startAt) {
+      throw new Error("endAt must be greater than startAt");
+    }
+
+    // Two result sets share Convex's per-function read budget. If this caps,
+    // rerun with a narrower time window rather than risking a partial count.
+    const limit = Math.min(Math.max(Math.floor(args.limit ?? 5_000), 1), 7_000);
+    const legacyTable = legacyTableByKnowledgeKind[args.kind];
+    const [legacyRows, knowledgeRows] = await Promise.all([
+      db
+        .query(legacyTable)
+        .withIndex("by_brain_created", (q: any) =>
+          q
+            .eq("brainInstanceId", args.brainInstanceId)
+            .gte("createdAt", args.startAt)
+            .lt("createdAt", args.endAt),
+        )
+        .take(limit + 1),
+      db
+        .query("knowledge")
+        .withIndex("by_brain_kind_created", (q: any) =>
+          q
+            .eq("brainInstanceId", args.brainInstanceId)
+            .eq("kind", args.kind)
+            .gte("createdAt", args.startAt)
+            .lt("createdAt", args.endAt),
+        )
+        .take(limit + 1),
+    ]);
+    const truncated = legacyRows.length > limit || knowledgeRows.length > limit;
+    const legacyCount = Math.min(legacyRows.length, limit);
+    const knowledgeCount = Math.min(knowledgeRows.length, limit);
+
+    return {
+      kind: args.kind,
+      startAt: args.startAt,
+      endAt: args.endAt,
+      legacyCount,
+      knowledgeCount,
+      difference: knowledgeCount - legacyCount,
+      matches: !truncated && legacyCount === knowledgeCount,
+      truncated,
+      limit,
     };
   },
 });
@@ -2729,7 +2859,7 @@ export const captureThoughtForViewer = mutationGeneric({
     );
     const relatedEntityRefs = await requireRelatedEntityRefsForBrain(ctx.db, brain._id, args.relatedEntityRefs as any);
     const title = memoryTitleFor("thought", args.title, body);
-    const memoryId = await ctx.db.insert("memories", {
+    const memoryDocument = {
       brainInstanceId: brain._id,
       memoryType: "thought",
       title,
@@ -2743,7 +2873,9 @@ export const captureThoughtForViewer = mutationGeneric({
       captureReason: optionalTrimmed(args.captureReason),
       createdAt: now,
       updatedAt: now,
-    });
+    };
+    const memoryId = await ctx.db.insert("memories", memoryDocument);
+    await insertKnowledgeForMemory(ctx.db, memoryDocument);
 
     await ctx.db.insert("activityEvents", {
       brainInstanceId: brain._id,
@@ -2791,7 +2923,7 @@ export const recordDurableMemoryForViewer = mutationGeneric({
     );
     const relatedEntityRefs = await requireRelatedEntityRefsForBrain(ctx.db, brain._id, args.relatedEntityRefs as any);
     const title = memoryTitleFor(memoryTypeName, args.title, body);
-    const memoryId = await ctx.db.insert("memories", {
+    const memoryDocument = {
       brainInstanceId: brain._id,
       memoryType: memoryTypeName,
       title,
@@ -2809,7 +2941,9 @@ export const recordDurableMemoryForViewer = mutationGeneric({
       acceptedAt: now,
       createdAt: now,
       updatedAt: now,
-    });
+    };
+    const memoryId = await ctx.db.insert("memories", memoryDocument);
+    await insertKnowledgeForMemory(ctx.db, memoryDocument);
 
     await ctx.db.insert("activityEvents", {
       brainInstanceId: brain._id,
@@ -2861,7 +2995,7 @@ export const submitMemoryReviewCandidateForViewer = mutationGeneric({
     );
     const relatedEntityRefs = await requireRelatedEntityRefsForBrain(ctx.db, brain._id, args.relatedEntityRefs as any);
     const title = memoryTitleFor(args.memoryType, args.title, body);
-    const memoryId = await ctx.db.insert("memories", {
+    const memoryDocument = {
       brainInstanceId: brain._id,
       memoryType: args.memoryType,
       title,
@@ -2876,7 +3010,9 @@ export const submitMemoryReviewCandidateForViewer = mutationGeneric({
       captureReason: optionalTrimmed(args.captureReason),
       createdAt: now,
       updatedAt: now,
-    });
+    };
+    const memoryId = await ctx.db.insert("memories", memoryDocument);
+    await insertKnowledgeForMemory(ctx.db, memoryDocument);
 
     await ctx.db.insert("activityEvents", {
       brainInstanceId: brain._id,
@@ -3286,7 +3422,7 @@ export const captureThoughtForBrain = mutationGeneric({
     const submitForReview = reviewBehavior === "submit_for_review";
     const directAccept = reviewBehavior === "accept";
 
-    const memoryId = await db.insert("memories", {
+    const memoryDocument = {
       brainInstanceId: args.brainInstanceId,
       memoryType: memoryTypeName,
       title,
@@ -3302,7 +3438,9 @@ export const captureThoughtForBrain = mutationGeneric({
       reviewedAt: directAccept ? now : undefined,
       createdAt: now,
       updatedAt: now,
-    });
+    };
+    const memoryId = await db.insert("memories", memoryDocument);
+    await insertKnowledgeForMemory(db, memoryDocument);
 
     await db.insert("activityEvents", {
       brainInstanceId: args.brainInstanceId,
@@ -3371,7 +3509,7 @@ export const recordMemoryForBrain = mutationGeneric({
     const relatedEntityRefs = await requireRelatedEntityRefsForBrain(db, args.brainInstanceId, args.relatedEntityRefs as any);
     const title = memoryTitleFor(memoryTypeName, args.title, body);
 
-    const memoryId = await db.insert("memories", {
+    const memoryDocument = {
       brainInstanceId: args.brainInstanceId,
       memoryType: memoryTypeName,
       title,
@@ -3388,7 +3526,9 @@ export const recordMemoryForBrain = mutationGeneric({
       reviewedAt: submitForReview ? undefined : now,
       createdAt: now,
       updatedAt: now,
-    });
+    };
+    const memoryId = await db.insert("memories", memoryDocument);
+    await insertKnowledgeForMemory(db, memoryDocument);
 
     await db.insert("activityEvents", {
       brainInstanceId: args.brainInstanceId,
@@ -3448,7 +3588,7 @@ export const submitMemoryReviewCandidateForBrain = mutationGeneric({
     const sourceRefIds = await memorySourceRefIdsFromArgs(db, args.brainInstanceId, args.sourceRefIds, args.sourceRefs, now);
     const relatedEntityRefs = await requireRelatedEntityRefsForBrain(db, args.brainInstanceId, args.relatedEntityRefs as any);
     const title = memoryTitleFor(memoryTypeName, undefined, body);
-    const memoryId = await db.insert("memories", {
+    const memoryDocument = {
       brainInstanceId: args.brainInstanceId,
       memoryType: memoryTypeName,
       title,
@@ -3462,7 +3602,9 @@ export const submitMemoryReviewCandidateForBrain = mutationGeneric({
       captureReason: optionalTrimmed(args.captureReason),
       createdAt: now,
       updatedAt: now,
-    });
+    };
+    const memoryId = await db.insert("memories", memoryDocument);
+    await insertKnowledgeForMemory(db, memoryDocument);
 
     await db.insert("activityEvents", {
       brainInstanceId: args.brainInstanceId,

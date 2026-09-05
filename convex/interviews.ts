@@ -1,6 +1,7 @@
 import { mutationGeneric, queryGeneric } from "convex/server";
 import { v } from "convex/values";
 import { requireOwnedBrain } from "./auth";
+import { insertKnowledgeForMemory } from "./knowledgeDualWrite";
 
 const interviewKind = v.union(
   v.literal("project"),
@@ -365,7 +366,7 @@ async function createMemoryReviewCandidate(db: any, args: {
   relatedEntityRefs?: EntityRef[];
   now: number;
 }) {
-  const memoryId = await db.insert("memories", {
+  const memoryDocument = {
     brainInstanceId: args.brainInstanceId,
     memoryType: args.memoryType,
     title: args.title,
@@ -378,7 +379,9 @@ async function createMemoryReviewCandidate(db: any, args: {
     captureReason: args.captureReason,
     createdAt: args.now,
     updatedAt: args.now,
-  });
+  };
+  const memoryId = await db.insert("memories", memoryDocument);
+  await insertKnowledgeForMemory(db, memoryDocument);
 
   await db.insert("activityEvents", {
     brainInstanceId: args.brainInstanceId,
