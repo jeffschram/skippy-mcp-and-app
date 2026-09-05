@@ -580,6 +580,7 @@ async function insertKnowledgeForEntity(
     url: optionalTrimmed(payload.url),
     normalizedUrl: optionalTrimmed(payload.normalizedUrl),
     whyItMatters: optionalTrimmed(payload.whyItMatters),
+    status: entityTypeName === "link" ? payload.status : undefined,
     objectType: optionalTrimmed(payload.objectType),
     properties: payload.properties,
     processingState: payload.processingState ?? "accepted",
@@ -776,7 +777,43 @@ function memoryIsSearchable(memory: any, includeArchived: boolean | undefined) {
   if (includeArchived) {
     return true;
   }
-  return memory.status !== "archived" && memory.status !== "rejected";
+  return memory.processingState !== "archived" && memory.processingState !== "rejected";
+}
+
+function knowledgeMemoryForReader(memory: any) {
+  const status =
+    memory.status ?? (memory.processingState === "accepted"
+      ? "accepted"
+      : memory.processingState === "rejected"
+        ? "rejected"
+        : memory.processingState === "archived"
+          ? "archived"
+          : "inbox");
+  return {
+    ...memory,
+    status,
+    reviewState: status === "inbox" ? "pending_review" : status,
+  };
+}
+
+async function acceptedKnowledgeByKinds(
+  db: any,
+  brainInstanceId: any,
+  kinds: Array<"note" | "link" | "knowledgeObject">,
+  limitPerKind: number,
+) {
+  const rows = await Promise.all(
+    kinds.map((kind) =>
+      db
+        .query("knowledge")
+        .withIndex("by_brain_kind_state", (q: any) =>
+          q.eq("brainInstanceId", brainInstanceId).eq("kind", kind).eq("processingState", "accepted"),
+        )
+        .order("desc")
+        .take(limitPerKind),
+    ),
+  );
+  return rows.flat();
 }
 
 function sourceRefText(sourceRef: any) {
@@ -932,8 +969,10 @@ async function searchMemoriesForBrainId(
   const queryTokens = searchTokens(args.query);
   const candidateLimit = Math.max(100, Math.min(500, limit * (queryTokens.length || args.relatedEntityRefs?.length ? 12 : 3)));
   const memories = await db
-    .query("memories")
-    .withIndex("by_brain_updated", (q: any) => q.eq("brainInstanceId", brainInstanceId))
+    .query("knowledge")
+    .withIndex("by_brain_kind_created", (q: any) =>
+      q.eq("brainInstanceId", brainInstanceId).eq("kind", "memory"),
+    )
     .order("desc")
     .take(candidateLimit);
   const hydrated = [];
@@ -958,7 +997,7 @@ async function searchMemoriesForBrainId(
       continue;
     }
     hydrated.push({
-      memory,
+      memory: knowledgeMemoryForReader(memory),
       ...scored,
       sourceRefs,
       relatedEntities: relatedEntities.map((item) => entityDisplay(item.ref, item.entity)),
@@ -1000,11 +1039,9 @@ async function queryMatchedEntityContext(
     ...(await db.query("goals").withIndex("by_brain_state", (q: any) => q.eq("brainInstanceId", brainInstanceId)).filter((q: any) => q.eq(q.field("processingState"), "accepted")).take(60)).map((entity: any) => ({ ref: { entityType: "goal", entityId: entity._id }, entity })),
     ...(await db.query("projects").withIndex("by_brain_state", (q: any) => q.eq("brainInstanceId", brainInstanceId)).filter((q: any) => q.eq(q.field("processingState"), "accepted")).take(60)).map((entity: any) => ({ ref: { entityType: "project", entityId: entity._id }, entity })),
     ...(await db.query("tasks").withIndex("by_brain_state", (q: any) => q.eq("brainInstanceId", brainInstanceId)).filter((q: any) => q.eq(q.field("processingState"), "accepted")).take(80)).map((entity: any) => ({ ref: { entityType: "task", entityId: entity._id }, entity })),
-    ...(await db.query("notes").withIndex("by_brain_state", (q: any) => q.eq("brainInstanceId", brainInstanceId)).filter((q: any) => q.eq(q.field("processingState"), "accepted")).take(40)).map((entity: any) => ({ ref: { entityType: "note", entityId: entity._id }, entity })),
     ...(await db.query("people").withIndex("by_brain_state", (q: any) => q.eq("brainInstanceId", brainInstanceId)).filter((q: any) => q.eq(q.field("processingState"), "accepted")).take(60)).map((entity: any) => ({ ref: { entityType: "person", entityId: entity._id }, entity })),
     ...(await db.query("companies").withIndex("by_brain_state", (q: any) => q.eq("brainInstanceId", brainInstanceId)).filter((q: any) => q.eq(q.field("processingState"), "accepted")).take(60)).map((entity: any) => ({ ref: { entityType: "company", entityId: entity._id }, entity })),
-    ...(await db.query("links").withIndex("by_brain_state", (q: any) => q.eq("brainInstanceId", brainInstanceId)).filter((q: any) => q.eq(q.field("processingState"), "accepted")).take(60)).map((entity: any) => ({ ref: { entityType: "link", entityId: entity._id }, entity })),
-    ...(await db.query("knowledgeObjects").withIndex("by_brain_state", (q: any) => q.eq("brainInstanceId", brainInstanceId)).filter((q: any) => q.eq(q.field("processingState"), "accepted")).take(40)).map((entity: any) => ({ ref: { entityType: "knowledgeObject", entityId: entity._id }, entity })),
+    ...(await acceptedKnowledgeByKinds(db, brainInstanceId, ["note", "link", "knowledgeObject"], 60)).map((entity: any) => ({ ref: { entityType: entity.kind, entityId: entity._id }, entity })),
   ];
 
   return entityRows
@@ -2555,16 +2592,15 @@ export const listLinksForViewer = queryGeneric({
   args: {},
   handler: async (ctx) => {
     const { brain } = await requireOwnedBrain(ctx);
-    const links = (
-      await ctx.db
-        .query("links")
-        .filter((q) =>
-          q.and(q.eq(q.field("brainInstanceId"), brain._id), q.eq(q.field("processingState"), "accepted")),
-        )
-        .collect()
-    ).sort((left, right) => right.createdAt - left.createdAt);
+    const links = await ctx.db
+      .query("knowledge")
+      .withIndex("by_brain_kind_state", (q: any) =>
+        q.eq("brainInstanceId", brain._id).eq("kind", "link").eq("processingState", "accepted"),
+      )
+      .order("desc")
+      .take(500);
 
-    return { brain, links };
+    return { brain, links: links.map((link) => ({ ...link, status: link.status ?? "unread" })) };
   },
 });
 
@@ -2572,14 +2608,13 @@ export const listNotesForViewer = queryGeneric({
   args: {},
   handler: async (ctx) => {
     const { brain } = await requireOwnedBrain(ctx);
-    const notes = (
-      await ctx.db
-        .query("notes")
-        .filter((q) =>
-          q.and(q.eq(q.field("brainInstanceId"), brain._id), q.eq(q.field("processingState"), "accepted")),
-        )
-        .collect()
-    ).sort((left, right) => right.createdAt - left.createdAt);
+    const notes = await ctx.db
+      .query("knowledge")
+      .withIndex("by_brain_kind_state", (q: any) =>
+        q.eq("brainInstanceId", brain._id).eq("kind", "note").eq("processingState", "accepted"),
+      )
+      .order("desc")
+      .take(500);
 
     return { brain, notes };
   },
@@ -2623,15 +2658,27 @@ async function applyLinkStatusUpdate(
 
 export const updateLinkStatusForViewer = mutationGeneric({
   args: {
-    linkId: v.id("links"),
+    linkId: v.id("knowledge"),
     status: linkStatusValidator,
   },
   handler: async (ctx, args) => {
     const { user, brain } = await requireOwnedBrain(ctx);
-    return await applyLinkStatusUpdate(ctx.db, brain._id, args.linkId, args.status, {
+    const link = await ctx.db.get(args.linkId);
+    if (!link || link.brainInstanceId !== brain._id || link.kind !== "link") {
+      throw new Error("link not found");
+    }
+    const now = Date.now();
+    await ctx.db.patch(args.linkId, { status: args.status, updatedAt: now });
+    await ctx.db.insert("activityEvents", {
+      brainInstanceId: brain._id,
+      entityRef: { entityType: "link", entityId: args.linkId },
+      activityType: "link_status_updated",
       actorType: "user",
       actorId: user._id,
+      timestamp: now,
+      summary: `Link marked ${args.status}: ${link.title ?? link.url}`,
     });
+    return { linkId: args.linkId, title: link.title ?? link.url, status: args.status };
   },
 });
 
@@ -2644,11 +2691,14 @@ export const acceptedEntityOptionsForViewer = queryGeneric({
     const goals = await ctx.db.query("goals").filter(acceptedFilter).take(50);
     const projects = await ctx.db.query("projects").filter(acceptedFilter).take(50);
     const tasks = await ctx.db.query("tasks").filter(acceptedFilter).take(100);
-    const notes = await ctx.db.query("notes").filter(acceptedFilter).take(50);
     const people = await ctx.db.query("people").filter(acceptedFilter).take(50);
     const companies = await ctx.db.query("companies").filter(acceptedFilter).take(50);
-    const links = await ctx.db.query("links").filter(acceptedFilter).take(50);
-    const knowledgeObjects = await ctx.db.query("knowledgeObjects").filter(acceptedFilter).take(50);
+    const knowledgeRows = await acceptedKnowledgeByKinds(
+      ctx.db,
+      brain._id,
+      ["note", "link", "knowledgeObject"],
+      50,
+    );
 
     return [
       ...goals.map((goal) => ({
@@ -2672,12 +2722,6 @@ export const acceptedEntityOptionsForViewer = queryGeneric({
         summary: task.description,
         status: task.status,
       })),
-      ...notes.map((note) => ({
-        entityType: "note",
-        entityId: note._id,
-        title: note.title ?? note.body.slice(0, 80),
-        summary: note.body,
-      })),
       ...people.map((person) => ({
         entityType: "person",
         entityId: person._id,
@@ -2690,18 +2734,11 @@ export const acceptedEntityOptionsForViewer = queryGeneric({
         title: company.name,
         summary: [company.domain, company.website, company.notes].filter(Boolean).join(" "),
       })),
-      ...links.map((link) => ({
-        entityType: "link",
-        entityId: link._id,
-        title: link.title ?? link.url,
-        summary: [link.summary, link.whyItMatters, link.url].filter(Boolean).join(" "),
-        status: link.status,
-      })),
-      ...knowledgeObjects.map((object) => ({
-        entityType: "knowledgeObject",
-        entityId: object._id,
-        title: object.title,
-        summary: [object.objectType, object.summary].filter(Boolean).join(" "),
+      ...knowledgeRows.map((item) => ({
+        entityType: item.kind,
+        entityId: item._id,
+        title: item.title ?? item.url ?? item.body?.slice(0, 80) ?? "Untitled knowledge",
+        summary: [item.objectType, item.summary, item.body, item.whyItMatters, item.url].filter(Boolean).join(" "),
       })),
     ];
   },
@@ -2761,21 +2798,17 @@ export const listAcceptedMemoryLibraryForViewer = queryGeneric({
   },
   handler: async (ctx, args) => {
     const { brain } = await requireOwnedBrain(ctx);
+    const query = ctx.db
+      .query("knowledge")
+      .withIndex("by_brain_kind_state", (q: any) =>
+        q.eq("brainInstanceId", brain._id).eq("kind", "memory").eq("processingState", "accepted"),
+      )
+      .order("desc");
     const memories = args.memoryType
-      ? await ctx.db
-          .query("memories")
-          .withIndex("by_brain_type_status", (q) => q.eq("brainInstanceId", brain._id))
-          .filter((q) => q.and(q.eq(q.field("memoryType"), args.memoryType), q.eq(q.field("status"), "accepted")))
-          .order("desc")
-          .take(args.limit ?? 100)
-      : await ctx.db
-          .query("memories")
-          .withIndex("by_brain_status", (q) => q.eq("brainInstanceId", brain._id))
-          .filter((q) => q.eq(q.field("status"), "accepted"))
-          .order("desc")
-          .take(args.limit ?? 100);
+      ? await query.filter((q) => q.eq(q.field("memoryType"), args.memoryType)).take(args.limit ?? 100)
+      : await query.take(args.limit ?? 100);
 
-    return memories;
+    return memories.map(knowledgeMemoryForReader);
   },
 });
 
@@ -2813,12 +2846,12 @@ export const getContextBundleForViewer = queryGeneric({
 
 export const getMemoryDetailForViewer = queryGeneric({
   args: {
-    memoryId: v.id("memories"),
+    memoryId: v.id("knowledge"),
   },
   handler: async (ctx, args) => {
     const { brain } = await requireOwnedBrain(ctx);
     const memory = await ctx.db.get(args.memoryId);
-    if (!memory || memory.brainInstanceId !== brain._id) {
+    if (!memory || memory.brainInstanceId !== brain._id || memory.kind !== "memory") {
       return null;
     }
 
@@ -2827,7 +2860,7 @@ export const getMemoryDetailForViewer = queryGeneric({
       relatedEntitiesForMemory(ctx.db, brain._id, memory.relatedEntityRefs as any),
     ]);
 
-    return { memory, sourceRefs, relatedEntities };
+    return { memory: knowledgeMemoryForReader(memory), sourceRefs, relatedEntities };
   },
 });
 
@@ -3690,13 +3723,13 @@ export const getContextBundleForBrain = queryGeneric({
 export const memoryDetailForBrain = queryGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
-    memoryId: v.id("memories"),
+    memoryId: v.id("knowledge"),
     includeSourceRefs: v.optional(v.boolean()),
     includeRelatedEntities: v.optional(v.boolean()),
   },
   handler: async ({ db }, args) => {
     const memory = await db.get(args.memoryId);
-    if (!memory || memory.brainInstanceId !== args.brainInstanceId) {
+    if (!memory || memory.brainInstanceId !== args.brainInstanceId || memory.kind !== "memory") {
       return null;
     }
 
@@ -3705,14 +3738,14 @@ export const memoryDetailForBrain = queryGeneric({
       args.includeRelatedEntities === false ? [] : relatedEntitiesForMemory(db, args.brainInstanceId, memory.relatedEntityRefs as any),
     ]);
 
-    return { memory, sourceRefs, relatedEntities };
+    return { memory: knowledgeMemoryForReader(memory), sourceRefs, relatedEntities };
   },
 });
 
 export const linkMemoryForBrain = mutationGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
-    memoryId: v.id("memories"),
+    memoryId: v.id("knowledge"),
     entityRef,
     relationshipType: v.optional(v.string()),
     reason: v.optional(v.string()),
@@ -3723,7 +3756,7 @@ export const linkMemoryForBrain = mutationGeneric({
   },
   handler: async ({ db }, args) => {
     const memory = await db.get(args.memoryId);
-    if (!memory || memory.brainInstanceId !== args.brainInstanceId) {
+    if (!memory || memory.brainInstanceId !== args.brainInstanceId || memory.kind !== "memory") {
       throw new Error("memory not found for brain instance");
     }
 
