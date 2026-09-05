@@ -57,6 +57,7 @@ import {
 import { agentRoleDisplayName, agentRoleFromMetadata } from "../lib/display";
 import { focusItemKey, focusSummaryBullets, focusSummaryPresentation } from "./focus-summary";
 import { formatEventWhen, parseCalendarActionBody } from "./pending-action-helpers";
+import { triageMetaLabel } from "./triage-helpers";
 import { LiveGate } from "./live-auth";
 import { icons } from "./ui";
 import { IconButton, InlineMarkdown, useToast } from "./components";
@@ -1683,6 +1684,9 @@ function TriageItem({
   displayLabels: { ownerName: string; agentName: string };
 }) {
   const review = useMutation(api.knowledge.reviewTriageItem);
+  // Collapsed by default: the Phase 2 card pattern (ui-ux-improvement-plan.md)
+  // makes editing opt-in — the always-open form was the worst offender on Review.
+  const [expanded, setExpanded] = useState(false);
   const [targetEntityType, setTargetEntityType] = useState(item.candidateEntityType ?? "note");
   const [editedPayload, setEditedPayload] = useState(() =>
     editablePayloadFor(item.candidateEntityType ?? "note", item.candidatePayload ?? {}),
@@ -1718,113 +1722,122 @@ function TriageItem({
     await review(args as any);
   }
 
+  const title = titleForReviewItem(item);
+
   return (
     <article className={itemClass}>
       <span className={itemIconClass}>
         <icons.Archive size={17} aria-hidden />
       </span>
-      <div className={formGridClass}>
+      {expanded ? (
+        <div className={formGridClass}>
+          <div>
+            <p className={itemTitleClass}>{title}</p>
+            <p className={itemMetaClass}>{triageMetaLabel(item)}</p>
+          </div>
+          <PayloadEditor
+            entityType={targetEntityType}
+            payload={editedPayload}
+            setPayload={setEditedPayload}
+            displayLabels={displayLabels}
+          />
+          <div className={splitListClass}>
+            <label className={fieldClass}>
+              <span>Target type</span>
+              <select
+                className={selectClass}
+                value={targetEntityType}
+                onChange={(event) => {
+                  const nextType = event.target.value;
+                  setTargetEntityType(nextType);
+                  setEditedPayload(editablePayloadFor(nextType, editedPayload));
+                }}
+              >
+                {entityTypes.map((type) => (
+                  <option key={type} value={type}>
+                    {type}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className={fieldClass}>
+              <span>Merge target</span>
+              <select className={selectClass} value={mergeTargetId} onChange={(event) => setMergeTargetId(event.target.value)}>
+                <option value="">Select existing {targetEntityType}</option>
+                {bestMergeOptions.length ? <option disabled>Suggested matches</option> : null}
+                {bestMergeOptions.map((option) => (
+                  <option key={option.entityId} value={option.entityId}>
+                    {option.title} - {Math.round(option.matchScore * 100)}%
+                  </option>
+                ))}
+                {remainingMergeOptions.length ? <option disabled>Other accepted {targetEntityType}s</option> : null}
+                {remainingMergeOptions.map((option) => (
+                  <option key={option.entityId} value={option.entityId}>
+                    {option.title}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+        </div>
+      ) : (
         <div>
-          <p className={itemTitleClass}>{titleForReviewItem(item)}</p>
-          <p className={itemMetaClass}>
-            {item.candidateEntityType} signal
-            {item.confidence ? `, confidence ${Math.round(item.confidence * 100)}%` : ""}
-          </p>
+          <p className={itemTitleClass}>{title}</p>
+          <p className={itemMetaClass}>{triageMetaLabel(item)}</p>
         </div>
-        <PayloadEditor
-          entityType={targetEntityType}
-          payload={editedPayload}
-          setPayload={setEditedPayload}
-          displayLabels={displayLabels}
+      )}
+      {expanded ? (
+        <CardActions
+          label={`Review actions for ${title}`}
+          actions={[
+            { label: "Accept as edited", ariaLabel: `Accept ${title} with edited payload`, primary: true, onClick: () => void submit("correct") },
+            { label: "Reclassify", ariaLabel: `Reclassify ${title} to selected target type`, onClick: () => void submit("reclassify") },
+            { label: "Merge", ariaLabel: `Merge ${title} into selected target`, disabled: !mergeTargetId, onClick: () => void submit("merge") },
+            { label: "Dismiss", ariaLabel: `Dismiss ${title}`, onClick: () => void submit("reject") },
+            { label: "Cancel", ariaLabel: `Collapse ${title} without submitting`, onClick: () => setExpanded(false) },
+          ]}
         />
-        <div className={splitListClass}>
-          <label className={fieldClass}>
-            <span>Target type</span>
-            <select
-              className={selectClass}
-              value={targetEntityType}
-              onChange={(event) => {
-                const nextType = event.target.value;
-                setTargetEntityType(nextType);
-                setEditedPayload(editablePayloadFor(nextType, editedPayload));
-              }}
-            >
-              {entityTypes.map((type) => (
-                <option key={type} value={type}>
-                  {type}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className={fieldClass}>
-            <span>Merge target</span>
-            <select className={selectClass} value={mergeTargetId} onChange={(event) => setMergeTargetId(event.target.value)}>
-              <option value="">Select existing {targetEntityType}</option>
-              {bestMergeOptions.length ? <option disabled>Suggested matches</option> : null}
-              {bestMergeOptions.map((option) => (
-                <option key={option.entityId} value={option.entityId}>
-                  {option.title} - {Math.round(option.matchScore * 100)}%
-                </option>
-              ))}
-              {remainingMergeOptions.length ? <option disabled>Other accepted {targetEntityType}s</option> : null}
-              {remainingMergeOptions.map((option) => (
-                <option key={option.entityId} value={option.entityId}>
-                  {option.title}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-      </div>
-      <div className={toolbarClass} aria-label={`Review actions for ${titleForReviewItem(item)}`}>
-        <button
-          className={iconButtonClass}
-          type="button"
-          title="Approve as-is"
-          aria-label={`Approve ${titleForReviewItem(item)} as-is`}
-          onClick={() => void submit("approve")}
-        >
-          <icons.Check size={17} aria-hidden />
-        </button>
-        <button
-          className={iconButtonClass}
-          type="button"
-          title="Approve with edited payload"
-          aria-label={`Approve ${titleForReviewItem(item)} with edited payload`}
-          onClick={() => void submit("correct")}
-        >
-          <icons.CircleCheck size={17} aria-hidden />
-        </button>
-        <button
-          className={iconButtonClass}
-          type="button"
-          title="Reclassify to selected target type"
-          aria-label={`Reclassify ${titleForReviewItem(item)} to selected target type`}
-          onClick={() => void submit("reclassify")}
-        >
-          <icons.Shuffle size={17} aria-hidden />
-        </button>
-        <button
-          className={iconButtonClass}
-          type="button"
-          title="Merge into target ID"
-          aria-label={`Merge ${titleForReviewItem(item)} into target ID`}
-          disabled={!mergeTargetId}
-          onClick={() => void submit("merge")}
-        >
-          <icons.LinkIcon size={17} aria-hidden />
-        </button>
-        <button
-          className={iconButtonClass}
-          type="button"
-          title="Reject signal"
-          aria-label={`Reject ${titleForReviewItem(item)}`}
-          onClick={() => void submit("reject")}
-        >
-          <icons.X size={17} aria-hidden />
-        </button>
-      </div>
+      ) : (
+        <CardActions
+          label={`Review actions for ${title}`}
+          actions={[
+            { label: "Accept", ariaLabel: `Accept ${title} as-is`, primary: true, onClick: () => void submit("approve") },
+            { label: "Edit…", ariaLabel: `Edit ${title} before accepting`, onClick: () => setExpanded(true) },
+            { label: "Dismiss", ariaLabel: `Dismiss ${title}`, onClick: () => void submit("reject") },
+          ]}
+        />
+      )}
     </article>
+  );
+}
+
+/**
+ * Labeled text-button strip for the Phase 2 read cards. Replaces icon-only
+ * toolbars — every action reads as a word, matching the Phase-1
+ * PendingActionItem buttons. Reused by the Finds/Goals/Contacts card work.
+ */
+function CardActions({
+  label,
+  actions,
+}: {
+  label: string;
+  actions: { label: string; ariaLabel?: string; onClick: () => void; disabled?: boolean; primary?: boolean }[];
+}) {
+  return (
+    <div className={toolbarClass} aria-label={label}>
+      {actions.map((action) => (
+        <button
+          key={action.label}
+          className={cn(textButtonClass, textButtonCompactClass, action.primary && "border-primary")}
+          type="button"
+          aria-label={action.ariaLabel}
+          disabled={action.disabled}
+          onClick={action.onClick}
+        >
+          {action.label}
+        </button>
+      ))}
+    </div>
   );
 }
 
