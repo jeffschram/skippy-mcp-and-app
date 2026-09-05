@@ -14,6 +14,17 @@ export default async function BrainPage({ params }: { params: Promise<{ section?
     // links follow the content.
     redirect("/review?filter=finds");
   }
+  const renamedSections: Record<string, string> = {
+    links: "library",
+    contacts: "people",
+    interviews: "check-ins",
+  };
+  if (section?.[0] && renamedSections[section[0]]) {
+    redirect(`/brain/${renamedSections[section[0]]}`);
+  }
+  if (section?.[0] === "map") {
+    redirect("/projects");
+  }
   return (
     <AppShell>
       {isLiveConfigured() ? <BrainContent section={section?.[0]} /> : <NotConfigured />}

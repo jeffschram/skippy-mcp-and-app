@@ -1379,11 +1379,66 @@ function MemoryReviewActions({ memory, small }: { memory: AnyRecord; small?: boo
   );
 }
 
+function memoryKindLabel(memory: AnyRecord) {
+  const kind = memoryKind(memory);
+  if (kind === "memory") return "Fact";
+  return `${kind.charAt(0).toUpperCase()}${kind.slice(1)}`;
+}
+
 function MemoryRow({ memory, variant = "memory" }: { memory: AnyRecord; variant?: "inbox" | "memory" }) {
   const state = memoryState(memory);
   const reason = memoryReason(memory);
   const sourceRefs = arrayValue(memory.sourceRefs ?? memory.sources);
   const sourceRefIds = Array.isArray(memory.sourceRefIds) ? memory.sourceRefIds : [];
+  const [expanded, setExpanded] = useState(false);
+
+  if (variant === "memory") {
+    return (
+      <article className={itemClass}>
+        <span className={itemIconClass}>
+          <icons.BookOpen size={17} aria-hidden />
+        </span>
+        <div>
+          <button
+            className="block w-full text-left"
+            type="button"
+            aria-expanded={expanded}
+            onClick={() => setExpanded((value) => !value)}
+          >
+            <p className={itemTitleClass}>{memoryTitle(memory)}</p>
+            <p className={itemMetaClass}>
+              {memory.updatedAt || memory.createdAt ? formatDate(memory.updatedAt ?? memory.createdAt) : "Date unknown"}
+            </p>
+          </button>
+          {expanded ? (
+            <div className="mt-3 grid gap-2 border-t pt-3">
+              <p className={itemMetaClass}>{memorySummary(memory)}</p>
+              {memory.confidence ? (
+                <p className={itemMetaClass}>{Math.round(Number(memory.confidence) * 100)}% confidence</p>
+              ) : null}
+              {reason ? <p className={itemMetaClass}>Why it was saved: {reason}</p> : null}
+              <InlineSourceRefs sourceRefs={sourceRefs} sourceRefIds={sourceRefIds} />
+              <InlineRelatedEntities entities={arrayValue(memory.relatedEntities)} />
+              <Link className={cn(textButtonClass, textButtonCompactClass, "w-fit")} href={memoryHref(memory)}>
+                Open details
+              </Link>
+            </div>
+          ) : null}
+        </div>
+        <span className={projectRowSideClass}>
+          <span className={cn(badgeClass, badgeBlueClass)}>{memoryKindLabel(memory)}</span>
+          <button
+            className="grid size-8 place-items-center rounded-md hover:bg-muted"
+            type="button"
+            aria-label={expanded ? `Collapse ${memoryTitle(memory)}` : `Expand ${memoryTitle(memory)}`}
+            onClick={() => setExpanded((value) => !value)}
+          >
+            <icons.ChevronRight className={cn("transition-transform", expanded && "rotate-90")} size={18} aria-hidden />
+          </button>
+        </span>
+      </article>
+    );
+  }
 
   return (
     <Link className={cn(itemClass, projectRowClass)} href={memoryHref(memory)}>
@@ -1501,13 +1556,21 @@ function RelatedEntityList({ entities }: { entities: AnyRecord[] }) {
 
 export function LiveMemoryContent({ objectTypes, emptyMessage }: MemoryCollectionFilter = {}) {
   const viewerReady = useViewerReady();
-  const memoryType = objectTypes?.length === 1 ? objectTypes[0] : undefined;
+  const [query, setQuery] = useState("");
+  const [kind, setKind] = useState<"all" | "facts" | "decisions" | "principles">("all");
+  const kinds = kind === "facts" ? ["memory"] : kind === "decisions" ? ["decision"] : kind === "principles" ? ["principle"] : objectTypes;
   const data = useQuery(
-    expectedMemoryApi.listAcceptedMemoryLibraryForViewer,
-    viewerReady ? { memoryType, limit: 100 } : "skip",
+    expectedMemoryApi.searchMemoriesForViewer,
+    viewerReady ? { query: query.trim() || undefined, kinds, limit: 50 } : "skip",
   ) as AnyRecord | AnyRecord[] | undefined;
-  const items = collectionItems(data);
-  const counts = !Array.isArray(data) && data && typeof data === "object" ? arrayValue((data as AnyRecord).counts) : [];
+  const results = collectionItems(data);
+  const items = results.map((result) => result.memory ?? result);
+  const filters = [
+    ["all", "All"],
+    ["facts", "Facts"],
+    ["decisions", "Decisions"],
+    ["principles", "Principles"],
+  ] as const;
 
   return (
     <LiveGate>
@@ -1519,6 +1582,31 @@ export function LiveMemoryContent({ objectTypes, emptyMessage }: MemoryCollectio
       ) : (
         <div className={gridClass}>
           <section className={span12Class}>
+            <label className={fieldClass}>
+              <span className={fieldLabelClass}>Search memory</span>
+              <input
+                className={inputClass}
+                type="search"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Search everything Skippy knows…"
+              />
+            </label>
+            <div className={cn(toolbarClass, "mt-3")} role="group" aria-label="Filter memory by kind">
+              {filters.map(([key, label]) => (
+                <button
+                  key={key}
+                  className={cn(badgeClass, kind === key && badgeBlueClass)}
+                  type="button"
+                  aria-pressed={kind === key}
+                  onClick={() => setKind(key)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </section>
+          <section className={span12Class}>
             {items.length === 0 ? (
               <p className={mutedClass}>{emptyMessage ?? "No accepted memory objects yet."}</p>
             ) : (
@@ -1529,18 +1617,6 @@ export function LiveMemoryContent({ objectTypes, emptyMessage }: MemoryCollectio
               </div>
             )}
           </section>
-          {counts.length ? (
-            <section className={cn(cardClass, sectionClass, span12Class)}>
-              <h2>Types</h2>
-              <div className={toolbarClass}>
-                {counts.map((count) => (
-                  <span className={cn(badgeClass, badgeBlueClass)} key={textValue(count.objectType, count.type, count.label)}>
-                    {textValue(count.objectType, count.type, count.label)}: {count.count ?? count.total ?? 0}
-                  </span>
-                ))}
-              </div>
-            </section>
-          ) : null}
         </div>
       )}
     </LiveGate>

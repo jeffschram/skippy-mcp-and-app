@@ -22,9 +22,9 @@ import {
   mutedClass,
   projectRowSideClass,
   sectionClass,
-  splitListClass,
   textButtonClass,
   textButtonCompactClass,
+  toolbarClass,
 } from "./page-classes";
 import { icons } from "./ui";
 
@@ -161,6 +161,7 @@ export function LiveLinksAndNotesContent() {
   const notesData = useQuery(api.knowledge.listNotesForViewer, viewerReady ? {} : "skip") as
     | AnyRecord
     | undefined;
+  const [filter, setFilter] = useState<"all" | "links" | "notes">("all");
 
   useHashScroll(Boolean(linksData && notesData));
 
@@ -171,29 +172,40 @@ export function LiveLinksAndNotesContent() {
           <h2>Loading links and notes</h2>
         </section>
       ) : (
-        <div className={splitListClass}>
-          <section>
-            <h2>Links</h2>
-            <p className={mutedClass}>
-              Self-managing: unread links stop feeding focus after {UNREAD_LINK_FOCUS_MAX_AGE_DAYS} days — no
-              grooming required. Everything stays stored and searchable here.
-            </p>
-            <div className={itemListClass}>
-              {linksData.links.length === 0 ? <p className={mutedClass}>No links captured yet.</p> : null}
-              {linksData.links.map((link: AnyRecord) => (
-                <LinkRow key={link._id} link={link} />
-              ))}
-            </div>
-          </section>
-          <section>
-            <h2>Notes</h2>
-            <div className={itemListClass}>
-              {notesData.notes.length === 0 ? <p className={mutedClass}>No notes captured yet.</p> : null}
-              {notesData.notes.map((note: AnyRecord) => (
-                <NoteRow key={note._id} note={note} />
-              ))}
-            </div>
-          </section>
+        <div>
+          <div className={cn(toolbarClass, "mb-4")} role="group" aria-label="Filter library">
+            {([
+              ["all", "All", linksData.links.length + notesData.notes.length],
+              ["links", "Links", linksData.links.length],
+              ["notes", "Notes", notesData.notes.length],
+            ] as const).map(([key, label, count]) => (
+              <button
+                key={key}
+                className={cn(badgeClass, filter === key && badgeBlueClass)}
+                type="button"
+                aria-pressed={filter === key}
+                onClick={() => setFilter(key)}
+              >
+                {label} · {count}
+              </button>
+            ))}
+          </div>
+          <p className={cn(mutedClass, "mb-4")}>
+            Links and notes live together here. Unread links leave focus after {UNREAD_LINK_FOCUS_MAX_AGE_DAYS} days, but stay saved.
+          </p>
+          <div className={itemListClass}>
+            {(filter === "all" || filter === "links") && linksData.links.map((link: AnyRecord) => (
+              <LinkRow key={link._id} link={link} />
+            ))}
+            {(filter === "all" || filter === "notes") && notesData.notes.map((note: AnyRecord) => (
+              <NoteRow key={note._id} note={note} />
+            ))}
+            {((filter === "links" && linksData.links.length === 0) ||
+              (filter === "notes" && notesData.notes.length === 0) ||
+              (filter === "all" && linksData.links.length + notesData.notes.length === 0)) ? (
+              <p className={mutedClass}>Nothing saved here yet.</p>
+            ) : null}
+          </div>
         </div>
       )}
     </LiveGate>
