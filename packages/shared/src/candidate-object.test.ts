@@ -5,6 +5,10 @@ import {
   normalizeCandidateObject,
   normalizeConfidence,
   normalizeEntityInput,
+  SOURCE_REF_DEDUPE_ENTITY_TYPES,
+  sourceRefIdentityKey,
+  sourceRefIdentityKeys,
+  sourceRefKeysIntersect,
 } from "./index";
 
 describe("candidate object normalization", () => {
@@ -126,5 +130,53 @@ describe("candidate object normalization", () => {
         dueAt: Date.parse("2026-06-10"),
       }),
     );
+  });
+});
+
+describe("source-ref identity dedupe", () => {
+  it("keys the same message identically regardless of candidate wording", () => {
+    // The 2026-09-07 Netlify incident: three passes, three titles, one email.
+    const key = sourceRefIdentityKey({ sourceSystem: "gmail", messageId: "netlify-75pct-msg" });
+    expect(key).toBe("gmail|message|netlify-75pct-msg");
+    expect(sourceRefIdentityKey({ sourceSystem: " Gmail ", messageId: " netlify-75pct-msg " })).toBe(key);
+  });
+
+  it("prefers stronger identities over url and ignores threadId entirely", () => {
+    expect(
+      sourceRefIdentityKey({
+        sourceSystem: "gmail",
+        messageId: "msg-1",
+        url: "https://mail.example.com/deep-link",
+      }),
+    ).toBe("gmail|message|msg-1");
+    // threadId is not an identity: one thread may yield several distinct finds.
+    expect(sourceRefIdentityKey({ sourceSystem: "gmail", threadId: "thread-1" } as never)).toBeNull();
+    expect(sourceRefIdentityKey({ sourceSystem: "web", url: "https://example.com/a" })).toBe(
+      "web|url|https://example.com/a",
+    );
+  });
+
+  it("returns null for refs with no usable identity", () => {
+    expect(sourceRefIdentityKey({ sourceSystem: "manual_conversation" })).toBeNull();
+    expect(sourceRefIdentityKey(null)).toBeNull();
+    expect(sourceRefIdentityKey({ sourceSystem: "gmail", messageId: "   " })).toBeNull();
+  });
+
+  it("collects keys across refs and detects intersections", () => {
+    const incoming = sourceRefIdentityKeys([
+      { sourceSystem: "gmail", messageId: "msg-1" },
+      { sourceSystem: "manual_conversation" },
+    ]);
+    expect(incoming.size).toBe(1);
+    const pending = sourceRefIdentityKeys([{ sourceSystem: "gmail", messageId: "msg-1" }]);
+    const unrelated = sourceRefIdentityKeys([{ sourceSystem: "gmail", messageId: "msg-2" }]);
+    expect(sourceRefKeysIntersect(incoming, pending)).toBe(true);
+    expect(sourceRefKeysIntersect(incoming, unrelated)).toBe(false);
+    expect(sourceRefKeysIntersect(incoming, new Set())).toBe(false);
+  });
+
+  it("scopes source-ref dedupe to the types with no other duplicate net", () => {
+    expect(SOURCE_REF_DEDUPE_ENTITY_TYPES).toEqual(["note", "link", "knowledgeObject"]);
+    expect(SOURCE_REF_DEDUPE_ENTITY_TYPES).not.toContain("task");
   });
 });

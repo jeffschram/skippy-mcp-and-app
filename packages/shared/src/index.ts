@@ -1291,6 +1291,81 @@ export function candidateFingerprint(entityType: EntityType, rawPayload: unknown
 }
 
 /* ------------------------------------------------------------------ */
+/* Source-ref identity: cross-wording candidate dedupe                 */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 2026-09-07: the Finds queue collected three differently-worded note
+ * candidates for the same Netlify email. candidateFingerprint hashes the
+ * normalized payload, so any wording drift between ingestion passes defeats
+ * it — and notes/links/knowledgeObjects have no accepted-entity similarity
+ * merge to fall back on (tasks/people/companies do). The identity that stays
+ * stable across passes is the SOURCE: the same Gmail message is the same
+ * find no matter how a pass phrases the title.
+ */
+export type SourceRefIdentityInput = {
+  sourceSystem?: string;
+  messageId?: string;
+  eventId?: string;
+  reminderId?: string;
+  externalId?: string;
+  url?: string;
+};
+
+/**
+ * Canonical identity key for a source ref, or null when the ref carries no
+ * usable identity (e.g. a bare manual_conversation ref). threadId is
+ * deliberately NOT an identity: one Gmail thread can legitimately yield
+ * several distinct finds, a single message cannot.
+ */
+export function sourceRefIdentityKey(
+  ref: SourceRefIdentityInput | null | undefined,
+): string | null {
+  if (!ref) return null;
+  const system = (ref.sourceSystem ?? "").trim().toLowerCase();
+  const idFields: Array<[string, string | undefined]> = [
+    ["message", ref.messageId],
+    ["event", ref.eventId],
+    ["reminder", ref.reminderId],
+    ["external", ref.externalId],
+    // URL is the weakest identity, used only when nothing stronger exists
+    // (e.g. a saved link with no message behind it).
+    ["url", ref.url],
+  ];
+  for (const [kind, raw] of idFields) {
+    const value = typeof raw === "string" ? raw.trim() : "";
+    if (value) return `${system}|${kind}|${value}`;
+  }
+  return null;
+}
+
+export function sourceRefIdentityKeys(
+  refs: Array<SourceRefIdentityInput | null | undefined> | undefined,
+): Set<string> {
+  const keys = new Set<string>();
+  for (const ref of refs ?? []) {
+    const key = sourceRefIdentityKey(ref);
+    if (key) keys.add(key);
+  }
+  return keys;
+}
+
+/**
+ * Candidate types that dedupe on source identity. Scoped to the types with
+ * no other duplicate net; tasks are excluded on purpose — one email can
+ * legitimately produce two different action items, and tasks already merge
+ * via selectTaskDuplicate.
+ */
+export const SOURCE_REF_DEDUPE_ENTITY_TYPES = ["note", "link", "knowledgeObject"] as const;
+
+export function sourceRefKeysIntersect(left: Set<string>, right: Set<string>): boolean {
+  for (const key of left) {
+    if (right.has(key)) return true;
+  }
+  return false;
+}
+
+/* ------------------------------------------------------------------ */
 /* Finances: fixed taxonomy, month keys, report math, bulk ingestion   */
 /* ------------------------------------------------------------------ */
 

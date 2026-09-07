@@ -21,6 +21,9 @@ import {
   normalizeAcceptedEntityPayload,
   quickCaptureIntent,
   selectTaskDuplicate,
+  SOURCE_REF_DEDUPE_ENTITY_TYPES,
+  sourceRefIdentityKey,
+  sourceRefIdentityKeys,
   taskTitleLooksDuplicate,
 } from "@skippy/shared";
 import { requireOwnedBrain } from "./auth";
@@ -1547,6 +1550,73 @@ export const submitCandidateObject = mutationGeneric({
         status: "duplicate_pending",
         candidateFingerprint: fingerprint,
       };
+    }
+
+    // 2026-09-07: three differently-worded copies of the same Netlify email
+    // reached the Finds queue. The fingerprint above only catches EXACT
+    // payload repeats, and notes/links/KOs have no accepted-entity similarity
+    // merge — so when the ingestion cursor doesn't advance (failed pass, or
+    // the 15-min overlap window), every re-read minted a fresh pending item.
+    // The wording drifts between passes; the source message ID does not.
+    if ((SOURCE_REF_DEDUPE_ENTITY_TYPES as readonly string[]).includes(args.candidateEntityType)) {
+      const incomingKeys = sourceRefIdentityKeys(args.sourceRefs);
+      for (const refId of args.sourceRefIds ?? []) {
+        const row = await db.get(refId);
+        const key = row ? sourceRefIdentityKey(row) : null;
+        if (key) incomingKeys.add(key);
+      }
+      if (incomingKeys.size > 0) {
+        const pendingItems = await db
+          .query("triageItems")
+          .withIndex("by_brain_status", (q: any) =>
+            q.eq("brainInstanceId", args.brainInstanceId).eq("status", "pending"),
+          )
+          .collect();
+        for (const item of pendingItems) {
+          if (item.candidateEntityType !== args.candidateEntityType) continue;
+          let matchedKey: string | null = null;
+          for (const refId of item.sourceRefIds ?? []) {
+            const row = await db.get(refId);
+            const key = row ? sourceRefIdentityKey(row) : null;
+            if (key && incomingKeys.has(key)) {
+              matchedKey = key;
+              break;
+            }
+          }
+          if (!matchedKey) continue;
+
+          const mergedSourceRefIds = Array.from(
+            new Set([...(item.sourceRefIds ?? []), ...sourceRefIds]),
+          );
+          await db.patch(item._id, {
+            sourceRefIds: mergedSourceRefIds,
+            updatedAt: now,
+          });
+
+          await db.insert("activityEvents", {
+            brainInstanceId: args.brainInstanceId,
+            activityType: "candidate_duplicate_detected",
+            actorType: "harness",
+            timestamp: now,
+            summary: `Duplicate suggested ${args.candidateEntityType} matched a pending triage item from the same source.`,
+            metadata: {
+              triageItemId: item._id,
+              candidateFingerprint: fingerprint,
+              matchedBy: "source_ref",
+              sourceRefKey: matchedKey,
+            },
+            sourceRefIds,
+          });
+
+          return {
+            triageItemId: item._id,
+            sourceRefIds: mergedSourceRefIds,
+            duplicate: true,
+            status: "duplicate_pending",
+            candidateFingerprint: fingerprint,
+          };
+        }
+      }
     }
 
     const triageItemId = await db.insert("triageItems", {
