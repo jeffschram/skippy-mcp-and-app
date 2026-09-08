@@ -6,6 +6,7 @@ import { useConvexAuth, useQuery } from "convex/react";
 import {
   Bot,
   Brain,
+  Network,
   CalendarDays,
   FolderKanban,
   House,
@@ -70,6 +71,7 @@ export const primaryHubs: Hub[] = [
 ];
 
 export const secondaryHubs: Hub[] = [
+  { href: "/mind", label: "Mind", icon: Network, match: (p) => p.startsWith("/mind") },
   {
     href: "/brain",
     label: "Brain",

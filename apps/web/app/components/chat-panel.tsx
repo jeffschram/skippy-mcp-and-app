@@ -38,6 +38,7 @@ const PAGE_LABELS: Record<string, string> = {
   review: "Review",
   projects: "Projects",
   brain: "Brain",
+  mind: "Mind",
   skills: "Skills",
   settings: "Settings",
 };

@@ -1,6 +1,7 @@
 import { queryGeneric } from "convex/server";
 import { v } from "convex/values";
 import { requireOwnedBrain } from "./auth";
+import { buildMindGraph } from "./mindGraphHelpers";
 
 const entityType = v.union(
   v.literal("goal"),
@@ -334,5 +335,30 @@ export const contextualMapForViewer = queryGeneric({
       querySourceRefs: await hydrateSources(queryMatches),
       sourceRefs: Array.from(sourceRefCache.values()).slice(0, sourceLimit * 4),
     };
+  },
+});
+
+/** Bounded, owner-scoped data for the experimental 3D Mind page. No writes. */
+export const mindMapForViewer = queryGeneric({
+  args: {},
+  handler: async (ctx) => {
+    const { brain } = await requireOwnedBrain(ctx);
+    const perType = 70;
+    const tables = ["goals", "projects", "tasks", "people", "companies"] as const;
+    const kinds = ["goal", "project", "task", "person", "company"] as const;
+    const knowledgeKinds = ["note", "link", "knowledgeObject", "memory"] as const;
+    const [entityGroups, knowledgeGroups, relationships] = await Promise.all([
+      Promise.all(tables.map(table => ctx.db.query(table)
+        .withIndex("by_brain_state", (q: any) => q.eq("brainInstanceId", brain._id).eq("processingState", "accepted"))
+        .order("desc").take(perType + 1))),
+      Promise.all(knowledgeKinds.map(kind => ctx.db.query("knowledge")
+        .withIndex("by_brain_kind_state", (q: any) => q.eq("brainInstanceId", brain._id).eq("kind", kind).eq("processingState", "accepted"))
+        .order("desc").take(perType + 1))),
+      ctx.db.query("relationships").withIndex("by_brain_type", q => q.eq("brainInstanceId", brain._id)).take(2501),
+    ]);
+    return buildMindGraph([
+      ...entityGroups.map((rows, i) => ({ kind: kinds[i]!, rows: rows.slice(0, perType) })),
+      ...knowledgeGroups.map((rows, i) => ({ kind: knowledgeKinds[i]!, rows: rows.slice(0, perType) })),
+    ], relationships.slice(0, 2500), [...entityGroups, ...knowledgeGroups].some(rows => rows.length > perType) || relationships.length > 2500);
   },
 });
