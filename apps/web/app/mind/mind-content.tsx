@@ -111,7 +111,7 @@ export function MindExplorer({ graph }: { graph: MindGraph }) {
     setReset((n) => n + 1);
   }
   return (
-    <div className="mx-auto max-w-[1800px]">
+    <div>
       <header className="mb-[22px] flex items-end justify-between gap-5">
         <div>
           <p className="mb-[7px] mt-0 text-[10px] font-bold uppercase leading-[1.8] tracking-[0.17em] text-[#738ca6]">
@@ -233,7 +233,7 @@ export function MindExplorer({ graph }: { graph: MindGraph }) {
             </button>
           </div>
         )}
-        <div className="grid h-[calc(100dvh-300px)] min-h-[620px] max-h-[950px] grid-cols-[minmax(0,1fr)_290px] max-[1050px]:grid-cols-[minmax(0,1fr)_250px] max-[700px]:flex max-[700px]:h-auto max-[700px]:min-h-0 max-[700px]:max-h-none max-[700px]:flex-col">
+        <div className="grid h-[calc(100dvh-300px)] min-h-[620px] max-h-[950px] grid-cols-[minmax(0,2fr)_minmax(340px,1fr)] max-[700px]:flex max-[700px]:h-auto max-[700px]:min-h-0 max-[700px]:max-h-none max-[700px]:flex-col">
           <div className="relative min-h-[450px] min-w-0 overflow-hidden bg-[radial-gradient(ellipse_at_45%_45%,#18294360,transparent_70%),radial-gradient(#93b9e710_0.7px,transparent_0.7px)] bg-size-[auto,24px_24px] max-[700px]:h-[480px] max-[700px]:min-h-0">
             {!graph.nodes.length ? (
               <div className={mindFallbackClass}>
