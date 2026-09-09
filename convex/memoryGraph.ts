@@ -350,9 +350,11 @@ export const mindMapForViewer = queryGeneric({
     const [entityGroups, knowledgeGroups, relationships] = await Promise.all([
       Promise.all(tables.map(table => ctx.db.query(table)
         .withIndex("by_brain_state", (q: any) => q.eq("brainInstanceId", brain._id).eq("processingState", "accepted"))
+        .filter(q => q.neq(q.field("status"), "archived"))
         .order("desc").take(perType + 1))),
       Promise.all(knowledgeKinds.map(kind => ctx.db.query("knowledge")
         .withIndex("by_brain_kind_state", (q: any) => q.eq("brainInstanceId", brain._id).eq("kind", kind).eq("processingState", "accepted"))
+        .filter(q => q.and(q.neq(q.field("status"), "archived"), q.neq(q.field("reviewState"), "archived")))
         .order("desc").take(perType + 1))),
       ctx.db.query("relationships").withIndex("by_brain_type", q => q.eq("brainInstanceId", brain._id)).take(2501),
     ]);

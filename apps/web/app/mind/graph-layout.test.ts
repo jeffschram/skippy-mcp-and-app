@@ -53,6 +53,71 @@ const graph = buildMindGraph(
   false,
 );
 describe("Mind graph", () => {
+  it("excludes archives on every lifecycle axis and drops their canonical and legacy connections", () => {
+    const result = buildMindGraph(
+      [
+        {
+          kind: "project",
+          rows: [
+            {
+              _id: "archived-project",
+              title: "Booking options evaluation",
+              processingState: "accepted",
+              status: "archived",
+            },
+            {
+              _id: "active",
+              processingState: "accepted",
+              status: "in_progress",
+            },
+          ],
+        },
+        {
+          kind: "memory",
+          rows: [
+            {
+              _id: "archived-memory",
+              legacyId: "old-memory",
+              processingState: "accepted",
+              reviewState: "archived",
+            },
+          ],
+        },
+        {
+          kind: "person",
+          rows: [{ _id: "archived-person", processingState: "archived" }],
+        },
+        {
+          kind: "task",
+          rows: [
+            { _id: "finished", processingState: "accepted", status: "done" },
+          ],
+        },
+      ],
+      [
+        "archived-project",
+        "archived-memory",
+        "old-memory",
+        "archived-person",
+        "finished",
+      ].map((id) => ({
+        _id: id,
+        from: { entityId: id },
+        to: { entityId: "active" },
+        type: "related_to",
+      })),
+      false,
+    );
+    expect(result.nodes.map((n) => n.id)).toEqual(["active", "finished"]);
+    expect(result.edges).toEqual([
+      {
+        id: "finished",
+        source: "finished",
+        target: "active",
+        type: "related_to",
+      },
+    ]);
+  });
   it("resolves legacy Knowledge references, deduplicates edges, and excludes rejected or missing endpoints", () => {
     expect(graph.nodes.map((n) => n.id)).toEqual(["p", "m", "person"]);
     expect(graph.edges).toEqual([

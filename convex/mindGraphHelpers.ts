@@ -41,6 +41,7 @@ export type MindRecord = {
   status?: string;
   url?: string;
   processingState?: string;
+  reviewState?: string;
 };
 export function buildMindGraph(
   groups: { kind: MindKind; rows: MindRecord[] }[],
@@ -56,8 +57,13 @@ export function buildMindGraph(
   const aliases = new Map<string, string>();
   for (const group of groups)
     for (const row of group.rows) {
-      // Never expose rejected/suggested records, including through legacy aliases.
-      if (row.processingState !== "accepted") continue;
+      // Exclude archives on either lifecycle axis before registering graph aliases.
+      if (
+        row.processingState !== "accepted" ||
+        row.status === "archived" ||
+        row.reviewState === "archived"
+      )
+        continue;
       const kind = group.kind;
       const id = String(row._id);
       aliases.set(id, id);
