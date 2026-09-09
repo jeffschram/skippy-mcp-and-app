@@ -4,6 +4,8 @@ import { Canvas, useThree } from "@react-three/fiber";
 import { Html, OrbitControls } from "@react-three/drei";
 import { useEffect, useMemo, useState } from "react";
 import * as THREE from "three";
+import { cn } from "@/lib/utils";
+import { mindFallbackClass } from "./mind-classes";
 import type { MindGraph } from "../../../../convex/mindGraphHelpers";
 import { KINDS, type Position } from "./graph-layout";
 
@@ -175,11 +177,15 @@ function Network({ graph, positions, selected, onSelect, reset }: Props) {
               <Html
                 center
                 position={[0, size + 0.5, 0]}
-                style={{ pointerEvents: "none" }}
+                className="pointer-events-none"
                 zIndexRange={[20, 0]}
               >
                 <span
-                  className={`mind-node-label ${active ? "is-selected" : ""}`}
+                  className={cn(
+                    "block max-w-[280px] select-none truncate rounded-[5px] bg-[#0b1220aa] px-[7px] py-[3px] text-[10px] text-[#a7bbd2]",
+                    active &&
+                      "border border-[#a7ceee50] bg-[#213952] text-[#eff7ff]",
+                  )}
                 >
                   {node.title.length > 42
                     ? node.title.slice(0, 40) + "…"
@@ -204,13 +210,14 @@ function Network({ graph, positions, selected, onSelect, reset }: Props) {
 export default function MindScene(props: Props) {
   return (
     <Canvas
+      className="h-full"
       frameloop="demand"
       dpr={[1, 1.75]}
       camera={{ position: [12, 8, 70], fov: 48, near: 0.1, far: 600 }}
       gl={{ antialias: true, alpha: true }}
       onPointerMissed={() => props.onSelect(null)}
       fallback={
-        <p className="mind-fallback">
+        <p className={mindFallbackClass}>
           Interactive 3D mind map. Use List view to explore the same records
           without the canvas.
         </p>

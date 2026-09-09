@@ -18,6 +18,7 @@ Mind renders accepted goals, projects, tasks, people, companies, and all four un
 ## Scope and implementation
 
 - React Three Fiber 9 / Three.js, with Drei controls and HTML labels; loaded only on the client on this page.
+- Styling uses Tailwind utilities and shared class strings in `mind-classes.ts`, following `page-classes.ts`. There is no separate Mind stylesheet. Runtime record colors are shared with the Three.js materials.
 - Deterministic 3D force layout. Edges attract, nodes repel. Layout positions remain stable while filtering. No continuous animation; rendering occurs on demand.
 - `memoryGraph:mindMapForViewer` is read-only and resolves the signed-in user's owned brain. It queries only that brain's accepted records and relationships.
 - Knowledge uses the canonical table; legacy IDs resolve to canonical nodes. Duplicate edges, self-links, and edges with unloaded endpoints are excluded. Isolated records remain visible.
