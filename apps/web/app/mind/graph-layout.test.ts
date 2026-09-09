@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildMindGraph } from "../../../../convex/mindGraphHelpers";
-import { filterGraph, layoutGraph } from "./graph-layout";
+import { filterGraph } from "./graph-layout";
 const graph = buildMindGraph(
   [
     {
@@ -123,16 +123,6 @@ describe("Mind graph", () => {
     expect(graph.edges).toEqual([
       { id: "r", source: "m", target: "p", type: "mentions" },
     ]);
-  });
-  it("keeps isolated records and creates finite, repeatable 3D positions", () => {
-    const positions = layoutGraph(graph);
-    expect(positions.size).toBe(3);
-    for (const p of positions.values())
-      expect(p.every(Number.isFinite)).toBe(true);
-    expect(
-      layoutGraph({ ...graph, nodes: [...graph.nodes].reverse() }),
-    ).toEqual(positions);
-    expect(layoutGraph({ nodes: [], edges: [], limited: false }).size).toBe(0);
   });
   it("filters nodes and edges together, and restricts neighborhoods to direct connections", () => {
     const kinds = new Set(graph.nodes.map((n) => n.kind));

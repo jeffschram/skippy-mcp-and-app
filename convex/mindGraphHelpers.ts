@@ -23,7 +23,9 @@ export type MindEdge = {
   target: string;
   type: string;
 };
+export type MindOwner = { id: string; title: string; personId?: string };
 export type MindGraph = {
+  owner?: MindOwner;
   nodes: MindNode[];
   edges: MindEdge[];
   limited: boolean;
@@ -113,4 +115,29 @@ export function buildMindGraph(
     edges.push({ id: String(rel._id), source, target, type: rel.type });
   }
   return { nodes, edges, limited };
+}
+
+/** Match only an unambiguous contact in the already owner-scoped, accepted set. */
+export function mindOwner(
+  user: { _id: string; displayName?: string; email?: string },
+  people: (MindRecord & { emails?: string[] })[],
+): MindOwner {
+  const normalize = (value: string) => value.trim().toLowerCase();
+  const emailMatches = user.email
+    ? people.filter((p) =>
+        p.emails?.some((e) => normalize(e) === normalize(user.email!)),
+      )
+    : [];
+  const nameMatches = user.displayName
+    ? people.filter(
+        (p) => normalize(p.name || "") === normalize(user.displayName!),
+      )
+    : [];
+  const matches = emailMatches.length ? emailMatches : nameMatches;
+  const person = matches.length === 1 ? matches[0] : undefined;
+  return {
+    id: `owner:${user._id}`,
+    title: user.displayName || person?.name || "You",
+    ...(person ? { personId: person._id } : {}),
+  };
 }

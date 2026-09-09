@@ -17,7 +17,8 @@ import { api } from "../../lib/skippy-api";
 import { useViewerReady } from "../hubs/use-viewer";
 import { LiveGate } from "../live-auth";
 import type { MindGraph, MindKind } from "../../../../convex/mindGraphHelpers";
-import { filterGraph, KINDS, layoutGraph } from "./graph-layout";
+import { filterGraph, KINDS } from "./graph-layout";
+import { buildMyWorld, categoryId, categoryKind } from "./my-world";
 import { cn } from "@/lib/utils";
 import {
   mindControlClass,
@@ -76,14 +77,40 @@ export function MindExplorer({ graph }: { graph: MindGraph }) {
   );
   const [selected, setSelected] = useState<string | null>(null);
   const [focus, setFocus] = useState<string | null>(null);
+  const [branch, setBranch] = useState<MindKind | null>(null);
   const [list, setList] = useState(false);
   const [reset, setReset] = useState(0);
-  const positions = useMemo(() => layoutGraph(graph), [graph]);
+  const owner = graph.owner || { id: "owner:self", title: "You" };
+  const selectedKind = categoryKind(selected);
+  const shownKinds = useMemo(
+    () => new Set([...enabled].filter((k) => !branch || k === branch)),
+    [enabled, branch],
+  );
   const visible = useMemo(
-    () => filterGraph(graph, enabled, query, focus),
-    [graph, enabled, query, focus],
+    () => filterGraph(graph, shownKinds, query, focus),
+    [graph, shownKinds, query, focus],
+  );
+  const world = useMemo(
+    () => buildMyWorld(graph, visible, shownKinds),
+    [graph, visible, shownKinds],
   );
   const node = graph.nodes.find((n) => n.id === selected);
+  const records = visible.nodes.filter((n) => n.id !== owner.personId);
+  function selectNode(id: string | null) {
+    if (id === owner.id || id === owner.personId) {
+      clear();
+      setSelected(owner.id);
+      return;
+    }
+    const kind = categoryKind(id);
+    if (kind) {
+      setBranch(kind);
+      setFocus(null);
+      setQuery("");
+      setEnabled(new Set(Object.keys(KINDS) as MindKind[]));
+    }
+    setSelected(id);
+  }
   const neighbors = useMemo(
     () =>
       graph.edges
@@ -98,15 +125,16 @@ export function MindExplorer({ graph }: { graph: MindGraph }) {
   );
   const counts = useMemo(() => {
     const result = new Map<MindKind, number>();
-    graph.nodes.forEach((n) =>
-      result.set(n.kind, (result.get(n.kind) || 0) + 1),
-    );
+    graph.nodes
+      .filter((n) => n.id !== graph.owner?.personId)
+      .forEach((n) => result.set(n.kind, (result.get(n.kind) || 0) + 1));
     return result;
   }, [graph]);
   function clear() {
     setQuery("");
     setEnabled(new Set(Object.keys(KINDS) as MindKind[]));
     setFocus(null);
+    setBranch(null);
     setSelected(null);
     setReset((n) => n + 1);
   }
@@ -115,7 +143,7 @@ export function MindExplorer({ graph }: { graph: MindGraph }) {
       <header className="mb-[22px] flex items-end justify-between gap-5">
         <div>
           <p className="mb-[7px] mt-0 text-[10px] font-bold uppercase leading-[1.8] tracking-[0.17em] text-[#738ca6]">
-            A different perspective
+            Your world, connected
           </p>
           <h1 className="mb-[7px] mt-0 flex items-center gap-3.5 text-[36px] font-[650] leading-[1.2] tracking-[-0.045em] max-[700px]:text-[30px]">
             Mind
@@ -124,7 +152,7 @@ export function MindExplorer({ graph }: { graph: MindGraph }) {
             </span>
           </h1>
           <p className="text-[14px] text-[#73869a]">
-            Follow a thought. See where it leads.
+            You at the center. Every part of your world within reach.
           </p>
         </div>
         <div className="whitespace-nowrap pb-[3px] text-[12px] text-[#71859a] max-[1050px]:hidden">
@@ -135,7 +163,7 @@ export function MindExplorer({ graph }: { graph: MindGraph }) {
           <strong className="text-[18px] font-[650] text-inherit">
             {graph.edges.length}
           </strong>{" "}
-          connections
+          saved relationships
         </div>
       </header>
       <section
@@ -162,7 +190,13 @@ export function MindExplorer({ graph }: { graph: MindGraph }) {
               </button>
             )}
           </label>
-          <div className="flex gap-[5px]">
+          <div className="flex flex-wrap gap-[5px]">
+            <button
+              className={cn(mindControlClass, mindToolClass)}
+              onClick={clear}
+            >
+              My world
+            </button>
             <button
               className={cn(mindControlClass, mindToolClass)}
               aria-pressed={!list}
@@ -221,13 +255,19 @@ export function MindExplorer({ graph }: { graph: MindGraph }) {
             </button>
           ))}
         </div>
-        {focus && (
+        {(focus || branch) && (
           <div className="flex flex-wrap items-center gap-2 bg-[#a7ceee0b] px-5 py-1 text-[12px] text-[#a7ceee]">
             <Focus size={14} />
-            Neighborhood of {graph.nodes.find((n) => n.id === focus)?.title}
+            {branch
+              ? KINDS[branch].label
+              : `Connections of ${graph.nodes.find((n) => n.id === focus)?.title}`}
             <button
               className={cn("ml-auto", mindControlClass, mindToolClass)}
-              onClick={() => setFocus(null)}
+              onClick={() => {
+                setFocus(null);
+                setBranch(null);
+                setSelected(null);
+              }}
             >
               Show whole map <X size={13} />
             </button>
@@ -235,31 +275,18 @@ export function MindExplorer({ graph }: { graph: MindGraph }) {
         )}
         <div className="grid h-[calc(100dvh-300px)] min-h-[620px] max-h-[950px] grid-cols-[minmax(0,2fr)_minmax(340px,1fr)] max-[700px]:flex max-[700px]:h-auto max-[700px]:min-h-0 max-[700px]:max-h-none max-[700px]:flex-col">
           <div className="relative min-h-[450px] min-w-0 overflow-hidden bg-[radial-gradient(ellipse_at_45%_45%,#18294360,transparent_70%),radial-gradient(#93b9e710_0.7px,transparent_0.7px)] bg-size-[auto,24px_24px] max-[700px]:h-[480px] max-[700px]:min-h-0">
-            {!graph.nodes.length ? (
-              <div className={mindFallbackClass}>
-                <Network size={38} />
-                <h2 className="text-[20px] text-[#dce8f6]">
-                  Your mind map starts here
-                </h2>
-                <p className="max-w-[390px]">
-                  Saved projects, tasks, people, companies, and Knowledge will
-                  appear here. Connections appear as Skippy links them.
-                </p>
-              </div>
-            ) : !visible.nodes.length ? (
+            {list && !records.length ? (
               <div className={mindFallbackClass}>
                 <Search size={30} />
                 <h2 className="text-[20px] text-[#dce8f6]">
                   No matching records
                 </h2>
-                <p className="max-w-[390px]">
-                  Try another search or include more record types.
-                </p>
+                <p className="max-w-[390px]">Try another search or category.</p>
                 <button
                   className={cn("text-[#a7ceee] underline", mindControlClass)}
                   onClick={clear}
                 >
-                  Clear filters
+                  Show my world
                 </button>
               </div>
             ) : list ? (
@@ -267,7 +294,7 @@ export function MindExplorer({ graph }: { graph: MindGraph }) {
                 className="h-full overflow-auto px-4 pb-[55px] pt-3 [scrollbar-width:thin]"
                 aria-label="Records"
               >
-                {visible.nodes.map((n) => (
+                {records.map((n) => (
                   <button
                     className={cn(
                       "flex w-full items-center gap-3 border-b border-[#ffffff13] p-3 text-left hover:bg-[#a7ceee10] aria-pressed:bg-[#a7ceee10]",
@@ -275,7 +302,7 @@ export function MindExplorer({ graph }: { graph: MindGraph }) {
                     )}
                     key={n.id}
                     aria-pressed={selected === n.id}
-                    onClick={() => setSelected(n.id)}
+                    onClick={() => selectNode(n.id)}
                   >
                     <i
                       className="inline-block size-1.5 shrink-0 rounded-full"
@@ -300,17 +327,16 @@ export function MindExplorer({ graph }: { graph: MindGraph }) {
             ) : (
               <MapBoundary>
                 <Scene
-                  graph={visible}
-                  positions={positions}
+                  graph={world}
                   selected={selected}
-                  onSelect={setSelected}
+                  onSelect={selectNode}
                   reset={reset}
                 />
               </MapBoundary>
             )}
             <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-between gap-3 bg-[linear-gradient(transparent,#0b1220)] px-[18px] py-3.5 text-[10px] text-[#748ba4] max-[700px]:flex-col max-[700px]:gap-1 max-[700px]:text-[9px]">
               <span>
-                {visible.nodes.length} visible
+                {records.length} records around you
                 {graph.limited ? " · Showing a sample of your brain" : ""}
               </span>
               <span>
@@ -325,7 +351,51 @@ export function MindExplorer({ graph }: { graph: MindGraph }) {
             aria-label="Selected record"
             aria-live="polite"
           >
-            {node ? (
+            {selectedKind ? (
+              <div>
+                <p className="text-[11px] uppercase tracking-[.15em] text-[#93a7be]">
+                  {owner.title} / category
+                </p>
+                <h2
+                  className="my-3 text-[24px] font-semibold"
+                  style={{ color: KINDS[selectedKind].color }}
+                >
+                  {KINDS[selectedKind].label}
+                </h2>
+                <p className="mb-5 text-[12px] leading-[1.8] text-[#98acc2]">
+                  {records.filter((n) => n.kind === selectedKind).length}{" "}
+                  records in this branch. Select one to read its details and
+                  saved relationships.
+                </p>
+                <div className="flex flex-col gap-1">
+                  {records
+                    .filter((n) => n.kind === selectedKind)
+                    .map((record) => (
+                      <button
+                        key={record.id}
+                        className={cn(
+                          "rounded-md border-b border-[#ffffff13] px-2 py-3 text-left text-[12px] text-[#c3d2e3] hover:bg-[#a7ceee10]",
+                          mindControlClass,
+                        )}
+                        onClick={() => selectNode(record.id)}
+                      >
+                        {record.title}
+                      </button>
+                    ))}
+                </div>
+                {!records.some((n) => n.kind === selectedKind) && (
+                  <p className="text-[12px] text-[#93a7be]">
+                    No records here yet, or none match your filters.
+                  </p>
+                )}
+                <button
+                  className={cn(mindControlClass, mindNeighborhoodClass)}
+                  onClick={clear}
+                >
+                  Back to my world
+                </button>
+              </div>
+            ) : node ? (
               <>
                 <div className="flex items-center justify-between text-[11px]">
                   <span style={{ color: KINDS[node.kind].color }}>
@@ -363,15 +433,16 @@ export function MindExplorer({ graph }: { graph: MindGraph }) {
                   className={cn(mindControlClass, mindNeighborhoodClass)}
                   onClick={() => {
                     setFocus(node.id);
+                    setBranch(null);
                     setQuery("");
                     setEnabled(new Set(Object.keys(KINDS) as MindKind[]));
                   }}
                 >
                   <Focus size={16} />
-                  Explore this neighborhood
+                  Explore saved connections
                 </button>
                 <h3 className="mb-3 mt-[26px] text-[11px] uppercase tracking-[0.1em] text-[#9fb3c9]">
-                  Connections{" "}
+                  Saved relationships{" "}
                   <span className="ml-2 text-[#617e9c]">
                     {neighbors.length}
                   </span>
@@ -385,7 +456,7 @@ export function MindExplorer({ graph }: { graph: MindGraph }) {
                           mindControlClass,
                         )}
                         key={edge.id}
-                        onClick={() => setSelected(neighbor.id)}
+                        onClick={() => selectNode(neighbor.id)}
                       >
                         <small className="mb-[5px] block text-[10px] text-[#708eab]">
                           {edge.source === selected ? "→" : "←"}{" "}
@@ -403,55 +474,65 @@ export function MindExplorer({ graph }: { graph: MindGraph }) {
                   </div>
                 ) : (
                   <p className="mb-[18px] mt-3 whitespace-pre-wrap text-[12px] leading-[1.8] text-[#98acc2] [overflow-wrap:anywhere]">
-                    No connections in this view yet. This record still has a
-                    place in your Mind.
+                    No saved relationships in this sample yet. This record is
+                    organized under its category in your world.
                   </p>
                 )}
               </>
             ) : (
-              <div className="pt-[30px] max-[700px]:p-[5px]">
-                <div className="mb-8 mt-[5px] grid size-[70px] place-items-center rounded-full border border-[#a7ceee22] text-[#a7ceee] shadow-[0_0_0_10px_#a7ceee04,0_0_40px_#a7ceee08] max-[700px]:hidden">
+              <div className="pt-3">
+                <div className="mb-6 grid size-[70px] place-items-center rounded-full border border-[#a7ceee44] bg-[#a7ceee0a] text-[#dceeff]">
                   <Network size={32} />
                 </div>
-                <p className="mb-[7px] mt-0 text-[10px] font-bold uppercase leading-[1.8] tracking-[0.17em] text-[#738ca6]">
-                  Everything is connected.
-                  <br />
-                  Some links are still waiting.
+                <p className="text-[10px] uppercase tracking-[.17em] text-[#93a7be]">
+                  At the center
                 </p>
-                <h2 className="my-3 text-[21px] font-semibold leading-[1.35] tracking-[-0.025em] [overflow-wrap:anywhere]">
-                  Start anywhere.
+                <h2 className="my-3 text-[26px] font-semibold tracking-tight">
+                  {owner.title}
                 </h2>
-                <p className="mb-[26px] mt-3 text-[12px] leading-[1.8] text-[#8ba2ba]">
-                  Select a dot to see what it holds and follow its connections.
+                <p className="mb-6 text-[12px] leading-[1.8] text-[#98acc2]">
+                  Your people, projects, ideas, and tasks branch out from here.
+                  Choose a category to explore that part of your world.
                 </p>
-                <div className="my-[15px] flex gap-2.5 text-[11px] leading-[1.7] text-[#8ba2ba] max-[700px]:hidden">
-                  <span className="font-mono text-[#547492]">01</span>Colors
-                  distinguish record types.
-                </div>
-                <div className="my-[15px] flex gap-2.5 text-[11px] leading-[1.7] text-[#8ba2ba] max-[700px]:hidden">
-                  <span className="font-mono text-[#547492]">02</span>Larger
-                  dots have more connections.
-                </div>
-                <div className="my-[15px] flex gap-2.5 text-[11px] leading-[1.7] text-[#8ba2ba] max-[700px]:hidden">
-                  <span className="font-mono text-[#547492]">03</span>Lines are
-                  saved relationships, not guesses.
-                </div>
-                <button
-                  className={cn(mindControlClass, mindNeighborhoodClass)}
-                  onClick={() => setList(true)}
+                <div
+                  className="flex flex-col gap-1"
+                  aria-label="Your categories"
                 >
-                  <List size={16} />
-                  Browse records as a list
-                </button>
+                  {(Object.keys(KINDS) as MindKind[]).map((kind) => (
+                    <button
+                      key={kind}
+                      className={cn(
+                        "flex items-center gap-3 rounded-md px-2 py-3 text-left text-[12px] hover:bg-[#a7ceee10]",
+                        mindControlClass,
+                      )}
+                      onClick={() => selectNode(categoryId(kind))}
+                    >
+                      <i
+                        className="size-2 rounded-full"
+                        style={{ background: KINDS[kind].color }}
+                      />
+                      <span className="flex-1">{KINDS[kind].label}</span>
+                      <span className="text-[#93a7be]">
+                        {counts.get(kind) || 0}
+                      </span>
+                      <ArrowUpRight size={14} />
+                    </button>
+                  ))}
+                </div>
+                <p className="mt-6 text-[11px] leading-[1.8] text-[#7891ab]">
+                  Spokes organize your records by category. Select a record to
+                  highlight its saved relationships across the map.
+                </p>
               </div>
             )}
           </aside>
         </div>
       </section>
       <p className="mx-[3px] my-[13px] text-[11px] leading-[1.8] text-[#71849a]">
-        Projects, tasks, goals, people, companies & Knowledge. Nearby dots are
-        arranged by their connections; distance is a visual aid, not a measure
-        of meaning.
+        You → categories → records. Category spokes show how your world is
+        organized; highlighted cross-links show saved relationships. Projects,
+        tasks, goals, people, companies, and all four Knowledge kinds are
+        included.
         {graph.limited
           ? " This experiment shows up to 70 records of each type and connections from a bounded sample."
           : ""}

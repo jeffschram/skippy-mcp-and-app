@@ -6,12 +6,11 @@ import { useEffect, useMemo, useState } from "react";
 import * as THREE from "three";
 import { cn } from "@/lib/utils";
 import { mindFallbackClass } from "./mind-classes";
-import type { MindGraph } from "../../../../convex/mindGraphHelpers";
-import { KINDS, type Position } from "./graph-layout";
+import type { WorldGraph } from "./my-world";
+import { type Position } from "./graph-layout";
 
 type Props = {
-  graph: MindGraph;
-  positions: Map<string, Position>;
+  graph: WorldGraph;
   selected: string | null;
   onSelect: (id: string | null) => void;
   reset: number;
@@ -33,11 +32,7 @@ function CameraReset({
     } | null;
     const distance =
       (radius * 2.9) / Math.min(1, size.width / Math.max(1, size.height));
-    camera.position.set(
-      center[0] + distance * 0.09,
-      center[1] + distance * 0.06,
-      center[2] + distance,
-    );
+    camera.position.set(center[0], center[1], center[2] + distance);
     camera.lookAt(...center);
     orbit?.target.set(...center);
     orbit?.update();
@@ -54,7 +49,8 @@ function CameraReset({
   ]);
   return null;
 }
-function Network({ graph, positions, selected, onSelect, reset }: Props) {
+function Network({ graph, selected, onSelect, reset }: Props) {
+  const positions = graph.positions;
   const [hovered, setHovered] = useState<string | null>(null);
   const connected = useMemo(() => {
     const ids = new Set<string>();
@@ -64,35 +60,20 @@ function Network({ graph, positions, selected, onSelect, reset }: Props) {
     }
     return ids;
   }, [graph.edges, selected]);
-  const degree = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const e of graph.edges) {
-      m.set(e.source, (m.get(e.source) || 0) + 1);
-      m.set(e.target, (m.get(e.target) || 0) + 1);
-    }
-    return m;
-  }, [graph.edges]);
-  const prominent = useMemo(
-    () =>
-      new Set(
-        [...graph.nodes]
-          .sort((a, b) => (degree.get(b.id) || 0) - (degree.get(a.id) || 0))
-          .slice(0, 4)
-          .map((n) => n.id),
-      ),
-    [graph.nodes, degree],
-  );
   const geometry = useMemo(() => {
     const normal: number[] = [],
       active: number[] = [];
     for (const e of graph.edges) {
+      if (
+        e.role === "relationship" &&
+        e.source !== selected &&
+        e.target !== selected
+      )
+        continue;
       const a = positions.get(e.source),
         b = positions.get(e.target);
       if (a && b)
-        (e.source === selected || e.target === selected ? active : normal).push(
-          ...a,
-          ...b,
-        );
+        (e.role === "relationship" ? active : normal).push(...a, ...b);
     }
     return [normal, active].map((points) =>
       new THREE.BufferGeometry().setAttribute(
@@ -106,8 +87,7 @@ function Network({ graph, positions, selected, onSelect, reset }: Props) {
     const points = graph.nodes.map(
       (n) => new THREE.Vector3(...positions.get(n.id)!),
     );
-    const box = new THREE.Box3().setFromPoints(points);
-    const midpoint = box.getCenter(new THREE.Vector3());
+    const midpoint = new THREE.Vector3();
     return {
       center: midpoint.toArray() as Position,
       radius: Math.max(4, ...points.map((p) => p.distanceTo(midpoint))),
@@ -121,7 +101,7 @@ function Network({ graph, positions, selected, onSelect, reset }: Props) {
         <lineBasicMaterial
           color="#7796bc"
           transparent
-          opacity={selected ? 0.09 : 0.25}
+          opacity={0.27}
           depthWrite={false}
         />
       </lineSegments>
@@ -136,13 +116,18 @@ function Network({ graph, positions, selected, onSelect, reset }: Props) {
       {graph.nodes.map((node) => {
         const active = node.id === selected,
           hover = node.id === hovered,
-          dim = Boolean(selected && !active && !connected.has(node.id));
+          dim = Boolean(
+            selected &&
+            node.role === "record" &&
+            !active &&
+            !connected.has(node.id),
+          );
         const size =
-          0.28 + Math.min(0.48, Math.sqrt(degree.get(node.id) || 0) * 0.09);
+          node.role === "owner" ? 1.65 : node.role === "category" ? 0.85 : 0.3;
         return (
           <group key={node.id} position={positions.get(node.id)!}>
             <mesh
-              scale={active ? 1.5 : hover ? 1.25 : 1}
+              scale={active ? 1.2 : hover ? 1.15 : 1}
               onClick={(e) => {
                 e.stopPropagation();
                 if (e.delta < 5) onSelect(node.id);
@@ -155,8 +140,8 @@ function Network({ graph, positions, selected, onSelect, reset }: Props) {
             >
               <sphereGeometry args={[size, 16, 12]} />
               <meshStandardMaterial
-                color={KINDS[node.kind].color}
-                emissive={KINDS[node.kind].color}
+                color={node.color}
+                emissive={node.color}
                 emissiveIntensity={active || hover ? 1.5 : 0.45}
                 transparent
                 opacity={dim ? 0.18 : 1}
@@ -166,14 +151,14 @@ function Network({ graph, positions, selected, onSelect, reset }: Props) {
               <mesh>
                 <sphereGeometry args={[size * 2.3, 20, 16]} />
                 <meshBasicMaterial
-                  color={KINDS[node.kind].color}
+                  color={node.color}
                   wireframe
                   transparent
                   opacity={0.2}
                 />
               </mesh>
             )}
-            {(active || hover || (!selected && prominent.has(node.id))) && (
+            {(node.role !== "record" || active || hover) && (
               <Html
                 center
                 position={[0, size + 0.5, 0]}
@@ -182,7 +167,11 @@ function Network({ graph, positions, selected, onSelect, reset }: Props) {
               >
                 <span
                   className={cn(
-                    "block max-w-[280px] select-none truncate rounded-[5px] bg-[#0b1220aa] px-[7px] py-[3px] text-[10px] text-[#a7bbd2]",
+                    "block max-w-[280px] select-none truncate rounded-[5px] bg-[#0b1220dd] px-[7px] py-[3px] text-[10px] text-[#a7bbd2]",
+                    node.role === "owner" &&
+                      "px-2 py-1 text-[11px] font-semibold text-[#eff7ff] sm:px-3 sm:py-1.5 sm:text-[14px]",
+                    node.role === "category" &&
+                      "max-w-[48px] px-1 py-0.5 text-[9px] font-medium text-[#dceeff] sm:max-w-[280px] sm:px-[7px] sm:py-[3px] sm:text-[12px]",
                     active &&
                       "border border-[#a7ceee50] bg-[#213952] text-[#eff7ff]",
                   )}
@@ -190,6 +179,16 @@ function Network({ graph, positions, selected, onSelect, reset }: Props) {
                   {node.title.length > 42
                     ? node.title.slice(0, 40) + "…"
                     : node.title}
+                  {node.role === "category" && (
+                    <span className="ml-1.5 hidden text-[10px] text-[#93a7be] sm:inline">
+                      {node.count}
+                    </span>
+                  )}
+                  {node.role === "owner" && (
+                    <span className="ml-2 hidden text-[9px] uppercase tracking-[0.15em] text-[#a7ceee] sm:inline">
+                      You
+                    </span>
+                  )}
                 </span>
               </Html>
             )}
