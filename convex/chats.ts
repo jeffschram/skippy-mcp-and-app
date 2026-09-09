@@ -72,6 +72,7 @@ const PAGE_DESCRIPTIONS: Record<string, string> = {
   review: "the Review page: pending knowledge triage and memory review queues",
   projects: "the Projects overview page listing all active projects",
   brain: "the Brain page: stored memories, principles, decisions, and knowledge",
+  mind: "the experimental Mind page: an interactive 3D map of records and their saved relationships",
   skills: "the Skills page: reusable harness skill documents",
   settings: "the Settings page: brain configuration, tokens, and agent hosts",
 };
