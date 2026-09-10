@@ -1,15 +1,16 @@
 import type { MindGraph, MindKind } from "../../../../convex/mindGraphHelpers";
 export type Position = [number, number, number];
+// Mind uses a stronger palette so small nodes remain distinguishable on the dark canvas.
 export const KINDS: Record<MindKind, { label: string; color: string }> = {
-  project: { label: "Projects", color: "#A7CEEE" },
-  task: { label: "Tasks", color: "#A7EEE8" },
-  goal: { label: "Goals", color: "#EEECA7" },
-  person: { label: "People", color: "#EEA7D6" },
-  company: { label: "Companies", color: "#EED0A7" },
-  memory: { label: "Memories", color: "#C5A7EE" },
-  note: { label: "Notes", color: "#A7EEA7" },
-  link: { label: "Links", color: "#EEA7A7" },
-  knowledgeObject: { label: "Knowledge objects", color: "#B1B4EF" },
+  project: { label: "Projects", color: "#4DA3FF" },
+  task: { label: "Tasks", color: "#20D5D2" },
+  goal: { label: "Goals", color: "#F4D447" },
+  person: { label: "People", color: "#F36AC4" },
+  company: { label: "Companies", color: "#F59A38" },
+  memory: { label: "Memories", color: "#AC78F5" },
+  note: { label: "Notes", color: "#75CE45" },
+  link: { label: "Links", color: "#EF6258" },
+  knowledgeObject: { label: "Knowledge objects", color: "#A6B5C8" },
 };
 export function filterGraph(
   graph: MindGraph,

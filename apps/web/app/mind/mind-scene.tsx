@@ -101,8 +101,6 @@ function Network({
   }, [positions, graph.nodes]);
   return (
     <>
-      <ambientLight intensity={1.8} />
-      <pointLight position={[20, 30, 40]} intensity={70} />
       <lineSegments geometry={geometry[0]!}>
         <lineBasicMaterial
           color="#7796bc"
@@ -144,10 +142,9 @@ function Network({
               onPointerOut={() => setHovered(null)}
             >
               <sphereGeometry args={[size, 16, 12]} />
-              <meshStandardMaterial
+              <meshBasicMaterial
                 color={node.color}
-                emissive={node.color}
-                emissiveIntensity={active || hover ? 1.5 : 0.45}
+                toneMapped={false}
                 transparent
                 opacity={dim ? 0.18 : 1}
               />
