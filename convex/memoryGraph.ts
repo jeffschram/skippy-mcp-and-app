@@ -1,7 +1,7 @@
 import { queryGeneric } from "convex/server";
 import { v } from "convex/values";
 import { requireOwnedBrain } from "./auth";
-import { buildMindGraph } from "./mindGraphHelpers";
+import { buildMindGraph, mindOwner } from "./mindGraphHelpers";
 
 const entityType = v.union(
   v.literal("goal"),
@@ -342,7 +342,7 @@ export const contextualMapForViewer = queryGeneric({
 export const mindMapForViewer = queryGeneric({
   args: {},
   handler: async (ctx) => {
-    const { brain } = await requireOwnedBrain(ctx);
+    const { brain, user } = await requireOwnedBrain(ctx);
     const perType = 70;
     const tables = ["goals", "projects", "tasks", "people", "companies"] as const;
     const kinds = ["goal", "project", "task", "person", "company"] as const;
@@ -358,9 +358,10 @@ export const mindMapForViewer = queryGeneric({
         .order("desc").take(perType + 1))),
       ctx.db.query("relationships").withIndex("by_brain_type", q => q.eq("brainInstanceId", brain._id)).take(2501),
     ]);
-    return buildMindGraph([
+    const graph = buildMindGraph([
       ...entityGroups.map((rows, i) => ({ kind: kinds[i]!, rows: rows.slice(0, perType) })),
       ...knowledgeGroups.map((rows, i) => ({ kind: knowledgeKinds[i]!, rows: rows.slice(0, perType) })),
     ], relationships.slice(0, 2500), [...entityGroups, ...knowledgeGroups].some(rows => rows.length > perType) || relationships.length > 2500);
+    return { ...graph, owner: mindOwner(user, entityGroups[3]!.slice(0, perType)) };
   },
 });
