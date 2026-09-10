@@ -1,8 +1,8 @@
 "use client";
 
-import { Canvas, useThree } from "@react-three/fiber";
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Html, OrbitControls } from "@react-three/drei";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { cn } from "@/lib/utils";
 import { mindFallbackClass } from "./mind-classes";
@@ -55,7 +55,8 @@ function Network({
   onSelect,
   reset,
   rotating,
-}: Props & { rotating: boolean }) {
+  reducedMotion,
+}: Props & { rotating: boolean; reducedMotion: boolean }) {
   const positions = graph.positions;
   const [hovered, setHovered] = useState<string | null>(null);
   const connected = useMemo(() => {
@@ -66,29 +67,111 @@ function Network({
     }
     return ids;
   }, [graph.edges, selected]);
+  const nodeGroups = useRef(new Map<string, THREE.Group>());
+  const { invalidate } = useThree();
   const geometry = useMemo(() => {
-    const normal: number[] = [],
-      active: number[] = [];
-    for (const e of graph.edges) {
-      if (
-        e.role === "relationship" &&
-        e.source !== selected &&
-        e.target !== selected
-      )
-        continue;
-      const a = positions.get(e.source),
-        b = positions.get(e.target);
-      if (a && b)
-        (e.role === "relationship" ? active : normal).push(...a, ...b);
+    const normal: number[] = [];
+    const connections: {
+      source: string;
+      target: string;
+      a: Position;
+      b: Position;
+      progress: number;
+      reversed: boolean;
+    }[] = [];
+    for (const edge of graph.edges) {
+      const a = positions.get(edge.source),
+        b = positions.get(edge.target);
+      if (!a || !b) continue;
+      if (edge.role === "branch") normal.push(...a, ...b);
+      else
+        connections.push({
+          source: edge.source,
+          target: edge.target,
+          a,
+          b,
+          progress: 0,
+          reversed: false,
+        });
     }
-    return [normal, active].map((points) =>
-      new THREE.BufferGeometry().setAttribute(
-        "position",
-        new THREE.Float32BufferAttribute(points, 3),
+    const branches = new THREE.BufferGeometry().setAttribute(
+      "position",
+      new THREE.Float32BufferAttribute(normal, 3),
+    );
+    const links = new THREE.BufferGeometry().setAttribute(
+      "position",
+      new THREE.Float32BufferAttribute(
+        new Float32Array(connections.length * 6),
+        3,
       ),
     );
-  }, [graph.edges, positions, selected]);
-  useEffect(() => () => geometry.forEach((g) => g.dispose()), [geometry]);
+    return { branches, links, connections };
+  }, [graph.edges, positions]);
+  useEffect(
+    () => () => {
+      geometry.branches.dispose();
+      geometry.links.dispose();
+    },
+    [geometry],
+  );
+  useFrame((_, delta) => {
+    let moving = false;
+    const ease = (current: number, target: number, speed = 12) => {
+      if (reducedMotion || Math.abs(current - target) < 0.001) return target;
+      moving = true;
+      return THREE.MathUtils.damp(
+        current,
+        target,
+        speed,
+        Math.min(delta, 0.05),
+      );
+    };
+    for (const node of graph.nodes) {
+      const group = nodeGroups.current.get(node.id);
+      if (!group) continue;
+      const sphere = group.children[0] as THREE.Mesh<
+        THREE.SphereGeometry,
+        THREE.MeshBasicMaterial
+      >;
+      const halo = group.children[1] as THREE.Mesh<
+        THREE.SphereGeometry,
+        THREE.MeshBasicMaterial
+      >;
+      const active = node.id === selected,
+        hover = node.id === hovered;
+      const dim = Boolean(
+        selected &&
+        node.role === "record" &&
+        !active &&
+        !connected.has(node.id),
+      );
+      sphere.scale.setScalar(
+        ease(sphere.scale.x, active ? 1.2 : hover ? 1.15 : 1),
+      );
+      sphere.material.opacity = ease(sphere.material.opacity, dim ? 0.18 : 1);
+      halo.material.opacity = ease(halo.material.opacity, active ? 0.2 : 0);
+      halo.scale.setScalar(ease(halo.scale.x, active ? 1 : 0.8));
+    }
+    const attribute = geometry.links.getAttribute(
+      "position",
+    ) as THREE.BufferAttribute;
+    for (const [index, link] of geometry.connections.entries()) {
+      const active = link.source === selected || link.target === selected;
+      if (active) link.reversed = link.target === selected;
+      link.progress = ease(link.progress, active ? 1 : 0, 9);
+      const start = link.reversed ? link.b : link.a,
+        end = link.reversed ? link.a : link.b;
+      attribute.setXYZ(index * 2, ...start);
+      attribute.setXYZ(
+        index * 2 + 1,
+        THREE.MathUtils.lerp(start[0], end[0], link.progress),
+        THREE.MathUtils.lerp(start[1], end[1], link.progress),
+        THREE.MathUtils.lerp(start[2], end[2], link.progress),
+      );
+    }
+    attribute.needsUpdate = true;
+    if (moving) invalidate();
+  });
   const { radius, center } = useMemo(() => {
     const points = graph.nodes.map(
       (n) => new THREE.Vector3(...positions.get(n.id)!),
@@ -101,7 +184,7 @@ function Network({
   }, [positions, graph.nodes]);
   return (
     <>
-      <lineSegments geometry={geometry[0]!}>
+      <lineSegments geometry={geometry.branches}>
         <lineBasicMaterial
           color="#7796bc"
           transparent
@@ -109,7 +192,7 @@ function Network({
           depthWrite={false}
         />
       </lineSegments>
-      <lineSegments geometry={geometry[1]!}>
+      <lineSegments geometry={geometry.links} frustumCulled={false}>
         <lineBasicMaterial
           color="#d0e9ff"
           transparent
@@ -119,18 +202,18 @@ function Network({
       </lineSegments>
       {graph.nodes.map((node) => {
         const active = node.id === selected,
-          hover = node.id === hovered,
-          dim = Boolean(
-            selected &&
-            node.role === "record" &&
-            !active &&
-            !connected.has(node.id),
-          );
+          hover = node.id === hovered;
         const size = node.role === "owner" ? 1.65 : 0.45;
         return (
-          <group key={node.id} position={positions.get(node.id)!}>
+          <group
+            key={node.id}
+            position={positions.get(node.id)!}
+            ref={(group) => {
+              if (group) nodeGroups.current.set(node.id, group);
+              else nodeGroups.current.delete(node.id);
+            }}
+          >
             <mesh
-              scale={active ? 1.2 : hover ? 1.15 : 1}
               onClick={(e) => {
                 e.stopPropagation();
                 if (e.delta < 5) onSelect(node.id);
@@ -146,20 +229,19 @@ function Network({
                 color={node.color}
                 toneMapped={false}
                 transparent
-                opacity={dim ? 0.18 : 1}
+                opacity={1}
               />
             </mesh>
-            {active && (
-              <mesh>
-                <sphereGeometry args={[size * 2.3, 20, 16]} />
-                <meshBasicMaterial
-                  color={node.color}
-                  wireframe
-                  transparent
-                  opacity={0.2}
-                />
-              </mesh>
-            )}
+            <mesh scale={0.8}>
+              <sphereGeometry args={[size * 2.3, 20, 16]} />
+              <meshBasicMaterial
+                color={node.color}
+                wireframe
+                transparent
+                opacity={0}
+                depthWrite={false}
+              />
+            </mesh>
             {(node.role !== "record" || active || hover) && (
               <Html
                 center
@@ -205,9 +287,13 @@ function Network({
 }
 export default function MindScene(props: Props) {
   const [rotating, setRotating] = useState(true);
+  const [reducedMotion, setReducedMotion] = useState(false);
   useEffect(() => {
     const preference = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const update = () => setRotating(!preference.matches);
+    const update = () => {
+      setRotating(!preference.matches);
+      setReducedMotion(preference.matches);
+    };
     update();
     preference.addEventListener("change", update);
     return () => preference.removeEventListener("change", update);
@@ -228,7 +314,7 @@ export default function MindScene(props: Props) {
           </p>
         }
       >
-        <Network {...props} rotating={rotating} />
+        <Network {...props} rotating={rotating} reducedMotion={reducedMotion} />
       </Canvas>
       <button
         type="button"
