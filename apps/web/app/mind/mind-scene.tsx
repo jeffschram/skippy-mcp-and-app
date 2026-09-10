@@ -31,7 +31,7 @@ function CameraReset({
       update: () => void;
     } | null;
     const distance =
-      (radius * 2.9) / Math.min(1, size.width / Math.max(1, size.height));
+      (radius * 2.5) / Math.min(1, size.width / Math.max(1, size.height));
     camera.position.set(center[0], center[1], center[2] + distance);
     camera.lookAt(...center);
     orbit?.target.set(...center);
@@ -49,7 +49,13 @@ function CameraReset({
   ]);
   return null;
 }
-function Network({ graph, selected, onSelect, reset }: Props) {
+function Network({
+  graph,
+  selected,
+  onSelect,
+  reset,
+  rotating,
+}: Props & { rotating: boolean }) {
   const positions = graph.positions;
   const [hovered, setHovered] = useState<string | null>(null);
   const connected = useMemo(() => {
@@ -190,6 +196,8 @@ function Network({ graph, selected, onSelect, reset }: Props) {
       <OrbitControls
         makeDefault
         enableDamping
+        autoRotate={rotating && !hovered}
+        autoRotateSpeed={0.35}
         dampingFactor={0.12}
         minDistance={3}
         maxDistance={220}
@@ -199,22 +207,41 @@ function Network({ graph, selected, onSelect, reset }: Props) {
   );
 }
 export default function MindScene(props: Props) {
+  const [rotating, setRotating] = useState(true);
+  useEffect(() => {
+    const preference = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const update = () => setRotating(!preference.matches);
+    update();
+    preference.addEventListener("change", update);
+    return () => preference.removeEventListener("change", update);
+  }, []);
   return (
-    <Canvas
-      className="h-full"
-      frameloop="demand"
-      dpr={[1, 1.75]}
-      camera={{ position: [12, 8, 70], fov: 48, near: 0.1, far: 600 }}
-      gl={{ antialias: true, alpha: true }}
-      onPointerMissed={() => props.onSelect(null)}
-      fallback={
-        <p className={mindFallbackClass}>
-          Interactive 3D mind map. Use List view to explore the same records
-          without the canvas.
-        </p>
-      }
-    >
-      <Network {...props} />
-    </Canvas>
+    <div className="relative h-full">
+      <Canvas
+        className="h-full"
+        frameloop="demand"
+        dpr={[1, 1.75]}
+        camera={{ position: [12, 8, 70], fov: 48, near: 0.1, far: 600 }}
+        gl={{ antialias: true, alpha: true }}
+        onPointerMissed={() => props.onSelect(null)}
+        fallback={
+          <p className={mindFallbackClass}>
+            Interactive 3D mind map. Use List view to explore the same records
+            without the canvas.
+          </p>
+        }
+      >
+        <Network {...props} rotating={rotating} />
+      </Canvas>
+      <button
+        type="button"
+        className="absolute left-3 top-3 rounded-md border border-[#ffffff13] bg-[#0b1220cc] px-2.5 py-1.5 text-[11px] text-[#93a7be] hover:bg-[#213952] hover:text-[#eff7ff]"
+        onClick={() => setRotating((value) => !value)}
+        aria-pressed={rotating}
+        aria-label="Auto-rotate map"
+      >
+        {rotating ? "Pause rotation" : "Resume rotation"}
+      </button>
+    </div>
   );
 }
