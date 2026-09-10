@@ -3,10 +3,9 @@ import { KINDS, type Position } from "./graph-layout";
 export type WorldNode = {
   id: string;
   title: string;
-  role: "owner" | "category" | "record";
+  role: "owner" | "record";
   color: string;
   kind?: MindKind;
-  count?: number;
 };
 export type WorldEdge = {
   id: string;
@@ -24,7 +23,7 @@ export const categoryId = (kind: MindKind) => `category:${kind}`;
 export const categoryKind = (id: string | null): MindKind | undefined =>
   (Object.keys(KINDS) as MindKind[]).find((k) => categoryId(k) === id);
 
-/** A view hierarchy, never written to the relationship table. Every record has one category parent. */
+/** A spherical view of the user’s world; structural links are never saved relationships. */
 export function buildMyWorld(
   graph: MindGraph,
   visible: MindGraph,
@@ -36,59 +35,36 @@ export function buildMyWorld(
   ];
   const edges: WorldEdge[] = [];
   const positions = new Map<string, Position>([[owner.id, [0, 0, 0]]]);
-  const kinds = Object.keys(KINDS) as MindKind[];
   const visibleIds = new Set(visible.nodes.map((n) => n.id));
-  for (const [index, kind] of kinds.entries()) {
-    if (!enabled.has(kind)) continue;
-    const members = graph.nodes
-      .filter((n) => n.kind === kind && n.id !== owner.personId)
-      .sort((a, b) => a.id.localeCompare(b.id));
-    const shown = members.filter((n) => visibleIds.has(n.id));
-    const angle = Math.PI / 2 - (index * Math.PI * 2) / kinds.length;
-    const direction = [Math.cos(angle), Math.sin(angle)];
-    const id = categoryId(kind);
+  const records = graph.nodes
+    .filter((n) => n.id !== owner.personId)
+    .sort((a, b) => a.id.localeCompare(b.id));
+  // Fibonacci directions cover the whole sphere. A shallow variation in radius
+  // adds depth, while slots based on the full sample stay stable under filtering.
+  for (const [i, record] of records.entries()) {
+    if (!visibleIds.has(record.id) || !enabled.has(record.kind)) continue;
+    const y = 1 - (2 * (i + 0.5)) / records.length;
+    const ring = Math.sqrt(1 - y * y);
+    const angle = i * Math.PI * (3 - Math.sqrt(5));
+    const radius = 24 + 4 * Math.sin(i * 1.618);
+    positions.set(record.id, [
+      Math.cos(angle) * ring * radius,
+      y * radius,
+      Math.sin(angle) * ring * radius,
+    ]);
     nodes.push({
-      id,
-      kind,
-      title: KINDS[kind].label,
-      role: "category",
-      color: KINDS[kind].color,
-      count: shown.length,
+      id: record.id,
+      kind: record.kind,
+      title: record.title,
+      role: "record",
+      color: KINDS[record.kind].color,
     });
-    positions.set(id, [direction[0]! * 17, direction[1]! * 17, 0]);
     edges.push({
-      id: `branch:${id}`,
+      id: `branch:${record.id}`,
       source: owner.id,
-      target: id,
+      target: record.id,
       role: "branch",
     });
-    for (const [i, record] of members.entries()) {
-      if (!visibleIds.has(record.id)) continue;
-      // Fixed slots based on the complete sample keep filtering from shuffling records.
-      const row = Math.floor(i / 8),
-        slot = i % 8;
-      const leafAngle = angle + ((slot - 3.5) / 3.5) * 0.23;
-      const radius = 25 + row * 2.1;
-      const z = Math.sin(i * 2.39996) * 3.2;
-      positions.set(record.id, [
-        Math.cos(leafAngle) * radius,
-        Math.sin(leafAngle) * radius,
-        z,
-      ]);
-      nodes.push({
-        id: record.id,
-        kind,
-        title: record.title,
-        role: "record",
-        color: KINDS[kind].color,
-      });
-      edges.push({
-        id: `branch:${record.id}`,
-        source: id,
-        target: record.id,
-        role: "branch",
-      });
-    }
   }
   // Saved relationships are a separate overlay for the selected record only.
   const ids = new Set(nodes.map((n) => n.id));

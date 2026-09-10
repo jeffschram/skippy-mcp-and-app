@@ -101,7 +101,7 @@ function Network({ graph, selected, onSelect, reset }: Props) {
         <lineBasicMaterial
           color="#7796bc"
           transparent
-          opacity={0.27}
+          opacity={0.12}
           depthWrite={false}
         />
       </lineSegments>
@@ -122,8 +122,7 @@ function Network({ graph, selected, onSelect, reset }: Props) {
             !active &&
             !connected.has(node.id),
           );
-        const size =
-          node.role === "owner" ? 1.65 : node.role === "category" ? 0.85 : 0.3;
+        const size = node.role === "owner" ? 1.65 : 0.45;
         return (
           <group key={node.id} position={positions.get(node.id)!}>
             <mesh
@@ -170,8 +169,6 @@ function Network({ graph, selected, onSelect, reset }: Props) {
                     "block max-w-[280px] select-none truncate rounded-[5px] bg-[#0b1220dd] px-[7px] py-[3px] text-[10px] text-[#a7bbd2]",
                     node.role === "owner" &&
                       "px-2 py-1 text-[11px] font-semibold text-[#eff7ff] sm:px-3 sm:py-1.5 sm:text-[14px]",
-                    node.role === "category" &&
-                      "max-w-[48px] px-1 py-0.5 text-[9px] font-medium text-[#dceeff] sm:max-w-[280px] sm:px-[7px] sm:py-[3px] sm:text-[12px]",
                     active &&
                       "border border-[#a7ceee50] bg-[#213952] text-[#eff7ff]",
                   )}
@@ -179,11 +176,6 @@ function Network({ graph, selected, onSelect, reset }: Props) {
                   {node.title.length > 42
                     ? node.title.slice(0, 40) + "…"
                     : node.title}
-                  {node.role === "category" && (
-                    <span className="ml-1.5 hidden text-[10px] text-[#93a7be] sm:inline">
-                      {node.count}
-                    </span>
-                  )}
                   {node.role === "owner" && (
                     <span className="ml-2 hidden text-[9px] uppercase tracking-[0.15em] text-[#a7ceee] sm:inline">
                       You

@@ -364,7 +364,7 @@ export function MindExplorer({ graph }: { graph: MindGraph }) {
                 </h2>
                 <p className="mb-5 text-[12px] leading-[1.8] text-[#98acc2]">
                   {records.filter((n) => n.kind === selectedKind).length}{" "}
-                  records in this branch. Select one to read its details and
+                  records in this category. Select one to read its details and
                   saved relationships.
                 </p>
                 <div className="flex flex-col gap-1">
@@ -475,7 +475,7 @@ export function MindExplorer({ graph }: { graph: MindGraph }) {
                 ) : (
                   <p className="mb-[18px] mt-3 whitespace-pre-wrap text-[12px] leading-[1.8] text-[#98acc2] [overflow-wrap:anywhere]">
                     No saved relationships in this sample yet. This record is
-                    organized under its category in your world.
+                    shown in its category color in your world.
                   </p>
                 )}
               </>
@@ -491,8 +491,8 @@ export function MindExplorer({ graph }: { graph: MindGraph }) {
                   {owner.title}
                 </h2>
                 <p className="mb-6 text-[12px] leading-[1.8] text-[#98acc2]">
-                  Your people, projects, ideas, and tasks branch out from here.
-                  Choose a category to explore that part of your world.
+                  Your people, projects, ideas, and tasks surround you. Choose a
+                  category to explore that part of your world.
                 </p>
                 <div
                   className="flex flex-col gap-1"
@@ -520,7 +520,7 @@ export function MindExplorer({ graph }: { graph: MindGraph }) {
                   ))}
                 </div>
                 <p className="mt-6 text-[11px] leading-[1.8] text-[#7891ab]">
-                  Spokes organize your records by category. Select a record to
+                  Colors identify each record’s category. Select a record to
                   highlight its saved relationships across the map.
                 </p>
               </div>
@@ -529,10 +529,9 @@ export function MindExplorer({ graph }: { graph: MindGraph }) {
         </div>
       </section>
       <p className="mx-[3px] my-[13px] text-[11px] leading-[1.8] text-[#71849a]">
-        You → categories → records. Category spokes show how your world is
-        organized; highlighted cross-links show saved relationships. Projects,
-        tasks, goals, people, companies, and all four Knowledge kinds are
-        included.
+        Your world surrounds you in 3D. Colors identify categories; highlighted
+        cross-links show saved relationships. Projects, tasks, goals, people,
+        companies, and all four Knowledge kinds are included.
         {graph.limited
           ? " This experiment shows up to 70 records of each type and connections from a bounded sample."
           : ""}

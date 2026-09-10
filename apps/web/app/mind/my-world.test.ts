@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { mindOwner, type MindGraph } from "../../../../convex/mindGraphHelpers";
-import { buildMyWorld, categoryId } from "./my-world";
+import { buildMyWorld } from "./my-world";
 import { KINDS, filterGraph } from "./graph-layout";
 const graph: MindGraph = {
   owner: { id: "owner:u", title: "Jeff Schram", personId: "self" },
@@ -45,31 +45,26 @@ const graph: MindGraph = {
   limited: false,
 };
 const all = new Set(Object.keys(KINDS) as (keyof typeof KINDS)[]);
-describe("My world hierarchy", () => {
-  it("pins the owner to the origin, includes empty categories, and avoids a duplicate self contact", () => {
+describe("My world sphere", () => {
+  it("pins the owner to the origin without category nodes or a duplicate self contact", () => {
     const world = buildMyWorld(graph, graph, all);
     expect(world.positions.get("owner:u")).toEqual([0, 0, 0]);
     expect(world.nodes.filter((n) => n.role === "owner")).toHaveLength(1);
-    expect(world.nodes.filter((n) => n.role === "category")).toHaveLength(9);
+    expect(world.nodes).toHaveLength(4);
     expect(world.nodes.some((n) => n.id === "self")).toBe(false);
-    expect(world.nodes.find((n) => n.id === categoryId("person"))?.count).toBe(
-      0,
-    );
     expect(world.nodes.find((n) => n.id === "p")?.role).toBe("record");
     expect(world.nodes.find((n) => n.id === "owner:u")?.title).toBe(
       "Jeff Schram",
     );
   });
-  it("gives every category and record exactly one structural parent without inventing stored relationships", () => {
+  it("connects every record directly to the owner without inventing stored relationships", () => {
     const world = buildMyWorld(graph, graph, all);
     for (const node of world.nodes.filter((n) => n.role !== "owner")) {
       const parents = world.edges.filter(
         (e) => e.role === "branch" && e.target === node.id,
       );
       expect(parents).toHaveLength(1);
-      expect(parents[0]?.source).toBe(
-        node.role === "category" ? world.ownerId : categoryId(node.kind!),
-      );
+      expect(parents[0]?.source).toBe(world.ownerId);
     }
     expect(world.edges.filter((e) => e.role === "relationship")).toEqual([
       { id: "r", source: "t1", target: "p", role: "relationship" },
@@ -92,6 +87,31 @@ describe("My world hierarchy", () => {
     ).toEqual(full.positions);
     expect(
       [...full.positions.values()].every((p) => p.every(Number.isFinite)),
+    ).toBe(true);
+  });
+  it("distributes records in all three dimensions with category colors", () => {
+    const sample = {
+      ...graph,
+      nodes: Array.from({ length: 100 }, (_, i) => ({
+        ...graph.nodes[1]!,
+        id: `record:${i}`,
+      })),
+    };
+    const world = buildMyWorld(sample, sample, all);
+    const points = world.nodes
+      .filter((n) => n.role === "record")
+      .map((n) => world.positions.get(n.id)!);
+    for (let axis = 0; axis < 3; axis++) {
+      expect(Math.min(...points.map((p) => p[axis]!))).toBeLessThan(-18);
+      expect(Math.max(...points.map((p) => p[axis]!))).toBeGreaterThan(18);
+    }
+    expect(
+      points.every((p) => Math.hypot(...p) >= 20 && Math.hypot(...p) <= 28),
+    ).toBe(true);
+    expect(
+      world.nodes
+        .filter((n) => n.role === "record")
+        .every((n) => n.color === KINDS.project.color),
     ).toBe(true);
   });
   it("still shows the owner when the graph or filters are empty", () => {
