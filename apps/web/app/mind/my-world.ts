@@ -1,11 +1,13 @@
+import { ATTENTION, resolveAttention } from "../../../../convex/attentionModel";
 import type { MindGraph, MindKind } from "../../../../convex/mindGraphHelpers";
-import { KINDS, type Position } from "./graph-layout";
+import { KINDS, MIND_OWNER_COLOR, type Position } from "./graph-layout";
 export type WorldNode = {
   id: string;
   title: string;
   role: "owner" | "record";
   color: string;
   kind?: MindKind;
+  connectionCount?: number;
 };
 export type WorldEdge = {
   id: string;
@@ -28,10 +30,11 @@ export function buildMyWorld(
   graph: MindGraph,
   visible: MindGraph,
   enabled: Set<MindKind>,
+  now = 0,
 ): WorldGraph {
   const owner = graph.owner || { id: "owner:self", title: "You" };
   const nodes: WorldNode[] = [
-    { id: owner.id, title: owner.title, role: "owner", color: "#DCEEFF" },
+    { id: owner.id, title: owner.title, role: "owner", color: MIND_OWNER_COLOR },
   ];
   const edges: WorldEdge[] = [];
   const positions = new Map<string, Position>([[owner.id, [0, 0, 0]]]);
@@ -57,7 +60,7 @@ export function buildMyWorld(
       kind: record.kind,
       title: record.title,
       role: "record",
-      color: KINDS[record.kind].color,
+      color: ATTENTION[resolveAttention(record.kind, record, now).status].color,
     });
     edges.push({
       id: `branch:${record.id}`,
@@ -75,5 +78,40 @@ export function buildMyWorld(
       edges.push({ id: edge.id, source, target, role: "relationship" });
     }
   }
+  // Count distinct saved neighbors in the full sample so filtering never
+  // changes a record's size. Synthetic owner spokes do not count.
+  const neighbors = new Map<string, Set<string>>();
+  for (const edge of graph.edges) {
+    const a = edge.source === owner.personId ? owner.id : edge.source;
+    const b = edge.target === owner.personId ? owner.id : edge.target;
+    if (a === b) continue;
+    if (!neighbors.has(a)) neighbors.set(a, new Set());
+    if (!neighbors.has(b)) neighbors.set(b, new Set());
+    neighbors.get(a)!.add(b); neighbors.get(b)!.add(a);
+  }
+  for (const node of nodes) {
+    const count = neighbors.get(node.id)?.size ?? 0;
+    if (count) node.connectionCount = count;
+  }
   return { nodes, edges, positions, ownerId: owner.id };
+}
+
+/** Only saved, direct relationships belong to a selected record's neighborhood. */
+export function selectionIds(graph: WorldGraph, selected: string | null): Set<string> {
+  const ids = new Set<string>();
+  if (!selected || !graph.nodes.some(node => node.id === selected)) return ids;
+  ids.add(selected);
+  for (const edge of graph.edges) {
+    if (edge.role !== "relationship") continue;
+    if (edge.source === selected) ids.add(edge.target);
+    if (edge.target === selected) ids.add(edge.source);
+  }
+  return ids;
+}
+
+/** Four readable tiers: 0–1, 2–4, 5–9, and 10+ distinct saved neighbors. */
+export function nodeVisualSize(node: WorldNode): number {
+  const count = node.connectionCount ?? 0;
+  const multiplier = count >= 10 ? 3 : count >= 5 ? 2 : count >= 2 ? 1.3 : .8;
+  return (node.role === "owner" ? 3.1 : 1.35) * multiplier;
 }

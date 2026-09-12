@@ -1,7 +1,7 @@
 import { queryGeneric } from "convex/server";
 import { v } from "convex/values";
 import { requireOwnedBrain } from "./auth";
-import { buildMindGraph, mindOwner } from "./mindGraphHelpers";
+import { buildMindGraph, mindOwner, excludeArchivedProjectTasks } from "./mindGraphHelpers";
 
 const entityType = v.union(
   v.literal("goal"),
@@ -358,10 +358,32 @@ export const mindMapForViewer = queryGeneric({
         .order("desc").take(perType + 1))),
       ctx.db.query("relationships").withIndex("by_brain_type", q => q.eq("brainInstanceId", brain._id)).take(2501),
     ]);
+    // Use endpoint lookups, not the capped display edge sample: a task's parent
+    // may be archived (and therefore absent from the displayed projects).
+    let parentLookupsLimited = false;
+    const projectCache = new Map<string, Promise<{ brainInstanceId: string; status?: string; processingState?: string } | null>>();
+    const visibleTasks = await excludeArchivedProjectTasks(entityGroups[2]!, async taskId => {
+      const links = await ctx.db.query("relationships")
+        .withIndex("by_brain_from", (q: any) => q.eq("brainInstanceId", brain._id).eq("from.entityId", taskId))
+        .take(257);
+      // Omit an unusually dense task rather than risk showing an unchecked parent.
+      if (links.length > 256) {
+        parentLookupsLimited = true;
+        return [{ status: "archived" }];
+      }
+      const parents = links.filter(link => link.type === "belongs_to" && link.from.entityType === "task" && link.to.entityType === "project");
+      const projects = await Promise.all(parents.map(link => {
+        const id = ctx.db.normalizeId("projects", link.to.entityId);
+        if (!id) return null;
+        if (!projectCache.has(id)) projectCache.set(id, ctx.db.get(id));
+        return projectCache.get(id)!;
+      }));
+      return projects.filter((project): project is NonNullable<typeof project> => project !== null && project.brainInstanceId === brain._id);
+    });
     const graph = buildMindGraph([
-      ...entityGroups.map((rows, i) => ({ kind: kinds[i]!, rows: rows.slice(0, perType) })),
+      ...entityGroups.map((rows, i) => ({ kind: kinds[i]!, rows: (i === 2 ? visibleTasks : rows).slice(0, perType) })),
       ...knowledgeGroups.map((rows, i) => ({ kind: knowledgeKinds[i]!, rows: rows.slice(0, perType) })),
-    ], relationships.slice(0, 2500), [...entityGroups, ...knowledgeGroups].some(rows => rows.length > perType) || relationships.length > 2500);
+    ], relationships.slice(0, 2500), [...entityGroups, ...knowledgeGroups].some(rows => rows.length > perType) || relationships.length > 2500 || parentLookupsLimited);
     return { ...graph, owner: mindOwner(user, entityGroups[3]!.slice(0, perType)) };
   },
 });

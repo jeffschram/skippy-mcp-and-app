@@ -27,6 +27,7 @@ import { agentRoleDisplayName, agentRoleFromMetadata, formatRelative } from "../
 import { focusItemKey, parseFocusSummary } from "../focus-summary";
 import { LiveGate } from "../live-auth";
 import { Badge, Button, Card, IconButton, InlineMarkdown, LoadingRow, Section, TextArea, useToast } from "../components";
+import { AttentionFocus } from "../components/attention";
 import { AgendaSection } from "./agenda";
 import { useViewerReady } from "./use-viewer";
 import { formatFileSize } from "./project-library-helpers";
@@ -730,6 +731,7 @@ export function TodayContent() {
         </Card>
       ) : (
         <div className="grid gap-4">
+          <AttentionFocus />
           {/* Focus hero */}
           <section className={cn(cardClass, sectionClass, focusSummaryClass)} style={{ minHeight: 0 }}>
             <div>

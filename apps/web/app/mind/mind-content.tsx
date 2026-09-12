@@ -1,8 +1,10 @@
 "use client";
 
+import { AttentionEditor, useAttentionClock } from "../components/attention";
+import { ATTENTION, resolveAttention } from "../../../../convex/attentionModel";
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { Component, useMemo, useState, type ReactNode } from "react";
+import { Component, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "convex/react";
 import {
   ArrowUpRight,
@@ -11,6 +13,7 @@ import {
   Network,
   RotateCcw,
   Search,
+  SlidersHorizontal,
   X,
 } from "lucide-react";
 import { api } from "../../lib/skippy-api";
@@ -63,7 +66,7 @@ export function MindContent() {
       {graph ? (
         <MindExplorer graph={graph} />
       ) : (
-        <div className="p-20 text-center text-[#73869a]" role="status">
+        <div className="p-20 text-center text-[#686457]" role="status">
           Gathering your thoughts and connections…
         </div>
       )}
@@ -71,14 +74,20 @@ export function MindContent() {
   );
 }
 export function MindExplorer({ graph }: { graph: MindGraph }) {
+  const now = useAttentionClock();
   const [query, setQuery] = useState("");
   const [enabled, setEnabled] = useState(
     () => new Set(Object.keys(KINDS) as MindKind[]),
   );
   const [selected, setSelected] = useState<string | null>(null);
-  const [focus, setFocus] = useState<string | null>(null);
   const [branch, setBranch] = useState<MindKind | null>(null);
   const [list, setList] = useState(false);
+  const [filters, setFilters] = useState(false);
+  useEffect(() => {
+    const close = (event: KeyboardEvent) => { if (event.key === "Escape" && !(event.target instanceof HTMLElement && event.target.closest("input, textarea, select, form"))) { setSelected(null); setQuery(""); setBranch(null); setEnabled(new Set(Object.keys(KINDS) as MindKind[])); setReset(n => n + 1); } };
+    window.addEventListener("keydown", close);
+    return () => window.removeEventListener("keydown", close);
+  }, []);
   const [reset, setReset] = useState(0);
   const owner = graph.owner || { id: "owner:self", title: "You" };
   const selectedKind = categoryKind(selected);
@@ -87,16 +96,17 @@ export function MindExplorer({ graph }: { graph: MindGraph }) {
     [enabled, branch],
   );
   const visible = useMemo(
-    () => filterGraph(graph, shownKinds, query, focus),
-    [graph, shownKinds, query, focus],
+    () => filterGraph(graph, shownKinds, query, null),
+    [graph, shownKinds, query],
   );
   const world = useMemo(
-    () => buildMyWorld(graph, visible, shownKinds),
-    [graph, visible, shownKinds],
+    () => buildMyWorld(graph, visible, shownKinds, now),
+    [graph, visible, shownKinds, now],
   );
   const node = graph.nodes.find((n) => n.id === selected);
   const records = visible.nodes.filter((n) => n.id !== owner.personId);
   function selectNode(id: string | null) {
+    if (id === null) { clear(); return; }
     if (id === owner.id || id === owner.personId) {
       clear();
       setSelected(owner.id);
@@ -105,7 +115,12 @@ export function MindExplorer({ graph }: { graph: MindGraph }) {
     const kind = categoryKind(id);
     if (kind) {
       setBranch(kind);
-      setFocus(null);
+      setReset(n => n + 1);
+      setQuery("");
+      setEnabled(new Set(Object.keys(KINDS) as MindKind[]));
+    }
+    if (!kind) {
+      setBranch(null);
       setQuery("");
       setEnabled(new Set(Object.keys(KINDS) as MindKind[]));
     }
@@ -133,48 +148,24 @@ export function MindExplorer({ graph }: { graph: MindGraph }) {
   function clear() {
     setQuery("");
     setEnabled(new Set(Object.keys(KINDS) as MindKind[]));
-    setFocus(null);
     setBranch(null);
     setSelected(null);
     setReset((n) => n + 1);
   }
   return (
-    <div>
-      <header className="mb-[22px] flex items-end justify-between gap-5">
-        <div>
-          <p className="mb-[7px] mt-0 text-[10px] font-bold uppercase leading-[1.8] tracking-[0.17em] text-[#738ca6]">
-            Your world, connected
-          </p>
-          <h1 className="mb-[7px] mt-0 flex items-center gap-3.5 text-[36px] font-[650] leading-[1.2] tracking-[-0.045em] max-[700px]:text-[30px]">
-            Mind
-            <span className="rounded-md border border-[#a7ceee70] bg-[#a7ceee20] px-2 py-[5px] text-[10px] uppercase tracking-[0.03em] text-[#54799a]">
-              Experiment
-            </span>
-          </h1>
-          <p className="text-[14px] text-[#73869a]">
-            You at the center. Every part of your world within reach.
-          </p>
-        </div>
-        <div className="whitespace-nowrap pb-[3px] text-[12px] text-[#71859a] max-[1050px]:hidden">
-          <strong className="text-[18px] font-[650] text-inherit">
-            {graph.nodes.length}
-          </strong>{" "}
-          records <span className="px-2.5">·</span>{" "}
-          <strong className="text-[18px] font-[650] text-inherit">
-            {graph.edges.length}
-          </strong>{" "}
-          saved relationships
-        </div>
+    <div className="relative h-dvh overflow-hidden bg-[#f0e9dc] text-[#24333c]">
+      <header className="absolute left-5 top-5 z-40 sm:left-8 sm:top-7">
+        <h1 className="m-0 font-serif text-[30px] font-normal tracking-[-0.06em] text-[#24333c]">mind<span className="text-[#c7472c]">.</span></h1>
       </header>
       <section
-        className="overflow-hidden rounded-[18px] border border-[#21334a] bg-[#0b1220] text-[#e2eaf5] shadow-[0_20px_50px_#06112117] max-[700px]:rounded-xl"
+        className="h-full"
         aria-label="Mind explorer"
       >
-        <div className="flex items-center justify-between gap-4 border-b border-[#ffffff13] px-5 py-4 max-[700px]:flex-wrap max-[700px]:gap-2 max-[700px]:p-3">
-          <label className="flex max-w-[480px] flex-1 items-center gap-2.5 text-[#93a7be] focus-within:rounded-md focus-within:outline-2 focus-within:outline-offset-[3px] focus-within:outline-[#a7ceee] max-[700px]:max-w-none max-[700px]:basis-full">
+        <div className="pointer-events-none absolute inset-x-0 top-5 z-40 flex items-start justify-center px-4 sm:top-7">
+          <label className="pointer-events-auto mt-14 flex w-full max-w-[460px] items-center gap-3 rounded-full border border-[#a9a394] bg-[#f0e9dc]/90 px-5 py-3 text-[#686457] backdrop-blur-md focus-within:outline-2 focus-within:outline-[#286c70] sm:mt-0 sm:w-[40%]">
             <Search size={17} />
             <input
-              className="min-w-0 w-full border-0 bg-transparent text-[13px] text-[#e2eaf5] outline-none placeholder:text-[#7890a9]"
+              className="min-w-0 w-full border-0 bg-transparent text-[14px] text-[#24333c] outline-none placeholder:text-[#777367]"
               aria-label="Search mind"
               placeholder="Find a thought, person, project…"
               value={query}
@@ -190,7 +181,18 @@ export function MindExplorer({ graph }: { graph: MindGraph }) {
               </button>
             )}
           </label>
-          <div className="flex flex-wrap gap-[5px]">
+          <details className="pointer-events-auto absolute right-5 top-0 sm:right-8">
+            <summary className={cn(mindControlClass, "cursor-pointer list-none rounded-full border border-[#d8d0c0] bg-[#faf6ec]/90 px-4 py-2.5 text-sm")}>Map options</summary>
+            <div className="absolute right-0 mt-3 flex max-h-[65dvh] w-[260px] overflow-y-auto flex-wrap gap-1 rounded-2xl border border-[#d8d0c0] bg-[#faf6ec] p-3 shadow-lg">
+            <button className={cn(mindControlClass, mindToolClass)} aria-expanded={filters} aria-controls="mind-filters" onClick={() => setFilters(!filters)}><SlidersHorizontal size={16} /> Types{enabled.size < Object.keys(KINDS).length ? ` (${enabled.size})` : ""}</button>
+            <details className="relative">
+              <summary className={cn(mindControlClass, mindToolClass, "cursor-pointer")}>Colors</summary>
+              <div className="absolute right-0 top-full z-40 mt-2 grid min-w-[240px] gap-3 rounded-xl border border-[#d8d0c0] bg-[#faf6ec] p-4 shadow-lg">
+                {Object.entries(ATTENTION).map(([status, meta]) => <span key={status} className="flex items-center gap-2 text-sm"><span className="h-3 w-3 rounded-full" style={{ background: meta.color }} />{meta.label}</span>)}
+                <Link href="/attention" className="text-sm underline">Review attention</Link>
+              </div>
+            </details>
+            <button className={cn(mindControlClass, mindToolClass)} onClick={() => setSelected(owner.id)}>Browse</button>
             <button
               className={cn(mindControlClass, mindToolClass)}
               onClick={clear}
@@ -221,16 +223,15 @@ export function MindExplorer({ graph }: { graph: MindGraph }) {
               <RotateCcw size={16} />
               <span className="max-[1050px]:hidden">Reset view</span>
             </button>
-          </div>
-        </div>
-        <div
-          className="flex flex-wrap gap-1.5 border-b border-[#ffffff13] px-5 py-3 max-[700px]:gap-0.5 max-[700px]:p-2.5"
+        {filters && <div
+          id="mind-filters"
+          className="flex w-full flex-wrap gap-1.5 border-t border-[#d8d0c0] pt-3"
           aria-label="Filter record types"
         >
           {(Object.keys(KINDS) as MindKind[]).map((kind) => (
             <button
               className={cn(
-                "flex items-center gap-1.5 rounded-md border border-transparent px-2 py-1.5 text-[11px] text-[#93a7be] opacity-40 aria-pressed:border-[#ffffff10] aria-pressed:bg-[#ffffff04] aria-pressed:opacity-100 max-[700px]:p-[5px] max-[700px]:text-[10px]",
+                "flex items-center gap-1.5 rounded-md border border-transparent px-2 py-1.5 text-[12px] text-[#686457] opacity-40 aria-pressed:border-[#d8d0c0] aria-pressed:bg-[#286c7008] aria-pressed:opacity-100 max-[700px]:p-[5px] max-[700px]:text-[12px]",
                 mindControlClass,
               )}
               key={kind}
@@ -246,26 +247,27 @@ export function MindExplorer({ graph }: { graph: MindGraph }) {
             >
               <i
                 className="inline-block size-1.5 shrink-0 rounded-full"
-                style={{ background: KINDS[kind].color }}
+                style={{ background: "#8A8476" }}
               />
               {KINDS[kind].label}
-              <span className="ml-0.5 text-[10px] text-[#7089a4]">
+              <span className="ml-0.5 text-[12px] text-[#777367]">
                 {counts.get(kind) || 0}
               </span>
             </button>
           ))}
+        </div>}
+            </div>
+          </details>
         </div>
-        {(focus || branch) && (
-          <div className="flex flex-wrap items-center gap-2 bg-[#a7ceee0b] px-5 py-1 text-[12px] text-[#a7ceee]">
+
+        {branch && (
+          <div className="absolute left-1/2 top-32 z-30 flex -translate-x-1/2 items-center gap-2 rounded-full bg-[#faf6ec] px-4 py-1 text-xs text-[#286c70] sm:top-24">
             <Focus size={14} />
-            {branch
-              ? KINDS[branch].label
-              : `Connections of ${graph.nodes.find((n) => n.id === focus)?.title}`}
+            {KINDS[branch].label}
             <button
               className={cn("ml-auto", mindControlClass, mindToolClass)}
               onClick={() => {
-                setFocus(null);
-                setBranch(null);
+                          setBranch(null);
                 setSelected(null);
               }}
             >
@@ -273,17 +275,17 @@ export function MindExplorer({ graph }: { graph: MindGraph }) {
             </button>
           </div>
         )}
-        <div className="grid h-[calc(100dvh-300px)] min-h-[620px] max-h-[950px] grid-cols-[minmax(0,2fr)_minmax(340px,1fr)] max-[700px]:flex max-[700px]:h-auto max-[700px]:min-h-0 max-[700px]:max-h-none max-[700px]:flex-col">
-          <div className="relative min-h-[450px] min-w-0 overflow-hidden bg-[radial-gradient(ellipse_at_45%_45%,#18294360,transparent_70%),radial-gradient(#93b9e710_0.7px,transparent_0.7px)] bg-size-[auto,24px_24px] max-[700px]:h-[480px] max-[700px]:min-h-0">
-            {list && !records.length ? (
+        <div className="absolute inset-x-0 bottom-[210px] top-[130px] sm:bottom-[190px] sm:top-[95px]">
+          <div className="relative h-full min-w-0 overflow-hidden">
+            {!records.length ? (
               <div className={mindFallbackClass}>
                 <Search size={30} />
-                <h2 className="text-[20px] text-[#dce8f6]">
+                <h2 className="text-[20px] text-[#24333c]">
                   No matching records
                 </h2>
                 <p className="max-w-[390px]">Try another search or category.</p>
                 <button
-                  className={cn("text-[#a7ceee] underline", mindControlClass)}
+                  className={cn("text-[#286c70] underline", mindControlClass)}
                   onClick={clear}
                 >
                   Show my world
@@ -291,13 +293,13 @@ export function MindExplorer({ graph }: { graph: MindGraph }) {
               </div>
             ) : list ? (
               <div
-                className="h-full overflow-auto px-4 pb-[55px] pt-3 [scrollbar-width:thin]"
+                className={cn("h-full overflow-auto px-4 pb-[55px] pt-3 [scrollbar-width:thin]", selected && "min-[701px]:pr-[380px]")}
                 aria-label="Records"
               >
                 {records.map((n) => (
                   <button
                     className={cn(
-                      "flex w-full items-center gap-3 border-b border-[#ffffff13] p-3 text-left hover:bg-[#a7ceee10] aria-pressed:bg-[#a7ceee10]",
+                      "flex w-full items-center gap-3 border-b border-[#d8d0c0] p-3 text-left hover:bg-[#286c7010] aria-pressed:bg-[#286c7010]",
                       mindControlClass,
                     )}
                     key={n.id}
@@ -306,19 +308,19 @@ export function MindExplorer({ graph }: { graph: MindGraph }) {
                   >
                     <i
                       className="inline-block size-1.5 shrink-0 rounded-full"
-                      style={{ background: KINDS[n.kind].color }}
+                      style={{ background: ATTENTION[resolveAttention(n.kind, n, now).status].color }}
                     />
                     <span className="min-w-0 flex-1">
                       <strong className="block text-[12px] font-medium [overflow-wrap:anywhere]">
                         {n.title}
                       </strong>
-                      <small className="mt-1 block text-[10px] text-[#7891ab]">
+                      <small className="mt-1 block text-[12px] text-[#686457]">
                         {KINDS[n.kind].label}
                         {n.status ? ` · ${n.status.replaceAll("_", " ")}` : ""}
                       </small>
                     </span>
                     <ArrowUpRight
-                      className="shrink-0 text-[#7891ab]"
+                      className="shrink-0 text-[#686457]"
                       size={15}
                     />
                   </button>
@@ -331,38 +333,30 @@ export function MindExplorer({ graph }: { graph: MindGraph }) {
                   selected={selected}
                   onSelect={selectNode}
                   reset={reset}
+                  focusKey={branch || query.trim()}
                 />
               </MapBoundary>
             )}
-            <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-between gap-3 bg-[linear-gradient(transparent,#0b1220)] px-[18px] py-3.5 text-[10px] text-[#748ba4] max-[700px]:flex-col max-[700px]:gap-1 max-[700px]:text-[9px]">
-              <span>
-                {records.length} records around you
-                {graph.limited ? " · Showing a sample of your brain" : ""}
-              </span>
-              <span>
-                {list
-                  ? "Select a record to explore"
-                  : "Drag to orbit · Scroll to zoom · Right-drag to pan"}
-              </span>
-            </div>
+
           </div>
-          <aside
-            className="overflow-y-auto border-l border-[#ffffff13] bg-[#101b2c80] p-[22px] [scrollbar-width:thin] [scrollbar-color:#30445d_transparent] max-[1050px]:p-4 max-[700px]:max-h-[420px] max-[700px]:border-l-0 max-[700px]:border-t"
+          {selected && <aside
+            className="absolute bottom-4 right-4 top-4 z-30 w-[340px] max-w-[calc(100%-32px)] overflow-y-auto rounded-xl border border-[#d8d0c0] bg-[#f7f2e8f5] p-[22px] shadow-[0_12px_45px_#24333c0d] [scrollbar-width:thin] max-[700px]:left-3 max-[700px]:right-3 max-[700px]:top-auto max-[700px]:max-h-[55%] max-[700px]:w-auto max-[700px]:p-4"
             aria-label="Selected record"
             aria-live="polite"
           >
+            {!node && <button className={cn("float-right p-1", mindControlClass)} onClick={() => selectNode(null)} aria-label="Close browser"><X size={18} /></button>}
             {selectedKind ? (
               <div>
-                <p className="text-[11px] uppercase tracking-[.15em] text-[#93a7be]">
+                <p className="text-[12px] uppercase tracking-[.15em] text-[#686457]">
                   {owner.title} / category
                 </p>
                 <h2
-                  className="my-3 text-[24px] font-semibold"
-                  style={{ color: KINDS[selectedKind].color }}
+                  className="my-3 border-l-4 pl-3 text-[24px] font-semibold"
+                  style={{ borderLeftColor: "#8A8476" }}
                 >
                   {KINDS[selectedKind].label}
                 </h2>
-                <p className="mb-5 text-[12px] leading-[1.8] text-[#98acc2]">
+                <p className="mb-5 text-[14px] leading-[1.8] text-[#686457]">
                   {records.filter((n) => n.kind === selectedKind).length}{" "}
                   records in this category. Select one to read its details and
                   saved relationships.
@@ -374,7 +368,7 @@ export function MindExplorer({ graph }: { graph: MindGraph }) {
                       <button
                         key={record.id}
                         className={cn(
-                          "rounded-md border-b border-[#ffffff13] px-2 py-3 text-left text-[12px] text-[#c3d2e3] hover:bg-[#a7ceee10]",
+                          "rounded-md border-b border-[#d8d0c0] px-2 py-3 text-left text-[12px] text-[#343d3c] hover:bg-[#286c7010]",
                           mindControlClass,
                         )}
                         onClick={() => selectNode(record.id)}
@@ -384,7 +378,7 @@ export function MindExplorer({ graph }: { graph: MindGraph }) {
                     ))}
                 </div>
                 {!records.some((n) => n.kind === selectedKind) && (
-                  <p className="text-[12px] text-[#93a7be]">
+                  <p className="text-[12px] text-[#686457]">
                     No records here yet, or none match your filters.
                   </p>
                 )}
@@ -397,53 +391,42 @@ export function MindExplorer({ graph }: { graph: MindGraph }) {
               </div>
             ) : node ? (
               <>
-                <div className="flex items-center justify-between text-[11px]">
-                  <span style={{ color: KINDS[node.kind].color }}>
+                <div className="flex items-center justify-between text-[12px]">
+                  <span className="text-[#343d3c]">
                     {KINDS[node.kind].label}
                   </span>
                   <button
-                    className={cn("p-[5px] text-[#93a7be]", mindControlClass)}
-                    onClick={() => setSelected(null)}
+                    className={cn("p-[5px] text-[#686457]", mindControlClass)}
+                    onClick={() => selectNode(null)}
                     aria-label="Close record"
                   >
                     <X size={17} />
                   </button>
                 </div>
-                <h2 className="my-3 text-[21px] font-semibold leading-[1.35] tracking-[-0.025em] [overflow-wrap:anywhere]">
+                <h2 className="my-3 font-serif text-[28px] font-normal leading-[1.35] tracking-[-0.025em] [overflow-wrap:anywhere]">
                   {node.title}
                 </h2>
+                <AttentionEditor key={node.id} kind={node.kind} id={node.id} />
                 {node.status && (
-                  <span className="inline-block rounded bg-[#a7ceee13] px-[7px] py-1 text-[10px] text-[#a7ceee]">
+                  <span className="inline-block rounded bg-[#286c7013] px-[7px] py-1 text-[12px] text-[#286c70]">
                     {node.status.replaceAll("_", " ")}
                   </span>
                 )}
-                <p className="mb-[18px] mt-3 whitespace-pre-wrap text-[12px] leading-[1.8] text-[#98acc2] [overflow-wrap:anywhere]">
+                <p className="mb-[18px] mt-3 whitespace-pre-wrap text-[14px] leading-[1.8] text-[#686457] [overflow-wrap:anywhere]">
                   {node.summary || "No description saved yet."}
                 </p>
                 <Link
                   className={cn(
-                    "flex items-center justify-between border-b border-[#ffffff13] pb-3.5 pt-2.5 text-[12px] text-[#bddcf5]",
+                    "flex items-center justify-between border-b border-[#d8d0c0] pb-3.5 pt-2.5 text-[12px] text-[#286c70]",
                     mindControlClass,
                   )}
                   href={node.href}
                 >
-                  Open in Skippy <ArrowUpRight size={15} />
+                  Open record <ArrowUpRight size={15} />
                 </Link>
-                <button
-                  className={cn(mindControlClass, mindNeighborhoodClass)}
-                  onClick={() => {
-                    setFocus(node.id);
-                    setBranch(null);
-                    setQuery("");
-                    setEnabled(new Set(Object.keys(KINDS) as MindKind[]));
-                  }}
-                >
-                  <Focus size={16} />
-                  Explore saved connections
-                </button>
-                <h3 className="mb-3 mt-[26px] text-[11px] uppercase tracking-[0.1em] text-[#9fb3c9]">
+                <h3 className="mb-3 mt-[26px] text-[12px] uppercase tracking-[0.1em] text-[#686457]">
                   Saved relationships{" "}
-                  <span className="ml-2 text-[#617e9c]">
+                  <span className="ml-2 text-[#686457]">
                     {neighbors.length}
                   </span>
                 </h3>
@@ -452,20 +435,20 @@ export function MindExplorer({ graph }: { graph: MindGraph }) {
                     {neighbors.map(({ edge, node: neighbor }) => (
                       <button
                         className={cn(
-                          "rounded-md px-2 py-2.5 text-left [overflow-wrap:anywhere] hover:bg-[#a7ceee0c]",
+                          "rounded-md px-2 py-2.5 text-left [overflow-wrap:anywhere] hover:bg-[#286c700c]",
                           mindControlClass,
                         )}
                         key={edge.id}
                         onClick={() => selectNode(neighbor.id)}
                       >
-                        <small className="mb-[5px] block text-[10px] text-[#708eab]">
+                        <small className="mb-[5px] block text-[12px] text-[#686457]">
                           {edge.source === selected ? "→" : "←"}{" "}
                           {edge.type.replaceAll("_", " ")}
                         </small>
-                        <span className="flex items-baseline gap-2 text-[12px] leading-[1.5] text-[#c3d2e3]">
+                        <span className="flex items-baseline gap-2 text-[12px] leading-[1.5] text-[#343d3c]">
                           <i
                             className="inline-block size-1.5 shrink-0 rounded-full"
-                            style={{ background: KINDS[neighbor.kind].color }}
+                            style={{ background: ATTENTION[resolveAttention(neighbor.kind, neighbor, now).status].color }}
                           />
                           {neighbor.title}
                         </span>
@@ -473,7 +456,7 @@ export function MindExplorer({ graph }: { graph: MindGraph }) {
                     ))}
                   </div>
                 ) : (
-                  <p className="mb-[18px] mt-3 whitespace-pre-wrap text-[12px] leading-[1.8] text-[#98acc2] [overflow-wrap:anywhere]">
+                  <p className="mb-[18px] mt-3 whitespace-pre-wrap text-[14px] leading-[1.8] text-[#686457] [overflow-wrap:anywhere]">
                     No saved relationships in this sample yet. This record is
                     shown in its category color in your world.
                   </p>
@@ -481,16 +464,16 @@ export function MindExplorer({ graph }: { graph: MindGraph }) {
               </>
             ) : (
               <div className="pt-3">
-                <div className="mb-6 grid size-[70px] place-items-center rounded-full border border-[#a7ceee44] bg-[#a7ceee0a] text-[#dceeff]">
+                <div className="mb-6 grid size-[70px] place-items-center rounded-full border border-[#286c7044] bg-[#286c700a] text-[#24333c]">
                   <Network size={32} />
                 </div>
-                <p className="text-[10px] uppercase tracking-[.17em] text-[#93a7be]">
+                <p className="text-[12px] uppercase tracking-[.17em] text-[#686457]">
                   At the center
                 </p>
                 <h2 className="my-3 text-[26px] font-semibold tracking-tight">
                   {owner.title}
                 </h2>
-                <p className="mb-6 text-[12px] leading-[1.8] text-[#98acc2]">
+                <p className="mb-6 text-[14px] leading-[1.8] text-[#686457]">
                   Your people, projects, ideas, and tasks surround you. Choose a
                   category to explore that part of your world.
                 </p>
@@ -502,40 +485,32 @@ export function MindExplorer({ graph }: { graph: MindGraph }) {
                     <button
                       key={kind}
                       className={cn(
-                        "flex items-center gap-3 rounded-md px-2 py-3 text-left text-[12px] hover:bg-[#a7ceee10]",
+                        "flex items-center gap-3 rounded-md px-2 py-3 text-left text-[12px] hover:bg-[#286c7010]",
                         mindControlClass,
                       )}
                       onClick={() => selectNode(categoryId(kind))}
                     >
                       <i
                         className="size-2 rounded-full"
-                        style={{ background: KINDS[kind].color }}
+                        style={{ background: "#8A8476" }}
                       />
                       <span className="flex-1">{KINDS[kind].label}</span>
-                      <span className="text-[#93a7be]">
+                      <span className="text-[#686457]">
                         {counts.get(kind) || 0}
                       </span>
                       <ArrowUpRight size={14} />
                     </button>
                   ))}
                 </div>
-                <p className="mt-6 text-[11px] leading-[1.8] text-[#7891ab]">
-                  Colors identify each record’s category. Select a record to
+                <p className="mt-6 text-[14px] leading-[1.8] text-[#686457]">
+                  Shapes identify categories; color shows attention. Select a record to
                   highlight its saved relationships across the map.
                 </p>
               </div>
             )}
-          </aside>
+          </aside>}
         </div>
       </section>
-      <p className="mx-[3px] my-[13px] text-[11px] leading-[1.8] text-[#71849a]">
-        Your world surrounds you in 3D. Colors identify categories; highlighted
-        cross-links show saved relationships. Projects, tasks, goals, people,
-        companies, and all four Knowledge kinds are included.
-        {graph.limited
-          ? " This experiment shows up to 70 records of each type and connections from a bounded sample."
-          : ""}
-      </p>
     </div>
   );
 }

@@ -1,4 +1,5 @@
 "use client";
+import { AttentionEditor } from "../components/attention";
 
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
@@ -451,6 +452,7 @@ export function TaskDetailPanel({
       <div className="min-h-0 flex-1 space-y-6 overflow-y-auto p-5 desk:p-6">
         <div>
           <h2 className="m-0 text-xl leading-snug">{task.title}</h2>
+        <AttentionEditor kind="task" id={task._id} />
           {/* One meta row: status pills on the left, PR facts (link, status
               chip, branch) pushed right when space allows — on narrow panels
               the right group wraps to its own line and left-aligns. */}

@@ -59,6 +59,7 @@ const pushPermissionState = v.union(
 );
 
 const defaultImportanceRubric = [
+  "Classify actions separately from events and reference material. Tasks require a concrete owner action or decision; release dates, birthdays and availability notices are not deadlines. Store useful informational items as notes/references or appropriate calendar events. Do not invent follow-up obligations from announcements.",
   "Create or update Skippy knowledge when an item is actionable, deadline-bearing, financially/security relevant, relationship-building, tied to an active project/goal, or clearly useful for future recall.",
   "Ignore newsletters, one-time login codes, routine receipts, promotions, social notifications, and FYI updates unless they affect money, access, commitments, relationships, or current focus.",
   "Prefer direct accepted ingestion with source references when the harness can explain why the item clears this rubric.",

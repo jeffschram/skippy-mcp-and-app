@@ -1,17 +1,19 @@
 import type { MindGraph, MindKind } from "../../../../convex/mindGraphHelpers";
 export type Position = [number, number, number];
-// Mind uses a stronger palette so small nodes remain distinguishable on the dark canvas.
-export const KINDS: Record<MindKind, { label: string; color: string }> = {
-  project: { label: "Projects", color: "#4DA3FF" },
-  task: { label: "Tasks", color: "#20D5D2" },
-  goal: { label: "Goals", color: "#F4D447" },
-  person: { label: "People", color: "#F36AC4" },
-  company: { label: "Companies", color: "#F59A38" },
-  memory: { label: "Memories", color: "#AC78F5" },
-  note: { label: "Notes", color: "#75CE45" },
-  link: { label: "Links", color: "#EF6258" },
-  knowledgeObject: { label: "Knowledge objects", color: "#A6B5C8" },
+// Shared by the sculptures, filters, and record details.
+export type MindShape = "cube" | "pyramid" | "ring" | "sphere" | "cylinder" | "octahedron" | "slab" | "cross" | "capsule";
+export const KINDS: Record<MindKind, { label: string; color: string; shape: MindShape }> = {
+  project: { label: "Projects", color: "#286C70", shape: "cube" },
+  task: { label: "Tasks", color: "#657968", shape: "pyramid" },
+  goal: { label: "Goals", color: "#E0A126", shape: "ring" },
+  person: { label: "People", color: "#C7472C", shape: "sphere" },
+  company: { label: "Companies", color: "#AB3827", shape: "cylinder" },
+  memory: { label: "Memories", color: "#D16B2F", shape: "octahedron" },
+  note: { label: "Notes", color: "#91AAA2", shape: "slab" },
+  link: { label: "Links", color: "#30475B", shape: "cross" },
+  knowledgeObject: { label: "Knowledge objects", color: "#BE9136", shape: "capsule" },
 };
+export const MIND_OWNER_COLOR = "#F7E7C7";
 export function filterGraph(
   graph: MindGraph,
   enabled: Set<MindKind>,
