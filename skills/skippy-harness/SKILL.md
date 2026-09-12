@@ -144,3 +144,12 @@ Use plain confirmations:
 - "I skipped the newsletter because it did not contain a deadline, decision, relationship, or reusable context."
 
 Do not store source-derived items just because they exist. Store them only when the rubric decision is clear, or use the review fallback when the uncertainty itself is worth surfacing.
+
+
+## Action versus event classification
+
+Before saving a task, identify the concrete action or decision the owner needs to take. A date alone is not evidence of an obligation. Book releases, birthdays, availability notices, routine confirmations, and announcements are informational; save useful ones as notes/reference material with the date in the body, or use calendar events when appropriate. Skip noise. Do not invent a download, purchase, reply, or follow-up task from an announcement.
+
+Use `itemIntent: "action"`, `"event"`, or `"reference"` on candidate payloads to express the classification. Tasks explicitly marked event/reference/informational or `actionRequired: false` are rejected with routing guidance. Use `dueAt` only for an actual action deadline, with `dateKind: "deadline"` when known. `start` and `eventAt` never become task deadlines; `dateKind: "event"` preserves a date as context and removes its deadline meaning. An explicit action such as "Download the audiobook" may be a task, but its release date is not a deadline. Unclear actions belong in Review rather than the accepted task queue.
+
+When the owner confirms an action was already handled, complete the existing task rather than creating a follow-up. Retain the record and its provenance. Do not infer that all similarly named tasks have been completed.

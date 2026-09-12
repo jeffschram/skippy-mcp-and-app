@@ -269,7 +269,11 @@ function ChatComposer({
   onSend,
   onAddFiles,
   onTypingChange,
+  compact = false,
+  quiet = false,
 }: {
+  compact?: boolean;
+  quiet?: boolean;
   placeholder: string;
   avatarState: AvatarStateName;
   canAttach: boolean;
@@ -307,17 +311,18 @@ function ChatComposer({
   };
 
   return (
-    <div className="p-3 pb-6 desk:p-3 desk:px-[4vw] desk:pb-[2vw] desk:pt-[1vw]">
-      <div className="rounded-2xl border bg-card transition-colors focus-within:border-primary/60">
+    <div className={compact ? "p-2 sm:p-3" : "p-3 pb-6 desk:p-3 desk:px-[4vw] desk:pb-[2vw] desk:pt-[1vw]"}>
+      <div className={cn("rounded-2xl transition-colors", quiet ? "border-0 bg-transparent" : "border bg-card focus-within:border-primary/60")}>
         <textarea
           className="max-h-40 min-h-11 w-full resize-none bg-transparent px-3.5 pb-1 pt-3 text-[16px] outline-none"
           style={{ fieldSizing: "content" }}
           value={draft}
+          aria-label={placeholder}
           placeholder={placeholder}
           rows={1}
           onChange={(event) => updateDraft(event.target.value)}
           onKeyDown={(event) => {
-            if (event.key === "Enter" && !event.shiftKey) {
+            if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
               event.preventDefault();
               void send();
             }
@@ -415,7 +420,13 @@ function ChatSurface({
   taskMoments,
   runApprovals,
   onOpenTask,
+  collapsed = false,
+  mind = false,
+  onExpand,
 }: {
+  collapsed?: boolean;
+  mind?: boolean;
+  onExpand?: () => void;
   scope: ChatScope;
   className?: string | undefined;
   header?: ReactNode | undefined;
@@ -674,6 +685,7 @@ function ChatSurface({
     lastTimelineItem?.kind === "message"
       ? lastTimelineItem.message.status
       : lastTimelineItem?.moment.state,
+    collapsed,
     // Keep the view pinned to the bottom while live activity streams in.
     activeTurnEvents.length,
     activeTurnEvents[activeTurnEvents.length - 1]?.seq,
@@ -683,6 +695,7 @@ function ChatSurface({
   // message went through so the composer knows to restore the draft on failure.
   const send = async (content: string) => {
     if ((!content && !attachments.length) || sending || uploadingCount > 0) return false;
+    onExpand?.();
     setSending(true);
     // Sending is an explicit return to the conversation: re-pin so the sent
     // message (and the reply) scroll into view even if they were reading history.
@@ -701,6 +714,7 @@ function ChatSurface({
     } catch (error) {
       setAttachments(sentAttachments);
       showAvatarMoment("disagree", 1500);
+      toast("Could not send your message. Your draft has been restored.", "error");
       console.error("chat send failed", error);
       return false;
     } finally {
@@ -710,7 +724,7 @@ function ChatSurface({
 
   return (
     <section
-      className={cn("relative flex min-h-0 flex-col overflow-hidden bg-background", className)}
+      className={cn("relative flex min-h-0 flex-col overflow-hidden", !mind && "bg-background", className)}
       aria-label="Skippy chat"
       onDragOver={handleDragOver}
       onDragLeave={() => setDragOver(false)}
@@ -728,14 +742,14 @@ function ChatSurface({
           passes its own header (it needs the close affordance). */}
       {header}
 
-      <div className="relative flex min-h-0 flex-1">
+      <div className={collapsed ? "hidden" : "relative flex min-h-0 flex-1"}>
       <div className="flex flex-1 flex-col gap-3 overflow-y-auto px-4 py-5 desk:px-[4vw]" ref={messagesRef} onScroll={handleTranscriptScroll}>
         {timelineItems.length === 0 ? (
           <div className="mx-auto my-auto max-w-md text-center">
             <MessageCircle className="mx-auto mb-3 text-primary" size={24} aria-hidden />
-            <p className="mb-1 font-bold">Talk through this project</p>
+            <p className="mb-1 font-bold">{mind ? "What’s on your mind?" : "Talk through this project"}</p>
             <p className="m-0 text-sm text-muted-foreground">
-              Ask what comes next, update project details, or discuss work already in progress.
+              {mind ? "Explore a connection, capture a thought, or decide what to focus on next." : "Ask what comes next, update project details, or discuss work already in progress."}
             </p>
           </div>
         ) : (
@@ -819,7 +833,7 @@ function ChatSurface({
       ) : null}
       </div>
 
-      {pendingApprovals.length ? (
+      {!collapsed && pendingApprovals.length ? (
         // Conversational (chat-turn) approvals: same compact card and
         // decision path as run approvals, docked above the composer because
         // they gate the in-flight reply rather than a project task.
@@ -859,6 +873,8 @@ function ChatSurface({
       ) : null}
 
       <ChatComposer
+        compact={mind}
+        quiet={mind && collapsed}
         placeholder={scope.kind === "project" ? "Message about this project…" : `Message ${scope.label}…`}
         avatarState={avatarState}
         canAttach={canAttach}
@@ -899,12 +915,31 @@ export function ProjectChatWorkspace({
   );
 }
 
+function MindChat({ scope }: { scope: ChatScope }) {
+  const [open, setOpen] = useState(false);
+  return <ChatSurface
+    scope={scope}
+    mind
+    collapsed={!open}
+    onExpand={() => setOpen(true)}
+    className={cn(
+      "fixed bottom-16 left-1/2 z-[60] w-[calc(100%-24px)] -translate-x-1/2 rounded-[28px] border sm:bottom-6 sm:w-[min(920px,calc(100%-200px))]",
+      open ? "h-[min(720px,calc(100dvh-180px))] border-[#d8d0c0] bg-[#fffcf5] shadow-[0_16px_70px_#24333c26]" : "border-[#a9a394] bg-transparent shadow-none transition-colors focus-within:bg-[#fffcf5]",
+    )}
+    header={open ? <header className="flex min-h-14 items-center gap-2 border-b border-[#d8d0c0] px-5">
+      <MessageCircle size={17} aria-hidden /><span className="flex-1 text-sm font-semibold">Chat</span>
+      <button type="button" className="grid size-9 place-items-center rounded-full hover:bg-black/5" onClick={() => setOpen(false)} aria-label="Collapse chat"><X size={18} /></button>
+    </header> : <button type="button" onClick={() => setOpen(true)} aria-expanded={false} className="flex items-center gap-2 px-5 pt-3 text-xs text-muted-foreground hover:text-foreground"><MessageCircle size={14} /> Open conversation</button>}
+  />;
+}
+
 export function ChatPanel() {
   const pathname = usePathname() ?? "/";
   const { isAuthenticated } = useConvexAuth();
   const scope = useMemo(() => scopeForPathname(pathname), [pathname]);
   const [open, setOpen] = useState(false);
   if (!isAuthenticated || scope.kind === "project") return null;
+  if (pathname === "/mind") return <MindChat scope={scope} />;
   if (!open) {
     return (
       <button type="button" className="fixed bottom-3.5 right-3.5 z-[60] inline-flex items-center gap-2 rounded-full border bg-secondary px-3.5 py-2.5 font-bold shadow-md" onClick={() => setOpen(true)} aria-label="Open chat">

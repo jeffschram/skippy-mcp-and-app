@@ -11,6 +11,9 @@
 import type * as agenda from "../agenda.js";
 import type * as agentConfigs from "../agentConfigs.js";
 import type * as agentWorkbench from "../agentWorkbench.js";
+import type * as attention from "../attention.js";
+import type * as attentionModel from "../attentionModel.js";
+import type * as attentionValidators from "../attentionValidators.js";
 import type * as auth from "../auth.js";
 import type * as bootstrap from "../bootstrap.js";
 import type * as calendar from "../calendar.js";
@@ -50,6 +53,9 @@ declare const fullApi: ApiFromModules<{
   agenda: typeof agenda;
   agentConfigs: typeof agentConfigs;
   agentWorkbench: typeof agentWorkbench;
+  attention: typeof attention;
+  attentionModel: typeof attentionModel;
+  attentionValidators: typeof attentionValidators;
   auth: typeof auth;
   bootstrap: typeof bootstrap;
   calendar: typeof calendar;

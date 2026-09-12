@@ -1161,10 +1161,20 @@ export function normalizeAcceptedEntityPayload<T extends EntityType>(
         ...priorityFields(payload),
       }) as EntityInputMap[T];
     case "task": {
-      const description = withAdditionalContext(
+      // Source events and reference material must not acquire task deadlines.
+      // These are semantic declarations, not keyword guesses about the title.
+      const itemIntent = firstString(payload.itemIntent);
+      if (["event", "reference", "informational"].includes(itemIntent || "") || payload.actionRequired === false) {
+        throw new Error("This item is informational, not an actionable task. Save it as a note/reference (including its event date in the body), or a calendar event when appropriate. Create a separate task only for an explicit action the user needs to take.");
+      }
+      const dateKind = firstString(payload.dateKind);
+      if (dateKind && dateKind !== "deadline" && dateKind !== "event") throw new Error("dateKind must be deadline or event");
+      const eventDate = dateKind === "event" ? timestampValue(payload.eventAt, payload.start, payload.dueAt, payload.dueDate, payload.due) : timestampValue(payload.eventAt, payload.start);
+      const sourceDescription = withAdditionalContext(
         firstString(payload.description, payload.summary, payload.sourceSummary),
         payload,
       );
+      const description = eventDate === undefined ? sourceDescription : [sourceDescription, `Event date (not a deadline): ${new Date(eventDate).toISOString()}`].filter(Boolean).join("\n\n");
 
       return stripUndefinedValues({
         title: normalizeRequiredString(firstString(payload.title, payload.name, payload.summary) ?? "", "title"),
@@ -1178,7 +1188,7 @@ export function normalizeAcceptedEntityPayload<T extends EntityType>(
         // Harnesses routinely emit last year's date for recurring calendar
         // events and mis-yeared email dates; see repairStaleDueDate.
         dueAt: repairStaleDueDate(
-          timestampValue(payload.dueAt, payload.dueDate, payload.due, payload.start),
+          dateKind === "event" ? undefined : timestampValue(payload.dueAt, payload.dueDate, payload.due),
           now,
         ),
         completedAt: timestampValue(payload.completedAt),

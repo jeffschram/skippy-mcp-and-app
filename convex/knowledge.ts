@@ -1,3 +1,4 @@
+import { completedTaskAttention } from "./attentionModel";
 import {
   internalMutationGeneric,
   makeFunctionReference,
@@ -4756,6 +4757,7 @@ export const markTaskDoneForViewer = mutationGeneric({
     const now = Date.now();
     await ctx.db.patch(args.taskId, {
       status: "done",
+      attention: completedTaskAttention(task.attention, now),
       completedAt: now,
       executionState: "done",
       updatedAt: now,

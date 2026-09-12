@@ -1,4 +1,5 @@
 "use client";
+import { AttentionEditor } from "../components/attention";
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -481,6 +482,7 @@ function ProjectOverview({
           {project.kind === "code" ? "Code project" : "Project"}
         </p>
         <h1 className="text-[clamp(32px,4vw,52px)]">{project.title}</h1>
+        <AttentionEditor kind="project" id={project._id} />
         <p className="mb-0 mt-4 whitespace-pre-wrap text-[15px] leading-relaxed text-muted-foreground">
           {project.summary ||
             "No project description yet. Ask chat to add one."}

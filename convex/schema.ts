@@ -1,5 +1,6 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
+import { attentionMetadata } from "./attentionValidators";
 
 const processingState = v.union(
   v.literal("suggested"),
@@ -100,6 +101,7 @@ const knowledgeKind = v.union(
 );
 
 const processingMetadata = {
+  attention: v.optional(attentionMetadata),
   processingState,
   rejectedAt: v.optional(v.number()),
   rejectionReason: v.optional(v.string()),
@@ -339,7 +341,10 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_brain_state", ["brainInstanceId", "processingState"])
-    .index("by_brain_status", ["brainInstanceId", "status"]),
+    .index("by_brain_status", ["brainInstanceId", "status"])
+    .index("by_brain_attention", ["brainInstanceId", "processingState", "attention.override"])
+    .index("by_brain_review", ["brainInstanceId", "processingState", "attention.reviewAt"])
+    .index("by_brain_scheduled", ["brainInstanceId", "processingState", "attention.scheduledAt"]),
 
   projects: defineTable({
     brainInstanceId: v.id("brainInstances"),
@@ -388,7 +393,10 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_brain_state", ["brainInstanceId", "processingState"])
-    .index("by_brain_status", ["brainInstanceId", "status"]),
+    .index("by_brain_status", ["brainInstanceId", "status"])
+    .index("by_brain_attention", ["brainInstanceId", "processingState", "attention.override"])
+    .index("by_brain_review", ["brainInstanceId", "processingState", "attention.reviewAt"])
+    .index("by_brain_scheduled", ["brainInstanceId", "processingState", "attention.scheduledAt"]),
 
   tasks: defineTable({
     brainInstanceId: v.id("brainInstances"),
@@ -449,10 +457,14 @@ export default defineSchema({
     .index("by_brain_state", ["brainInstanceId", "processingState"])
     .index("by_brain_status", ["brainInstanceId", "status"])
     .index("by_brain_due", ["brainInstanceId", "dueAt"])
+    .index("by_brain_status_due", ["brainInstanceId", "processingState", "status", "dueAt"])
     .index("by_brain_commitment", ["brainInstanceId", "commitment"])
     .index("by_brain_execution_state", ["brainInstanceId", "executionState"])
     .index("by_brain_plan", ["brainInstanceId", "planRunId"])
-    .index("by_brain_phase", ["brainInstanceId", "phaseId"]),
+    .index("by_brain_phase", ["brainInstanceId", "phaseId"])
+    .index("by_brain_attention", ["brainInstanceId", "processingState", "attention.override"])
+    .index("by_brain_review", ["brainInstanceId", "processingState", "attention.reviewAt"])
+    .index("by_brain_scheduled", ["brainInstanceId", "processingState", "attention.scheduledAt"]),
 
   // Repeating life obligations: furnace filters, oil changes, renewals, trash
   // night, quarterly taxes. A task with a dueAt cannot express any of these,
@@ -545,7 +557,10 @@ export default defineSchema({
     ...processingMetadata,
     createdAt: v.number(),
     updatedAt: v.number(),
-  }).index("by_brain_state", ["brainInstanceId", "processingState"]),
+  }).index("by_brain_state", ["brainInstanceId", "processingState"])
+    .index("by_brain_attention", ["brainInstanceId", "processingState", "attention.override"])
+    .index("by_brain_review", ["brainInstanceId", "processingState", "attention.reviewAt"])
+    .index("by_brain_scheduled", ["brainInstanceId", "processingState", "attention.scheduledAt"]),
 
   companies: defineTable({
     brainInstanceId: v.id("brainInstances"),
@@ -567,7 +582,10 @@ export default defineSchema({
     ...processingMetadata,
     createdAt: v.number(),
     updatedAt: v.number(),
-  }).index("by_brain_state", ["brainInstanceId", "processingState"]),
+  }).index("by_brain_state", ["brainInstanceId", "processingState"])
+    .index("by_brain_attention", ["brainInstanceId", "processingState", "attention.override"])
+    .index("by_brain_review", ["brainInstanceId", "processingState", "attention.reviewAt"])
+    .index("by_brain_scheduled", ["brainInstanceId", "processingState", "attention.scheduledAt"]),
 
   // DEPRECATED (brain refactor step 4): retained read-only during the soak.
   links: defineTable({
@@ -650,7 +668,10 @@ export default defineSchema({
     .index("by_brain_kind_created", ["brainInstanceId", "kind", "createdAt"])
     .index("by_brain_kind_updated", ["brainInstanceId", "kind", "updatedAt"])
     .index("by_brain_kind_legacy_id", ["brainInstanceId", "kind", "legacyId"])
-    .index("by_brain_updated", ["brainInstanceId", "updatedAt"]),
+    .index("by_brain_updated", ["brainInstanceId", "updatedAt"])
+    .index("by_brain_attention", ["brainInstanceId", "processingState", "attention.override"])
+    .index("by_brain_review", ["brainInstanceId", "processingState", "attention.reviewAt"])
+    .index("by_brain_scheduled", ["brainInstanceId", "processingState", "attention.scheduledAt"]),
 
   // DEPRECATED (brain refactor step 4): retained read-only during the soak.
   // The unified `knowledge` table is canonical; deletion remains owner-gated.
@@ -791,7 +812,8 @@ export default defineSchema({
       ),
     ),
     createdAt: v.number(),
-  }).index("by_source", ["sourceRefId"]),
+  }).index("by_source", ["sourceRefId"])
+    .index("by_brain_entity", ["brainInstanceId", "entityRef.entityType", "entityRef.entityId"]),
 
   triageItems: defineTable({
     brainInstanceId: v.id("brainInstances"),

@@ -1,3 +1,4 @@
+import type { AttentionRecord } from "./attentionModel";
 /** Serializable, read-only graph model shared with the Mind experiment. */
 export type MindKind =
   | "goal"
@@ -9,7 +10,7 @@ export type MindKind =
   | "link"
   | "knowledgeObject"
   | "memory";
-export type MindNode = {
+export type MindNode = AttentionRecord & {
   id: string;
   kind: MindKind;
   title: string;
@@ -30,7 +31,7 @@ export type MindGraph = {
   edges: MindEdge[];
   limited: boolean;
 };
-export type MindRecord = {
+export type MindRecord = AttentionRecord & {
   _id: string;
   kind?: string;
   legacyId?: string;
@@ -101,6 +102,10 @@ export function buildMindGraph(
           ""
         ).slice(0, 1200),
         status: row.status || "",
+        ...(row.attention ? { attention: row.attention } : {}),
+        ...(row.dueAt !== undefined ? { dueAt: row.dueAt } : {}),
+        ...(row.commitment ? { commitment: row.commitment } : {}),
+        ...(row.executionState ? { executionState: row.executionState } : {}),
       });
     }
   const seen = new Set<string>();
@@ -140,4 +145,16 @@ export function mindOwner(
     title: user.displayName || person?.name || "You",
     ...(person ? { personId: person._id } : {}),
   };
+}
+
+/** Parent lookups must include projects outside the visible graph sample. */
+export async function excludeArchivedProjectTasks<T extends { _id: string }>(
+  tasks: T[],
+  loadParents: (taskId: string) => Promise<{ status?: string; processingState?: string }[]>,
+): Promise<T[]> {
+  const visible = await Promise.all(tasks.map(async task => {
+    const parents = await loadParents(String(task._id));
+    return !parents.some(parent => parent.status === "archived" || parent.processingState === "archived");
+  }));
+  return tasks.filter((_, index) => visible[index]);
 }

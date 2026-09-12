@@ -86,6 +86,7 @@ const skippyInstructions = [
   "When a user first connects or asks what Skippy can do, offer the skippy_intro prompt/message if the harness supports MCP prompts.",
   "When a user asks for slash commands or types slash-command shorthand, load skippy_slash_commands if the harness supports MCP prompts.",
   "Use the user's evolving importance rubric. Directly ingest source-backed objects when they are actionable, deadline-bearing, relationship-building, decision-relevant, financially/security relevant, or clearly useful later.",
+  "Classify before saving: a task requires a concrete action or decision for the owner, not merely a dated event. Book releases, birthdays, availability notices and routine confirmations are informational; use a note/reference, an actual calendar event when appropriate, or skip noise. Do not invent a download, purchase, reply or follow-up obligation from an announcement. dueAt is only an action deadline, never a release/start/event date. Use itemIntent: action/event/reference and dateKind: deadline/event in candidate payloads to make the distinction explicit. If action is uncertain, send it for review instead of creating an accepted task.",
   "For direct ingestion, call ingest_object and include a concise rubricDecision explaining why the item clears the importance bar.",
   "Use submit_candidate_object only as a legacy fallback when the harness cannot decide whether the item belongs in Skippy.",
   "Extract useful objects, not raw dumps. Prefer task, project, person, company, link, note, goal, or knowledgeObject records.",
@@ -1740,7 +1741,7 @@ export function createMcpServer(
       inputSchema: z.object({
         candidateEntityType: z.enum(entityTypeValues),
         candidatePayload: jsonObjectSchema.describe(
-          "Structured fields, e.g. task {title,status,dueDate}; person {name,email}; link {title,url,summary}; note {title,body}.",
+          "Structured fields: task {title,status,itemIntent:action,dateKind:deadline,dueAt} only for concrete actions; event/reference announcements use note {title,body} with the event date in the body. A task event date may use eventAt or dateKind:event; it is not an overdue deadline. person {name,email}; link {title,url,summary}.",
         ),
         rubricDecision: z
           .string()

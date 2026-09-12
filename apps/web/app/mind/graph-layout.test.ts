@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildMindGraph } from "../../../../convex/mindGraphHelpers";
+import { buildMindGraph, excludeArchivedProjectTasks } from "../../../../convex/mindGraphHelpers";
 import { filterGraph } from "./graph-layout";
 const graph = buildMindGraph(
   [
@@ -135,5 +135,26 @@ describe("Mind graph", () => {
       filterGraph(graph, new Set(["person"]), "", null).nodes.map((n) => n.id),
     ).toEqual(["person"]);
     expect(filterGraph(graph, new Set(), " ", null).nodes).toEqual([]);
+  });
+});
+
+
+describe("tasks of archived projects", () => {
+  it("checks parents outside the graph sample and preserves standalone and active-project tasks", async () => {
+    const tasks = ["archived", "processing-archived", "mixed", "active", "standalone"].map(_id => ({ _id, processingState: "accepted" }));
+    const parents: Record<string, { status?: string; processingState?: string }[]> = {
+      archived: [{ status: "archived" }],
+      "processing-archived": [{ processingState: "archived" }],
+      mixed: [{ status: "in_progress" }, { status: "archived" }],
+      active: [{ status: "completed" }],
+      standalone: [],
+    };
+    const visible = await excludeArchivedProjectTasks(tasks, async id => parents[id]!);
+    expect(visible.map(task => task._id)).toEqual(["active", "standalone"]);
+    const graph = buildMindGraph([{ kind: "task", rows: visible }], [{
+      _id: "hidden-edge", from: { entityId: "archived" }, to: { entityId: "active" }, type: "related_to",
+    }], false);
+    expect(graph.nodes.map(node => node.id)).toEqual(["active", "standalone"]);
+    expect(graph.edges).toEqual([]);
   });
 });
