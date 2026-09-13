@@ -46,6 +46,15 @@ export type MindRecord = AttentionRecord & {
   processingState?: string;
   reviewState?: string;
 };
+/** Terminal lifecycle states do not belong in Mind's active map or lists. */
+export const MIND_HIDDEN_STATUSES = [
+  "done", "completed", "cancelled", "archived", "achieved", "abandoned", "discarded", "rejected",
+] as const;
+export function isMindClosed(row: AttentionRecord): boolean {
+  return [row.status, row.processingState, row.reviewState, row.executionState]
+    .some(state => MIND_HIDDEN_STATUSES.some(hidden => hidden === state));
+}
+
 export function buildMindGraph(
   groups: { kind: MindKind; rows: MindRecord[] }[],
   relationships: {
@@ -60,11 +69,10 @@ export function buildMindGraph(
   const aliases = new Map<string, string>();
   for (const group of groups)
     for (const row of group.rows) {
-      // Exclude archives on either lifecycle axis before registering graph aliases.
+      // Exclude closed records before registering canonical or legacy aliases.
       if (
         row.processingState !== "accepted" ||
-        row.status === "archived" ||
-        row.reviewState === "archived"
+        isMindClosed(row)
       )
         continue;
       const kind = group.kind;
@@ -148,13 +156,13 @@ export function mindOwner(
 }
 
 /** Parent lookups must include projects outside the visible graph sample. */
-export async function excludeArchivedProjectTasks<T extends { _id: string }>(
+export async function excludeClosedProjectTasks<T extends { _id: string }>(
   tasks: T[],
-  loadParents: (taskId: string) => Promise<{ status?: string; processingState?: string }[]>,
+  loadParents: (taskId: string) => Promise<AttentionRecord[]>,
 ): Promise<T[]> {
   const visible = await Promise.all(tasks.map(async task => {
     const parents = await loadParents(String(task._id));
-    return !parents.some(parent => parent.status === "archived" || parent.processingState === "archived");
+    return !parents.some(isMindClosed);
   }));
   return tasks.filter((_, index) => visible[index]);
 }
