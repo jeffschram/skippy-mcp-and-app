@@ -1,7 +1,7 @@
 import { ATTENTION } from "../../../../convex/attentionModel";
 import { describe, expect, it } from "vitest";
 import { mindOwner, type MindGraph } from "../../../../convex/mindGraphHelpers";
-import { buildMyWorld, selectionIds, nodeVisualSize } from "./my-world";
+import { buildMyWorld, highlightedIds, selectionIds, nodeVisualSize } from "./my-world";
 import { KINDS, MIND_OWNER_COLOR, filterGraph } from "./graph-layout";
 const graph: MindGraph = {
   owner: { id: "owner:u", title: "Jeff Schram", personId: "self" },
@@ -106,9 +106,8 @@ describe("My world sphere", () => {
       expect(Math.min(...points.map((p) => p[axis]!))).toBeLessThan(-18);
       expect(Math.max(...points.map((p) => p[axis]!))).toBeGreaterThan(18);
     }
-    expect(
-      points.every((p) => Math.hypot(...p) >= 20 && Math.hypot(...p) <= 28),
-    ).toBe(true);
+    // Neighborhoods occupy the volume, not a fixed-radius outer shell.
+    expect(points.every(p => p.every(Number.isFinite) && Math.hypot(...p) > 6)).toBe(true);
     expect(
       world.nodes
         .filter((n) => n.role === "record")
@@ -196,5 +195,21 @@ describe("connection size tiers", () => {
     for (const [count, multiplier] of [[0, .8], [1, .8], [2, 1.3], [4, 1.3], [5, 2], [9, 2], [10, 3], [100, 3]] as const) {
       expect(nodeVisualSize({ ...node, connectionCount: count })).toBeCloseTo(1.35 * multiplier!);
     }
+  });
+});
+
+
+describe("search highlighting", () => {
+  it("uses matches instead of the prior selection without removing map records", () => {
+    const world = buildMyWorld(graph, graph, all);
+    const search = { ...world, searchIds: ["t1"] };
+    expect(highlightedIds(search, "p")).toEqual(new Set(["t1"]));
+    expect(search.nodes).toEqual(world.nodes);
+    expect(search.positions).toEqual(world.positions);
+  });
+  it("keeps no-match search distinct from normal selection", () => {
+    const world = buildMyWorld(graph, graph, all);
+    expect(highlightedIds({ ...world, searchIds: [] }, "p").size).toBe(0);
+    expect(highlightedIds(world, "p")).toEqual(selectionIds(world, "p"));
   });
 });

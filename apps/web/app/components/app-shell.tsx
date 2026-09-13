@@ -1,12 +1,14 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useRef } from "react";
 import { usePathname } from "next/navigation";
 import { useConvexAuth, useQuery } from "convex/react";
 import {
   Bot,
   Brain,
   Network,
+  Menu,
   Focus,
   CalendarDays,
   FolderKanban,
@@ -22,6 +24,7 @@ import { AuthStatus } from "../live-auth";
 import { ToastProvider } from "./widgets";
 import { ViewerContextTracker } from "./viewer-context-tracker";
 import { ChatPanel } from "./chat-panel";
+import { mindControlClass, mindToolClass } from "../mind/mind-classes";
 
 type NavProject = {
   _id: string;
@@ -207,6 +210,19 @@ function NavLinks({
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname() ?? "/";
   const projectDetail = /^\/projects\/[^/]+/.test(pathname);
+  const mindMenuRef = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    if (pathname !== "/mind") return;
+    const closeOutside = (event: PointerEvent) => {
+      const menu = mindMenuRef.current;
+      if (menu?.open && event.target instanceof Node && !menu.contains(event.target)) {
+        menu.open = false;
+      }
+    };
+    document.addEventListener("pointerdown", closeOutside, true);
+    return () => document.removeEventListener("pointerdown", closeOutside, true);
+  }, [pathname]);
+
   const { isAuthenticated } = useConvexAuth();
   const activeProjects = useQuery(api.projects.activeProjectsForViewer, isAuthenticated ? {} : "skip") as
     | NavProject[]
@@ -222,8 +238,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <ToastProvider>
       <ViewerContextTracker />
       <main className="h-dvh overflow-hidden bg-[var(--mind-canvas)]">{children}</main>
-      <details className="fixed bottom-5 left-5 z-[65] text-[var(--mind-ink)]">
-        <summary className="cursor-pointer list-none rounded-full border border-[var(--mind-border)] bg-[var(--mind-surface)]/95 px-4 py-2 text-sm shadow-sm focus-visible:outline-2">Menu</summary>
+      <details ref={mindMenuRef} className="fixed bottom-5 left-5 z-[65] text-[var(--mind-ink)]">
+        <summary className={cn(mindControlClass, mindToolClass, "list-none rounded-full [&::-webkit-details-marker]:hidden")}><Menu size={16} aria-hidden /> Menu</summary>
         <div className="absolute bottom-full left-0 mb-3 max-h-[75dvh] w-64 overflow-y-auto rounded-2xl border border-[var(--mind-border)] bg-[var(--mind-surface)] p-3 shadow-xl">
           <nav className="grid gap-1" aria-label="Primary"><NavLinks pathname={pathname} hubs={hubs} mobile badges={navBadges} /></nav>
           <div className="mt-3 border-t pt-3"><AuthStatus /></div>

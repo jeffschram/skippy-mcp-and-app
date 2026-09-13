@@ -4,23 +4,24 @@ import { AttentionEditor, useAttentionClock } from "../components/attention";
 import { ATTENTION, resolveAttention } from "../../../../convex/attentionModel";
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { Component, useEffect, useMemo, useState, type ReactNode } from "react";
-import { useQuery } from "convex/react";
+import { Component, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useMutation, useQuery } from "convex/react";
 import {
   ArrowUpRight,
   Focus,
   List,
   Network,
-  RotateCcw,
   Search,
-  SlidersHorizontal,
   X,
 } from "lucide-react";
 import { api } from "../../lib/skippy-api";
 import { useViewerReady } from "../hubs/use-viewer";
 import { LiveGate } from "../live-auth";
+import type { Id } from "../../../../convex/_generated/dataModel";
 import type { MindGraph, MindKind } from "../../../../convex/mindGraphHelpers";
-import { filterGraph, KINDS } from "./graph-layout";
+import { layoutKey, relationshipPositions } from "./relationship-layout";
+import { completionProject } from "./completion-context";
+import { filterGraph, KINDS, type Position } from "./graph-layout";
 import { buildMyWorld, categoryId, categoryKind } from "./my-world";
 import { cn } from "@/lib/utils";
 import {
@@ -73,17 +74,33 @@ export function MindContent() {
     </LiveGate>
   );
 }
-export function MindExplorer({ graph }: { graph: MindGraph }) {
+export function MindExplorer({ graph: liveGraph }: { graph: MindGraph }) {
+  const completeTask = useMutation(api.knowledge.markTaskDoneForViewer);
+  const [completion, setCompletion] = useState<{ graph: MindGraph; id: string; projectId: string | null; fading: boolean } | null>(null);
+  const graph = completion?.graph ?? liveGraph;
+  const previousSelection = useRef<string | null>(null);
+  const latestSelection = useRef<string | null>(null);
+
   const now = useAttentionClock();
   const [query, setQuery] = useState("");
   const [enabled, setEnabled] = useState(
     () => new Set(Object.keys(KINDS) as MindKind[]),
   );
   const [selected, setSelected] = useState<string | null>(null);
+  latestSelection.current = selected;
+  useEffect(() => {
+    if (!completion?.fading) return;
+    const timer = setTimeout(() => {
+      if (latestSelection.current === completion.id) {
+        setSelected(completion.projectId && liveGraph.nodes.some(n => n.id === completion.projectId) ? completion.projectId : null);
+        setReset(n => n + 1);
+      }
+      setCompletion(null);
+    }, window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 700);
+    return () => clearTimeout(timer);
+  }, [completion, liveGraph]);
   const [branch, setBranch] = useState<MindKind | null>(null);
   const [list, setList] = useState(false);
-  const [filters, setFilters] = useState(false);
-  const [attentionColors, setAttentionColors] = useState(false);
   useEffect(() => {
     const close = (event: KeyboardEvent) => { if (event.key === "Escape" && !(event.target instanceof HTMLElement && event.target.closest("input, textarea, select, form"))) { setSelected(null); setQuery(""); setBranch(null); setEnabled(new Set(Object.keys(KINDS) as MindKind[])); setReset(n => n + 1); } };
     window.addEventListener("keydown", close);
@@ -100,13 +117,24 @@ export function MindExplorer({ graph }: { graph: MindGraph }) {
     () => filterGraph(graph, shownKinds, query, null),
     [graph, shownKinds, query],
   );
-  const world = useMemo(
-    () => buildMyWorld(graph, visible, shownKinds, now, attentionColors ? "attention" : "category"),
-    [graph, visible, shownKinds, now, attentionColors],
-  );
+  const stablePositions = useRef(new Map<string, Position>());
+  const topology = layoutKey(graph);
+  const layout = useMemo(() => {
+    const next = relationshipPositions(graph, stablePositions.current);
+    stablePositions.current = next;
+    return next;
+  // Status, search, and selection changes must not run the layout solver.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [topology]);
+  const world = useMemo(() => {
+    const mapVisible = filterGraph(graph, shownKinds, "", null);
+    const next = buildMyWorld(graph, mapVisible, shownKinds, now, "category", layout);
+    return query.trim() ? { ...next, searchIds: visible.nodes.map(node => node.id) } : next;
+  }, [graph, visible, shownKinds, now, layout, query]);
   const node = graph.nodes.find((n) => n.id === selected);
   const records = visible.nodes.filter((n) => n.id !== owner.personId);
   function selectNode(id: string | null) {
+    previousSelection.current = selected;
     if (id === null) { clear(); return; }
     if (id === owner.id || id === owner.personId) {
       clear();
@@ -126,6 +154,19 @@ export function MindExplorer({ graph }: { graph: MindGraph }) {
       setEnabled(new Set(Object.keys(KINDS) as MindKind[]));
     }
     setSelected(id);
+  }
+  async function finishSelectedTask() {
+    if (!node || node.kind !== "task" || completion) return;
+    const projectId = completionProject(graph, node.id, previousSelection.current);
+    const pending = { graph, id: node.id, projectId, fading: false };
+    setCompletion(pending);
+    try {
+      await completeTask({ taskId: node.id as Id<"tasks"> });
+      setCompletion({ ...pending, fading: true });
+    } catch (error) {
+      setCompletion(null);
+      throw error;
+    }
   }
   const neighbors = useMemo(
     () =>
@@ -170,7 +211,7 @@ export function MindExplorer({ graph }: { graph: MindGraph }) {
               aria-label="Search mind"
               placeholder="Find a thought, person, project…"
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
+              onChange={(e) => { setQuery(e.target.value); setSelected(null); setBranch(null); }}
             />
             {query && (
               <button
@@ -182,85 +223,14 @@ export function MindExplorer({ graph }: { graph: MindGraph }) {
               </button>
             )}
           </label>
-          <details className="pointer-events-auto absolute right-5 top-0 sm:right-8">
-            <summary className={cn(mindControlClass, "cursor-pointer list-none rounded-full border border-[var(--mind-border)] bg-[var(--mind-surface)]/90 px-4 py-2.5 text-sm")}>Map options</summary>
-            <div className="absolute right-0 mt-3 flex max-h-[65dvh] w-[260px] overflow-y-auto flex-wrap gap-1 rounded-2xl border border-[var(--mind-border)] bg-[var(--mind-surface)] p-3 shadow-lg">
-            <button className={cn(mindControlClass, mindToolClass)} aria-expanded={filters} aria-controls="mind-filters" onClick={() => setFilters(!filters)}><SlidersHorizontal size={16} /> Types{enabled.size < Object.keys(KINDS).length ? ` (${enabled.size})` : ""}</button>
-            <button className={cn(mindControlClass, mindToolClass)} aria-pressed={attentionColors} onClick={() => setAttentionColors(value => !value)}>Show attention</button>
-            <details className="w-full">
-              <summary className={cn(mindControlClass, mindToolClass, "cursor-pointer")}>Colors</summary>
-              <div className="mt-2 grid w-full gap-3 rounded-xl border border-[var(--mind-border)] bg-[var(--mind-surface)] p-4 shadow-lg">
-                {Object.entries(attentionColors ? ATTENTION : KINDS).map(([status, meta]) => <span key={status} className="flex items-center gap-2 text-sm"><span className="h-3 w-3 rounded-full" style={{ background: meta.color }} />{meta.label}</span>)}
-                <p className="m-0 text-xs text-[var(--mind-muted)]">Coral halos mark items needing immediate attention.</p>
-                <Link href="/attention" className="text-sm underline">Review attention</Link>
-              </div>
-            </details>
-            <button className={cn(mindControlClass, mindToolClass)} onClick={() => setSelected(owner.id)}>Browse</button>
-            <button
-              className={cn(mindControlClass, mindToolClass)}
-              onClick={clear}
-            >
-              My world
+          <div className="pointer-events-auto absolute right-5 top-0 flex gap-2 sm:right-8" role="group" aria-label="Mind view">
+            <button type="button" className={cn(mindControlClass, mindToolClass, "rounded-full")} aria-pressed={list} onClick={() => setList(true)}>
+              <List size={16} /> List
             </button>
-            <button
-              className={cn(mindControlClass, mindToolClass)}
-              aria-pressed={!list}
-              onClick={() => setList(false)}
-            >
-              <Network size={16} />
-              3D
+            <button type="button" className={cn(mindControlClass, mindToolClass, "rounded-full")} aria-pressed={!list} onClick={() => setList(false)}>
+              <Network size={16} /> Map
             </button>
-            <button
-              className={cn(mindControlClass, mindToolClass)}
-              aria-pressed={list}
-              onClick={() => setList(true)}
-            >
-              <List size={16} />
-              List
-            </button>
-            <button
-              className={cn(mindControlClass, mindToolClass)}
-              onClick={() => setReset((n) => n + 1)}
-              title="Reset camera"
-            >
-              <RotateCcw size={16} />
-              <span className="max-[1050px]:hidden">Reset view</span>
-            </button>
-        {filters && <div
-          id="mind-filters"
-          className="flex w-full flex-wrap gap-1.5 border-t border-[var(--mind-border)] pt-3"
-          aria-label="Filter record types"
-        >
-          {(Object.keys(KINDS) as MindKind[]).map((kind) => (
-            <button
-              className={cn(
-                "flex items-center gap-1.5 rounded-md border border-transparent px-2 py-1.5 text-[12px] text-[var(--mind-muted)] opacity-40 aria-pressed:border-[var(--mind-border)] aria-pressed:bg-[color-mix(in_srgb,var(--mind-accent)_3.14%,transparent)] aria-pressed:opacity-100 max-[700px]:p-[5px] max-[700px]:text-[12px]",
-                mindControlClass,
-              )}
-              key={kind}
-              aria-pressed={enabled.has(kind)}
-              onClick={() =>
-                setEnabled((current) => {
-                  const next = new Set(current);
-                  if (next.has(kind)) next.delete(kind);
-                  else next.add(kind);
-                  return next;
-                })
-              }
-            >
-              <i
-                className="inline-block size-1.5 shrink-0 rounded-full"
-                style={{ background: KINDS[kind].color }}
-              />
-              {KINDS[kind].label}
-              <span className="ml-0.5 text-[12px] text-[var(--mind-placeholder)]">
-                {counts.get(kind) || 0}
-              </span>
-            </button>
-          ))}
-        </div>}
-            </div>
-          </details>
+          </div>
         </div>
 
         {branch && (
@@ -280,7 +250,7 @@ export function MindExplorer({ graph }: { graph: MindGraph }) {
         )}
         <div className="absolute inset-x-0 bottom-[210px] top-[130px] sm:bottom-[190px] sm:top-[95px]">
           <div className="relative h-full min-w-0 overflow-hidden">
-            {!records.length ? (
+            {!records.length && list ? (
               <div className={mindFallbackClass}>
                 <Search size={30} />
                 <h2 className="text-[20px] text-[var(--mind-ink)]">
@@ -332,7 +302,7 @@ export function MindExplorer({ graph }: { graph: MindGraph }) {
             ) : (
               <MapBoundary>
                 <Scene
-                  graph={world}
+                  graph={completion?.fading ? { ...world, exitingId: completion.id } : world}
                   selected={selected}
                   onSelect={selectNode}
                   reset={reset}
@@ -342,6 +312,7 @@ export function MindExplorer({ graph }: { graph: MindGraph }) {
             )}
 
           </div>
+          {!list && query.trim() && !records.length && <p role="status" className="pointer-events-none absolute inset-x-0 top-6 z-20 text-center text-sm text-[var(--mind-muted)]">No matching records</p>}
           {selected && <aside
             className="absolute bottom-4 right-4 top-4 z-30 w-[340px] max-w-[calc(100%-32px)] overflow-y-auto rounded-xl border border-[var(--mind-border)] bg-[color-mix(in_srgb,var(--mind-panel)_96.08%,transparent)] p-[22px] shadow-[0_12px_45px_color-mix(in_srgb,var(--mind-ink)_5.1%,transparent)] [scrollbar-width:thin] max-[700px]:left-3 max-[700px]:right-3 max-[700px]:top-auto max-[700px]:max-h-[55%] max-[700px]:w-auto max-[700px]:p-4"
             aria-label="Selected record"
@@ -410,7 +381,7 @@ export function MindExplorer({ graph }: { graph: MindGraph }) {
                   <span className="mt-[.5em] size-2.5 shrink-0 rounded-full" role="img" aria-label={ATTENTION[resolveAttention(node.kind, node, now).status].label} style={{ background: ATTENTION[resolveAttention(node.kind, node, now).status].color }} />
                   <span className="min-w-0">{node.title}</span>
                 </h2>
-                {node.kind === "task" && <AttentionEditor key={node.id} kind={node.kind} id={node.id} actionsOnly />}
+                {node.kind === "task" && <AttentionEditor key={node.id} kind={node.kind} id={node.id} actionsOnly onCompleteTask={finishSelectedTask} />}
                 {node.status && (
                   <span className="inline-block rounded bg-[color-mix(in_srgb,var(--mind-accent)_7.45%,transparent)] px-[7px] py-1 text-[12px] text-[var(--mind-accent)]">
                     {node.status.replaceAll("_", " ")}

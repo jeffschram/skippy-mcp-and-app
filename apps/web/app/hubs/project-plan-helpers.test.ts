@@ -1,3 +1,4 @@
+import { isPlanTaskVisible } from "./project-plan-helpers";
 import { describe, expect, it } from "vitest";
 import {
   completedPhaseSummary,
@@ -106,5 +107,19 @@ describe("partitionPhasesByCompletion", () => {
       activePhases: [],
       completedPhases: [],
     });
+  });
+});
+
+
+describe("Plan task visibility", () => {
+  it.each(["cancelled", "abandoned"])("excludes %s from either lifecycle field", state => {
+    expect(isPlanTaskVisible({ status: state, executionState: "ready" })).toBe(false);
+    expect(isPlanTaskVisible({ status: "todo", executionState: state })).toBe(false);
+    expect(isPlanTaskVisible({ status: state, executionState: "done" })).toBe(false);
+  });
+  it("keeps open work and completed history", () => {
+    for (const status of [undefined, "todo", "in_progress", "waiting", "done"]) {
+      expect(isPlanTaskVisible(status === undefined ? {} : { status })).toBe(true);
+    }
   });
 });

@@ -1,3 +1,4 @@
+import { relationshipPositions } from "./relationship-layout";
 import { ATTENTION, resolveAttention, type AttentionStatus } from "../../../../convex/attentionModel";
 import type { MindGraph, MindKind } from "../../../../convex/mindGraphHelpers";
 import { KINDS, MIND_OWNER_COLOR, type Position } from "./graph-layout";
@@ -17,6 +18,8 @@ export type WorldEdge = {
   role: "branch" | "relationship";
 };
 export type WorldGraph = {
+  exitingId?: string;
+  searchIds?: string[];
   nodes: WorldNode[];
   edges: WorldEdge[];
   positions: Map<string, Position>;
@@ -33,6 +36,7 @@ export function buildMyWorld(
   enabled: Set<MindKind>,
   now = 0,
   colorMode: "category" | "attention" = "category",
+  layout?: Map<string, Position>,
 ): WorldGraph {
   const owner = graph.owner || { id: "owner:self", title: "You" };
   const nodes: WorldNode[] = [
@@ -44,19 +48,10 @@ export function buildMyWorld(
   const records = graph.nodes
     .filter((n) => n.id !== owner.personId)
     .sort((a, b) => a.id.localeCompare(b.id));
-  // Fibonacci directions cover the whole sphere. A shallow variation in radius
-  // adds depth, while slots based on the full sample stay stable under filtering.
-  for (const [i, record] of records.entries()) {
+  const settled = layout ?? relationshipPositions(graph);
+  for (const record of records) {
     if (!visibleIds.has(record.id) || !enabled.has(record.kind)) continue;
-    const y = 1 - (2 * (i + 0.5)) / records.length;
-    const ring = Math.sqrt(1 - y * y);
-    const angle = i * Math.PI * (3 - Math.sqrt(5));
-    const radius = 24 + 4 * Math.sin(i * 1.618);
-    positions.set(record.id, [
-      Math.cos(angle) * ring * radius,
-      y * radius,
-      Math.sin(angle) * ring * radius,
-    ]);
+    positions.set(record.id, settled.get(record.id)!);
     const attentionStatus = resolveAttention(record.kind, record, now).status;
     nodes.push({
       id: record.id,
@@ -118,4 +113,9 @@ export function nodeVisualSize(node: WorldNode): number {
   const count = node.connectionCount ?? 0;
   const multiplier = count >= 10 ? 3 : count >= 5 ? 2 : count >= 2 ? 1.3 : .8;
   return (node.role === "owner" ? 3.1 : 1.35) * multiplier;
+}
+
+/** Search matches take precedence over a previous record selection. */
+export function highlightedIds(graph: WorldGraph, selected: string | null): Set<string> {
+  return graph.searchIds !== undefined ? new Set(graph.searchIds) : selectionIds(graph, selected);
 }
