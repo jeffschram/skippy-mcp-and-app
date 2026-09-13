@@ -70,6 +70,7 @@ import {
 import { LiveGate } from "../live-auth";
 import {
   completedPhaseSummary,
+  isPlanTaskVisible,
   partitionPhasesByCompletion,
   phaseCompletion,
 } from "./project-plan-helpers";
@@ -861,7 +862,10 @@ function ProjectPlan({
   const createPhase = useMutation(api.projects.createPhaseForViewer);
   const reorderTask = useMutation(api.projects.reorderTaskInPhaseForViewer);
   const toast = useToast();
-  const tasks: AnyRecord[] = board.tasks ?? [];
+  const tasks: AnyRecord[] = useMemo(
+    () => (board.tasks ?? []).filter(isPlanTaskVisible),
+    [board.tasks],
+  );
   const phases: AnyRecord[] = board.phases ?? [];
   const tasksForPhase = (phase: AnyRecord) =>
     tasks.filter((task) => task.phaseId === phase._id);

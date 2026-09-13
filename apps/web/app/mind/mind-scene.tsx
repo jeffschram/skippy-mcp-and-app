@@ -6,9 +6,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { cn } from "@/lib/utils";
 import { mindFallbackClass, mindControlClass } from "./mind-classes";
-import { selectionIds, nodeVisualSize, type WorldGraph } from "./my-world";
+import { highlightedIds, nodeVisualSize, type WorldGraph } from "./my-world";
 import { KINDS, type Position } from "./graph-layout";
 import { createMindGeometries } from "./mind-geometry";
+
+const ignorePointerHits: THREE.Mesh["raycast"] = () => {};
 
 type Props = {
   graph: WorldGraph;
@@ -29,7 +31,8 @@ function CameraReset({ reset, graph, focusKey, selected, reducedMotion, onMoving
     const center = new THREE.Vector3();
     let distance = 85 / Math.min(1, size.width / Math.max(1, size.height));
     const current = latestGraph.current;
-    const ids = selectionIds(current, selected);
+    const ids = highlightedIds(current, selected);
+    if (current.searchIds !== undefined && !ids.size) return;
     if (ids.size || focusKey) {
       const points = [...current.positions.entries()]
         .filter(([id]) => (!ids.size || ids.has(id)) && (!selected || selected === current.ownerId || id !== current.ownerId))
@@ -83,17 +86,22 @@ function CameraReset({ reset, graph, focusKey, selected, reducedMotion, onMoving
 
 function Network({ graph, selected, onSelect, reset, focusKey = "", rotating, reducedMotion, dark }: Props & { rotating: boolean; reducedMotion: boolean; dark: boolean }) {
   const [hovered, setHovered] = useState<string | null>(null);
+  const groups = useRef(new Map<string, THREE.Group>());
   const bodies = useRef(new Map<string, THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>>());
   const { invalidate } = useThree();
   const shapes = useMemo(createMindGeometries, []);
   useEffect(() => () => Object.values(shapes).forEach(g => g.dispose()), [shapes]);
   const [cameraMoving, setCameraMoving] = useState(false);
-  const connected = useMemo(() => selectionIds(graph, selected), [graph, selected]);
+  const connected = useMemo(() => highlightedIds(graph, selected), [graph, selected]);
+  const focused = graph.searchIds !== undefined || connected.size > 0;
+  useEffect(() => {
+    if (hovered && focused && !connected.has(hovered)) setHovered(null);
+  }, [connected, hovered, focused]);
   const colors = useMemo(() => new Map(graph.nodes.map(node => {
     const color = new THREE.Color(node.role === "owner" && dark ? "#253C43" : node.color);
-    if (selected && node.id !== selected && !connected.has(node.id)) color.lerp(new THREE.Color(dark ? "#788781" : "#b7b0a1"), .72);
+    if (focused && !connected.has(node.id)) color.lerp(new THREE.Color(dark ? "#788781" : "#b7b0a1"), .72);
     return [node.id, color];
-  })), [graph.nodes, selected, connected, dark]);
+  })), [graph.nodes, focused, connected, dark]);
   const lines = useMemo(() => {
     const branches: number[] = [], saved: number[] = [];
     const connections: { source: string; target: string; a: Position; b: Position; progress: number; reversed: boolean }[] = [];
@@ -123,21 +131,38 @@ function Network({ graph, selected, onSelect, reset, focusKey = "", rotating, re
     for (const node of graph.nodes) {
       const body = bodies.current.get(node.id);
       if (!body) continue;
+      const group = groups.current.get(node.id);
+      const destination = graph.positions.get(node.id);
+      if (group && destination) group.position.set(
+        ease(group.position.x, destination[0]), ease(group.position.y, destination[1]), ease(group.position.z, destination[2]),
+      );
       const target = colors.get(node.id)!;
       const color = body.material.color;
       color.setRGB(ease(color.r, target.r), ease(color.g, target.g), ease(color.b, target.b));
-      const ghost = connected.size > 0 && !connected.has(node.id);
-      body.material.opacity = ease(body.material.opacity, ghost ? .07 : 1);
+      const ghost = focused && !connected.has(node.id);
+      body.material.opacity = ease(body.material.opacity, node.id === graph.exitingId ? 0 : ghost ? .07 : 1);
       body.material.depthWrite = !ghost;
       body.renderOrder = ghost ? 1 : 2;
-      body.scale.setScalar(ease(body.scale.x, node.id === selected ? 1.12 : node.id === hovered ? 1.07 : 1));
+      body.scale.setScalar(ease(body.scale.x, node.id === selected ? 1.12 : !ghost && node.id === hovered ? 1.07 : 1));
+    }
+    let branchIndex = 0, savedIndex = 0;
+    for (const edge of graph.edges) {
+      const a = groups.current.get(edge.source)?.position, b = groups.current.get(edge.target)?.position;
+      if (!a || !b) continue;
+      const geometry = edge.role === "branch" ? lines.branches : lines.saved;
+      const index = edge.role === "branch" ? branchIndex++ : savedIndex++;
+      const attribute = geometry.getAttribute("position") as THREE.BufferAttribute;
+      attribute.setXYZ(index * 2, a.x, a.y, a.z); attribute.setXYZ(index * 2 + 1, b.x, b.y, b.z);
+      attribute.needsUpdate = true;
     }
     const attr = lines.highlight.getAttribute("position") as THREE.BufferAttribute;
     for (const [i, link] of lines.connections.entries()) {
-      const active = link.source === selected || link.target === selected;
+      const active = (link.source === selected || link.target === selected) && link.source !== graph.exitingId && link.target !== graph.exitingId;
       if (active) link.reversed = link.target === selected;
       link.progress = ease(link.progress, active ? 1 : 0);
-      const a = link.reversed ? link.b : link.a, b = link.reversed ? link.a : link.b;
+      const source = groups.current.get(link.source)?.position.toArray() ?? link.a;
+      const target = groups.current.get(link.target)?.position.toArray() ?? link.b;
+      const a = (link.reversed ? target : source) as Position, b = (link.reversed ? source : target) as Position;
       attr.setXYZ(i * 2, ...a);
       attr.setXYZ(i * 2 + 1, THREE.MathUtils.lerp(a[0], b[0], link.progress), THREE.MathUtils.lerp(a[1], b[1], link.progress), THREE.MathUtils.lerp(a[2], b[2], link.progress));
     }
@@ -151,36 +176,48 @@ function Network({ graph, selected, onSelect, reset, focusKey = "", rotating, re
     <hemisphereLight args={["#fff9ed", "#9c927e", .9]} />
     <directionalLight position={[12, 25, 30]} intensity={2.2} color="#fff4e5" />
     <directionalLight position={[-20, 8, 5]} intensity={.7} color="#e1efee" />
-    <lineSegments geometry={lines.branches}>
-      <lineBasicMaterial color={dark ? "#a8b9b1" : "#746c5e"} transparent opacity={selected ? .025 : .045} depthWrite={false} />
+    <lineSegments geometry={lines.branches} frustumCulled={false}>
+      <lineBasicMaterial color={dark ? "#a8b9b1" : "#746c5e"} transparent opacity={focused ? .025 : .045} depthWrite={false} />
     </lineSegments>
-    <lineSegments geometry={lines.saved}>
-      <lineBasicMaterial color={dark ? "#a8b9b1" : "#746c5e"} transparent opacity={selected ? .035 : .16} depthWrite={false} />
+    <lineSegments geometry={lines.saved} frustumCulled={false}>
+      <lineBasicMaterial color={dark ? "#a8b9b1" : "#746c5e"} transparent opacity={focused ? .035 : .16} depthWrite={false} />
     </lineSegments>
     <lineSegments geometry={lines.highlight} frustumCulled={false}>
       <lineBasicMaterial color={dark ? "#a0dad3" : "#28585b"} transparent opacity={.85} depthWrite={false} />
     </lineSegments>
     {graph.nodes.map((node) => {
-      const active = node.id === selected, hover = node.id === hovered;
+      const ghost = focused && !connected.has(node.id);
+      const exiting = node.id === graph.exitingId;
+      const active = node.id === selected, hover = !ghost && !exiting && node.id === hovered;
       const size = nodeVisualSize(node);
       const shape = node.kind ? KINDS[node.kind].shape : "owner";
-      return <group key={node.id} position={graph.positions.get(node.id)!}>
+      const labelColor = node.role === "owner" && dark ? "#253C43" : node.color;
+      const labelRgb = new THREE.Color(labelColor);
+      // Three converts sRGB hex colors to linear channels for luminance.
+      const luminance = .2126 * labelRgb.r + .7152 * labelRgb.g + .0722 * labelRgb.b;
+      const labelText = luminance > .179 ? "#000000" : "#FFFFFF";
+      return <group key={node.id} ref={group => {
+        if (group) {
+          if (!("mindPositioned" in group.userData)) { group.position.set(...graph.positions.get(node.id)!); group.userData.mindPositioned = true; }
+          groups.current.set(node.id, group);
+        } else groups.current.delete(node.id);
+      }}>
         <group scale={size} rotation={[.12, .25 + (Array.from(node.id).reduce((sum, ch) => sum + ch.charCodeAt(0), 0) % 5) * .13, shape === "ring" ? -.2 : .08]}>
-          {node.attentionStatus === "immediate" && <mesh geometry={shapes[shape]} scale={1.17} raycast={() => {}}>
-            <meshBasicMaterial color="#FF886E" side={THREE.BackSide} transparent opacity={selected && !connected.has(node.id) ? .04 : .65} depthWrite={false} toneMapped={false} />
+          {!exiting && node.attentionStatus === "immediate" && <mesh geometry={shapes[shape]} scale={1.17} raycast={() => {}}>
+            <meshBasicMaterial color="#FF886E" side={THREE.BackSide} transparent opacity={ghost ? .04 : .65} depthWrite={false} toneMapped={false} />
           </mesh>}
-          <mesh geometry={shapes[shape]} ref={body => { if (body) bodies.current.set(node.id, body as THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>); else bodies.current.delete(node.id); }}
+          <mesh geometry={shapes[shape]} raycast={ghost || exiting ? ignorePointerHits : THREE.Mesh.prototype.raycast} ref={body => { if (body) bodies.current.set(node.id, body as THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>); else bodies.current.delete(node.id); }}
             onClick={e => { e.stopPropagation(); if (e.delta < 5) onSelect(node.id); }}
             onPointerOver={e => { e.stopPropagation(); setHovered(node.id); }}
             onPointerOut={() => setHovered(null)}>
-            <meshStandardMaterial color={node.role === "owner" && dark ? "#253C43" : node.color} roughness={node.role === "owner" ? .5 : .72} metalness={0}
+            <meshStandardMaterial fog={graph.searchIds === undefined || ghost} color={node.role === "owner" && dark ? "#253C43" : node.color} roughness={node.role === "owner" ? .5 : .72} metalness={0}
               emissive={node.role === "owner" ? (dark ? "#31565E" : "#FFE4B0") : "#000000"} emissiveIntensity={node.role === "owner" ? (dark ? .12 : .3) : 0} transparent />
           </mesh>
         </group>
-        {(active || hover) && <Html center position={[0, -size * 1.15, 0]} className="pointer-events-none" zIndexRange={[20, 0]}>
-          <span className={cn("block max-w-[240px] select-none rounded-lg bg-[var(--mind-surface)]/95 px-3 py-2 text-[14px] text-[var(--mind-ink)] shadow-sm", active && "border border-[var(--mind-accent)]/20")}>
-            <span className="block truncate font-serif text-[18px]">{node.title}</span>
-            <span className="mt-1 block text-[12px] text-[var(--mind-muted)]">{node.kind ? KINDS[node.kind].label : "You"}{node.attentionStatus === "immediate" ? " · Needs immediate attention" : ""}</span>
+        {!exiting && (active || hover) && <Html center position={[0, -size * 1.15, 0]} className="pointer-events-none" zIndexRange={[20, 0]}>
+          <span className="block max-w-[240px] select-none rounded-lg px-3 py-2 text-[14px] shadow-sm" style={{ backgroundColor: labelColor, color: labelText }}>
+            <span className="block truncate font-sans text-[15px] font-normal leading-snug">{node.title}</span>
+            {node.attentionStatus === "immediate" && <span className="mt-1 block text-[12px]">Needs immediate attention</span>}
           </span>
         </Html>}
       </group>;

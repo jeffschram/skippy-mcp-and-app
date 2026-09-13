@@ -76,7 +76,7 @@ function AttentionForm({ kind, id, initial, onClose }: { kind: AttentionKind; id
     <div className="flex gap-3"><button className="rounded-md bg-teal-800 px-3 py-2 text-sm text-white disabled:opacity-50" disabled={busy}>{busy ? "Saving…" : "Save attention"}</button><button type="button" onClick={onClose} disabled={busy} className="text-sm">Cancel</button></div>
   </form>;
 }
-function AttentionEditorContent({ kind, id, actionsOnly = false }: { kind: AttentionKind; id: string; actionsOnly?: boolean }) {
+function AttentionEditorContent({ kind, id, actionsOnly = false, onCompleteTask }: { kind: AttentionKind; id: string; actionsOnly?: boolean; onCompleteTask?: () => Promise<void> }) {
   const ready = useViewerReady();
   const now = useAttentionClock();
   const result = useQuery(api.attention.getForViewer, ready && now ? { kind, id, now } : "skip");
@@ -97,7 +97,7 @@ function AttentionEditorContent({ kind, id, actionsOnly = false }: { kind: Atten
         {(item.sources || []).map(source => <a key={source.href} href={source.href} target="_blank" rel="noopener noreferrer" className="text-sm underline underline-offset-2">{source.label} ↗</a>)}
         {item.taskStatus === "done" ? <span className="text-sm">✓ Done</span> : item.taskStatus !== "cancelled" && <button type="button" disabled={completing} className="rounded-md bg-teal-800 px-3 py-1.5 text-sm text-white disabled:opacity-50" onClick={async () => {
           setCompleting(true); setCompleteError("");
-          try { await complete({ taskId: id as Id<"tasks"> }); setOpen(false); } catch (error) { setCompleteError(error instanceof Error ? error.message : "Could not complete task"); } finally { setCompleting(false); }
+          try { await (onCompleteTask ? onCompleteTask() : complete({ taskId: id as Id<"tasks"> })); setOpen(false); } catch (error) { setCompleteError(error instanceof Error ? error.message : "Could not complete task"); } finally { setCompleting(false); }
         }}>{completing ? "Saving…" : "✓ Done"}</button>}
       </div>
       {!item.sources?.length && <p className="m-0 text-xs opacity-70">No source link saved for this task.</p>}
@@ -131,7 +131,7 @@ export class AttentionBoundary extends Component<{ children: ReactNode }, { fail
     </div> : this.props.children;
   }
 }
-export function AttentionEditor(props: { kind: AttentionKind; id: string; actionsOnly?: boolean }) {
+export function AttentionEditor(props: { kind: AttentionKind; id: string; actionsOnly?: boolean; onCompleteTask?: () => Promise<void> }) {
   return <AttentionBoundary key={`${props.kind}:${props.id}`}><AttentionEditorContent {...props} /></AttentionBoundary>;
 }
 export function AttentionFocus(props: { expanded?: boolean }) {

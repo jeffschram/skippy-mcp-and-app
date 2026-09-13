@@ -8,6 +8,14 @@ export type PhaseTask = {
   status?: string;
 };
 
+/** Cancellation can be recorded on either lifecycle field. Keep completed
+ * work in the Plan history, but omit work that was explicitly dropped. */
+export function isPlanTaskVisible(task: PhaseTask): boolean {
+  return ![task.status, task.executionState].some(
+    state => state === "cancelled" || state === "abandoned",
+  );
+}
+
 export type PhaseCompletion = "empty" | "active" | "complete";
 
 // Mirrors displayState in project-board.tsx: either lifecycle field can
