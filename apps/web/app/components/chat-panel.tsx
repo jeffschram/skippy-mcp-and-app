@@ -924,9 +924,9 @@ function MindChat({ scope }: { scope: ChatScope }) {
     onExpand={() => setOpen(true)}
     className={cn(
       "fixed bottom-16 left-1/2 z-[60] w-[calc(100%-24px)] -translate-x-1/2 rounded-[28px] border sm:bottom-6 sm:w-[min(920px,calc(100%-200px))]",
-      open ? "h-[min(720px,calc(100dvh-180px))] border-[#d8d0c0] bg-[#fffcf5] shadow-[0_16px_70px_#24333c26]" : "border-[#a9a394] bg-transparent shadow-none transition-colors focus-within:bg-[#fffcf5]",
+      open ? "h-[min(720px,calc(100dvh-180px))] border-[var(--mind-border)] bg-[var(--mind-chat)] shadow-[0_16px_70px_color-mix(in_srgb,var(--mind-ink)_14.9%,transparent)]" : "border-[var(--mind-outline)] bg-transparent shadow-none transition-colors focus-within:bg-[var(--mind-chat)]",
     )}
-    header={open ? <header className="flex min-h-14 items-center gap-2 border-b border-[#d8d0c0] px-5">
+    header={open ? <header className="flex min-h-14 items-center gap-2 border-b border-[var(--mind-border)] px-5">
       <MessageCircle size={17} aria-hidden /><span className="flex-1 text-sm font-semibold">Chat</span>
       <button type="button" className="grid size-9 place-items-center rounded-full hover:bg-black/5" onClick={() => setOpen(false)} aria-label="Collapse chat"><X size={18} /></button>
     </header> : <button type="button" onClick={() => setOpen(true)} aria-expanded={false} className="flex items-center gap-2 px-5 pt-3 text-xs text-muted-foreground hover:text-foreground"><MessageCircle size={14} /> Open conversation</button>}

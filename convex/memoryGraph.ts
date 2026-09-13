@@ -1,7 +1,7 @@
 import { queryGeneric } from "convex/server";
 import { v } from "convex/values";
 import { requireOwnedBrain } from "./auth";
-import { buildMindGraph, mindOwner, excludeArchivedProjectTasks } from "./mindGraphHelpers";
+import { buildMindGraph, mindOwner, excludeClosedProjectTasks, MIND_HIDDEN_STATUSES } from "./mindGraphHelpers";
 
 const entityType = v.union(
   v.literal("goal"),
@@ -350,19 +350,19 @@ export const mindMapForViewer = queryGeneric({
     const [entityGroups, knowledgeGroups, relationships] = await Promise.all([
       Promise.all(tables.map(table => ctx.db.query(table)
         .withIndex("by_brain_state", (q: any) => q.eq("brainInstanceId", brain._id).eq("processingState", "accepted"))
-        .filter(q => q.neq(q.field("status"), "archived"))
+        .filter(q => q.and(...["status", "reviewState", "executionState"].flatMap(field => MIND_HIDDEN_STATUSES.map(status => q.neq(q.field(field), status)))))
         .order("desc").take(perType + 1))),
       Promise.all(knowledgeKinds.map(kind => ctx.db.query("knowledge")
         .withIndex("by_brain_kind_state", (q: any) => q.eq("brainInstanceId", brain._id).eq("kind", kind).eq("processingState", "accepted"))
-        .filter(q => q.and(q.neq(q.field("status"), "archived"), q.neq(q.field("reviewState"), "archived")))
+        .filter(q => q.and(...["status", "reviewState"].flatMap(field => MIND_HIDDEN_STATUSES.map(status => q.neq(q.field(field), status)))))
         .order("desc").take(perType + 1))),
       ctx.db.query("relationships").withIndex("by_brain_type", q => q.eq("brainInstanceId", brain._id)).take(2501),
     ]);
     // Use endpoint lookups, not the capped display edge sample: a task's parent
-    // may be archived (and therefore absent from the displayed projects).
+    // may be closed (and therefore absent from the displayed projects).
     let parentLookupsLimited = false;
     const projectCache = new Map<string, Promise<{ brainInstanceId: string; status?: string; processingState?: string } | null>>();
-    const visibleTasks = await excludeArchivedProjectTasks(entityGroups[2]!, async taskId => {
+    const visibleTasks = await excludeClosedProjectTasks(entityGroups[2]!, async taskId => {
       const links = await ctx.db.query("relationships")
         .withIndex("by_brain_from", (q: any) => q.eq("brainInstanceId", brain._id).eq("from.entityId", taskId))
         .take(257);

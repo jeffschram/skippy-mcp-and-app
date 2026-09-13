@@ -81,7 +81,7 @@ function CameraReset({ reset, graph, focusKey, selected, reducedMotion, onMoving
   return null;
 }
 
-function Network({ graph, selected, onSelect, reset, focusKey = "", rotating, reducedMotion }: Props & { rotating: boolean; reducedMotion: boolean }) {
+function Network({ graph, selected, onSelect, reset, focusKey = "", rotating, reducedMotion, dark }: Props & { rotating: boolean; reducedMotion: boolean; dark: boolean }) {
   const [hovered, setHovered] = useState<string | null>(null);
   const bodies = useRef(new Map<string, THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>>());
   const { invalidate } = useThree();
@@ -90,10 +90,10 @@ function Network({ graph, selected, onSelect, reset, focusKey = "", rotating, re
   const [cameraMoving, setCameraMoving] = useState(false);
   const connected = useMemo(() => selectionIds(graph, selected), [graph, selected]);
   const colors = useMemo(() => new Map(graph.nodes.map(node => {
-    const color = new THREE.Color(node.color);
-    if (selected && node.id !== selected && !connected.has(node.id)) color.lerp(new THREE.Color("#b7b0a1"), .72);
+    const color = new THREE.Color(node.role === "owner" && dark ? "#253C43" : node.color);
+    if (selected && node.id !== selected && !connected.has(node.id)) color.lerp(new THREE.Color(dark ? "#788781" : "#b7b0a1"), .72);
     return [node.id, color];
-  })), [graph.nodes, selected, connected]);
+  })), [graph.nodes, selected, connected, dark]);
   const lines = useMemo(() => {
     const branches: number[] = [], saved: number[] = [];
     const connections: { source: string; target: string; a: Position; b: Position; progress: number; reversed: boolean }[] = [];
@@ -145,20 +145,20 @@ function Network({ graph, selected, onSelect, reset, focusKey = "", rotating, re
     if (moving) invalidate();
   });
   return <>
-    <color attach="background" args={["#f0e9dc"]} />
-    <fog attach="fog" args={["#f0e9dc", 64, 150]} />
+    <color attach="background" args={[dark ? "#171a1b" : "#f0e9dc"]} />
+    <fog attach="fog" args={[dark ? "#171a1b" : "#f0e9dc", 64, 150]} />
     <ambientLight intensity={.7} />
     <hemisphereLight args={["#fff9ed", "#9c927e", .9]} />
     <directionalLight position={[12, 25, 30]} intensity={2.2} color="#fff4e5" />
     <directionalLight position={[-20, 8, 5]} intensity={.7} color="#e1efee" />
     <lineSegments geometry={lines.branches}>
-      <lineBasicMaterial color="#746c5e" transparent opacity={selected ? .025 : .045} depthWrite={false} />
+      <lineBasicMaterial color={dark ? "#a8b9b1" : "#746c5e"} transparent opacity={selected ? .025 : .045} depthWrite={false} />
     </lineSegments>
     <lineSegments geometry={lines.saved}>
-      <lineBasicMaterial color="#746c5e" transparent opacity={selected ? .035 : .16} depthWrite={false} />
+      <lineBasicMaterial color={dark ? "#a8b9b1" : "#746c5e"} transparent opacity={selected ? .035 : .16} depthWrite={false} />
     </lineSegments>
     <lineSegments geometry={lines.highlight} frustumCulled={false}>
-      <lineBasicMaterial color="#28585b" transparent opacity={.85} depthWrite={false} />
+      <lineBasicMaterial color={dark ? "#a0dad3" : "#28585b"} transparent opacity={.85} depthWrite={false} />
     </lineSegments>
     {graph.nodes.map((node) => {
       const active = node.id === selected, hover = node.id === hovered;
@@ -166,18 +166,21 @@ function Network({ graph, selected, onSelect, reset, focusKey = "", rotating, re
       const shape = node.kind ? KINDS[node.kind].shape : "owner";
       return <group key={node.id} position={graph.positions.get(node.id)!}>
         <group scale={size} rotation={[.12, .25 + (Array.from(node.id).reduce((sum, ch) => sum + ch.charCodeAt(0), 0) % 5) * .13, shape === "ring" ? -.2 : .08]}>
+          {node.attentionStatus === "immediate" && <mesh geometry={shapes[shape]} scale={1.17} raycast={() => {}}>
+            <meshBasicMaterial color="#FF886E" side={THREE.BackSide} transparent opacity={selected && !connected.has(node.id) ? .04 : .65} depthWrite={false} toneMapped={false} />
+          </mesh>}
           <mesh geometry={shapes[shape]} ref={body => { if (body) bodies.current.set(node.id, body as THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>); else bodies.current.delete(node.id); }}
             onClick={e => { e.stopPropagation(); if (e.delta < 5) onSelect(node.id); }}
             onPointerOver={e => { e.stopPropagation(); setHovered(node.id); }}
             onPointerOut={() => setHovered(null)}>
-            <meshStandardMaterial color={node.color} roughness={node.role === "owner" ? .5 : .72} metalness={0}
-              emissive={node.role === "owner" ? "#FFE4B0" : "#000000"} emissiveIntensity={node.role === "owner" ? .3 : 0} transparent />
+            <meshStandardMaterial color={node.role === "owner" && dark ? "#253C43" : node.color} roughness={node.role === "owner" ? .5 : .72} metalness={0}
+              emissive={node.role === "owner" ? (dark ? "#31565E" : "#FFE4B0") : "#000000"} emissiveIntensity={node.role === "owner" ? (dark ? .12 : .3) : 0} transparent />
           </mesh>
         </group>
         {(active || hover) && <Html center position={[0, -size * 1.15, 0]} className="pointer-events-none" zIndexRange={[20, 0]}>
-          <span className={cn("block max-w-[240px] select-none rounded-lg bg-[#faf6eced] px-3 py-2 text-[14px] text-[#24333c] shadow-sm", active && "border border-[#286c7033]")}>
+          <span className={cn("block max-w-[240px] select-none rounded-lg bg-[var(--mind-surface)]/95 px-3 py-2 text-[14px] text-[var(--mind-ink)] shadow-sm", active && "border border-[var(--mind-accent)]/20")}>
             <span className="block truncate font-serif text-[18px]">{node.title}</span>
-            <span className="mt-1 block text-[12px] text-[#686457]">{node.kind ? KINDS[node.kind].label : "You"}</span>
+            <span className="mt-1 block text-[12px] text-[var(--mind-muted)]">{node.kind ? KINDS[node.kind].label : "You"}{node.attentionStatus === "immediate" ? " · Needs immediate attention" : ""}</span>
           </span>
         </Html>}
       </group>;
@@ -188,6 +191,14 @@ function Network({ graph, selected, onSelect, reset, focusKey = "", rotating, re
 }
 
 export default function MindScene(props: Props) {
+  const [dark, setDark] = useState(false);
+  useEffect(() => {
+    const preference = window.matchMedia("(prefers-color-scheme: dark)");
+    const update = () => setDark(preference.matches);
+    update();
+    preference.addEventListener("change", update);
+    return () => preference.removeEventListener("change", update);
+  }, []);
   const [rotating, setRotating] = useState(false);
   const [reducedMotion, setReducedMotion] = useState(true);
   useEffect(() => {
@@ -200,7 +211,7 @@ export default function MindScene(props: Props) {
     <Canvas className="h-full" frameloop="demand" dpr={[1, 1.5]} camera={{ position: [3, 3, 85], fov: 48, near: .1, far: 600 }} gl={{ antialias: true, alpha: false }}
       onPointerMissed={(event) => { if (event.button === 0) props.onSelect(null); }}
       fallback={<p className={mindFallbackClass}>Use List view to explore your records without the 3D canvas.</p>}>
-      <Network {...props} rotating={rotating} reducedMotion={reducedMotion} />
+      <Network {...props} rotating={rotating} reducedMotion={reducedMotion} dark={dark} />
     </Canvas>
 
   </div>;

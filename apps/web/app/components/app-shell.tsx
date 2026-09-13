@@ -221,10 +221,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   if (pathname === "/mind") return (
     <ToastProvider>
       <ViewerContextTracker />
-      <main className="h-dvh overflow-hidden bg-[#f0e9dc]">{children}</main>
-      <details className="fixed bottom-5 left-5 z-[65] text-[#24333c]">
-        <summary className="cursor-pointer list-none rounded-full border border-[#d8d0c0] bg-[#faf6ec]/95 px-4 py-2 text-sm shadow-sm focus-visible:outline-2">Menu</summary>
-        <div className="absolute bottom-full left-0 mb-3 max-h-[75dvh] w-64 overflow-y-auto rounded-2xl border border-[#d8d0c0] bg-[#faf6ec] p-3 shadow-xl">
+      <main className="h-dvh overflow-hidden bg-[var(--mind-canvas)]">{children}</main>
+      <details className="fixed bottom-5 left-5 z-[65] text-[var(--mind-ink)]">
+        <summary className="cursor-pointer list-none rounded-full border border-[var(--mind-border)] bg-[var(--mind-surface)]/95 px-4 py-2 text-sm shadow-sm focus-visible:outline-2">Menu</summary>
+        <div className="absolute bottom-full left-0 mb-3 max-h-[75dvh] w-64 overflow-y-auto rounded-2xl border border-[var(--mind-border)] bg-[var(--mind-surface)] p-3 shadow-xl">
           <nav className="grid gap-1" aria-label="Primary"><NavLinks pathname={pathname} hubs={hubs} mobile badges={navBadges} /></nav>
           <div className="mt-3 border-t pt-3"><AuthStatus /></div>
         </div>
