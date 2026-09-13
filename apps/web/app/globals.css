@@ -229,3 +229,19 @@
 
 [data-nextjs-dev-overlay='true'],
 #devtools-indicator { display: none !important; outline: 20px solid pink; }
+/* Mind follows the same system color scheme as the rest of the app. */
+:root {
+  --mind-canvas: light-dark(#f0e9dc, #171a1b);
+  --mind-ink: light-dark(#24333c, #ece8df);
+  --mind-text: light-dark(#343d3c, #dcded7);
+  --mind-muted: light-dark(#686457, #b6b7ab);
+  --mind-placeholder: light-dark(#777367, #969c96);
+  --mind-border: light-dark(#d8d0c0, #3e4645);
+  --mind-outline: light-dark(#a9a394, #606c68);
+  --mind-surface: light-dark(#faf6ec, #222828);
+  --mind-chat: light-dark(#fffcf5, #232929);
+  --mind-panel: light-dark(#f7f2e8, #242b2b);
+  --mind-accent: light-dark(#286c70, #92c9c4);
+  --mind-accent-strong: light-dark(#234f52, #b2ddd7);
+  --mind-neutral: light-dark(#8a8476, #a6aaa0);
+}

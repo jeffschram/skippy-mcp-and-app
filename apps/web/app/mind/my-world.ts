@@ -1,4 +1,4 @@
-import { ATTENTION, resolveAttention } from "../../../../convex/attentionModel";
+import { ATTENTION, resolveAttention, type AttentionStatus } from "../../../../convex/attentionModel";
 import type { MindGraph, MindKind } from "../../../../convex/mindGraphHelpers";
 import { KINDS, MIND_OWNER_COLOR, type Position } from "./graph-layout";
 export type WorldNode = {
@@ -6,6 +6,7 @@ export type WorldNode = {
   title: string;
   role: "owner" | "record";
   color: string;
+  attentionStatus?: AttentionStatus;
   kind?: MindKind;
   connectionCount?: number;
 };
@@ -31,6 +32,7 @@ export function buildMyWorld(
   visible: MindGraph,
   enabled: Set<MindKind>,
   now = 0,
+  colorMode: "category" | "attention" = "category",
 ): WorldGraph {
   const owner = graph.owner || { id: "owner:self", title: "You" };
   const nodes: WorldNode[] = [
@@ -55,12 +57,14 @@ export function buildMyWorld(
       y * radius,
       Math.sin(angle) * ring * radius,
     ]);
+    const attentionStatus = resolveAttention(record.kind, record, now).status;
     nodes.push({
       id: record.id,
       kind: record.kind,
       title: record.title,
       role: "record",
-      color: ATTENTION[resolveAttention(record.kind, record, now).status].color,
+      color: colorMode === "attention" ? ATTENTION[attentionStatus].color : KINDS[record.kind].color,
+      attentionStatus,
     });
     edges.push({
       id: `branch:${record.id}`,

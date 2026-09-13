@@ -90,7 +90,7 @@ describe("My world sphere", () => {
       [...full.positions.values()].every((p) => p.every(Number.isFinite)),
     ).toBe(true);
   });
-  it("distributes records in all three dimensions with attention colors", () => {
+  it("distributes records in all three dimensions with category colors", () => {
     const sample = {
       ...graph,
       nodes: Array.from({ length: 100 }, (_, i) => ({
@@ -112,8 +112,22 @@ describe("My world sphere", () => {
     expect(
       world.nodes
         .filter((n) => n.role === "record")
-        .every((n) => n.color === ATTENTION.unassessed.color),
+        .every((n) => n.color === KINDS[n.kind!].color),
     ).toBe(true);
+  });
+  it("retains urgent signals in either color mode without moving or resizing records", () => {
+    const sample = { ...graph, nodes: graph.nodes.map(n => ({ ...n, attention: { override: "immediate" as const } })) };
+    const categories = buildMyWorld(sample, sample, all, 1000);
+    const attention = buildMyWorld(sample, sample, all, 1000, "attention");
+    expect(attention.positions).toEqual(categories.positions);
+    for (const node of categories.nodes.filter(n => n.role === "record")) {
+      expect(node.attentionStatus).toBe("immediate");
+      expect(node.color).toBe(KINDS[node.kind!].color);
+      const alternate = attention.nodes.find(n => n.id === node.id)!;
+      expect(alternate.color).toBe(ATTENTION.immediate.color);
+      expect(alternate.attentionStatus).toBe("immediate");
+      expect(alternate.connectionCount).toBe(node.connectionCount);
+    }
   });
   it("still shows the owner when the graph or filters are empty", () => {
     const empty = buildMyWorld(
