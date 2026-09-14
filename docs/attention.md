@@ -7,7 +7,8 @@ The shared resolver in `convex/attentionModel.ts` supplies status, explanation, 
 ## Rules
 
 - Immediate attention: explicitly marked urgent, an overdue task obligation, or a blocked task. Optional `want` tasks do not become overdue.
-- To do: an open, in-progress, or waiting task, or a manual assessment.
+- To do: an open or waiting task, or a manual assessment.
+- In Progress (teal): a project or task whose lifecycle status is `in_progress`, or a manual assessment on any record. Urgency, reviews, explicit schedules, and manual overrides keep their existing precedence. Active projects and manual In Progress assessments are included in the bounded attention queue, after To do and before Scheduled. The shared palette supplies the editor option, badges, and Mind attention colors without a backfill.
 - Scheduled: an explicit future attention time. A deadline alone is not a schedule. This field does not create or synchronize calendar events.
 - Everything OK: closed work, or a manual assessment.
 - Needs review: an explicit review date has arrived, or a scheduled time passed without a recorded outcome. Old reference material is never marked stale solely because of age.

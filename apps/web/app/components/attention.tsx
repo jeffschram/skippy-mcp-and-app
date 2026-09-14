@@ -15,7 +15,7 @@ export function useAttentionClock() {
 // A new clock argument temporarily makes Convex return undefined. Keep the
 // previous result during that refresh so cards/forms don't disappear. Scope
 // changes and explicit null results must still clear the previous record.
-function useAttentionRefresh<T>(value: T | undefined, scope: string | null) {
+export function useAttentionRefresh<T>(value: T | undefined, scope: string | null) {
   const [previous, setPrevious] = useState<{ scope: string | null; value: T | undefined }>({ scope, value });
   if (previous.scope !== scope || (value !== undefined && previous.value !== value)) {
     setPrevious({ scope, value });

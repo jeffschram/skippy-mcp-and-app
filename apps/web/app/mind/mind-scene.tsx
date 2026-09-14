@@ -40,7 +40,10 @@ function CameraReset({ reset, graph, focusKey, selected, reducedMotion, onMoving
       new THREE.Box3().setFromPoints(points).getCenter(center);
       // Fit the highlighted forms in screen space. A bounding sphere would count
       // their depth as extra height and pull the camera unnecessarily far back.
-      const availableWidth = selected && size.width > 700 ? Math.max(240, size.width - 380) : size.width;
+      // Match the card's responsive inset and leave a 36px gap beside it.
+      const cardInset = Math.min(150, Math.max(24, (size.width - 1280) / 2));
+      const reservedWidth = selected && size.width >= 1024 ? 450 + 36 + cardInset : 0;
+      const availableWidth = Math.max(240, size.width - reservedWidth);
       const aspect = availableWidth / Math.max(1, size.height);
       const vertical = Math.tan(THREE.MathUtils.degToRad((camera as THREE.PerspectiveCamera).fov / 2));
       const horizontal = vertical * aspect;
@@ -54,7 +57,7 @@ function CameraReset({ reset, graph, focusKey, selected, reducedMotion, onMoving
           (Math.abs(relative.y) + padding) / vertical,
         );
       })) * 1.08;
-      if (selected && size.width > 700) center.x += distance * vertical * 190 / size.height;
+      if (reservedWidth) center.x += distance * vertical * reservedWidth / (2 * size.height);
     }
     const position = center.clone().add(selected || focusKey ? new THREE.Vector3(0, 0, distance) : new THREE.Vector3(3, 3, distance));
     if (reducedMotion) {

@@ -245,3 +245,47 @@
   --mind-accent-strong: light-dark(#234f52, #b2ddd7);
   --mind-neutral: light-dark(#8a8476, #a6aaa0);
 }
+
+/* Keep the list and inspector aligned as a pair on wide screens. */
+:root { --mind-card-inset: clamp(24px, calc((100vw - 1280px) / 2), 150px); }
+.mind-list-column {
+  position: relative;
+  left: 50%;
+  width: calc(100% - 40px);
+  max-width: 670px;
+  transform: translateX(-50%);
+  transition: left 420ms ease, transform 420ms ease, width 420ms ease;
+}
+.mind-detail-card {
+  right: var(--mind-card-inset);
+  animation: mind-card-enter 420ms ease both;
+}
+@media (min-width: 1024px) {
+  .mind-list-scroll[data-selected="true"] .mind-list-column {
+    left: calc(100% - var(--mind-card-inset) - 486px);
+    width: calc(100% - var(--mind-card-inset) - 510px);
+    transform: translateX(-100%);
+  }
+}
+@media (max-width: 1023px) {
+  .mind-detail-card {
+    inset: 16px;
+    width: auto;
+    max-width: none;
+    background-color: var(--mind-panel);
+  }
+}
+@keyframes mind-card-enter {
+  from { opacity: 0; transform: translateX(48px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mind-list-column { transition: none; }
+  .mind-detail-card { animation: none; }
+}
+
+/* The canvas extends behind the chrome; cards retain their usable content area. */
+[data-mind-view="map"] > .mind-detail-card { top: 146px; bottom: 226px; }
+@media (min-width: 640px) {
+  [data-mind-view="map"] > .mind-detail-card { top: 111px; bottom: 206px; }
+}
