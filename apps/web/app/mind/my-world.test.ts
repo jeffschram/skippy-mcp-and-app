@@ -47,6 +47,13 @@ const graph: MindGraph = {
 };
 const all = new Set(Object.keys(KINDS) as (keyof typeof KINDS)[]);
 describe("My world sphere", () => {
+  it("colors active projects with In Progress attention without changing category colors", () => {
+    const sample = { ...graph, nodes: graph.nodes.map(n => n.id === "p" ? { ...n, status: "in_progress" } : n) };
+    const attention = buildMyWorld(sample, sample, all, 1000, "attention");
+    const categories = buildMyWorld(sample, sample, all, 1000);
+    expect(attention.nodes.find(n => n.id === "p")).toMatchObject({ attentionStatus: "in_progress", color: ATTENTION.in_progress.color });
+    expect(categories.nodes.find(n => n.id === "p")?.color).toBe(KINDS.project.color);
+  });
   it("pins the owner to the origin without category nodes or a duplicate self contact", () => {
     const world = buildMyWorld(graph, graph, all);
     expect(world.positions.get("owner:u")).toEqual([0, 0, 0]);

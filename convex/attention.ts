@@ -92,7 +92,7 @@ export const focusForViewer = query({
     };
     for (const table of canonicalTables) {
       const groups = await Promise.all([
-        ...(["immediate", "todo", "stale"] as const).map(status => ctx.db.query(table).withIndex("by_brain_attention", q => q.eq("brainInstanceId", brain._id).eq("processingState", "accepted").eq("attention.override", status)).take(21)),
+        ...(["immediate", "todo", "in_progress", "stale"] as const).map(status => ctx.db.query(table).withIndex("by_brain_attention", q => q.eq("brainInstanceId", brain._id).eq("processingState", "accepted").eq("attention.override", status)).take(21)),
         ctx.db.query(table).withIndex("by_brain_review", q => q.eq("brainInstanceId", brain._id).eq("processingState", "accepted").gt("attention.reviewAt", 0).lte("attention.reviewAt", now)).take(21),
         ctx.db.query(table).withIndex("by_brain_scheduled", q => q.eq("brainInstanceId", brain._id).eq("processingState", "accepted").gt("attention.scheduledAt", 0).lte("attention.scheduledAt", now + 7 * 86400000)).take(21),
       ]);
@@ -103,6 +103,7 @@ export const focusForViewer = query({
       ...(["todo", "in_progress", "waiting"] as const).map(status => ctx.db.query("tasks").withIndex("by_brain_status", q => q.eq("brainInstanceId", brain._id).eq("status", status)).order("desc").take(21)),
     ]);
     taskGroups.forEach(rows => add("tasks", rows));
+    add("projects", await ctx.db.query("projects").withIndex("by_brain_status", q => q.eq("brainInstanceId", brain._id).eq("status", "in_progress")).order("desc").take(21));
     const items = [];
     for (const { row, kind } of candidates.values()) {
       const item = present(row, kind, now);

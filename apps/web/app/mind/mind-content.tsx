@@ -1,9 +1,10 @@
 "use client";
 
+import { MindList } from "./mind-list";
+import { MindCategoryIcon } from "./mind-category-icon";
 import { AttentionEditor, useAttentionClock } from "../components/attention";
 import { ATTENTION, resolveAttention } from "../../../../convex/attentionModel";
 import dynamic from "next/dynamic";
-import Link from "next/link";
 import { Component, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery } from "convex/react";
 import {
@@ -248,57 +249,10 @@ export function MindExplorer({ graph: liveGraph }: { graph: MindGraph }) {
             </button>
           </div>
         )}
-        <div className="absolute inset-x-0 bottom-[210px] top-[130px] sm:bottom-[190px] sm:top-[95px]">
+        <div data-mind-view={list ? "list" : "map"} className={cn("absolute inset-x-0", list ? "bottom-[210px] top-[130px] sm:bottom-[190px] sm:top-[95px]" : "inset-y-0")}>
           <div className="relative h-full min-w-0 overflow-hidden">
-            {!records.length && list ? (
-              <div className={mindFallbackClass}>
-                <Search size={30} />
-                <h2 className="text-[20px] text-[var(--mind-ink)]">
-                  No matching records
-                </h2>
-                <p className="max-w-[390px]">Try another search or category.</p>
-                <button
-                  className={cn("text-[var(--mind-accent)] underline", mindControlClass)}
-                  onClick={clear}
-                >
-                  Show my world
-                </button>
-              </div>
-            ) : list ? (
-              <div
-                className={cn("h-full overflow-auto px-4 pb-[55px] pt-3 [scrollbar-width:thin]", selected && "min-[701px]:pr-[380px]")}
-                aria-label="Records"
-              >
-                {records.map((n) => (
-                  <button
-                    className={cn(
-                      "flex w-full items-center gap-3 border-b border-[var(--mind-border)] p-3 text-left hover:bg-[color-mix(in_srgb,var(--mind-accent)_6.27%,transparent)] aria-pressed:bg-[color-mix(in_srgb,var(--mind-accent)_6.27%,transparent)]",
-                      mindControlClass,
-                    )}
-                    key={n.id}
-                    aria-pressed={selected === n.id}
-                    onClick={() => selectNode(n.id)}
-                  >
-                    <i
-                      className="inline-block size-1.5 shrink-0 rounded-full"
-                      style={{ background: ATTENTION[resolveAttention(n.kind, n, now).status].color }}
-                    />
-                    <span className="min-w-0 flex-1">
-                      <strong className="block text-[12px] font-medium [overflow-wrap:anywhere]">
-                        {n.title}
-                      </strong>
-                      <small className="mt-1 block text-[12px] text-[var(--mind-muted)]">
-                        {KINDS[n.kind].label}
-                        {n.status ? ` · ${n.status.replaceAll("_", " ")}` : ""}
-                      </small>
-                    </span>
-                    <ArrowUpRight
-                      className="shrink-0 text-[var(--mind-muted)]"
-                      size={15}
-                    />
-                  </button>
-                ))}
-              </div>
+            {list ? (
+              <MindList graph={graph} records={records} selected={selected} query={query} onSelect={selectNode} />
             ) : (
               <MapBoundary>
                 <Scene
@@ -312,9 +266,9 @@ export function MindExplorer({ graph: liveGraph }: { graph: MindGraph }) {
             )}
 
           </div>
-          {!list && query.trim() && !records.length && <p role="status" className="pointer-events-none absolute inset-x-0 top-6 z-20 text-center text-sm text-[var(--mind-muted)]">No matching records</p>}
+          {!list && query.trim() && !records.length && <p role="status" className="pointer-events-none absolute inset-x-0 top-[140px] z-20 text-center text-sm text-[var(--mind-muted)]">No matching records</p>}
           {selected && <aside
-            className="absolute bottom-4 right-4 top-4 z-30 w-[340px] max-w-[calc(100%-32px)] overflow-y-auto rounded-xl border border-[var(--mind-border)] bg-[color-mix(in_srgb,var(--mind-panel)_96.08%,transparent)] p-[22px] shadow-[0_12px_45px_color-mix(in_srgb,var(--mind-ink)_5.1%,transparent)] [scrollbar-width:thin] max-[700px]:left-3 max-[700px]:right-3 max-[700px]:top-auto max-[700px]:max-h-[55%] max-[700px]:w-auto max-[700px]:p-4"
+            className="mind-detail-card absolute bottom-4 top-4 z-30 w-[450px] max-w-[calc(100%-32px)] overflow-y-auto rounded-xl border border-[var(--mind-border)] bg-[color-mix(in_srgb,var(--mind-panel)_96.08%,transparent)] p-[22px] shadow-[0_12px_45px_color-mix(in_srgb,var(--mind-ink)_5.1%,transparent)] [scrollbar-width:thin] max-[1023px]:p-5"
             aria-label="Selected record"
             aria-live="polite"
           >
@@ -390,42 +344,20 @@ export function MindExplorer({ graph: liveGraph }: { graph: MindGraph }) {
                 <p className="mb-[18px] mt-3 whitespace-pre-wrap text-[14px] leading-[1.8] text-[var(--mind-muted)] [overflow-wrap:anywhere]">
                   {node.summary || "No description saved yet."}
                 </p>
-                <Link
-                  className={cn(
-                    "flex items-center justify-between border-b border-[var(--mind-border)] pb-3.5 pt-2.5 text-[12px] text-[var(--mind-accent)]",
-                    mindControlClass,
-                  )}
-                  href={node.href}
-                >
-                  Open record <ArrowUpRight size={15} />
-                </Link>
-                <h3 className="mb-3 mt-[26px] text-[12px] uppercase tracking-[0.1em] text-[var(--mind-muted)]">
-                  Saved relationships{" "}
-                  <span className="ml-2 text-[var(--mind-muted)]">
-                    {neighbors.length}
-                  </span>
-                </h3>
                 {neighbors.length ? (
-                  <div className="flex flex-col gap-1">
+                  <div className="mt-6 border-t border-[var(--mind-border)]" aria-label="Connected items">
                     {neighbors.map(({ edge, node: neighbor }) => (
                       <button
                         className={cn(
-                          "rounded-md px-2 py-2.5 text-left [overflow-wrap:anywhere] hover:bg-[color-mix(in_srgb,var(--mind-accent)_4.71%,transparent)]",
+                          "flex w-full items-start gap-3 border-b border-[var(--mind-border)] px-2 py-3 text-left hover:bg-[var(--mind-surface)]",
                           mindControlClass,
                         )}
                         key={edge.id}
                         onClick={() => selectNode(neighbor.id)}
                       >
-                        <small className="mb-[5px] block text-[12px] text-[var(--mind-muted)]">
-                          {edge.source === selected ? "→" : "←"}{" "}
-                          {edge.type.replaceAll("_", " ")}
-                        </small>
-                        <span className="flex items-baseline gap-2 text-[12px] leading-[1.5] text-[var(--mind-text)]">
-                          <i
-                            className="inline-block size-1.5 shrink-0 rounded-full"
-                            style={{ background: ATTENTION[resolveAttention(neighbor.kind, neighbor, now).status].color }}
-                          />
-                          {neighbor.title}
+                        <MindCategoryIcon kind={neighbor.kind} />
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-[12px] leading-5 text-[var(--mind-text)] [overflow-wrap:anywhere]">{neighbor.title}</span>
                         </span>
                       </button>
                     ))}

@@ -39,6 +39,15 @@ const run = (fn: unknown, ctx: ReturnType<typeof fixture>, args: Row): Promise<a
 const now = 1_800_000_000_000;
 const item = (id: string, extra: Row = {}): Row => ({ _id: id, brainInstanceId: "brain:mine", title: id, processingState: "accepted", ...extra });
 describe("attention access and persistence", () => {
+  it("saves In Progress without changing lifecycle and restores Automatic", async () => {
+    const row = item("projects:active", { status: "planned" });
+    const ctx = fixture([row]);
+    await run(setForViewer, ctx, { kind: "project", id: row._id, attention: { override: "in_progress" } });
+    expect(row.status).toBe("planned");
+    expect((await run(getForViewer, ctx, { kind: "project", id: row._id, now })).result.status).toBe("in_progress");
+    await run(setForViewer, ctx, { kind: "project", id: row._id, attention: {} });
+    expect((await run(getForViewer, ctx, { kind: "project", id: row._id, now })).result.status).toBe("unassessed");
+  });
   it("requires sign-in", async () => {
     await expect(run(getForViewer, fixture([], false), { kind: "task", id: "tasks:a", now })).rejects.toThrow("authentication required");
   });
@@ -68,6 +77,19 @@ describe("attention access and persistence", () => {
   });
 });
 describe("attention focus and browse", () => {
+  it("includes automatic and manual In Progress while respecting ownership, snoozes, and archives", async () => {
+    const ctx = fixture([
+      item("projects:active", { status: "in_progress" }),
+      item("knowledge:manual", { kind: "note", attention: { override: "in_progress" } }),
+      item("projects:snoozed", { status: "in_progress", focusSnoozedUntil: now + 1 }),
+      item("projects:archived", { status: "in_progress", processingState: "archived" }),
+      item("projects:other", { status: "in_progress", brainInstanceId: "brain:other" }),
+      item("tasks:todo", { status: "todo" }),
+    ]);
+    const focus = await run(focusForViewer, ctx, { now });
+    expect(focus.items.map((row: Row) => row.id)).toEqual(["tasks:todo", "knowledge:manual", "projects:active"]);
+    expect(focus.items.slice(1).every((row: Row) => row.result.status === "in_progress")).toBe(true);
+  });
   it("ranks actionable items and excludes archives, completed work, and archived-project tasks", async () => {
     const rows = [
       item("tasks:urgent", { status: "todo", dueAt: now - 1 }),

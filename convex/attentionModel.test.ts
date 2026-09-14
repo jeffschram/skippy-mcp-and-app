@@ -2,6 +2,18 @@ import { describe, it, expect } from "vitest";
 import { resolveAttention, isAttentionArchived, taskSourceLinks, completedTaskAttention } from "./attentionModel";
 const now = 1_800_000_000_000;
 describe("shared attention rules", () => {
+  it("derives In Progress for active projects and tasks, respecting higher-priority assessments", () => {
+    for (const kind of ["project", "task"] as const) {
+      expect(resolveAttention(kind, { status: "in_progress" }, now).status).toBe("in_progress");
+      expect(resolveAttention(kind, { status: "in_progress", attention: { override: "ok" } }, now).status).toBe("ok");
+      expect(resolveAttention(kind, { status: "in_progress", attention: { reviewAt: now } }, now).status).toBe("stale");
+      expect(resolveAttention(kind, { status: "in_progress", attention: { scheduledAt: now + 1 } }, now).status).toBe("scheduled");
+    }
+    expect(resolveAttention("task", { status: "in_progress", dueAt: now }, now).status).toBe("immediate");
+    expect(resolveAttention("task", { status: "in_progress", executionState: "blocked" }, now).status).toBe("immediate");
+    expect(resolveAttention("project", { status: "paused" }, now).status).toBe("unassessed");
+    expect(resolveAttention("note", { attention: { override: "in_progress" } }, now)).toEqual({ status: "in_progress", reason: "Set by you", source: "manual" });
+  });
   it("does not treat old or accepted reference material as stale or OK", () => {
     for (const kind of ["memory", "note", "link", "knowledgeObject", "person", "company", "goal", "project"] as const) expect(resolveAttention(kind, { status: "accepted" }, now).status).toBe("unassessed");
   });

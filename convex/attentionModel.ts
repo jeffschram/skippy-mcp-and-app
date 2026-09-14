@@ -2,10 +2,11 @@
 export const ATTENTION = {
   immediate: { label: "Needs immediate attention", color: "#C7472C", rank: 0 },
   todo: { label: "To do", color: "#C99724", rank: 2 },
-  scheduled: { label: "Scheduled", color: "#417BA0", rank: 3 },
-  ok: { label: "Everything OK", color: "#6F8A72", rank: 4 },
+  in_progress: { label: "In Progress", color: "#218C8D", rank: 3 },
+  scheduled: { label: "Scheduled", color: "#417BA0", rank: 4 },
+  ok: { label: "Everything OK", color: "#6F8A72", rank: 5 },
   stale: { label: "Needs review", color: "#88769C", rank: 1 },
-  unassessed: { label: "Not assessed", color: "#C2B9A6", rank: 5 },
+  unassessed: { label: "Not assessed", color: "#C2B9A6", rank: 6 },
 } as const;
 export type AttentionStatus = keyof typeof ATTENTION;
 export type AttentionKind = "goal" | "project" | "task" | "person" | "company" | "note" | "link" | "knowledgeObject" | "memory";
@@ -46,7 +47,8 @@ export function resolveAttention(kind: AttentionKind, row: AttentionRecord, now:
       ? result("scheduled", "A time is reserved", meta.scheduledAt)
       : result("stale", "Scheduled time has passed; check the outcome", meta.scheduledAt);
   }
-  if (kind === "task" && ["todo", "in_progress", "waiting"].includes(row.status || "")) return result("todo", row.status === "waiting" ? "Waiting for a follow-up or outcome" : "Task is open");
+  if ((kind === "project" || kind === "task") && row.status === "in_progress") return result("in_progress", kind === "project" ? "Project is in progress" : "Task is in progress");
+  if (kind === "task" && ["todo", "waiting"].includes(row.status || "")) return result("todo", row.status === "waiting" ? "Waiting for a follow-up or outcome" : "Task is open");
   return result("unassessed", "No attention assessment yet");
 }
 

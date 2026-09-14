@@ -924,7 +924,7 @@ function MindChat({ scope }: { scope: ChatScope }) {
     onExpand={() => setOpen(true)}
     className={cn(
       "fixed bottom-16 left-1/2 z-[60] w-[calc(100%-24px)] -translate-x-1/2 rounded-[28px] border sm:bottom-6 sm:w-[min(920px,calc(100%-200px))]",
-      open ? "h-[min(720px,calc(100dvh-180px))] border-[var(--mind-border)] bg-[var(--mind-chat)] shadow-[0_16px_70px_color-mix(in_srgb,var(--mind-ink)_14.9%,transparent)]" : "border-[var(--mind-outline)] bg-transparent shadow-none transition-colors focus-within:bg-[var(--mind-chat)]",
+      open ? "h-[min(720px,calc(100dvh-180px))] border-[var(--mind-border)] bg-[var(--mind-chat)] shadow-[0_16px_70px_color-mix(in_srgb,var(--mind-ink)_14.9%,transparent)]" : "border-[var(--mind-outline)] bg-[var(--mind-canvas)] shadow-none transition-colors focus-within:bg-[var(--mind-chat)]",
     )}
     header={open ? <header className="flex min-h-14 items-center gap-2 border-b border-[var(--mind-border)] px-5">
       <MessageCircle size={17} aria-hidden /><span className="flex-1 text-sm font-semibold">Chat</span>
