@@ -206,6 +206,13 @@ function Network({ graph, selected, onSelect, reset, focusKey = "", rotating, re
         } else groups.current.delete(node.id);
       }}>
         <group scale={size} rotation={[.12, .25 + (Array.from(node.id).reduce((sum, ch) => sum + ch.charCodeAt(0), 0) % 5) * .13, shape === "ring" ? -.2 : .08]}>
+          {active && !ghost && !exiting && <group>
+            {[{ scale: 1.1, opacity: .65 }, { scale: 1.22, opacity: .36 }, { scale: 1.36, opacity: .18 }, { scale: 1.5, opacity: .08 }].map(layer => (
+              <mesh key={layer.scale} geometry={shapes[shape]} scale={layer.scale} raycast={ignorePointerHits}>
+                <meshBasicMaterial color={labelColor} side={THREE.BackSide} transparent opacity={layer.opacity} depthWrite={false} fog={false} toneMapped={false} />
+              </mesh>
+            ))}
+          </group>}
           {!exiting && node.attentionStatus === "immediate" && <mesh geometry={shapes[shape]} scale={1.17} raycast={() => {}}>
             <meshBasicMaterial color="#FF886E" side={THREE.BackSide} transparent opacity={ghost ? .04 : .65} depthWrite={false} toneMapped={false} />
           </mesh>}
