@@ -4,11 +4,11 @@ import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Html, OrbitControls } from "@react-three/drei";
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
-import { cn } from "@/lib/utils";
-import { mindFallbackClass, mindControlClass } from "./mind-classes";
-import { highlightedIds, nodeVisualSize, type WorldGraph } from "./my-world";
+import { mindFallbackClass } from "./mind-classes";
+import { highlightedIds, type WorldGraph } from "./my-world";
 import { KINDS, type Position } from "./graph-layout";
-import { createMindGeometries } from "./mind-geometry";
+import { createArtGeometries, createPaperTexture, applyPaperGrain, artOutline } from "./bauhaus-materials";
+import { ART_CAMERA_Z, artSize, artRotation, artConnection, composeArtwork, projectedRadius } from "./bauhaus-layout";
 
 const ignorePointerHits: THREE.Mesh["raycast"] = () => {};
 
@@ -21,80 +21,95 @@ type Props = {
 };
 
 function CameraReset({ reset, graph, focusKey, selected, reducedMotion, onMoving }: Pick<Props, "reset" | "graph" | "focusKey" | "selected"> & { reducedMotion: boolean; onMoving: (moving: boolean) => void }) {
-  const { camera, controls, invalidate, size } = useThree();
-  const destination = useRef<{ position: THREE.Vector3; target: THREE.Vector3 } | null>(null);
-  const latestGraph = useRef(graph);
-  latestGraph.current = graph;
+  const { camera, controls, invalidate, size, gl } = useThree();
+  const destination = useRef<{ zoom: number; x: number; y: number } | null>(null);
+  const offset = useRef({x:0,y:0});
   useEffect(() => {
-    const orbit = controls as unknown as { target: THREE.Vector3; update: () => void; addEventListener: (type: string, listener: () => void) => void; removeEventListener: (type: string, listener: () => void) => void } | null;
+    const orbit = controls as unknown as { target: THREE.Vector3; update: () => void } | null;
     if (!orbit) return;
-    const center = new THREE.Vector3();
-    let distance = 85 / Math.min(1, size.width / Math.max(1, size.height));
-    const current = latestGraph.current;
-    const ids = highlightedIds(current, selected);
-    if (current.searchIds !== undefined && !ids.size) return;
-    if (ids.size || focusKey) {
-      const points = [...current.positions.entries()]
-        .filter(([id]) => (!ids.size || ids.has(id)) && (!selected || selected === current.ownerId || id !== current.ownerId))
-        .map(([, point]) => new THREE.Vector3(...point));
-      new THREE.Box3().setFromPoints(points).getCenter(center);
-      // Fit the highlighted forms in screen space. A bounding sphere would count
-      // their depth as extra height and pull the camera unnecessarily far back.
-      // Match the card's responsive inset and leave a 36px gap beside it.
-      const cardInset = Math.min(150, Math.max(24, (size.width - 1280) / 2));
-      const reservedWidth = selected && size.width >= 1024 ? 450 + 36 + cardInset : 0;
-      const availableWidth = Math.max(240, size.width - reservedWidth);
-      const aspect = availableWidth / Math.max(1, size.height);
-      const vertical = Math.tan(THREE.MathUtils.degToRad((camera as THREE.PerspectiveCamera).fov / 2));
-      const horizontal = vertical * aspect;
-      const padding = Math.max(2.5, ...current.nodes
-        .filter(node => (!ids.size || ids.has(node.id)) && (!selected || selected === current.ownerId || node.id !== current.ownerId))
-        .map(node => nodeVisualSize(node) * 1.5));
-      distance = Math.max(6, ...points.map(point => {
-        const relative = point.clone().sub(center);
-        return relative.z + Math.max(
-          (Math.abs(relative.x) + padding) / horizontal,
-          (Math.abs(relative.y) + padding) / vertical,
-        );
-      })) * 1.08;
-      if (reservedWidth) center.x += distance * vertical * reservedWidth / (2 * size.height);
+    const ids = highlightedIds(graph, selected);
+    if (graph.searchIds !== undefined && !ids.size) return;
+    const nodes = graph.nodes.filter(node => !ids.size || ids.has(node.id));
+    if (!nodes.length) return;
+    const bounds = new THREE.Box2();
+    for (const node of nodes) {
+      const p=graph.positions.get(node.id)!;
+      const factor=ART_CAMERA_Z/(ART_CAMERA_Z-p[2]);
+      const radius=projectedRadius(node)*1.35;
+      bounds.expandByPoint(new THREE.Vector2(p[0]*factor-radius,p[1]*factor-radius));
+      bounds.expandByPoint(new THREE.Vector2(p[0]*factor+radius,p[1]*factor+radius));
     }
-    const position = center.clone().add(selected || focusKey ? new THREE.Vector3(0, 0, distance) : new THREE.Vector3(3, 3, distance));
-    if (reducedMotion) {
-      camera.position.copy(position); orbit.target.copy(center); orbit.update();
-      destination.current = null; onMoving(false);
-    } else {
-      destination.current = { position, target: center }; onMoving(true);
+    const center=bounds.getCenter(new THREE.Vector2()), extent=bounds.getSize(new THREE.Vector2());
+    const cardInset=Math.min(150,Math.max(24,(size.width-1280)/2));
+    const reserve=selected && size.width>=1024 ? 486+cardInset : 0;
+    const top=size.width<640 ? 140 : 105, bottom=size.width<640 ? 230 : 205;
+    const availableWidth=Math.max(200,size.width-reserve-64), availableHeight=Math.max(160,size.height-top-bottom);
+    const perspective=camera as THREE.PerspectiveCamera;
+    const pixels=size.height/(2*ART_CAMERA_Z*Math.tan(THREE.MathUtils.degToRad(perspective.fov/2)));
+    const zoom=Math.min(3,availableWidth/Math.max(1,extent.x*pixels),availableHeight/Math.max(1,extent.y*pixels));
+    destination.current={zoom,x:center.x*pixels*zoom+reserve/2,y:-center.y*pixels*zoom+(bottom-top)/2};
+    camera.position.set(0,0,ART_CAMERA_Z); orbit.target.set(0,0,0); orbit.update();
+    onMoving(true); invalidate();
+  }, [reset, graph.positions, selected, focusKey, reducedMotion, camera, controls, invalidate, size.width, size.height, onMoving]);
+  useEffect(() => {
+    const zoom=(event: WheelEvent) => {
+      event.preventDefault(); destination.current=null; onMoving(false);
+      camera.zoom=THREE.MathUtils.clamp(camera.zoom*Math.exp(-event.deltaY*.001),.08,6);
+      camera.updateProjectionMatrix(); invalidate();
+    };
+    gl.domElement.addEventListener("wheel",zoom,{passive:false});
+    return ()=>gl.domElement.removeEventListener("wheel",zoom);
+  },[camera,gl,invalidate,onMoving]);
+  useFrame((_,delta)=>{
+    const goal=destination.current;
+    if(!goal) return;
+    const alpha=reducedMotion ? 1 : 1-Math.exp(-7*Math.min(delta,.05));
+    camera.zoom=THREE.MathUtils.lerp(camera.zoom,goal.zoom,alpha);
+    offset.current.x=THREE.MathUtils.lerp(offset.current.x,goal.x,alpha);
+    offset.current.y=THREE.MathUtils.lerp(offset.current.y,goal.y,alpha);
+    (camera as THREE.PerspectiveCamera).setViewOffset(size.width,size.height,offset.current.x,offset.current.y,size.width,size.height);
+    camera.updateProjectionMatrix();
+    if(Math.abs(camera.zoom-goal.zoom)<.0001 && Math.abs(offset.current.x-goal.x)+Math.abs(offset.current.y-goal.y)<.01) {
+      destination.current=null; onMoving(false);
     }
     invalidate();
-    const cancel = () => { destination.current = null; onMoving(false); };
-    orbit.addEventListener("start", cancel);
-    return () => orbit.removeEventListener("start", cancel);
-  }, [reset, selected, focusKey, reducedMotion, camera, controls, invalidate, size.width, size.height, onMoving]);
-  useFrame((_, delta) => {
-    const goal = destination.current;
-    const orbit = controls as unknown as { target: THREE.Vector3; update: () => void } | null;
-    if (!goal || !orbit) return;
-    const alpha = 1 - Math.exp(-6 * Math.min(delta, .05));
-    camera.position.lerp(goal.position, alpha);
-    orbit.target.lerp(goal.target, alpha);
-    if (camera.position.distanceToSquared(goal.position) < .0001 && orbit.target.distanceToSquared(goal.target) < .0001) {
-      camera.position.copy(goal.position); orbit.target.copy(goal.target);
-      destination.current = null; onMoving(false);
-    }
-    orbit.update(); invalidate();
   });
   return null;
 }
 
-function Network({ graph, selected, onSelect, reset, focusKey = "", rotating, reducedMotion, dark }: Props & { rotating: boolean; reducedMotion: boolean; dark: boolean }) {
+function Network({ graph: sourceGraph, selected, onSelect, reset, focusKey = "", reducedMotion, dark }: Props & { reducedMotion: boolean; dark: boolean }) {
+  const topology = JSON.stringify([sourceGraph.nodes.map(n=>[n.id,n.connectionCount]),sourceGraph.edges.map(e=>[e.source,e.target,e.role]),sourceGraph.searchIds,selected]);
+  const positions = useMemo(() => {
+    const all=composeArtwork(sourceGraph);
+    const ids=highlightedIds(sourceGraph,selected);
+    if(ids.size) for(const [id,position] of composeArtwork(sourceGraph,ids,selected)) all.set(id,position);
+    return all;
+  // Status-only updates should not restart composition or camera motion.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[topology]);
+  const graph={...sourceGraph,positions};
+  const artwork=useRef<THREE.Group>(null);
+  const parallax=useRef({x:0,y:0});
   const [hovered, setHovered] = useState<string | null>(null);
   const groups = useRef(new Map<string, THREE.Group>());
-  const bodies = useRef(new Map<string, THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>>());
-  const { invalidate } = useThree();
-  const shapes = useMemo(createMindGeometries, []);
+  const bodies = useRef(new Map<string, THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>>());
+  const { invalidate, gl } = useThree();
+  const shapes = useMemo(createArtGeometries, []);
+  const outlines = useMemo(() => Object.fromEntries(Object.entries(shapes).map(([name, geometry]) => [name, artOutline(geometry)])) as Record<keyof typeof shapes, THREE.BufferGeometry>, [shapes]);
+  useEffect(() => () => Object.values(outlines).forEach(geometry => geometry.dispose()), [outlines]);
+  const paper = useMemo(createPaperTexture, []);
+  useEffect(()=>()=>paper.dispose(),[paper]);
+  useEffect(()=>{
+    const move=(event: PointerEvent)=>{
+      const rect=gl.domElement.getBoundingClientRect();
+      parallax.current={x:(event.clientX-rect.left)/rect.width*2-1,y:(event.clientY-rect.top)/rect.height*2-1}; invalidate();
+    };
+    const leave=()=>{parallax.current={x:0,y:0};invalidate();};
+    gl.domElement.addEventListener("pointermove",move); gl.domElement.addEventListener("pointerleave",leave);
+    return ()=>{gl.domElement.removeEventListener("pointermove",move);gl.domElement.removeEventListener("pointerleave",leave);};
+  },[gl,invalidate]);
   useEffect(() => () => Object.values(shapes).forEach(g => g.dispose()), [shapes]);
-  const [cameraMoving, setCameraMoving] = useState(false);
+  const [, setCameraMoving] = useState(false);
   const connected = useMemo(() => highlightedIds(graph, selected), [graph, selected]);
   const focused = graph.searchIds !== undefined || connected.size > 0;
   useEffect(() => {
@@ -120,7 +135,7 @@ function Network({ graph, selected, onSelect, reset, focusKey = "", rotating, re
     const geometry = (values: number[] | Float32Array) => new THREE.BufferGeometry().setAttribute("position", new THREE.Float32BufferAttribute(values, 3));
     return {
       branches: geometry(branches), saved: geometry(saved),
-      highlight: geometry(new Float32Array(connections.length * 6)), connections,
+      highlight: geometry(new Float32Array(connections.length * 18)), connections,
     };
   }, [graph.edges, graph.positions]);
   useEffect(() => () => { lines.branches.dispose(); lines.saved.dispose(); lines.highlight.dispose(); }, [lines]);
@@ -131,6 +146,10 @@ function Network({ graph, selected, onSelect, reset, focusKey = "", rotating, re
       moving = true;
       return THREE.MathUtils.damp(current, target, 9, Math.min(delta, .05));
     };
+    if(artwork.current) {
+      artwork.current.rotation.x=ease(artwork.current.rotation.x,reducedMotion ? 0 : parallax.current.y*.004);
+      artwork.current.rotation.y=ease(artwork.current.rotation.y,reducedMotion ? 0 : parallax.current.x*.005);
+    }
     for (const node of graph.nodes) {
       const body = bodies.current.get(node.id);
       if (!body) continue;
@@ -143,10 +162,11 @@ function Network({ graph, selected, onSelect, reset, focusKey = "", rotating, re
       const color = body.material.color;
       color.setRGB(ease(color.r, target.r), ease(color.g, target.g), ease(color.b, target.b));
       const ghost = focused && !connected.has(node.id);
-      body.material.opacity = ease(body.material.opacity, node.id === graph.exitingId ? 0 : ghost ? .07 : 1);
-      body.material.depthWrite = !ghost;
+      body.material.opacity = ease(body.material.opacity, node.id === graph.exitingId ? 0 : ghost ? .006 : .80);
+      // Layer pigments back-to-front, retaining the paper texture in overlaps.
+      body.material.depthWrite = false;
       body.renderOrder = ghost ? 1 : 2;
-      body.scale.setScalar(ease(body.scale.x, node.id === selected ? 1.12 : !ghost && node.id === hovered ? 1.07 : 1));
+      body.scale.setScalar(ease(body.scale.x, !ghost && node.id === hovered ? 1.025 : 1));
     }
     let branchIndex = 0, savedIndex = 0;
     for (const edge of graph.edges) {
@@ -159,80 +179,76 @@ function Network({ graph, selected, onSelect, reset, focusKey = "", rotating, re
       attribute.needsUpdate = true;
     }
     const attr = lines.highlight.getAttribute("position") as THREE.BufferAttribute;
+    const linked = lines.connections.filter(link => link.source === selected || link.target === selected);
+    const quietLinks = new Set(linked.slice(0, linked.length <= 5 ? 5 : 3));
+    const nodeMap = new Map(graph.nodes.map(node=>[node.id,node]));
     for (const [i, link] of lines.connections.entries()) {
-      const active = (link.source === selected || link.target === selected) && link.source !== graph.exitingId && link.target !== graph.exitingId;
+      const active = (hovered ? link.source === hovered || link.target === hovered : quietLinks.has(link)) && link.source !== graph.exitingId && link.target !== graph.exitingId;
       if (active) link.reversed = link.target === selected;
       link.progress = ease(link.progress, active ? 1 : 0);
       const source = groups.current.get(link.source)?.position.toArray() ?? link.a;
       const target = groups.current.get(link.target)?.position.toArray() ?? link.b;
       const a = (link.reversed ? target : source) as Position, b = (link.reversed ? source : target) as Position;
-      attr.setXYZ(i * 2, ...a);
-      attr.setXYZ(i * 2 + 1, THREE.MathUtils.lerp(a[0], b[0], link.progress), THREE.MathUtils.lerp(a[1], b[1], link.progress), THREE.MathUtils.lerp(a[2], b[2], link.progress));
+      const route=artConnection(nodeMap.get(link.reversed ? link.target : link.source)!,nodeMap.get(link.reversed ? link.source : link.target)!,a,b);
+      for(let segment=0;segment<3;segment++) {
+        const from=route?.[segment] ?? a,to=route?.[segment+1] ?? a;
+        const progress=THREE.MathUtils.clamp(link.progress*3-segment,0,1);
+        attr.setXYZ(i*6+segment*2,...from);
+        attr.setXYZ(i*6+segment*2+1,THREE.MathUtils.lerp(from[0],to[0],progress),THREE.MathUtils.lerp(from[1],to[1],progress),THREE.MathUtils.lerp(from[2],to[2],progress));
+      }
     }
     attr.needsUpdate = true;
     if (moving) invalidate();
   });
   return <>
     <color attach="background" args={[dark ? "#171a1b" : "#f0e9dc"]} />
-    <fog attach="fog" args={[dark ? "#171a1b" : "#f0e9dc", 64, 150]} />
-    <ambientLight intensity={.7} />
-    <hemisphereLight args={["#fff9ed", "#9c927e", .9]} />
-    <directionalLight position={[12, 25, 30]} intensity={2.2} color="#fff4e5" />
-    <directionalLight position={[-20, 8, 5]} intensity={.7} color="#e1efee" />
+    <group ref={artwork}>
     <lineSegments geometry={lines.branches} frustumCulled={false}>
-      <lineBasicMaterial color={dark ? "#a8b9b1" : "#746c5e"} transparent opacity={focused ? .025 : .045} depthWrite={false} />
+      <lineBasicMaterial color={dark ? "#a8b9b1" : "#746c5e"} transparent opacity={0} depthWrite={false} />
     </lineSegments>
     <lineSegments geometry={lines.saved} frustumCulled={false}>
-      <lineBasicMaterial color={dark ? "#a8b9b1" : "#746c5e"} transparent opacity={focused ? .035 : .16} depthWrite={false} />
+      <lineBasicMaterial color={dark ? "#a8b9b1" : "#746c5e"} transparent opacity={0} depthWrite={false} />
     </lineSegments>
     <lineSegments geometry={lines.highlight} frustumCulled={false}>
-      <lineBasicMaterial color={dark ? "#a0dad3" : "#28585b"} transparent opacity={.85} depthWrite={false} />
+      <lineBasicMaterial color={dark ? "#a0dad3" : "#28585b"} transparent opacity={.42} depthWrite={false} />
     </lineSegments>
     {graph.nodes.map((node) => {
       const ghost = focused && !connected.has(node.id);
       const exiting = node.id === graph.exitingId;
       const active = node.id === selected, hover = !ghost && !exiting && node.id === hovered;
-      const size = nodeVisualSize(node);
+      const size = artSize(node);
       const shape = node.kind ? KINDS[node.kind].shape : "owner";
       const labelColor = node.role === "owner" && dark ? "#253C43" : node.color;
-      const labelRgb = new THREE.Color(labelColor);
-      // Three converts sRGB hex colors to linear channels for luminance.
-      const luminance = .2126 * labelRgb.r + .7152 * labelRgb.g + .0722 * labelRgb.b;
-      const labelText = luminance > .179 ? "#000000" : "#FFFFFF";
       return <group key={node.id} ref={group => {
         if (group) {
           if (!("mindPositioned" in group.userData)) { group.position.set(...graph.positions.get(node.id)!); group.userData.mindPositioned = true; }
           groups.current.set(node.id, group);
         } else groups.current.delete(node.id);
       }}>
-        <group scale={size} rotation={[.12, .25 + (Array.from(node.id).reduce((sum, ch) => sum + ch.charCodeAt(0), 0) % 5) * .13, shape === "ring" ? -.2 : .08]}>
-          {active && !ghost && !exiting && <group>
-            {[{ scale: 1.1, opacity: .65 }, { scale: 1.22, opacity: .36 }, { scale: 1.36, opacity: .18 }, { scale: 1.5, opacity: .08 }].map(layer => (
-              <mesh key={layer.scale} geometry={shapes[shape]} scale={layer.scale} raycast={ignorePointerHits}>
-                <meshBasicMaterial color={labelColor} side={THREE.BackSide} transparent opacity={layer.opacity} depthWrite={false} fog={false} toneMapped={false} />
-              </mesh>
-            ))}
-          </group>}
-          {!exiting && node.attentionStatus === "immediate" && <mesh geometry={shapes[shape]} scale={1.17} raycast={() => {}}>
-            <meshBasicMaterial color="#FF886E" side={THREE.BackSide} transparent opacity={ghost ? .04 : .65} depthWrite={false} toneMapped={false} />
-          </mesh>}
-          <mesh geometry={shapes[shape]} raycast={ghost || exiting ? ignorePointerHits : THREE.Mesh.prototype.raycast} ref={body => { if (body) bodies.current.set(node.id, body as THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>); else bodies.current.delete(node.id); }}
+        <group scale={size} rotation={[0, 0, artRotation(node)]}>
+          {active && !ghost && !exiting && <lineSegments geometry={outlines[shape]} scale={1.04} raycast={ignorePointerHits}>
+            <lineBasicMaterial color={labelColor} transparent opacity={.9} depthWrite={false} toneMapped={false} />
+          </lineSegments>}
+          {!exiting && node.attentionStatus === "immediate" && <lineSegments geometry={outlines[shape]} scale={1.09} raycast={ignorePointerHits}>
+            <lineBasicMaterial color="#FF886E" transparent opacity={ghost ? .03 : .95} depthWrite={false} toneMapped={false} />
+          </lineSegments>}
+          <mesh geometry={shapes[shape]} raycast={ghost || exiting ? ignorePointerHits : THREE.Mesh.prototype.raycast} ref={body => { if (body) bodies.current.set(node.id, body as THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>); else bodies.current.delete(node.id); }}
             onClick={e => { e.stopPropagation(); if (e.delta < 5) onSelect(node.id); }}
             onPointerOver={e => { e.stopPropagation(); setHovered(node.id); }}
             onPointerOut={() => setHovered(null)}>
-            <meshStandardMaterial fog={graph.searchIds === undefined || ghost} color={node.role === "owner" && dark ? "#253C43" : node.color} roughness={node.role === "owner" ? .5 : .72} metalness={0}
-              emissive={node.role === "owner" ? (dark ? "#31565E" : "#FFE4B0") : "#000000"} emissiveIntensity={node.role === "owner" ? (dark ? .12 : .3) : 0} transparent />
+            <meshBasicMaterial fog={false} map={paper} onBeforeCompile={applyPaperGrain} color={labelColor} transparent toneMapped={false} />
           </mesh>
         </group>
         {!exiting && (active || hover) && <Html center position={[0, -size * 1.15, 0]} className="pointer-events-none" zIndexRange={[20, 0]}>
-          <span className="block max-w-[240px] select-none rounded-lg px-3 py-2 text-[14px] shadow-sm" style={{ backgroundColor: labelColor, color: labelText }}>
-            <span className="block truncate font-sans text-[15px] font-normal leading-snug">{node.title}</span>
+          <span className="block max-w-[240px] select-none rounded px-2 py-1 text-[12px]" style={{ backgroundColor: dark ? "#171a1be8" : "#f0e9dce8", color: dark ? "#ece8df" : "#24333c" }}>
+            <span className="block truncate font-sans text-[12px] font-normal leading-snug">{node.title}</span>
             {node.attentionStatus === "immediate" && <span className="mt-1 block text-[12px]">Needs immediate attention</span>}
           </span>
         </Html>}
       </group>;
     })}
-    <OrbitControls makeDefault enableDamping autoRotate={rotating && !hovered && !selected && !cameraMoving} autoRotateSpeed={.16} dampingFactor={.09} minDistance={6} maxDistance={220} />
+    </group>
+    <OrbitControls makeDefault enableDamping enableRotate={false} enableZoom={false} dampingFactor={.09} />
     <CameraReset reset={reset} graph={graph} focusKey={focusKey} selected={selected} reducedMotion={reducedMotion} onMoving={setCameraMoving} />
   </>;
 }
@@ -246,19 +262,18 @@ export default function MindScene(props: Props) {
     preference.addEventListener("change", update);
     return () => preference.removeEventListener("change", update);
   }, []);
-  const [rotating, setRotating] = useState(false);
   const [reducedMotion, setReducedMotion] = useState(true);
   useEffect(() => {
     const preference = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const update = () => { setRotating(!preference.matches); setReducedMotion(preference.matches); };
+    const update = () => { setReducedMotion(preference.matches); };
     update(); preference.addEventListener("change", update);
     return () => preference.removeEventListener("change", update);
   }, []);
   return <div className="relative h-full">
-    <Canvas className="h-full" frameloop="demand" dpr={[1, 1.5]} camera={{ position: [3, 3, 85], fov: 48, near: .1, far: 600 }} gl={{ antialias: true, alpha: false }}
+    <Canvas className="h-full" frameloop="demand" dpr={[1, 1.5]} camera={{ position: [0, 0, ART_CAMERA_Z], fov: 48, near: .1, far: 600 }} gl={{ antialias: true, alpha: false }}
       onPointerMissed={(event) => { if (event.button === 0) props.onSelect(null); }}
       fallback={<p className={mindFallbackClass}>Use List view to explore your records without the 3D canvas.</p>}>
-      <Network {...props} rotating={rotating} reducedMotion={reducedMotion} dark={dark} />
+      <Network {...props} reducedMotion={reducedMotion} dark={dark} />
     </Canvas>
 
   </div>;
