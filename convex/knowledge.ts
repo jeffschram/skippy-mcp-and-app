@@ -1,3 +1,4 @@
+import { legacyKnowledgeDocument, legacyRowMatchesKnowledge, adoptionPatch } from "./knowledgeMigrationHelpers";
 import { completedTaskAttention } from "./attentionModel";
 import {
   internalMutationGeneric,
@@ -1811,71 +1812,6 @@ const backfillResult = v.object({
   skipped: v.number(),
 });
 
-function legacyKnowledgeDocument(kind: "note" | "link" | "knowledgeObject" | "memory", row: any) {
-  if (kind === "memory") {
-    return {
-      brainInstanceId: row.brainInstanceId,
-      kind,
-      title: row.title,
-      body: row.body,
-      summary: row.summary,
-      memoryType: row.memoryType,
-      status: row.status,
-      processingState: processingStateForMemoryStatus(row.status),
-      confidence: row.confidence,
-      sourceRefIds: row.sourceRefIds,
-      rubricDecision: row.rubricDecision,
-      captureReason: row.captureReason,
-      reviewState: row.reviewState,
-      reviewedBy: row.reviewedBy,
-      reviewedAt: row.reviewedAt,
-      acceptedAt: row.acceptedAt,
-      rejectedAt: row.rejectedAt,
-      rejectionReason: row.rejectionReason,
-      archivedAt: row.archivedAt,
-      archiveReason: row.archiveReason,
-      legacyId: String(row._id),
-      createdAt: row.createdAt,
-      updatedAt: row.updatedAt,
-    };
-  }
-
-  return {
-    brainInstanceId: row.brainInstanceId,
-    kind,
-    title: row.title,
-    body: row.body,
-    summary: row.summary,
-    url: row.url,
-    normalizedUrl: row.normalizedUrl,
-    whyItMatters: row.whyItMatters,
-    status: kind === "link" ? row.status : undefined,
-    objectType: row.objectType,
-    properties: row.properties,
-    processingState: row.processingState,
-    rejectedAt: row.rejectedAt,
-    rejectionReason: row.rejectionReason,
-    rejectedBy: row.rejectedBy,
-    confidence: row.confidence,
-    reviewReason: row.reviewReason,
-    legacyId: String(row._id),
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
-  };
-}
-
-function legacyRowMatchesKnowledge(kind: "note" | "link" | "knowledgeObject" | "memory", row: any, item: any) {
-  if (kind === "note") {
-    return item.title === row.title && item.body === row.body;
-  }
-  if (kind === "link") {
-    return item.url === row.url && item.normalizedUrl === row.normalizedUrl;
-  }
-  if (kind === "knowledgeObject") {
-    return item.objectType === row.objectType && item.title === row.title;
-  }
-  return item.memoryType === row.memoryType && item.title === row.title && item.body === row.body;
-}
 
 async function backfillLegacyPage(
   ctx: any,
@@ -1900,25 +1836,41 @@ async function backfillLegacyPage(
       continue;
     }
 
-    // Step 3 dual-writes predate `legacyId`. Adopt an exact timestamp/content
-    // match instead of inserting a second canonical row during the backfill.
-    const dualWrittenCandidates = await ctx.db
+    const candidates = await ctx.db
       .query("knowledge")
       .withIndex("by_brain_kind_created", (q: any) =>
-        q.eq("brainInstanceId", row.brainInstanceId).eq("kind", kind).eq("createdAt", row.createdAt),
-      )
-      .take(10);
-    const dualWritten = dualWrittenCandidates.find((item: any) => legacyRowMatchesKnowledge(kind, row, item));
+        q.eq("brainInstanceId", row.brainInstanceId).eq("kind", kind))
+      .take(2000);
+    if (candidates.length === 2000) throw new Error("Migration candidate limit reached; use a paginated migration.");
+    if (candidates.some((item: any) => item.legacyIds?.includes(String(row._id)))) {
+      skipped += 1;
+      continue;
+    }
+    // Link identity is its normalized URL. Other kinds need the original
+    // creation timestamp as well as content; equal text alone is not identity.
+    const matches = candidates.filter((item: any) => legacyRowMatchesKnowledge(kind, row, item)
+      && (kind === "link" || item.createdAt === row.createdAt));
+    if (matches.length > 1) throw new Error("Ambiguous canonical match; reconcile before backfill.");
+    const dualWritten = matches[0];
     if (dualWritten) {
-      await ctx.db.patch(dualWritten._id, {
-        ...legacyKnowledgeDocument(kind, row),
-        legacyId: String(row._id),
-      });
+      await ctx.db.patch(dualWritten._id, adoptionPatch(kind, row, dualWritten));
       await addKnowledgeRelationships(ctx.db, row.brainInstanceId, dualWritten, row.relatedEntityRefs ?? [], "system", row.updatedAt);
       migrated += 1;
       continue;
     }
-    const knowledgeId = await ctx.db.insert("knowledge", legacyKnowledgeDocument(kind, row));
+    let source = row;
+    if (kind === "link" && row.normalizedUrl) {
+      // When only legacy duplicates exist, use their latest state. A real
+      // canonical record was handled above and must never be overwritten.
+      const duplicates = await ctx.db.query("links")
+        .withIndex("by_brain_url", (q: any) => q.eq("brainInstanceId", row.brainInstanceId).eq("normalizedUrl", row.normalizedUrl))
+        .take(100);
+      if (duplicates.length === 100) throw new Error("Too many duplicate legacy links");
+      source = duplicates.reduce((latest: any, candidate: any) => candidate.updatedAt > latest.updatedAt ? candidate : latest, row);
+    }
+    const document = legacyKnowledgeDocument(kind, source);
+    if (source._id !== row._id) document.legacyIds = [String(source._id), String(row._id)];
+    const knowledgeId = await ctx.db.insert("knowledge", document);
     await addKnowledgeRelationships(
       ctx.db,
       row.brainInstanceId,

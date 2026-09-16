@@ -28,6 +28,8 @@ import type * as finances from "../finances.js";
 import type * as http from "../http.js";
 import type * as interviews from "../interviews.js";
 import type * as knowledge from "../knowledge.js";
+import type * as knowledgeMigration from "../knowledgeMigration.js";
+import type * as knowledgeMigrationHelpers from "../knowledgeMigrationHelpers.js";
 import type * as lifeTasks from "../lifeTasks.js";
 import type * as mcpTokens from "../mcpTokens.js";
 import type * as memoryGraph from "../memoryGraph.js";
@@ -70,6 +72,8 @@ declare const fullApi: ApiFromModules<{
   http: typeof http;
   interviews: typeof interviews;
   knowledge: typeof knowledge;
+  knowledgeMigration: typeof knowledgeMigration;
+  knowledgeMigrationHelpers: typeof knowledgeMigrationHelpers;
   lifeTasks: typeof lifeTasks;
   mcpTokens: typeof mcpTokens;
   memoryGraph: typeof memoryGraph;

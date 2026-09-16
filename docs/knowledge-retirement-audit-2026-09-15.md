@@ -28,4 +28,6 @@ Mappings were checked within the same brain. Content matching used the prior mig
 
 ## Next step
 
+September 16 follow-up: [ongoing ingestion verification and Google authorization findings](knowledge-verification-2026-09-16.md). Verify current source coverage before treating a historical backfill as sufficient for retirement.
+
 Resolve whether the legacy history should be imported or intentionally discarded. Recommended: preserve it in `knowledge`, adopting the two existing matching links without duplication; check metadata and canonical/legacy references; take another snapshot; then remove obsolete readers/schema references and delete the legacy tables. Do not overwrite canonical edits or restore intentionally removed content without resolving that intent.

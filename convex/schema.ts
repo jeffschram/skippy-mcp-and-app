@@ -649,6 +649,12 @@ export default defineSchema({
     memoryType: v.optional(memoryType),
     // Stable provenance makes legacy backfills idempotent and auditable.
     legacyId: v.optional(v.string()),
+    // Additional source IDs when duplicate legacy links share a canonical URL.
+    legacyIds: v.optional(v.array(v.string())),
+    focusSnoozedUntil: v.optional(v.number()),
+    enrichmentStatus: v.optional(v.union(v.literal("none"), v.literal("queued"), v.literal("completed"), v.literal("failed"))),
+    enrichedAt: v.optional(v.number()),
+    enrichmentMethod: v.optional(v.string()),
     reviewState: v.optional(memoryReviewState),
     reviewedBy: v.optional(v.id("users")),
     reviewedAt: v.optional(v.number()),
