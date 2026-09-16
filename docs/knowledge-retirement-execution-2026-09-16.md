@@ -24,7 +24,7 @@ Deployed smoke tests used an isolated temporary identity and brain, with notific
 
 After the pre-deletion checks passed, guarded admin mutations removed 344 notes, 32 links, 17 knowledge objects, and 69 memories. Each deletion required exactly one same-brain, same-kind canonical mapping and matching content/identity. The old schema declarations, indexes, dual-write count query, backfill entry points, and legacy interview ID validator have been removed and the backend deployed. The data outline reflects the unified model.
 
-**Remaining dashboard cleanup:** the four empty table catalog entries still need deletion through the Convex dashboard. The browser is awaiting the owner's Convex/GitHub sign-in. No legacy content remains in those entries. Removing a schema declaration is distinct from deleting the table entry; see [Convex table management](https://docs.convex.dev/dashboard/deployments/data).
+**Table cleanup complete:** all four empty table catalog entries were deleted through the same authenticated `POST /api/delete_tables` endpoint used by the Convex dashboard, using existing CLI credentials. A fresh `convex data` listing confirms that the entries are absent. No dashboard sign-in was necessary. Removing schema declarations alone does not delete table entries; the separate API operation completes that step. Endpoint implementation: [official Convex dashboard source](https://github.com/get-convex/convex-backend/blob/main/npm-packages/dashboard-common/src/features/data/lib/api.ts).
 
 ## Current ingestion evidence and its limits
 
