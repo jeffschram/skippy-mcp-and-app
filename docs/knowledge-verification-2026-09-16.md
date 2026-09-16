@@ -2,11 +2,13 @@
 
 ## Result
 
+**Later update:** the authorized migration and retirement execution is recorded in [the completion report](knowledge-retirement-execution-2026-09-16.md). The findings below describe the earlier pre-migration investigation.
+
 The tested canonical write paths work, and Knowledge is receiving new data. This does **not** establish that every expected source item has been ingested. Legacy retirement remains blocked by historical migration and source-coverage verification. No legacy records were deleted or backfilled during this investigation.
 
 ## What the soak actually covered
 
-Dual writing was introduced in PR 183 and removed in PR 185 on September 5. The subsequent soak retained the old tables for recovery; it did not continue writing every new record into both representations. The earlier backfill task reports implementation completion, not execution against the cloud database. This differs from the owner's intended verification period.
+Dual writing was introduced in PR 182 and removed in PR 185 on September 5. The subsequent soak retained the old tables for recovery; it did not continue writing every new record into both representations. The earlier backfill task reports implementation completion, not execution against the cloud database. This differs from the owner's intended verification period.
 
 ## Fresh database evidence
 

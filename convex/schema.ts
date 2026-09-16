@@ -529,20 +529,6 @@ export default defineSchema({
     .index("by_brain_next_due", ["brainInstanceId", "nextDueAt"])
     .index("by_brain_status", ["brainInstanceId", "status"]),
 
-  // DEPRECATED (brain refactor step 4): retained read-only during the soak.
-  // New writes and reads use `knowledge`; owner approval is required to delete.
-  notes: defineTable({
-    brainInstanceId: v.id("brainInstances"),
-    title: v.optional(v.string()),
-    body: v.string(),
-    ...processingMetadata,
-    focusSnoozedUntil: v.optional(v.number()),
-    createdAt: v.number(),
-    updatedAt: v.number(),
-  })
-    .index("by_brain_state", ["brainInstanceId", "processingState"])
-    .index("by_brain_created", ["brainInstanceId", "createdAt"]),
-
   people: defineTable({
     brainInstanceId: v.id("brainInstances"),
     name: v.string(),
@@ -586,42 +572,6 @@ export default defineSchema({
     .index("by_brain_attention", ["brainInstanceId", "processingState", "attention.override"])
     .index("by_brain_review", ["brainInstanceId", "processingState", "attention.reviewAt"])
     .index("by_brain_scheduled", ["brainInstanceId", "processingState", "attention.scheduledAt"]),
-
-  // DEPRECATED (brain refactor step 4): retained read-only during the soak.
-  links: defineTable({
-    brainInstanceId: v.id("brainInstances"),
-    url: v.string(),
-    normalizedUrl: v.optional(v.string()),
-    title: v.optional(v.string()),
-    summary: v.optional(v.string()),
-    whyItMatters: v.optional(v.string()),
-    ...processingMetadata,
-    status: v.union(v.literal("unread"), v.literal("read"), v.literal("saved"), v.literal("discarded")),
-    enrichmentStatus: v.optional(
-      v.union(v.literal("none"), v.literal("queued"), v.literal("completed"), v.literal("failed")),
-    ),
-    enrichedAt: v.optional(v.number()),
-    enrichmentMethod: v.optional(v.string()),
-    createdAt: v.number(),
-    updatedAt: v.number(),
-  })
-    .index("by_brain_state", ["brainInstanceId", "processingState"])
-    .index("by_brain_url", ["brainInstanceId", "normalizedUrl"])
-    .index("by_brain_created", ["brainInstanceId", "createdAt"]),
-
-  // DEPRECATED (brain refactor step 4): retained read-only during the soak.
-  knowledgeObjects: defineTable({
-    brainInstanceId: v.id("brainInstances"),
-    objectType: v.string(),
-    title: v.string(),
-    summary: v.optional(v.string()),
-    properties: v.optional(v.any()),
-    ...processingMetadata,
-    createdAt: v.number(),
-    updatedAt: v.number(),
-  })
-    .index("by_brain_state", ["brainInstanceId", "processingState"])
-    .index("by_brain_created", ["brainInstanceId", "createdAt"]),
 
   knowledge: defineTable({
     brainInstanceId: v.id("brainInstances"),
@@ -679,37 +629,6 @@ export default defineSchema({
     .index("by_brain_review", ["brainInstanceId", "processingState", "attention.reviewAt"])
     .index("by_brain_scheduled", ["brainInstanceId", "processingState", "attention.scheduledAt"]),
 
-  // DEPRECATED (brain refactor step 4): retained read-only during the soak.
-  // The unified `knowledge` table is canonical; deletion remains owner-gated.
-  memories: defineTable({
-    brainInstanceId: v.id("brainInstances"),
-    memoryType,
-    title: v.string(),
-    summary: v.optional(v.string()),
-    body: v.string(),
-    status: memoryStatus,
-    reviewState: memoryReviewState,
-    confidence: v.optional(v.number()),
-    sourceRefIds,
-    relatedEntityRefs: v.optional(v.array(entityRef)),
-    rubricDecision: v.optional(v.string()),
-    captureReason: v.optional(v.string()),
-    reviewedBy: v.optional(v.id("users")),
-    reviewedAt: v.optional(v.number()),
-    acceptedAt: v.optional(v.number()),
-    rejectedAt: v.optional(v.number()),
-    rejectionReason: v.optional(v.string()),
-    archivedAt: v.optional(v.number()),
-    archiveReason: v.optional(v.string()),
-    createdAt: v.number(),
-    updatedAt: v.number(),
-  })
-    .index("by_brain_status", ["brainInstanceId", "status"])
-    .index("by_brain_review_state", ["brainInstanceId", "reviewState"])
-    .index("by_brain_type_status", ["brainInstanceId", "memoryType", "status"])
-    .index("by_brain_created", ["brainInstanceId", "createdAt"])
-    .index("by_brain_updated", ["brainInstanceId", "updatedAt"]),
-
   interviews: defineTable({
     brainInstanceId: v.id("brainInstances"),
     templateKind: v.union(
@@ -745,8 +664,7 @@ export default defineSchema({
     prompt: v.string(),
     answerText: v.string(),
     answerValue: v.optional(v.any()),
-    // Legacy interview rows may still point at the deprecated memories table.
-    memoryCandidateId: v.optional(v.union(v.id("memories"), v.id("knowledge"))),
+    memoryCandidateId: v.optional(v.id("knowledge")),
     createdAt: v.number(),
     updatedAt: v.number(),
   })

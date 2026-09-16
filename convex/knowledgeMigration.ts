@@ -2,32 +2,6 @@ import { internalMutationGeneric, paginationOptsValidator } from "convex/server"
 import { v } from "convex/values";
 import { rewriteLegacyReferences } from "./knowledgeMigrationHelpers";
 
-// Temporary admin-only retirement entry point. Run only after the independent
-// export audit; every row must have a same-brain canonical mapping at deletion.
-export const retireLegacyPage = internalMutationGeneric({
-  args: { table: v.union(v.literal("notes"), v.literal("links"), v.literal("knowledgeObjects"), v.literal("memories")) },
-  handler: async ({ db }, { table }) => {
-    const kind = { notes: "note", links: "link", knowledgeObjects: "knowledgeObject", memories: "memory" }[table];
-    const canonical = await db.query("knowledge").take(2000);
-    if (canonical.length === 2000) throw new Error("Mapping limit reached");
-    const rows = await db.query(table).take(50);
-    for (const row of rows) {
-      const matches = canonical.filter(item => item.brainInstanceId === row.brainInstanceId && item.kind === kind
-        && (item.legacyId === row._id || item.legacyIds?.includes(row._id)));
-      if (matches.length !== 1) throw new Error("Missing or ambiguous canonical record; retirement stopped");
-      const target = matches[0];
-      if (kind !== "link" && (target.body !== row.body || target.title !== row.title)) {
-        throw new Error("Canonical content mismatch; retirement stopped");
-      }
-      if (kind === "link" && (target.normalizedUrl ?? target.url) !== (row.normalizedUrl ?? row.url)) {
-        throw new Error("Canonical link identity mismatch; retirement stopped");
-      }
-      await db.delete(row._id);
-    }
-    return { deleted: rows.length };
-  },
-});
-
 // Admin-only cleanup for the isolated deployed smoke-test identity. Never
 // accepts a normal user's brain or deletes records belonging to another brain.
 export const cleanupVerificationBrain = internalMutationGeneric({
