@@ -320,9 +320,16 @@ export function MindExplorer({ graph: liveGraph }: { graph: MindGraph }) {
             ) : node ? (
               <>
                 <div className="flex items-center justify-between text-[12px]">
-                  <span className="text-[var(--mind-text)]">
-                    {KINDS[node.kind].label}
+                  <div className="flex min-w-0 flex-wrap items-center gap-3">
+                    <span className="text-[var(--mind-text)]">
+                      {KINDS[node.kind].label}
+                    </span>
+                {node.status && (
+                  <span className="inline-block rounded bg-[color-mix(in_srgb,var(--mind-accent)_7.45%,transparent)] px-[7px] py-1 text-[12px] text-[var(--mind-accent)]">
+                    {node.status.replaceAll("_", " ")}
                   </span>
+                )}
+                  </div>
                   <button
                     className={cn("p-[5px] text-[var(--mind-muted)]", mindControlClass)}
                     onClick={() => selectNode(null)}
@@ -336,11 +343,6 @@ export function MindExplorer({ graph: liveGraph }: { graph: MindGraph }) {
                   <span className="min-w-0">{node.title}</span>
                 </h2>
                 {node.kind === "task" && <AttentionEditor key={node.id} kind={node.kind} id={node.id} actionsOnly onCompleteTask={finishSelectedTask} />}
-                {node.status && (
-                  <span className="inline-block rounded bg-[color-mix(in_srgb,var(--mind-accent)_7.45%,transparent)] px-[7px] py-1 text-[12px] text-[var(--mind-accent)]">
-                    {node.status.replaceAll("_", " ")}
-                  </span>
-                )}
                 <p className="mb-[18px] mt-3 whitespace-pre-wrap text-[14px] leading-[1.8] text-[var(--mind-muted)] [overflow-wrap:anywhere]">
                   {node.summary || "No description saved yet."}
                 </p>
