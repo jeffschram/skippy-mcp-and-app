@@ -176,7 +176,7 @@ describe("source-ref identity dedupe", () => {
   });
 
   it("scopes source-ref dedupe to the types with no other duplicate net", () => {
-    expect(SOURCE_REF_DEDUPE_ENTITY_TYPES).toEqual(["note", "link", "knowledgeObject"]);
+    expect(SOURCE_REF_DEDUPE_ENTITY_TYPES).toEqual(["note", "link"]);
     expect(SOURCE_REF_DEDUPE_ENTITY_TYPES).not.toContain("task");
   });
 });

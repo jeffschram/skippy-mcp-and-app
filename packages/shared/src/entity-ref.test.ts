@@ -11,7 +11,7 @@ describe("entity references", () => {
       "person",
       "company",
       "link",
-      "knowledgeObject",
+      "memory",
     ]);
 
     for (const entityType of ENTITY_TYPES) {
@@ -21,6 +21,7 @@ describe("entity references", () => {
 
   it("rejects unknown entity types", () => {
     expect(isEntityType("email")).toBe(false);
+    expect(isEntityType("knowledgeObject")).toBe(false);
     expect(isEntityType("calendar_event")).toBe(false);
     expect(isEntityType(42)).toBe(false);
   });

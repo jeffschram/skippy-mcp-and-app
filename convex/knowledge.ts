@@ -1,9 +1,8 @@
+import { entityReferenceType } from "./entityReferenceType";
 import { completedTaskAttention } from "./attentionModel";
 import {
   internalMutationGeneric,
-  makeFunctionReference,
   mutationGeneric,
-  paginationOptsValidator,
   queryGeneric,
 } from "convex/server";
 import { v } from "convex/values";
@@ -39,11 +38,12 @@ const entityType = v.union(
   v.literal("person"),
   v.literal("company"),
   v.literal("link"),
-  v.literal("knowledgeObject"),
+  v.literal("knowledgeObject"), // Input-only compatibility alias.
+  v.literal("memory"),
 );
 
 const entityRef = v.object({
-  entityType,
+  entityType: entityReferenceType,
   entityId: v.string(),
 });
 
@@ -104,7 +104,6 @@ const memoryReviewBehavior = v.union(
 const knowledgeKind = v.union(
   v.literal("note"),
   v.literal("link"),
-  v.literal("knowledgeObject"),
   v.literal("memory"),
 );
 
@@ -163,13 +162,7 @@ const entityTableByType = {
   company: "companies",
   link: "knowledge",
   knowledgeObject: "knowledge",
-} as const;
-
-const legacyTableByKnowledgeKind = {
-  note: "notes",
-  link: "links",
-  knowledgeObject: "knowledgeObjects",
-  memory: "memories",
+  memory: "knowledge",
 } as const;
 
 function statusAllowedForEntity(entityTypeName: keyof typeof entityTableByType, status: string | undefined) {
@@ -478,6 +471,10 @@ async function createAcceptedEntity(
   actorType: "user" | "harness" | "skippy_ai" | "system" = "harness",
   actorId?: string,
 ) {
+  if (entityTypeName === "knowledgeObject") {
+    entityTypeName = "note";
+    payload = { ...payload, properties: payload.properties ?? payload };
+  }
   const sourceRefIds = triageItem.sourceRefIds ?? [];
   const normalizedPayload = normalizeAcceptedEntityPayload(entityTypeName, payload);
   const duplicateEntity = await findAcceptedEntityDuplicate(
@@ -573,7 +570,7 @@ function processingStateForMemoryStatus(status: string) {
         : "suggested";
 }
 
-const unifiedKnowledgeEntityKinds = new Set(["note", "link", "knowledgeObject"]);
+const unifiedKnowledgeEntityKinds = new Set(["note", "link"]);
 
 async function insertEntity(
   db: any,
@@ -664,10 +661,9 @@ async function requireRelatedEntityRefsForBrain(
 }
 
 function knowledgeEntityRef(knowledge: { _id: any; kind: string }) {
-  // The relationship graph predates the unified knowledge table, so retain
-  // the public semantic entity type while pointing at the canonical row ID.
+  // Relationship endpoints use the canonical kind, including memory.
   return {
-    entityType: knowledge.kind === "memory" ? "knowledgeObject" : knowledge.kind,
+    entityType: knowledge.kind,
     entityId: knowledge._id,
   } as { entityType: keyof typeof entityTableByType; entityId: string };
 }
@@ -904,7 +900,7 @@ function knowledgeMemoryForReader(memory: any) {
 async function acceptedKnowledgeByKinds(
   db: any,
   brainInstanceId: any,
-  kinds: Array<"note" | "link" | "knowledgeObject">,
+  kinds: Array<"note" | "link">,
   limitPerKind: number,
 ) {
   const rows = await Promise.all(
@@ -1148,7 +1144,7 @@ async function queryMatchedEntityContext(
     ...(await db.query("tasks").withIndex("by_brain_state", (q: any) => q.eq("brainInstanceId", brainInstanceId)).filter((q: any) => q.eq(q.field("processingState"), "accepted")).take(80)).map((entity: any) => ({ ref: { entityType: "task", entityId: entity._id }, entity })),
     ...(await db.query("people").withIndex("by_brain_state", (q: any) => q.eq("brainInstanceId", brainInstanceId)).filter((q: any) => q.eq(q.field("processingState"), "accepted")).take(60)).map((entity: any) => ({ ref: { entityType: "person", entityId: entity._id }, entity })),
     ...(await db.query("companies").withIndex("by_brain_state", (q: any) => q.eq("brainInstanceId", brainInstanceId)).filter((q: any) => q.eq(q.field("processingState"), "accepted")).take(60)).map((entity: any) => ({ ref: { entityType: "company", entityId: entity._id }, entity })),
-    ...(await acceptedKnowledgeByKinds(db, brainInstanceId, ["note", "link", "knowledgeObject"], 60)).map((entity: any) => ({ ref: { entityType: entity.kind, entityId: entity._id }, entity })),
+    ...(await acceptedKnowledgeByKinds(db, brainInstanceId, ["note", "link"], 60)).map((entity: any) => ({ ref: { entityType: entity.kind, entityId: entity._id }, entity })),
   ];
 
   return entityRows
@@ -1471,6 +1467,11 @@ export const submitCandidateObject = mutationGeneric({
     sourceRefs: v.optional(v.array(sourceRefInput)),
   },
   handler: async ({ db }, args) => {
+    if (args.candidateEntityType === "memory") throw new Error("Use record_memory or capture_thought for memories.");
+    if (args.candidateEntityType === "knowledgeObject") {
+      args = { ...args, candidateEntityType: "note", candidatePayload: { ...args.candidatePayload,
+        properties: args.candidatePayload.properties ?? args.candidatePayload } };
+    }
     const now = Date.now();
     const normalizedPayload = normalizeAcceptedEntityPayload(args.candidateEntityType, args.candidatePayload);
     const fingerprint = candidateFingerprint(args.candidateEntityType, normalizedPayload);
@@ -1659,6 +1660,11 @@ export const ingestObject = mutationGeneric({
     sourceRefs: v.optional(v.array(sourceRefInput)),
   },
   handler: async ({ db }, args) => {
+    if (args.candidateEntityType === "memory") throw new Error("Use record_memory or capture_thought for memories.");
+    if (args.candidateEntityType === "knowledgeObject") {
+      args = { ...args, candidateEntityType: "note", candidatePayload: { ...args.candidatePayload,
+        properties: args.candidatePayload.properties ?? args.candidatePayload } };
+    }
     const now = Date.now();
     const entityTypeName = args.candidateEntityType as keyof typeof entityTableByType;
     const normalizedPayload = normalizeAcceptedEntityPayload(entityTypeName, args.candidatePayload);
@@ -1742,278 +1748,6 @@ export const ingestObject = mutationGeneric({
   },
 });
 
-/**
- * Migration-step verification for the legacy -> knowledge dual write.
- * Run once per kind with the same [startAt, endAt) window. The bounded result
- * makes an unexpectedly busy window explicit instead of returning a partial
- * count that looks authoritative.
- */
-export const verifyKnowledgeDualWriteCounts = queryGeneric({
-  args: {
-    brainInstanceId: v.id("brainInstances"),
-    kind: knowledgeKind,
-    startAt: v.number(),
-    endAt: v.number(),
-    limit: v.optional(v.number()),
-  },
-  handler: async ({ db }, args) => {
-    if (args.endAt <= args.startAt) {
-      throw new Error("endAt must be greater than startAt");
-    }
-
-    // Two result sets share Convex's per-function read budget. If this caps,
-    // rerun with a narrower time window rather than risking a partial count.
-    const limit = Math.min(Math.max(Math.floor(args.limit ?? 5_000), 1), 7_000);
-    const legacyTable = legacyTableByKnowledgeKind[args.kind];
-    const [legacyRows, knowledgeRows] = await Promise.all([
-      db
-        .query(legacyTable)
-        .withIndex("by_brain_created", (q: any) =>
-          q
-            .eq("brainInstanceId", args.brainInstanceId)
-            .gte("createdAt", args.startAt)
-            .lt("createdAt", args.endAt),
-        )
-        .take(limit + 1),
-      db
-        .query("knowledge")
-        .withIndex("by_brain_kind_created", (q: any) =>
-          q
-            .eq("brainInstanceId", args.brainInstanceId)
-            .eq("kind", args.kind)
-            .gte("createdAt", args.startAt)
-            .lt("createdAt", args.endAt),
-        )
-        .take(limit + 1),
-    ]);
-    const truncated = legacyRows.length > limit || knowledgeRows.length > limit;
-    const legacyCount = Math.min(legacyRows.length, limit);
-    const knowledgeCount = Math.min(knowledgeRows.length, limit);
-
-    return {
-      kind: args.kind,
-      startAt: args.startAt,
-      endAt: args.endAt,
-      legacyCount,
-      knowledgeCount,
-      difference: knowledgeCount - legacyCount,
-      matches: !truncated && legacyCount === knowledgeCount,
-      truncated,
-      limit,
-    };
-  },
-});
-
-const backfillResult = v.object({
-  isDone: v.boolean(),
-  continueCursor: v.string(),
-  migrated: v.number(),
-  skipped: v.number(),
-});
-
-function legacyKnowledgeDocument(kind: "note" | "link" | "knowledgeObject" | "memory", row: any) {
-  if (kind === "memory") {
-    return {
-      brainInstanceId: row.brainInstanceId,
-      kind,
-      title: row.title,
-      body: row.body,
-      summary: row.summary,
-      memoryType: row.memoryType,
-      status: row.status,
-      processingState: processingStateForMemoryStatus(row.status),
-      confidence: row.confidence,
-      sourceRefIds: row.sourceRefIds,
-      rubricDecision: row.rubricDecision,
-      captureReason: row.captureReason,
-      reviewState: row.reviewState,
-      reviewedBy: row.reviewedBy,
-      reviewedAt: row.reviewedAt,
-      acceptedAt: row.acceptedAt,
-      rejectedAt: row.rejectedAt,
-      rejectionReason: row.rejectionReason,
-      archivedAt: row.archivedAt,
-      archiveReason: row.archiveReason,
-      legacyId: String(row._id),
-      createdAt: row.createdAt,
-      updatedAt: row.updatedAt,
-    };
-  }
-
-  return {
-    brainInstanceId: row.brainInstanceId,
-    kind,
-    title: row.title,
-    body: row.body,
-    summary: row.summary,
-    url: row.url,
-    normalizedUrl: row.normalizedUrl,
-    whyItMatters: row.whyItMatters,
-    status: kind === "link" ? row.status : undefined,
-    objectType: row.objectType,
-    properties: row.properties,
-    processingState: row.processingState,
-    rejectedAt: row.rejectedAt,
-    rejectionReason: row.rejectionReason,
-    rejectedBy: row.rejectedBy,
-    confidence: row.confidence,
-    reviewReason: row.reviewReason,
-    legacyId: String(row._id),
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
-  };
-}
-
-function legacyRowMatchesKnowledge(kind: "note" | "link" | "knowledgeObject" | "memory", row: any, item: any) {
-  if (kind === "note") {
-    return item.title === row.title && item.body === row.body;
-  }
-  if (kind === "link") {
-    return item.url === row.url && item.normalizedUrl === row.normalizedUrl;
-  }
-  if (kind === "knowledgeObject") {
-    return item.objectType === row.objectType && item.title === row.title;
-  }
-  return item.memoryType === row.memoryType && item.title === row.title && item.body === row.body;
-}
-
-async function backfillLegacyPage(
-  ctx: any,
-  table: "notes" | "links" | "knowledgeObjects" | "memories",
-  kind: "note" | "link" | "knowledgeObject" | "memory",
-  paginationOpts: { cursor: string | null; numItems: number },
-  continuation: any,
-) {
-  const page = await ctx.db.query(table).paginate(paginationOpts);
-  let migrated = 0;
-  let skipped = 0;
-
-  for (const row of page.page) {
-    const existing = await ctx.db
-      .query("knowledge")
-      .withIndex("by_brain_kind_legacy_id", (q: any) =>
-        q.eq("brainInstanceId", row.brainInstanceId).eq("kind", kind).eq("legacyId", String(row._id)),
-      )
-      .first();
-    if (existing) {
-      skipped += 1;
-      continue;
-    }
-
-    // Step 3 dual-writes predate `legacyId`. Adopt an exact timestamp/content
-    // match instead of inserting a second canonical row during the backfill.
-    const dualWrittenCandidates = await ctx.db
-      .query("knowledge")
-      .withIndex("by_brain_kind_created", (q: any) =>
-        q.eq("brainInstanceId", row.brainInstanceId).eq("kind", kind).eq("createdAt", row.createdAt),
-      )
-      .take(10);
-    const dualWritten = dualWrittenCandidates.find((item: any) => legacyRowMatchesKnowledge(kind, row, item));
-    if (dualWritten) {
-      await ctx.db.patch(dualWritten._id, {
-        ...legacyKnowledgeDocument(kind, row),
-        legacyId: String(row._id),
-      });
-      await addKnowledgeRelationships(ctx.db, row.brainInstanceId, dualWritten, row.relatedEntityRefs ?? [], "system", row.updatedAt);
-      migrated += 1;
-      continue;
-    }
-    const knowledgeId = await ctx.db.insert("knowledge", legacyKnowledgeDocument(kind, row));
-    await addKnowledgeRelationships(
-      ctx.db,
-      row.brainInstanceId,
-      { _id: knowledgeId, kind },
-      row.relatedEntityRefs ?? [],
-      "system",
-      row.updatedAt,
-    );
-    migrated += 1;
-  }
-
-  if (!page.isDone) {
-    await ctx.scheduler.runAfter(0, continuation, {
-      paginationOpts: { cursor: page.continueCursor, numItems: paginationOpts.numItems },
-    });
-  }
-
-  return { isDone: page.isDone, continueCursor: page.continueCursor, migrated, skipped };
-}
-
-/** Run once after deploying step 4; it self-schedules bounded pages to completion. */
-const backfillNotesRef = makeFunctionReference<"mutation">("knowledge:backfillNotesToKnowledge");
-const backfillLinksRef = makeFunctionReference<"mutation">("knowledge:backfillLinksToKnowledge");
-const backfillKnowledgeObjectsRef = makeFunctionReference<"mutation">(
-  "knowledge:backfillKnowledgeObjectsToKnowledge",
-);
-const backfillMemoriesRef = makeFunctionReference<"mutation">("knowledge:backfillMemoriesToKnowledge");
-const backfillKnowledgeRelationshipsRef = makeFunctionReference<"mutation">(
-  "knowledge:backfillKnowledgeRelationships",
-);
-
-/**
- * Migration step 5. Converts the old embedded refs to idempotent `mentions`
- * edges, then removes the embedded field. Safe to rerun and self-schedules.
- */
-export const backfillKnowledgeRelationships = internalMutationGeneric({
-  args: { paginationOpts: paginationOptsValidator },
-  returns: backfillResult,
-  handler: async (ctx, args) => {
-    const page = await ctx.db.query("knowledge").paginate(args.paginationOpts);
-    let migrated = 0;
-    let skipped = 0;
-    for (const row of page.page) {
-      const refs = (row as any).relatedEntityRefs ?? [];
-      if (!refs.length) {
-        skipped += 1;
-        continue;
-      }
-      await addKnowledgeRelationships(ctx.db, row.brainInstanceId, row, refs, "system", row.updatedAt);
-      await ctx.db.patch(row._id, { relatedEntityRefs: undefined } as any);
-      migrated += 1;
-    }
-    if (!page.isDone) {
-      await ctx.scheduler.runAfter(0, backfillKnowledgeRelationshipsRef, {
-        paginationOpts: { cursor: page.continueCursor, numItems: args.paginationOpts.numItems },
-      });
-    }
-    return { isDone: page.isDone, continueCursor: page.continueCursor, migrated, skipped };
-  },
-});
-
-export const backfillNotesToKnowledge = internalMutationGeneric({
-  args: { paginationOpts: paginationOptsValidator },
-  returns: backfillResult,
-  handler: async (ctx, args) =>
-    await backfillLegacyPage(ctx, "notes", "note", args.paginationOpts, backfillNotesRef),
-});
-
-export const backfillLinksToKnowledge = internalMutationGeneric({
-  args: { paginationOpts: paginationOptsValidator },
-  returns: backfillResult,
-  handler: async (ctx, args) =>
-    await backfillLegacyPage(ctx, "links", "link", args.paginationOpts, backfillLinksRef),
-});
-
-export const backfillKnowledgeObjectsToKnowledge = internalMutationGeneric({
-  args: { paginationOpts: paginationOptsValidator },
-  returns: backfillResult,
-  handler: async (ctx, args) =>
-    await backfillLegacyPage(
-      ctx,
-      "knowledgeObjects",
-      "knowledgeObject",
-      args.paginationOpts,
-      backfillKnowledgeObjectsRef,
-    ),
-});
-
-export const backfillMemoriesToKnowledge = internalMutationGeneric({
-  args: { paginationOpts: paginationOptsValidator },
-  returns: backfillResult,
-  handler: async (ctx, args) =>
-    await backfillLegacyPage(ctx, "memories", "memory", args.paginationOpts, backfillMemoriesRef),
-});
-
 export const approveTriageItem = mutationGeneric({
   args: {
     triageItemId: v.id("triageItems"),
@@ -2047,6 +1781,7 @@ export const approveTriageItem = mutationGeneric({
     );
 
     await db.patch(triageItemId, {
+      candidateEntityType: acceptedEntityRef.entityType,
       candidateEntityId: acceptedEntityRef.entityId,
       candidatePayload: normalizedPayload,
       status: correctedPayload ? "corrected" : "approved",
@@ -2165,7 +1900,7 @@ export const reviewTriageItem = mutationGeneric({
 
     const status = args.action === "approve" ? "approved" : "corrected";
     await ctx.db.patch(args.triageItemId, {
-      candidateEntityType: entityTypeName,
+      candidateEntityType: acceptedEntityRef.entityType,
       candidateEntityId: acceptedEntityRef.entityId,
       candidatePayload: normalizedPayload,
       status,
@@ -3090,7 +2825,7 @@ export const acceptedEntityOptionsForViewer = queryGeneric({
     const knowledgeRows = await acceptedKnowledgeByKinds(
       ctx.db,
       brain._id,
-      ["note", "link", "knowledgeObject"],
+      ["note", "link"],
       50,
     );
 

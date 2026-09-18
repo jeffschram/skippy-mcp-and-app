@@ -6,7 +6,7 @@ import { requireOwnedBrain } from "./auth";
 import { attentionKind, attentionMetadata, attentionStatus } from "./attentionValidators";
 import { ATTENTION, taskSourceLinks, attentionHref, isAttentionArchived, resolveAttention, type AttentionKind, type AttentionRecord } from "./attentionModel";
 
-const tables = { goal: "goals", project: "projects", task: "tasks", person: "people", company: "companies", note: "knowledge", link: "knowledge", knowledgeObject: "knowledge", memory: "knowledge" } as const;
+const tables = { goal: "goals", project: "projects", task: "tasks", person: "people", company: "companies", note: "knowledge", link: "knowledge", memory: "knowledge" } as const;
 const canonicalTables = ["goals", "projects", "tasks", "people", "companies", "knowledge"] as const;
 type Entity = AttentionRecord & { _id: string; brainInstanceId: string; kind?: string; title?: string; name?: string };
 const resultValidator = v.object({ status: attentionStatus, reason: v.string(), source: v.union(v.literal("manual"), v.literal("automatic")), at: v.optional(v.number()) });
@@ -72,7 +72,7 @@ export const browseForViewer = query({
     const { brain } = await requireOwnedBrain(ctx);
     const table = tables[args.kind];
     const result = table === "knowledge"
-      ? await ctx.db.query("knowledge").withIndex("by_brain_kind_state", q => q.eq("brainInstanceId", brain._id).eq("kind", args.kind as "note" | "link" | "knowledgeObject" | "memory").eq("processingState", "accepted")).order("desc").paginate({ ...args.paginationOpts, numItems: Math.min(25, args.paginationOpts.numItems) })
+      ? await ctx.db.query("knowledge").withIndex("by_brain_kind_state", q => q.eq("brainInstanceId", brain._id).eq("kind", args.kind as "note" | "link" | "memory").eq("processingState", "accepted")).order("desc").paginate({ ...args.paginationOpts, numItems: Math.min(25, args.paginationOpts.numItems) })
       : await ctx.db.query(table).withIndex("by_brain_state", q => q.eq("brainInstanceId", brain._id).eq("processingState", "accepted")).order("desc").paginate({ ...args.paginationOpts, numItems: Math.min(25, args.paginationOpts.numItems) });
     const page = [];
     for (const row of result.page) if (await eligible(ctx, row, args.kind, brain._id)) page.push(present(row, args.kind, args.now));

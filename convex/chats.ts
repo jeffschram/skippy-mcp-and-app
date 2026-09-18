@@ -29,6 +29,8 @@ import { tokenUsage } from "./schema";
 import { chatHistoryWindow, shouldRefreshHistorySummary } from "./chatHistoryHelpers";
 import { CHAT_LEASE_MS, isChatTurnLeaseExpired } from "./chatLeaseHelpers";
 
+import { mindChatContext, validateMindChatScope } from "./mindChatContext";
+
 const MAX_MESSAGE_CHARS = 8000;
 /** Max files attachable to a single chat message. */
 const MAX_MESSAGE_ATTACHMENTS = 8;
@@ -276,6 +278,7 @@ export const sendChatMessageForViewer = mutationGeneric({
   },
   handler: async (ctx, args) => {
     const { brain } = await requireOwnedBrain(ctx);
+    await validateMindChatScope(ctx.db, brain._id, args.pageKey);
     if (!args.projectId && !args.pageKey) throw new Error("projectId or pageKey is required");
     const content = args.content.trim().slice(0, MAX_MESSAGE_CHARS);
     const attachments = args.attachments ?? [];
@@ -383,6 +386,7 @@ export const startNewChatForViewer = mutationGeneric({
   },
   handler: async (ctx, args) => {
     const { brain } = await requireOwnedBrain(ctx);
+    await validateMindChatScope(ctx.db, brain._id, args.pageKey);
     if (!args.projectId && !args.pageKey) throw new Error("projectId or pageKey is required");
 
     let projectTitle: string | undefined;
@@ -499,7 +503,7 @@ export const claimNextChatTurn = mutationGeneric({
         }
       } else {
         const description = PAGE_DESCRIPTIONS[chat.pageKey ?? ""] ?? `the ${chat.pageKey} page of the Skippy app`;
-        scopeContext = `The user is chatting from ${description}.`;
+        scopeContext = await mindChatContext(ctx.db, chat.brainInstanceId, chat.pageKey ?? "") ?? `The user is chatting from ${description}.`;
       }
 
       // Transcript for thread bootstrap (resumed threads only need the new turn).

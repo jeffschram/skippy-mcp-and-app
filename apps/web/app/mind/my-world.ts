@@ -52,7 +52,7 @@ export function buildMyWorld(
   for (const record of records) {
     if (!visibleIds.has(record.id) || !enabled.has(record.kind)) continue;
     positions.set(record.id, settled.get(record.id)!);
-    const attentionStatus = resolveAttention(record.kind, record, now).status;
+    const attentionStatus = record.kind === "event" ? "scheduled" : resolveAttention(record.kind, record, now).status;
     nodes.push({
       id: record.id,
       kind: record.kind,
@@ -118,4 +118,23 @@ export function nodeVisualSize(node: WorldNode): number {
 /** Search matches take precedence over a previous record selection. */
 export function highlightedIds(graph: WorldGraph, selected: string | null): Set<string> {
   return graph.searchIds !== undefined ? new Set(graph.searchIds) : selectionIds(graph, selected);
+}
+
+/** Render a quiet overview, revealing supporting records through selection or
+ * search. The full graph remains the source for List, sizing, and positions.
+ */
+export function revealWorld(world: WorldGraph, selected: string | null, categoryView = false): WorldGraph {
+  if (categoryView) return world;
+  const revealed = highlightedIds(world, selected);
+  const nodes = world.nodes.filter(node =>
+    node.role === "owner" || node.attentionStatus === "immediate" || revealed.has(node.id) ||
+    node.kind === "project" || node.kind === "goal" || node.kind === "person" || node.kind === "company" ||
+    node.kind === "task" || node.kind === "event",
+  );
+  const ids = new Set(nodes.map(node => node.id));
+  return {
+    ...world, nodes,
+    edges: world.edges.filter(edge => ids.has(edge.source) && ids.has(edge.target)),
+    positions: new Map([...world.positions].filter(([id]) => ids.has(id))),
+  };
 }

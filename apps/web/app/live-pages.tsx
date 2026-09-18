@@ -74,7 +74,7 @@ type MergeOption = AnyRecord & {
   matchScore: number;
 };
 
-const entityTypes = ["goal", "project", "task", "note", "person", "company", "link", "knowledgeObject"] as const;
+const entityTypes = ["goal", "project", "task", "note", "person", "company", "link"] as const;
 
 const statusOptions: Record<string, string[]> = {
   goal: ["active", "paused", "achieved", "abandoned"],
@@ -134,6 +134,7 @@ function editablePayloadFor(type: string, payload: AnyRecord) {
       };
     case "note":
       return {
+        ...payload,
         title: textValue(payload.title),
         body: textValue(payload.body, payload.text, payload.summary, payload.sourceSummary, payload.title),
       };
@@ -160,12 +161,7 @@ function editablePayloadFor(type: string, payload: AnyRecord) {
         // Approving a candidate marks it valid reference material, not read-later homework.
         status: textValue(payload.status) || "saved",
       };
-    case "knowledgeObject":
-      return {
-        objectType: textValue(payload.objectType, payload.type) || "general",
-        title: textValue(payload.title, payload.name, payload.summary),
-        summary: textValue(payload.summary, payload.description, payload.sourceSummary),
-      };
+
     default:
       return { ...payload };
   }
@@ -259,7 +255,7 @@ function formatJson(value: unknown) {
 
 function formatRunDuration(run: AnyRecord) {
   if (!run.completedAt) {
-    return "still running";
+    return run.status === "running" ? "still running" : "duration unavailable";
   }
   const seconds = Math.max(0, Math.round((run.completedAt - run.startedAt) / 1000));
   if (seconds < 60) {
@@ -611,9 +607,12 @@ export function LiveIngestionLogDetailContent({ ingestionRunId }: { ingestionRun
                 <p className={mutedClass}>
                   {runRoleName ? `on ${run.harness} · ` : ""}
                   Started {formatDate(run.startedAt)}
-                  {run.completedAt ? ` · Completed ${formatDate(run.completedAt)}` : " · Still running"}
-                  {" · "}
-                  {formatRunDuration(run)}
+                  {run.completedAt
+                    ? ` · ${run.status === "failed" ? "Failed" : "Completed"} ${formatDate(run.completedAt)}`
+                    : run.status === "running"
+                      ? " · Still running"
+                      : ` · ${run.status === "failed" ? "Failed" : "Completed"} (finish time not recorded)`}
+                  {run.status !== "running" || run.completedAt ? ` · ${formatRunDuration(run)}` : ""}
                 </p>
               </div>
               <span className={cn(badgeClass, run.status === "failed" ? badgeRedClass : run.status === "running" ? badgeGoldClass : badgeBlueClass)}>
@@ -3138,4 +3137,16 @@ function NotificationSettings({
       </div>
     </div>
   );
+}
+
+
+/** Reuse the existing review workflows in an expanded Mind row. */
+export function MindReviewDetail({ type, item }: { type: "approval" | "triage" | "memory"; item: AnyRecord }) {
+  const ready = useViewerReady();
+  const options = useQuery(api.knowledge.acceptedEntityOptionsForViewer, ready && type === "triage" ? {} : "skip");
+  const viewer = useQuery(api.auth.viewer, ready && type === "triage" ? {} : "skip");
+  const review = useMutation(api.knowledge.reviewPendingActionForViewer);
+  if (type === "approval") return <PendingActionItem action={item} reviewPendingAction={args => review(args as any)} />;
+  if (type === "triage") return options && viewer ? <TriageItem item={item} entityOptions={options} displayLabels={displayLabelsFrom(viewer)} /> : <p role="status">Loading review…</p>;
+  return <div className="grid gap-3"><p>{memorySummary(item)}</p><InlineSourceRefs sourceRefs={arrayValue(item.sourceRefs)} sourceRefIds={item.sourceRefIds ?? []} /><div className="flex gap-2"><MemoryReviewActions memory={item} /></div></div>;
 }

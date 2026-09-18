@@ -18,7 +18,7 @@ const entityType = v.union(
   v.literal("person"),
   v.literal("company"),
   v.literal("link"),
-  v.literal("knowledgeObject"),
+  v.literal("memory"),
 );
 
 const entityRef = v.object({
@@ -288,7 +288,7 @@ function tableForEntityType(entityTypeName: string) {
       return "companies";
     case "link":
       return "knowledge";
-    case "knowledgeObject":
+    case "memory":
       return "knowledge";
     default:
       throw new Error("unsupported entity type");

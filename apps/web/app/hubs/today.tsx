@@ -114,8 +114,8 @@ function captureEntityHref(entityType: string, entityId: string): string | undef
     case "person":
     case "company":
       return `/brain/contacts`;
-    case "knowledgeObject":
-      return `/brain/memory`;
+    case "memory":
+      return `/memory/${id}`;
     // Life-layer primitives. These are NOT entityType members — keeping
     // calendar events and recurrences out of that union is what stops them
     // flowing through triage — so they arrive as plain strings and are matched

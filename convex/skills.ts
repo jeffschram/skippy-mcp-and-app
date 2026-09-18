@@ -713,13 +713,12 @@ export const saveSkillForViewer = mutationGeneric({
 
     await ctx.db.insert("activityEvents", {
       brainInstanceId: brain._id,
-      entityRef: { entityType: "knowledgeObject", entityId: skillId },
       activityType: "harness_skill_updated",
       actorType: "user",
       actorId: user._id,
       timestamp: now,
       summary: `Updated harness skill: ${title}`,
-      metadata: { slug },
+      metadata: { slug, skillId },
     });
 
     return { skillId, slug, status: "saved" };
