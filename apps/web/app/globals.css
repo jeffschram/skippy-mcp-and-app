@@ -297,3 +297,13 @@
 @media (min-width: 640px) {
   [data-mind-view="map"] > .mind-detail-card { top: 111px; bottom: 206px; }
 }
+
+/* Mobile inspectors occupy the viewport, above search and navigation chrome. */
+@media (max-width: 1023px) {
+  [data-mind-view] > .mind-detail-card {
+    position: fixed;
+    inset: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+    z-index: 80;
+    touch-action: pan-y pinch-zoom;
+  }
+}

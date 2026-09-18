@@ -16,7 +16,7 @@ export type ChatActivity = {
 };
 
 const STATUS_LABELS: Record<string, string> = {
-  session_started: "Session started",
+  session_started: "Starting response…",
 };
 
 function basename(filePath: string) {
