@@ -180,7 +180,10 @@ export function buildChatPrompt(turn: ClaimedChatTurn, attachments: Materialized
 
   // Resumed harness threads already hold the conversation — send only the new
   // user message. Fresh threads get the scope preamble plus recent history.
-  if (turn.externalThreadId) return [turn.userContent, ...attachmentLines].join("\n");
+  if (turn.externalThreadId) return [
+    ...(turn.scopeContext.startsWith("MIND_CARD_CONTEXT") ? [turn.scopeContext, "", "User:"] : []),
+    turn.userContent, ...attachmentLines,
+  ].join("\n");
 
   const lines = [
     "You are the user's Skippy assistant, chatting from the Skippy web app. You have your normal local capabilities (files, commands, tools); use them when they help answer.",

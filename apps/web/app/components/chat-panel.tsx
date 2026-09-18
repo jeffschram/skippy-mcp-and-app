@@ -25,6 +25,10 @@ import {
   iconKindForMimeType,
 } from "../hubs/project-library-helpers";
 
+import { CardCloseNotice } from "./card-close-notice";
+import { canCloseCompletedCard } from "../../lib/card-close";
+import { useMindChat } from "./mind-chat-context";
+
 type AnyRecord = Record<string, any>;
 
 type ChatScope =
@@ -311,7 +315,7 @@ function ChatComposer({
   };
 
   return (
-    <div className={compact ? "p-2 sm:p-3" : "p-3 pb-6 desk:p-3 desk:px-[4vw] desk:pb-[2vw] desk:pt-[1vw]"}>
+    <div className={compact ? "shrink-0 p-2 sm:p-3" : "p-3 pb-6 desk:p-3 desk:px-[4vw] desk:pb-[2vw] desk:pt-[1vw]"}>
       <div className={cn("rounded-2xl transition-colors", quiet ? "border-0 bg-transparent" : "border bg-card focus-within:border-primary/60")}>
         <textarea
           className="max-h-40 min-h-11 w-full resize-none bg-transparent px-3.5 pb-1 pt-3 text-[16px] outline-none"
@@ -422,10 +426,16 @@ function ChatSurface({
   onOpenTask,
   collapsed = false,
   mind = false,
+  card = false,
+  completedTaskStatus,
+  onCompletedCardClose,
   onExpand,
 }: {
   collapsed?: boolean;
   mind?: boolean;
+  card?: boolean;
+  completedTaskStatus?: string | undefined;
+  onCompletedCardClose?: (() => void) | undefined;
   onExpand?: () => void;
   scope: ChatScope;
   className?: string | undefined;
@@ -437,8 +447,9 @@ function ChatSurface({
   onOpenTask?: ((taskId: string) => void) | undefined;
 }) {
   const { isAuthenticated } = useConvexAuth();
+  const mindChat = useMindChat();
   const [sending, setSending] = useState(false);
-  const [pickedHarness, setPickedHarness] = useState<"claude" | "codex">("claude");
+  const [pickedHarness, setPickedHarness] = useState<"claude" | "codex">(mindChat.harness);
   const harnessWasPicked = useRef(false);
   const messagesRef = useRef<HTMLDivElement | null>(null);
   const queryArgs = scope.kind === "project" ? { projectId: scope.projectId as any } : { pageKey: scope.pageKey };
@@ -502,6 +513,12 @@ function ChatSurface({
   const pendingApprovals: AnyRecord[] = data?.pendingApprovals ?? [];
   const activeTurnEvents: AnyRecord[] = data?.activeTurnEvents ?? [];
   const boundHarness: string | undefined = data?.chat?.harness;
+  useEffect(() => {
+    if (mind && !card && (boundHarness === "claude" || boundHarness === "codex")) mindChat.setHarness(boundHarness);
+  }, [mind, card, boundHarness, mindChat.setHarness]);
+  useEffect(() => {
+    if (card && !harnessWasPicked.current && !boundHarness) setPickedHarness(mindChat.harness);
+  }, [card, boundHarness, mindChat.harness]);
   const [isTyping, setIsTyping] = useState(false);
   const [isSleeping, setIsSleeping] = useState(false);
   const [avatarMoment, setAvatarMoment] = useState<AvatarStateName | null>(null);
@@ -742,9 +759,9 @@ function ChatSurface({
           passes its own header (it needs the close affordance). */}
       {header}
 
-      <div className={collapsed ? "hidden" : "relative flex min-h-0 flex-1"}>
-      <div className="flex flex-1 flex-col gap-3 overflow-y-auto px-4 py-5 desk:px-[4vw]" ref={messagesRef} onScroll={handleTranscriptScroll}>
-        {timelineItems.length === 0 ? (
+      <div className={collapsed || (card && timelineItems.length === 0) ? "hidden" : "relative flex min-h-0 flex-1"}>
+      <div className={cn("flex flex-1 flex-col gap-3 overflow-y-auto", card ? "px-1 py-3" : "px-4 py-5 desk:px-[4vw]")} ref={messagesRef} onScroll={handleTranscriptScroll}>
+        {timelineItems.length === 0 ? (card ? null : (
           <div className="mx-auto my-auto max-w-md text-center">
             <MessageCircle className="mx-auto mb-3 text-primary" size={24} aria-hidden />
             <p className="mb-1 font-bold">{mind ? "What’s on your mind?" : "Talk through this project"}</p>
@@ -752,7 +769,7 @@ function ChatSurface({
               {mind ? "Explore a connection, capture a thought, or decide what to focus on next." : "Ask what comes next, update project details, or discuss work already in progress."}
             </p>
           </div>
-        ) : (
+        )) : (
           timelineItems.map((item) => {
             if (item.kind === "task") {
               const momentTask = item.moment.task;
@@ -872,17 +889,22 @@ function ChatSurface({
         </div>
       ) : null}
 
+      {card && onCompletedCardClose && <CardCloseNotice
+        completed={completedTaskStatus === "done"}
+        ready={canCloseCompletedCard(completedTaskStatus, messages as { role: string; status: string }[], sending)}
+        typing={isTyping} onClose={onCompletedCardClose}
+      />}
       <ChatComposer
         compact={mind}
         quiet={mind && collapsed}
-        placeholder={scope.kind === "project" ? "Message about this project…" : `Message ${scope.label}…`}
+        placeholder={card ? "Ask or add an update…" : scope.kind === "project" ? "Message about this project…" : `Message ${scope.label}…`}
         avatarState={avatarState}
         canAttach={canAttach}
         hasAttachments={attachments.length > 0}
         busy={sending || uploadingCount > 0}
         harness={(boundHarness as "claude" | "codex" | undefined) ?? pickedHarness}
         harnessBound={Boolean(boundHarness)}
-        onChooseHarness={(next) => void chooseHarness(next)}
+        onChooseHarness={(next) => { mindChat.setHarness(next); void chooseHarness(next); }}
         onSend={send}
         onAddFiles={(files) => void addFiles(files)}
         onTypingChange={setIsTyping}
@@ -915,15 +937,27 @@ export function ProjectChatWorkspace({
   );
 }
 
+export function MindCardChat({ itemId, label, taskId, onCompletedClose }: { itemId: string; label: string; taskId?: string | undefined; onCompletedClose?: (() => void) | undefined }) {
+  const { isAuthenticated } = useConvexAuth();
+  const task = useQuery(api.attention.getForViewer, isAuthenticated && taskId ? { kind: "task", id: taskId, now: 0 } : "skip");
+  const { setCardActive } = useMindChat();
+  useEffect(() => { setCardActive(true); return () => setCardActive(false); }, [setCardActive]);
+  return <ChatSurface key={itemId} scope={{ kind: "page", pageKey: `mind-item:${itemId}`, label }}
+    mind card completedTaskStatus={task?.taskStatus} onCompletedCardClose={onCompletedClose} className="mt-3 max-h-[45%] shrink-0 border-t border-[var(--mind-border)] pt-2" />;
+}
+
 function MindChat({ scope }: { scope: ChatScope }) {
   const [open, setOpen] = useState(false);
+  const { cardActive } = useMindChat();
+  useEffect(() => { if (cardActive) setOpen(false); }, [cardActive]);
   return <ChatSurface
     scope={scope}
     mind
-    collapsed={!open}
+    collapsed={!open || cardActive}
     onExpand={() => setOpen(true)}
     className={cn(
       "fixed bottom-16 left-1/2 z-[60] w-[calc(100%-24px)] -translate-x-1/2 rounded-[28px] border sm:bottom-6 sm:w-[min(920px,calc(100%-200px))]",
+      cardActive && "hidden",
       open ? "h-[min(720px,calc(100dvh-180px))] border-[var(--mind-border)] bg-[var(--mind-chat)] shadow-[0_16px_70px_color-mix(in_srgb,var(--mind-ink)_14.9%,transparent)]" : "border-[var(--mind-outline)] bg-[var(--mind-canvas)] shadow-none transition-colors focus-within:bg-[var(--mind-chat)]",
     )}
     header={open ? <header className="flex min-h-14 items-center gap-2 border-b border-[var(--mind-border)] px-5">

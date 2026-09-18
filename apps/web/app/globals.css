@@ -258,13 +258,21 @@
 }
 .mind-detail-card {
   right: var(--mind-card-inset);
+  translate: 0 0;
+  transition: translate 420ms ease;
+  will-change: translate;
   animation: mind-card-enter 420ms ease both;
 }
 @media (min-width: 1024px) {
   .mind-list-scroll[data-selected="true"] .mind-list-column {
-    left: calc(100% - var(--mind-card-inset) - 486px);
-    width: calc(100% - var(--mind-card-inset) - 510px);
-    transform: translateX(-100%);
+    /* 670px list + 36px gap + 450px card, with 24px outer gutters. */
+    left: max(24px, calc((100% - 1156px) / 2));
+    width: calc(100% - 534px);
+    transform: translateX(0);
+  }
+  [data-mind-view="list"] > .mind-detail-card {
+    /* Slide on the compositor while the 3D canvas initializes. */
+    translate: calc(var(--mind-card-inset) - max(24px, calc((100vw - 1156px) / 2))) 0;
   }
 }
 @media (max-width: 1023px) {
@@ -281,7 +289,7 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .mind-list-column { transition: none; }
-  .mind-detail-card { animation: none; }
+  .mind-detail-card { animation: none; transition: none; }
 }
 
 /* The canvas extends behind the chrome; cards retain their usable content area. */

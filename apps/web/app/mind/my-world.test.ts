@@ -1,7 +1,7 @@
 import { ATTENTION } from "../../../../convex/attentionModel";
 import { describe, expect, it } from "vitest";
 import { mindOwner, type MindGraph } from "../../../../convex/mindGraphHelpers";
-import { buildMyWorld, highlightedIds, selectionIds, nodeVisualSize } from "./my-world";
+import { buildMyWorld, revealWorld, highlightedIds, selectionIds, nodeVisualSize } from "./my-world";
 import { KINDS, MIND_OWNER_COLOR, filterGraph } from "./graph-layout";
 const graph: MindGraph = {
   owner: { id: "owner:u", title: "Jeff Schram", personId: "self" },
@@ -218,5 +218,44 @@ describe("search highlighting", () => {
     const world = buildMyWorld(graph, graph, all);
     expect(highlightedIds({ ...world, searchIds: [] }, "p").size).toBe(0);
     expect(highlightedIds(world, "p")).toEqual(selectionIds(world, "p"));
+  });
+});
+
+
+describe("progressive map detail", () => {
+  const sample: MindGraph = {
+    ...graph,
+    nodes: [...graph.nodes,
+      { ...graph.nodes[1]!, id: "note", kind: "note", title: "Reference" },
+      { ...graph.nodes[1]!, id: "urgent", kind: "link", attention: { override: "immediate" } },
+      { ...graph.nodes[1]!, id: "orphan", kind: "memory" },
+    ],
+    edges: [...graph.edges, { id: "note-link", source: "note", target: "p", type: "related_to" }],
+  };
+  const full = () => buildMyWorld(sample, sample, all, 1000);
+  it("hides supporting types but retains project tasks, standalone tasks, and urgent items", () => {
+    const overview = revealWorld(full(), null);
+    expect(overview.nodes.map(n => n.id).sort()).toEqual(["owner:u", "p", "t1", "t2", "urgent"]);
+    expect(overview.edges.every(e => overview.positions.has(e.source) && overview.positions.has(e.target))).toBe(true);
+  });
+  it("reveals direct connections with stable sizes and positions, then hides them on close", () => {
+    const world = full(), focused = revealWorld(world, "p");
+    for (const id of ["note", "t1"]) {
+      expect(focused.nodes.find(n => n.id === id)).toEqual(world.nodes.find(n => n.id === id));
+      expect(focused.positions.get(id)).toEqual(world.positions.get(id));
+    }
+    expect(revealWorld(world, null).positions.has("note")).toBe(false);
+  });
+  it("reveals hidden and orphan search results and restores the overview when cleared", () => {
+    const world = full();
+    const search = revealWorld({ ...world, searchIds: ["orphan", "t1"] }, null);
+    expect(search.positions.has("orphan")).toBe(true);
+    expect(search.positions.has("t1")).toBe(true);
+    expect(highlightedIds(search, null)).toEqual(new Set(["orphan", "t1"]));
+    expect(revealWorld(world, null).positions.has("orphan")).toBe(false);
+    expect(revealWorld({ ...world, searchIds: [] }, null).nodes).toEqual(revealWorld(world, null).nodes);
+    expect(revealWorld(world, "orphan").positions.has("orphan")).toBe(true);
+    expect(revealWorld(world, null, true)).toBe(world);
+    expect(world.nodes).toHaveLength(sample.nodes.length);
   });
 });

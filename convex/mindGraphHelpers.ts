@@ -1,6 +1,8 @@
+import type { AgendaItem } from "@skippy/shared";
 import type { AttentionRecord } from "./attentionModel";
 /** Serializable, read-only graph model shared with the Mind experiment. */
 export type MindKind =
+  | "event"
   | "goal"
   | "project"
   | "task"
@@ -16,6 +18,7 @@ export type MindNode = AttentionRecord & {
   summary: string;
   status: string;
   href: string;
+  agenda?: AgendaItem;
 };
 export type MindEdge = {
   id: string;

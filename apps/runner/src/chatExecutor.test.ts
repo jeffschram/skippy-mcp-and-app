@@ -128,6 +128,14 @@ describe("materializeChatAttachments", () => {
 });
 
 describe("buildChatPrompt", () => {
+  it("refreshes card context on resumed Codex and Claude conversations without replaying history", () => {
+    for (const harness of ["codex", "claude"] as const) {
+      const prompt = buildChatPrompt(makeTurn({ harness, externalThreadId: "existing", scopeContext: "MIND_CARD_CONTEXT\\nCurrent status: done", historySummary: "OLD SUMMARY" }));
+      expect(prompt).toContain("Current status: done");
+      expect(prompt).toContain("User:\nPlease look at this file");
+      expect(prompt).not.toContain("OLD SUMMARY");
+    }
+  });
   const attachments: MaterializedAttachment[] = [
     { fileName: "spec.pdf", localPath: "/root/project/_library/spec.pdf" },
     { fileName: "broken.png" },

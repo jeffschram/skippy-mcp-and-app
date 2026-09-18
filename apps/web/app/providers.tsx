@@ -1,5 +1,6 @@
 "use client";
 
+import { MindChatProvider } from "./components/mind-chat-context";
 import type { ReactNode } from "react";
 import { ConvexProviderWithClerk } from "convex/react-clerk";
 import { ConvexReactClient } from "convex/react";
@@ -10,12 +11,12 @@ const convexClient = convexUrl ? new ConvexReactClient(convexUrl) : null;
 
 export function AppProviders({ children }: { children: ReactNode }) {
   if (!convexClient || !process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY) {
-    return <>{children}</>;
+    return <MindChatProvider>{children}</MindChatProvider>;
   }
 
   return (
     <ConvexProviderWithClerk client={convexClient} useAuth={useAuth}>
-      {children}
+      <MindChatProvider>{children}</MindChatProvider>
     </ConvexProviderWithClerk>
   );
 }

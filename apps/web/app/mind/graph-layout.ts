@@ -4,6 +4,7 @@ export type Position = [number, number, number];
 export type MindShape = "cube" | "pyramid" | "ring" | "sphere" | "cylinder" | "octahedron" | "slab" | "cross" | "capsule";
 export const KINDS: Record<MindKind, { label: string; color: string; shape: MindShape }> = {
   project: { label: "Projects", color: "#3D9D9C", shape: "cube" },
+  event: { label: "Events", color: "#97CDC8", shape: "capsule" },
   task: { label: "Tasks", color: "#659FD7", shape: "pyramid" },
   goal: { label: "Goals", color: "#E4B550", shape: "ring" },
   person: { label: "People", color: "#E77F6B", shape: "sphere" },
