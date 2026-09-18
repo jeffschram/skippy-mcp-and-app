@@ -148,6 +148,25 @@ export function MindExplorer({ graph: liveGraph }: { graph: MindGraph }) {
   }, [node, graph]);
   const [closingCard, setClosingCard] = useState<string | null>(null);
   const currentCardId = attentionCard?.key ?? selected;
+  const swipe = useRef<{ x: number; y: number; horizontal: boolean } | null>(null);
+  const [swipeOffset, setSwipeOffset] = useState<number | null>(null);
+  const [swipeClosing, setSwipeClosing] = useState(false);
+  useEffect(() => {
+    swipe.current = null;
+    setSwipeOffset(null);
+    setSwipeClosing(false);
+  }, [currentCardId]);
+  useEffect(() => {
+    if (!swipeClosing) return;
+    const timer = setTimeout(() => {
+      setAttentionCard(null);
+      setSelected(null);
+      setReset(n => n + 1);
+      setSwipeClosing(false);
+      setSwipeOffset(0);
+    }, window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 220);
+    return () => clearTimeout(timer);
+  }, [swipeClosing]);
   useEffect(() => {
     if (!closingCard || closingCard !== currentCardId) { setClosingCard(null); return; }
     const timer = setTimeout(() => {
@@ -300,7 +319,33 @@ export function MindExplorer({ graph: liveGraph }: { graph: MindGraph }) {
           {!list && query.trim() && !records.length && <p role="status" className="pointer-events-none absolute inset-x-0 top-[140px] z-20 text-center text-sm text-[var(--mind-muted)]">No matching records</p>}
           {(selected || attentionCard) && <aside
             className="mind-detail-card flex flex-col absolute bottom-4 top-4 z-30 w-[450px] max-w-[calc(100%-32px)] overflow-hidden rounded-xl border border-[var(--mind-border)] bg-[color-mix(in_srgb,var(--mind-panel)_96.08%,transparent)] p-[22px] shadow-[0_12px_45px_color-mix(in_srgb,var(--mind-ink)_5.1%,transparent)] [scrollbar-width:thin] max-[1023px]:p-5"
-            style={closingCard === currentCardId && closingCard ? { animation: "none", opacity: 0, transition: "opacity 250ms ease" } : undefined}
+            onPointerDown={event => {
+              if (event.pointerType !== "touch" || !event.isPrimary || !window.matchMedia("(max-width: 1023px)").matches || swipeClosing) return;
+              if ((event.target as HTMLElement).closest("input, textarea, select, button, a, [contenteditable=true]")) return;
+              swipe.current = { x: event.clientX, y: event.clientY, horizontal: false };
+            }}
+            onPointerMove={event => {
+              const start = swipe.current;
+              if (!start) return;
+              const dx = event.clientX - start.x;
+              const dy = event.clientY - start.y;
+              if (!start.horizontal) {
+                if (Math.abs(dy) > 10 || dx < -10) { swipe.current = null; return; }
+                if (dx < 12) return;
+                start.horizontal = true;
+                event.currentTarget.setPointerCapture(event.pointerId);
+              }
+              setSwipeOffset(Math.max(0, dx));
+            }}
+            onPointerUp={event => {
+              const start = swipe.current;
+              swipe.current = null;
+              if (!start) return;
+              if (start.horizontal && event.clientX - start.x > Math.min(120, event.currentTarget.clientWidth * 0.28)) setSwipeClosing(true);
+              else setSwipeOffset(0);
+            }}
+            onPointerCancel={() => { swipe.current = null; setSwipeOffset(0); }}
+            style={swipeClosing ? { animation: "none", translate: "110vw 0", transition: "translate 220ms ease" } : swipeOffset !== null ? { animation: "none", translate: `${swipeOffset}px 0`, transition: swipeOffset ? "none" : "translate 220ms ease" } : closingCard === currentCardId && closingCard ? { animation: "none", opacity: 0, transition: "opacity 250ms ease" } : undefined}
             aria-label="Selected record"
             aria-live="polite"
           >

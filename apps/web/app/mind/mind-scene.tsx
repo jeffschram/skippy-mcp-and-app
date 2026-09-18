@@ -29,9 +29,17 @@ function CameraReset({ reset, graph, focusKey, selected, reducedMotion, onMoving
     const orbit = controls as unknown as { target: THREE.Vector3; update: () => void; addEventListener: (type: string, listener: () => void) => void; removeEventListener: (type: string, listener: () => void) => void } | null;
     if (!orbit) return;
     const center = new THREE.Vector3();
-    let distance = 85 / Math.min(1, size.width / Math.max(1, size.height));
+    // Portrait screens need a closer overview, not a distance proportional to
+    // their full height (which previously pushed the map beyond the fog).
+    const aspect = size.width / Math.max(1, size.height);
+    let distance = Math.min(110, 78 / Math.sqrt(Math.min(1, aspect)));
     const current = latestGraph.current;
     const ids = highlightedIds(current, selected);
+    if (!selected && !focusKey && current.positions.size) {
+      new THREE.Box3().setFromPoints(
+        [...current.positions.values()].map(point => new THREE.Vector3(...point)),
+      ).getCenter(center);
+    }
     if (current.searchIds !== undefined && !ids.size) return;
     if (ids.size || focusKey) {
       const points = [...current.positions.entries()]
@@ -124,7 +132,15 @@ function Network({ graph, selected, onSelect, reset, focusKey = "", rotating, re
     };
   }, [graph.edges, graph.positions]);
   useEffect(() => () => { lines.branches.dispose(); lines.saved.dispose(); lines.highlight.dispose(); }, [lines]);
-  useFrame((_, delta) => {
+  useFrame(({ camera, scene, controls }, delta) => {
+    // Keep atmospheric depth relative to the orbit target even after zooming.
+    // A fixed far distance made the entire portrait overview disappear.
+    const target = (controls as unknown as { target?: THREE.Vector3 } | null)?.target;
+    const distance = target ? camera.position.distanceTo(target) : camera.position.length();
+    if (scene.fog instanceof THREE.Fog) {
+      scene.fog.near = Math.max(64, distance + 12);
+      scene.fog.far = Math.max(150, distance + 110);
+    }
     let moving = false;
     const ease = (current: number, target: number) => {
       if (reducedMotion || Math.abs(current - target) < .001) return target;
