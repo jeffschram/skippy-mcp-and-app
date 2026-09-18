@@ -334,10 +334,11 @@ export const ENTITY_TYPES = [
   "person",
   "company",
   "link",
-  "knowledgeObject",
+  "memory",
 ] as const;
 
-export type EntityType = (typeof ENTITY_TYPES)[number];
+// Accepted only by ingestion adapters for older callers; never persisted.
+export type EntityType = (typeof ENTITY_TYPES)[number] | "knowledgeObject";
 
 export type EntityRef = {
   entityType: EntityType;
@@ -785,6 +786,9 @@ export type TaskInput = PriorityMetadata & {
 };
 
 export type NoteInput = {
+  summary?: string;
+  properties?: JsonObject;
+  objectType?: string;
   title?: string;
   body: string;
   processingState?: ProcessingState;
@@ -840,6 +844,7 @@ export type EntityInputMap = {
   company: CompanyInput;
   link: LinkInput;
   knowledgeObject: KnowledgeObjectInput;
+  memory: NoteInput;
 };
 
 export type CandidateObjectInput<T extends EntityType = EntityType> = {
@@ -949,6 +954,8 @@ export function normalizeEntityInput<T extends EntityType>(
   payload: EntityInputMap[T],
 ): EntityInputMap[T] {
   switch (entityType) {
+    case "memory":
+      throw new Error("Use record_memory or capture_thought for memories.");
     case "goal":
     case "project":
     case "task":
@@ -1147,6 +1154,8 @@ export function normalizeAcceptedEntityPayload<T extends EntityType>(
   const payload = asRecord(rawPayload);
 
   switch (entityType) {
+    case "memory":
+      throw new Error("Use record_memory or capture_thought for memories.");
     case "goal":
       return stripUndefinedValues({
         title: normalizeRequiredString(firstString(payload.title, payload.name, payload.summary) ?? "", "title"),
@@ -1201,9 +1210,12 @@ export function normalizeAcceptedEntityPayload<T extends EntityType>(
     }
     case "note":
       return stripUndefinedValues({
-        title: firstString(payload.title),
+        title: firstString(payload.title, asRecord(payload.properties)?.title),
+        summary: firstString(payload.summary, payload.sourceSummary),
+        properties: payload.properties === undefined ? undefined : asRecord(payload.properties),
+        objectType: firstString(payload.objectType),
         body: normalizeRequiredString(
-          firstString(payload.body, payload.text, payload.summary, payload.sourceSummary, payload.title) ?? "",
+          firstString(payload.body, payload.text, asRecord(payload.properties)?.body, payload.summary, payload.sourceSummary, payload.title) ?? "",
           "body",
         ),
       }) as EntityInputMap[T];
@@ -1366,7 +1378,7 @@ export function sourceRefIdentityKeys(
  * legitimately produce two different action items, and tasks already merge
  * via selectTaskDuplicate.
  */
-export const SOURCE_REF_DEDUPE_ENTITY_TYPES = ["note", "link", "knowledgeObject"] as const;
+export const SOURCE_REF_DEDUPE_ENTITY_TYPES = ["note", "link"] as const;
 
 export function sourceRefKeysIntersect(left: Set<string>, right: Set<string>): boolean {
   for (const key of left) {

@@ -805,7 +805,7 @@ async function rankContextItemsWithEmbeddings(
 
   const embeddingClient = createEmbeddingClient(config);
   const queryEmbedding = await embeddingClient.embed({
-    entityRef: { entityType: "knowledgeObject", entityId: "ask-query" },
+    entityRef: { entityType: "note", entityId: "ask-query" },
     text: query,
     textHash: textHash(query),
   });

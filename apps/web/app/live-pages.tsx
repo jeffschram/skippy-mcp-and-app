@@ -74,7 +74,7 @@ type MergeOption = AnyRecord & {
   matchScore: number;
 };
 
-const entityTypes = ["goal", "project", "task", "note", "person", "company", "link", "knowledgeObject"] as const;
+const entityTypes = ["goal", "project", "task", "note", "person", "company", "link"] as const;
 
 const statusOptions: Record<string, string[]> = {
   goal: ["active", "paused", "achieved", "abandoned"],
@@ -134,6 +134,7 @@ function editablePayloadFor(type: string, payload: AnyRecord) {
       };
     case "note":
       return {
+        ...payload,
         title: textValue(payload.title),
         body: textValue(payload.body, payload.text, payload.summary, payload.sourceSummary, payload.title),
       };
@@ -160,12 +161,7 @@ function editablePayloadFor(type: string, payload: AnyRecord) {
         // Approving a candidate marks it valid reference material, not read-later homework.
         status: textValue(payload.status) || "saved",
       };
-    case "knowledgeObject":
-      return {
-        objectType: textValue(payload.objectType, payload.type) || "general",
-        title: textValue(payload.title, payload.name, payload.summary),
-        summary: textValue(payload.summary, payload.description, payload.sourceSummary),
-      };
+
     default:
       return { ...payload };
   }

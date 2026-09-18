@@ -9,7 +9,7 @@ export const ATTENTION = {
   unassessed: { label: "Not assessed", color: "#C2B9A6", rank: 6 },
 } as const;
 export type AttentionStatus = keyof typeof ATTENTION;
-export type AttentionKind = "goal" | "project" | "task" | "person" | "company" | "note" | "link" | "knowledgeObject" | "memory";
+export type AttentionKind = "goal" | "project" | "task" | "person" | "company" | "note" | "link" | "memory";
 export type AttentionMetadata = {
   override?: AttentionStatus;
   reason?: string;

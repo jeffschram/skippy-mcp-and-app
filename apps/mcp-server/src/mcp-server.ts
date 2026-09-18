@@ -46,7 +46,7 @@ import {
   type SourceRefInput,
 } from "@skippy/shared";
 
-const entityTypeValues = ["goal", "project", "task", "note", "person", "company", "link", "knowledgeObject"] as const;
+const entityTypeValues = ["goal", "project", "task", "note", "person", "company", "link"] as const;
 
 const memoryKindValues = ["memory", "decision", "principle"] as const;
 
@@ -89,7 +89,7 @@ const skippyInstructions = [
   "Classify before saving: a task requires a concrete action or decision for the owner, not merely a dated event. Book releases, birthdays, availability notices and routine confirmations are informational; use a note/reference, an actual calendar event when appropriate, or skip noise. Do not invent a download, purchase, reply or follow-up obligation from an announcement. dueAt is only an action deadline, never a release/start/event date. Use itemIntent: action/event/reference and dateKind: deadline/event in candidate payloads to make the distinction explicit. If action is uncertain, send it for review instead of creating an accepted task.",
   "For direct ingestion, call ingest_object and include a concise rubricDecision explaining why the item clears the importance bar.",
   "Use submit_candidate_object only as a legacy fallback when the harness cannot decide whether the item belongs in Skippy.",
-  "Extract useful objects, not raw dumps. Prefer task, project, person, company, link, note, goal, or knowledgeObject records.",
+  "Extract useful objects, not raw dumps. Prefer task, project, person, company, link, note or goal records. Use notes for structured reference information, preserving extra properties.",
   "Links are reference material, not a reading queue. Confident, rubric-clearing links: ingest directly (status defaults to 'saved'; no user interaction expected). Pass status 'unread' only when the user explicitly wants to read it later. Genuinely uncertain whether a link is valid or important: use submit_candidate_object so it lands in Review for a one-tap decision.",
   "Include lightweight sourceRefs whenever possible: sourceSystem, messageId/threadId/eventId, timestamp, participants, URL/deepLink, summary, and a short excerpt.",
   "Avoid storing full raw emails, full calendar descriptions, or unnecessary private text. Store concise summaries and fields needed for future retrieval/focus.",
@@ -408,7 +408,7 @@ const sourceRefSchema = z.object({
 });
 
 const entityRefSchema = z.object({
-  entityType: z.enum(entityTypeValues),
+  entityType: z.enum([...entityTypeValues, "memory"]),
   entityId: z.string().describe("Accepted entity ID, not a review item ID."),
 });
 

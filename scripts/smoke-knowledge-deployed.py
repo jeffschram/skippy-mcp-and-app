@@ -26,10 +26,16 @@ try:
     created = []
     for kind, payload in [('note', {'title': 'Verification note', 'body': 'Known test content'}),
                           ('link', {'title': 'Verification link', 'url': 'https://example.invalid/direct', 'status': 'saved'}),
-                          ('knowledgeObject', {'title': 'Verification object', 'objectType': 'reference', 'properties': {'test': True}})]:
+                          ('knowledgeObject', {'title': 'Verification object', 'objectType': 'reference', 'properties': {'test': True, 'body': 'Full structured reference text'}})]:
         direct = run('knowledge:ingestObject', {'brainInstanceId': brain, 'candidateEntityType': kind, 'candidatePayload': payload,
                      'rubricDecision': 'Isolated verification', 'sourceRefs': [{'sourceSystem': 'verification', 'messageId': kind}]})
         created.append(direct['entityId'])
+        if kind == 'knowledgeObject':
+            assert direct['entityType'] == 'note'
+            notes = run('knowledge:listNotesForViewer', {})['notes']
+            note = next(row for row in notes if row['_id'] == direct['entityId'])
+            assert note['kind'] == 'note' and note['body'] == payload['properties']['body']
+            assert note['properties'] == payload['properties']
         reviewed_payload = {**payload, 'title': payload['title'] + ' reviewed'}
         if kind == 'link':
             reviewed_payload['url'] = 'https://example.invalid/review'

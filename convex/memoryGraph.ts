@@ -11,7 +11,7 @@ const entityType = v.union(
   v.literal("person"),
   v.literal("company"),
   v.literal("link"),
-  v.literal("knowledgeObject"),
+  v.literal("memory"),
 );
 
 const entityRef = v.object({
@@ -27,7 +27,7 @@ const entityTableByType = {
   person: "people",
   company: "companies",
   link: "knowledge",
-  knowledgeObject: "knowledge",
+  memory: "knowledge",
 } as const;
 
 const relationshipTypes = [
@@ -230,7 +230,7 @@ export const contextualMapForViewer = queryGeneric({
         .filter(
           (relationship) =>
             relationship.type === "mentions" &&
-            relationship.from.entityType === "knowledgeObject" &&
+            relationship.from.entityType === "memory" &&
             relationship.from.entityId === String(memory._id),
         )
         .map((relationship) => relationship.to);
@@ -346,7 +346,7 @@ export const mindMapForViewer = queryGeneric({
     const perType = 70;
     const tables = ["goals", "projects", "tasks", "people", "companies"] as const;
     const kinds = ["goal", "project", "task", "person", "company"] as const;
-    const knowledgeKinds = ["note", "link", "knowledgeObject", "memory"] as const;
+    const knowledgeKinds = ["note", "link", "memory"] as const;
     const [entityGroups, knowledgeGroups, relationships] = await Promise.all([
       Promise.all(tables.map(table => ctx.db.query(table)
         .withIndex("by_brain_state", (q: any) => q.eq("brainInstanceId", brain._id).eq("processingState", "accepted"))

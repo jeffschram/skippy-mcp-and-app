@@ -17,7 +17,7 @@ const entityType = v.union(
   v.literal("person"),
   v.literal("company"),
   v.literal("link"),
-  v.literal("knowledgeObject"),
+  v.literal("memory"),
 );
 
 const entityRef = v.object({
@@ -96,7 +96,6 @@ const memoryReviewState = v.union(
 const knowledgeKind = v.union(
   v.literal("note"),
   v.literal("link"),
-  v.literal("knowledgeObject"),
   v.literal("memory"),
 );
 

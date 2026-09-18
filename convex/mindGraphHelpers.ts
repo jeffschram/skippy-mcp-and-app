@@ -8,7 +8,6 @@ export type MindKind =
   | "company"
   | "note"
   | "link"
-  | "knowledgeObject"
   | "memory";
 export type MindNode = AttentionRecord & {
   id: string;

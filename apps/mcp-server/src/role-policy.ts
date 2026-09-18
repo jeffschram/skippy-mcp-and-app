@@ -65,7 +65,6 @@ const AGENDA_TOOLS = [
   "upsert_person",
   "upsert_company",
   "upsert_link",
-  "upsert_knowledgeObject",
 ] as const;
 
 /**

@@ -18,11 +18,9 @@
 
 - **Knowledge**
     - Notes
-        - Freeform written information.
+        - Written information, including structured references with optional properties.
     - Links
         - Saved URLs with context or summaries.
-    - Knowledge objects
-        - Structured information with flexible object types and properties.
     - Memories
         - Thoughts
         - Memories

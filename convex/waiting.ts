@@ -19,7 +19,7 @@ const entityRef = v.object({
     v.literal("person"),
     v.literal("company"),
     v.literal("link"),
-    v.literal("knowledgeObject"),
+    v.literal("memory"),
   ),
   entityId: v.string(),
 });

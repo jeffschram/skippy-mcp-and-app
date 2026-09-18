@@ -1,3 +1,4 @@
+import { entityReferenceType } from "./entityReferenceType";
 import { completedTaskAttention } from "./attentionModel";
 import {
   internalMutationGeneric,
@@ -37,11 +38,12 @@ const entityType = v.union(
   v.literal("person"),
   v.literal("company"),
   v.literal("link"),
-  v.literal("knowledgeObject"),
+  v.literal("knowledgeObject"), // Input-only compatibility alias.
+  v.literal("memory"),
 );
 
 const entityRef = v.object({
-  entityType,
+  entityType: entityReferenceType,
   entityId: v.string(),
 });
 
@@ -102,7 +104,6 @@ const memoryReviewBehavior = v.union(
 const knowledgeKind = v.union(
   v.literal("note"),
   v.literal("link"),
-  v.literal("knowledgeObject"),
   v.literal("memory"),
 );
 
@@ -161,6 +162,7 @@ const entityTableByType = {
   company: "companies",
   link: "knowledge",
   knowledgeObject: "knowledge",
+  memory: "knowledge",
 } as const;
 
 function statusAllowedForEntity(entityTypeName: keyof typeof entityTableByType, status: string | undefined) {
@@ -469,6 +471,10 @@ async function createAcceptedEntity(
   actorType: "user" | "harness" | "skippy_ai" | "system" = "harness",
   actorId?: string,
 ) {
+  if (entityTypeName === "knowledgeObject") {
+    entityTypeName = "note";
+    payload = { ...payload, properties: payload.properties ?? payload };
+  }
   const sourceRefIds = triageItem.sourceRefIds ?? [];
   const normalizedPayload = normalizeAcceptedEntityPayload(entityTypeName, payload);
   const duplicateEntity = await findAcceptedEntityDuplicate(
@@ -564,7 +570,7 @@ function processingStateForMemoryStatus(status: string) {
         : "suggested";
 }
 
-const unifiedKnowledgeEntityKinds = new Set(["note", "link", "knowledgeObject"]);
+const unifiedKnowledgeEntityKinds = new Set(["note", "link"]);
 
 async function insertEntity(
   db: any,
@@ -655,10 +661,9 @@ async function requireRelatedEntityRefsForBrain(
 }
 
 function knowledgeEntityRef(knowledge: { _id: any; kind: string }) {
-  // The relationship graph predates the unified knowledge table, so retain
-  // the public semantic entity type while pointing at the canonical row ID.
+  // Relationship endpoints use the canonical kind, including memory.
   return {
-    entityType: knowledge.kind === "memory" ? "knowledgeObject" : knowledge.kind,
+    entityType: knowledge.kind,
     entityId: knowledge._id,
   } as { entityType: keyof typeof entityTableByType; entityId: string };
 }
@@ -895,7 +900,7 @@ function knowledgeMemoryForReader(memory: any) {
 async function acceptedKnowledgeByKinds(
   db: any,
   brainInstanceId: any,
-  kinds: Array<"note" | "link" | "knowledgeObject">,
+  kinds: Array<"note" | "link">,
   limitPerKind: number,
 ) {
   const rows = await Promise.all(
@@ -1139,7 +1144,7 @@ async function queryMatchedEntityContext(
     ...(await db.query("tasks").withIndex("by_brain_state", (q: any) => q.eq("brainInstanceId", brainInstanceId)).filter((q: any) => q.eq(q.field("processingState"), "accepted")).take(80)).map((entity: any) => ({ ref: { entityType: "task", entityId: entity._id }, entity })),
     ...(await db.query("people").withIndex("by_brain_state", (q: any) => q.eq("brainInstanceId", brainInstanceId)).filter((q: any) => q.eq(q.field("processingState"), "accepted")).take(60)).map((entity: any) => ({ ref: { entityType: "person", entityId: entity._id }, entity })),
     ...(await db.query("companies").withIndex("by_brain_state", (q: any) => q.eq("brainInstanceId", brainInstanceId)).filter((q: any) => q.eq(q.field("processingState"), "accepted")).take(60)).map((entity: any) => ({ ref: { entityType: "company", entityId: entity._id }, entity })),
-    ...(await acceptedKnowledgeByKinds(db, brainInstanceId, ["note", "link", "knowledgeObject"], 60)).map((entity: any) => ({ ref: { entityType: entity.kind, entityId: entity._id }, entity })),
+    ...(await acceptedKnowledgeByKinds(db, brainInstanceId, ["note", "link"], 60)).map((entity: any) => ({ ref: { entityType: entity.kind, entityId: entity._id }, entity })),
   ];
 
   return entityRows
@@ -1462,6 +1467,11 @@ export const submitCandidateObject = mutationGeneric({
     sourceRefs: v.optional(v.array(sourceRefInput)),
   },
   handler: async ({ db }, args) => {
+    if (args.candidateEntityType === "memory") throw new Error("Use record_memory or capture_thought for memories.");
+    if (args.candidateEntityType === "knowledgeObject") {
+      args = { ...args, candidateEntityType: "note", candidatePayload: { ...args.candidatePayload,
+        properties: args.candidatePayload.properties ?? args.candidatePayload } };
+    }
     const now = Date.now();
     const normalizedPayload = normalizeAcceptedEntityPayload(args.candidateEntityType, args.candidatePayload);
     const fingerprint = candidateFingerprint(args.candidateEntityType, normalizedPayload);
@@ -1650,6 +1660,11 @@ export const ingestObject = mutationGeneric({
     sourceRefs: v.optional(v.array(sourceRefInput)),
   },
   handler: async ({ db }, args) => {
+    if (args.candidateEntityType === "memory") throw new Error("Use record_memory or capture_thought for memories.");
+    if (args.candidateEntityType === "knowledgeObject") {
+      args = { ...args, candidateEntityType: "note", candidatePayload: { ...args.candidatePayload,
+        properties: args.candidatePayload.properties ?? args.candidatePayload } };
+    }
     const now = Date.now();
     const entityTypeName = args.candidateEntityType as keyof typeof entityTableByType;
     const normalizedPayload = normalizeAcceptedEntityPayload(entityTypeName, args.candidatePayload);
@@ -1766,6 +1781,7 @@ export const approveTriageItem = mutationGeneric({
     );
 
     await db.patch(triageItemId, {
+      candidateEntityType: acceptedEntityRef.entityType,
       candidateEntityId: acceptedEntityRef.entityId,
       candidatePayload: normalizedPayload,
       status: correctedPayload ? "corrected" : "approved",
@@ -1884,7 +1900,7 @@ export const reviewTriageItem = mutationGeneric({
 
     const status = args.action === "approve" ? "approved" : "corrected";
     await ctx.db.patch(args.triageItemId, {
-      candidateEntityType: entityTypeName,
+      candidateEntityType: acceptedEntityRef.entityType,
       candidateEntityId: acceptedEntityRef.entityId,
       candidatePayload: normalizedPayload,
       status,
@@ -2809,7 +2825,7 @@ export const acceptedEntityOptionsForViewer = queryGeneric({
     const knowledgeRows = await acceptedKnowledgeByKinds(
       ctx.db,
       brain._id,
-      ["note", "link", "knowledgeObject"],
+      ["note", "link"],
       50,
     );
 

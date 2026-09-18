@@ -15,7 +15,7 @@ describe("shared attention rules", () => {
     expect(resolveAttention("note", { attention: { override: "in_progress" } }, now)).toEqual({ status: "in_progress", reason: "Set by you", source: "manual" });
   });
   it("does not treat old or accepted reference material as stale or OK", () => {
-    for (const kind of ["memory", "note", "link", "knowledgeObject", "person", "company", "goal", "project"] as const) expect(resolveAttention(kind, { status: "accepted" }, now).status).toBe("unassessed");
+    for (const kind of ["memory", "note", "link",  "person", "company", "goal", "project"] as const) expect(resolveAttention(kind, { status: "accepted" }, now).status).toBe("unassessed");
   });
   it("derives open tasks without mistaking future deadlines for schedules", () => {
     expect(resolveAttention("task", { status: "todo", dueAt: now + 1000 }, now).status).toBe("todo");

@@ -122,7 +122,7 @@ describe("canonical Knowledge paths after dual-write retirement", () => {
         sourceRefs: [{ sourceSystem: "verification", messageId: "source-1" }],
       });
       const row = ctx.rows.find((r) => r._id === result.entityId)!;
-      expect(row.kind).toBe(kind);
+      expect(row.kind).toBe(kind === "knowledgeObject" ? "note" : kind);
       expect(row.processingState).toBe("accepted");
       expect(row.title).toBe(payload.title);
       for (const [field, value] of Object.entries(payload)) {
@@ -155,7 +155,7 @@ describe("canonical Knowledge paths after dual-write retirement", () => {
       });
       expect(
         ctx.rows.find((r) => r._id === result.entityRef.entityId)?.kind,
-      ).toBe(kind);
+      ).toBe(kind === "knowledgeObject" ? "note" : kind);
       expect(ctx.rows.find((r) => r._id === id)?.candidateEntityId).toBe(
         result.entityRef.entityId,
       );
@@ -164,6 +164,17 @@ describe("canonical Knowledge paths after dual-write retirement", () => {
       ).rejects.toThrow("already been reviewed");
     });
   }
+  it("routes legacy review submissions into note candidates with full properties", async () => {
+    const ctx = fixture();
+    const result = await run(knowledge.submitCandidateObject, ctx, {
+      brainInstanceId, candidateEntityType: "knowledgeObject",
+      candidatePayload: { title: "Legacy reference", properties: { body: "Original full text", tags: ["home"] } },
+    });
+    const candidate = ctx.rows.find(r => r._id === result.triageItemId)!;
+    expect(candidate.candidateEntityType).toBe("note");
+    expect(candidate.candidatePayload.body).toBe("Original full text");
+    expect(candidate.candidatePayload.properties.tags).toEqual(["home"]);
+  });
   it("captures, links, retrieves and isolates memories by brain", async () => {
     const ctx = fixture();
     const projectId = await ctx.db.insert("projects", {
@@ -186,6 +197,7 @@ describe("canonical Knowledge paths after dual-write retirement", () => {
     });
     expect(detail.memory.body).toBe("Remember the decision");
     expect(detail.relatedEntities).toHaveLength(1);
+    expect(ctx.rows.find(r => r._id.startsWith("relationships:"))?.from.entityType).toBe("memory");
     expect(
       await run(knowledge.memoryDetailForBrain, ctx, {
         brainInstanceId: "brainInstances:other",

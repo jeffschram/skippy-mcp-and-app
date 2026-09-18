@@ -11,7 +11,6 @@ export const KINDS: Record<MindKind, { label: string; color: string; shape: Mind
   memory: { label: "Memories", color: "#AC8CD1", shape: "octahedron" },
   note: { label: "Notes", color: "#E7AD88", shape: "slab" },
   link: { label: "Links", color: "#64BDB0", shape: "cross" },
-  knowledgeObject: { label: "Knowledge objects", color: "#CE86A8", shape: "capsule" },
 };
 export const MIND_OWNER_COLOR = "#F7E7C7";
 export function filterGraph(

@@ -156,7 +156,7 @@ function boundary(node:WorldNode, dx:number, dy:number):number {
     case "memory":polygon=[[0,1.15],[-.85,0],[0,-1.15],[.85,0]];break;
     case "note":polygon=[[-.35,-1],[.35,-1],[.35,1],[-.35,1]];break;
     case "link":polygon=[[-.3,1],[.3,1],[.3,.3],[1,.3],[1,-.3],[.3,-.3],[.3,-1],[-.3,-1],[-.3,-.3],[-1,-.3],[-1,.3],[-.3,.3]];break;
-    default:return radius/(Math.hypot(d[0]/(node.kind==="company"?.65:1),d[1]/(node.kind==="knowledgeObject"?.45:1)));
+    default:return radius/(Math.hypot(d[0]/(node.kind==="company"?.65:1),d[1]));
   }
   const cross=(a:Point,b:Point)=>a[0]*b[1]-a[1]*b[0];
   let hit=Infinity;

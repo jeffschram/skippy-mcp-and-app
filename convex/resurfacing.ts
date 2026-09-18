@@ -27,7 +27,7 @@ const entityTableByType = {
   person: "people",
   company: "companies",
   link: "knowledge",
-  knowledgeObject: "knowledge",
+  memory: "knowledge",
 } as const;
 
 type RoutineType = (typeof ROUTINE_ORDER)[number];
@@ -250,7 +250,7 @@ export const reviewSuggestionsForViewer = queryGeneric({
       memory.relatedEntityRefs = mentionRelationships
         .filter(
           (relationship) =>
-            relationship.from.entityType === "knowledgeObject" &&
+            relationship.from.entityType === "memory" &&
             relationship.from.entityId === String(memory._id),
         )
         .map((relationship) => relationship.to);
