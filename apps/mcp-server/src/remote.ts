@@ -1,35 +1,31 @@
-import { ConvexHttpClient } from "convex/browser";
-import { makeFunctionReference } from "convex/server";
+import { ConvexError } from "convex/values";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
+import { hashMcpToken } from "@skippy/shared";
 import { createMcpServer } from "./mcp-server.js";
 import { createConvexSkippyClient } from "./skippy-client.js";
-
-const authenticateMcpTokenRef = makeFunctionReference<"mutation">("mcpTokens:authenticate");
-
-export type RemoteMcpOptions = {
-  convexUrl: string;
-  convexAuthToken?: string;
-  bearerToken: string;
-};
-
+import { bridgeCall, type BridgeConnection } from "./bridge-client.js";
+import { verifyOAuthToken, McpAuthError } from "./oauth.js";
+export { McpAuthError, authChallenge, protectedResourceMetadata } from "./oauth.js";
+export type RemoteMcpOptions = { convexUrl: string; bearerToken: string };
 export async function handleRemoteMcpRequest(request: Request, options: RemoteMcpOptions) {
-  const convex = new ConvexHttpClient(options.convexUrl);
-  if (options.convexAuthToken) {
-    convex.setAuth(options.convexAuthToken);
+  const secret = process.env.SKIPPY_MCP_BRIDGE_SECRET;
+  if (!secret || secret.length < 32) throw new McpAuthError(503, "mcp_not_configured");
+  let connection: BridgeConnection = { secret, principal: { kind: "static", tokenHash: await hashMcpToken(options.bearerToken) } };
+  let identity: { brainInstanceId: string; role?: string };
+  try { identity = await bridgeCall(options.convexUrl, connection, "$identity", {}); }
+  catch (error) {
+    if (!(error instanceof ConvexError) || (error.data as any)?.code !== "invalid_static_token") throw new McpAuthError(503, "mcp_backend_unavailable");
+    connection = { secret, principal: await verifyOAuthToken(options.bearerToken) };
+    try { identity = await bridgeCall(options.convexUrl, connection, "$identity", {}); }
+    catch (error) {
+      if (error instanceof ConvexError && (error.data as any)?.code === "account_not_authorized") throw new McpAuthError(403, "account_not_authorized");
+      throw new McpAuthError(503, "mcp_backend_unavailable");
+    }
   }
-
-  const authResult = (await convex.mutation(authenticateMcpTokenRef, {
-    token: options.bearerToken,
-  })) as { brainInstanceId: string; role?: string };
-
-  const skippyClient = createConvexSkippyClient(options.convexUrl, options.convexAuthToken);
-  const server = authResult.role
-    ? createMcpServer(skippyClient, authResult.brainInstanceId, { role: authResult.role })
-    : createMcpServer(skippyClient, authResult.brainInstanceId);
-  const transport = new WebStandardStreamableHTTPServerTransport({
-    enableJsonResponse: true,
-  });
-
+  const client = createConvexSkippyClient(options.convexUrl, connection);
+  const server = createMcpServer(client, identity.brainInstanceId, { role: identity.role,
+    oauth: connection.principal.kind === "oauth" ? connection.principal : undefined });
+  const transport = new WebStandardStreamableHTTPServerTransport({ enableJsonResponse: true });
   await server.connect(transport);
-  return await transport.handleRequest(request);
+  return transport.handleRequest(request);
 }

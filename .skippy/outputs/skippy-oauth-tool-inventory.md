@@ -1,6 +1,6 @@
 # Skippy OAuth tool permission inventory
 
-Proposed registry for the 83 tool registrations in `apps/mcp-server/src/mcp-server.ts` at `febba07`. This is an implementation input, not an enforced policy. Scope names depend on the provider spike. Both scopes cover all exposed owner domains; write access also requires read access. Existing legacy role allowlists remain separate.
+Original planning inventory for the 83 tool registrations in `apps/mcp-server/src/mcp-server.ts` at `febba07`. This is an implementation input, not an enforced policy. Scope names depend on the provider spike. Both scopes cover all exposed owner domains; write access also requires read access. Existing legacy role allowlists remain separate.
 
 Read candidates follow current read-only descriptors. Synthesis tools `ask` and `summarize_focus`, plus `get_current_context`, conservatively require both grants until their complete call graphs prove they cannot write derived state. Inspect every tool's side effects before finalizing; do not use name prefixes or existing hints as authorization. Private resource and prompt callbacks also need checks even though they are not tools.
 
@@ -91,3 +91,7 @@ For each row, implementation must add matching top-level oauth2 securitySchemes 
 | `upsert_project` | `skippy:read + skippy:write` |
 | `upsert_recurrence` | `skippy:read + skippy:write` |
 | `upsert_task` | `skippy:read + skippy:write` |
+
+## Implemented registry
+
+The executable source of truth is `apps/mcp-server/src/oauth-tool-policy.ts`. Call-graph review confirmed `summarize_focus` and `get_current_context` are read-only; their implemented grant is `skippy:read`. `ask` can persist embeddings and call the configured AI provider, so it requires both grants and advertises external access. Tests assert coverage of all 83 registered tools and both wire metadata representations.

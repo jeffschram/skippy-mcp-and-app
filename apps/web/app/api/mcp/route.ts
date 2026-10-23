@@ -1,49 +1,21 @@
-import { handleRemoteMcpRequest } from "@skippy/mcp-server/remote";
-
+import { handleRemoteMcpRequest, McpAuthError, authChallenge } from "@skippy/mcp-server/remote";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-function getBearerToken(request: Request) {
-  const authorization = request.headers.get("authorization");
-  if (!authorization?.startsWith("Bearer ")) {
-    return null;
-  }
-
-  return authorization.slice("Bearer ".length).trim();
-}
-
 async function handle(request: Request) {
-  const bearerToken = getBearerToken(request);
-  if (!bearerToken) {
-    return Response.json({ error: "Bearer token is required" }, { status: 401 });
-  }
-
-  const convexUrl = process.env.CONVEX_URL ?? process.env.NEXT_PUBLIC_CONVEX_URL;
-  if (!convexUrl) {
-    return Response.json({ error: "CONVEX_URL is required for remote MCP" }, { status: 500 });
-  }
-
+  const token = /^Bearer\s+(\S+)$/i.exec(request.headers.get("authorization") ?? "")?.[1];
   try {
-    const options = {
-      convexUrl,
-      bearerToken,
-    };
-    if (process.env.CONVEX_AUTH_TOKEN) {
-      return await handleRemoteMcpRequest(request, {
-        ...options,
-        convexAuthToken: process.env.CONVEX_AUTH_TOKEN,
-      });
-    }
-
-    return await handleRemoteMcpRequest(request, options);
+    if (!token) throw new McpAuthError(401, "invalid_token");
+    const convexUrl = process.env.CONVEX_URL ?? process.env.NEXT_PUBLIC_CONVEX_URL;
+    if (!convexUrl) throw new McpAuthError(503, "mcp_not_configured");
+    return await handleRemoteMcpRequest(request, { convexUrl, bearerToken: token });
   } catch (error) {
-    return Response.json(
-      { error: error instanceof Error ? error.message : "MCP request failed" },
-      { status: 401 },
-    );
+    const status = error instanceof McpAuthError ? error.status : 500;
+    const code = error instanceof McpAuthError ? error.code : "mcp_request_failed";
+    let challenge = "Bearer";
+    try { challenge = authChallenge(status === 401 || status === 403 ? code : undefined); } catch { /* misconfiguration */ }
+    return Response.json({ error: code }, { status, headers: { "Cache-Control": "no-store", ...(status === 401 || status === 403 ? { "WWW-Authenticate": challenge } : {}) } });
   }
 }
-
 export const GET = handle;
 export const POST = handle;
 export const DELETE = handle;

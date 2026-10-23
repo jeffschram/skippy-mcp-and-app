@@ -2,6 +2,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 
 const required = [
+  ["SKIPPY_MCP_BRIDGE_SECRET (at least 32 characters)", (process.env.SKIPPY_MCP_BRIDGE_SECRET?.length ?? 0) >= 32],
   ["CONVEX_URL or NEXT_PUBLIC_CONVEX_URL", Boolean(process.env.CONVEX_URL || process.env.NEXT_PUBLIC_CONVEX_URL)],
   ["NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY", Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY)],
   ["OPENAI_API_KEY", Boolean(process.env.OPENAI_API_KEY)],

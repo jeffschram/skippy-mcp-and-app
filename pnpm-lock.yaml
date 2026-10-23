@@ -66,6 +66,9 @@ importers:
       convex:
         specifier: ^1.40.0
         version: 1.40.0(react@19.2.7)
+      jose:
+        specifier: ^6
+        version: 6.2.3
       web-push:
         specifier: ^3.6.7
         version: 3.6.7

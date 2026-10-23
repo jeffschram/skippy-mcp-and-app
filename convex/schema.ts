@@ -263,6 +263,8 @@ export const tokenUsage = v.object({
 });
 
 export default defineSchema({
+  mcpBridgeNonces: defineTable({ nonce: v.string(), expiresAt: v.number() })
+    .index("by_nonce", ["nonce"]).index("by_expiry", ["expiresAt"]),
   users: defineTable({
     authProvider: v.literal("clerk"),
     authUserId: v.string(),
@@ -936,6 +938,7 @@ export default defineSchema({
     createdAt: v.number(),
     updatedAt: v.number(),
   })
+    .index("by_storage", ["storageId"])
     .index("by_brain_project", ["brainInstanceId", "projectId"])
     .index("by_brain_project_kind", ["brainInstanceId", "projectId", "kind"])
     .index("by_brain_task", ["brainInstanceId", "taskId"])
@@ -974,6 +977,7 @@ export default defineSchema({
     createdAt: v.number(),
     updatedAt: v.number(),
   })
+    .index("by_storage", ["storageId"])
     .index("by_brain_status", ["brainInstanceId", "status"])
     .index("by_brain_created", ["brainInstanceId", "createdAt"]),
 

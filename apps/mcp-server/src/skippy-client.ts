@@ -1,4 +1,4 @@
-import { ConvexHttpClient } from "convex/browser";
+import { createBridgeClient, type BridgeConnection } from "./bridge-client.js";
 import { makeFunctionReference } from "convex/server";
 import type {
   CandidateObjectInput,
@@ -114,11 +114,8 @@ const markQuickCaptureHandledForBrainRef = makeFunctionReference<"mutation">(
   "knowledge:markQuickCaptureHandledForBrain",
 );
 
-export function createConvexSkippyClient(convexUrl: string, authToken?: string): SkippyClient {
-  const client = new ConvexHttpClient(convexUrl);
-  if (authToken) {
-    client.setAuth(authToken);
-  }
+export function createConvexSkippyClient(convexUrl: string, bridge: BridgeConnection): SkippyClient {
+  const client = createBridgeClient(convexUrl, bridge);
 
   return {
     submitCandidateObject: (brainInstanceId, input) =>

@@ -1,3 +1,4 @@
+import { internalQueryGeneric } from "convex/server";
 import { queryGeneric } from "convex/server";
 import { v } from "convex/values";
 import { buildAgenda, effectiveCommitment } from "@skippy/shared";
@@ -122,7 +123,7 @@ export const agendaForViewer = queryGeneric({
 });
 
 /** Brain-scoped entry point for the MCP surface, which authenticates by token. */
-export const agendaForBrain = queryGeneric({
+export const agendaForBrain = internalQueryGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     from: v.number(),

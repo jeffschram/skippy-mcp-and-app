@@ -15,7 +15,8 @@ import type { SkippyClient } from "./tools";
 // after. The floor is ~53k of structural JSON (keys, types, enums) that cannot
 // shrink without changing validation shapes, so the budget guards the
 // description payload on top of that floor.
-const TOOL_SCHEMA_BYTE_BUDGET = 78_000;
+// OAuth adds both required securitySchemes representations and explicit hints (~10k).
+const TOOL_SCHEMA_BYTE_BUDGET = 88_000;
 
 describe("tool schema size", () => {
   it("keeps the serialized tools/list payload within budget", async () => {

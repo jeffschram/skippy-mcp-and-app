@@ -2952,3 +2952,6 @@ export function appendOrderIndex(siblingOrderIndexes: Array<number | undefined>)
   }
   return orderIndexBetween(max, undefined) ?? 0;
 }
+
+export * from "./mcp-operations.js";
+export * from "./mcp-bridge.js";

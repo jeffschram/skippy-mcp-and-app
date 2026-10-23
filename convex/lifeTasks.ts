@@ -1,3 +1,4 @@
+import { internalMutationGeneric, internalQueryGeneric } from "convex/server";
 import { mutationGeneric, queryGeneric } from "convex/server";
 import { v } from "convex/values";
 import { effectiveCommitment, repairStaleDueDate } from "@skippy/shared";
@@ -101,7 +102,7 @@ export const lifeTasksForViewer = queryGeneric({
 });
 
 /** Brain-scoped entry point for the MCP surface, which authenticates by token. */
-export const lifeTasksForBrain = queryGeneric({
+export const lifeTasksForBrain = internalQueryGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     commitment: v.optional(taskCommitment),
@@ -149,7 +150,7 @@ export const lifeTasksForBrain = queryGeneric({
  * `dryRun` reports what would change without writing, so the effect can be
  * inspected before it is applied.
  */
-export const repairStaleTaskDueDatesForBrain = mutationGeneric({
+export const repairStaleTaskDueDatesForBrain = internalMutationGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     dryRun: v.optional(v.boolean()),

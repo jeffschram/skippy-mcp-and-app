@@ -1,3 +1,4 @@
+import { internalMutationGeneric, internalQueryGeneric } from "convex/server";
 import { mutationGeneric, queryGeneric } from "convex/server";
 import { v } from "convex/values";
 import {
@@ -1342,7 +1343,7 @@ export const payoffPlanForViewer = queryGeneric({
 /* Brain-facing (MCP token routing)                                   */
 /* ------------------------------------------------------------------ */
 
-export const upsertFinancialAccountForBrain = mutationGeneric({
+export const upsertFinancialAccountForBrain = internalMutationGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     name: v.string(),
@@ -1373,7 +1374,7 @@ export const upsertFinancialAccountForBrain = mutationGeneric({
   },
 });
 
-export const upsertDebtForBrain = mutationGeneric({
+export const upsertDebtForBrain = internalMutationGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     debtId: v.optional(v.id("financialDebts")),
@@ -1403,7 +1404,7 @@ export const upsertDebtForBrain = mutationGeneric({
  * externalId '401k-{contributionSource}-{monthKey}': contributions already
  * materialized for the month are skipped, never duplicated. Returns counts.
  */
-export const materializeContributionsForBrain = mutationGeneric({
+export const materializeContributionsForBrain = internalMutationGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     accountId: v.id("financialAccounts"),
@@ -1470,7 +1471,7 @@ export const materializeContributionsForBrain = mutationGeneric({
   },
 });
 
-export const recordFinancialTransactionsForBrain = mutationGeneric({
+export const recordFinancialTransactionsForBrain = internalMutationGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     accountId: v.id("financialAccounts"),
@@ -1492,7 +1493,7 @@ export const recordFinancialTransactionsForBrain = mutationGeneric({
   },
 });
 
-export const recordDailyBalancesForBrain = mutationGeneric({
+export const recordDailyBalancesForBrain = internalMutationGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     accountId: v.id("financialAccounts"),
@@ -1514,7 +1515,7 @@ export const recordDailyBalancesForBrain = mutationGeneric({
   },
 });
 
-export const setBudgetForBrain = mutationGeneric({
+export const setBudgetForBrain = internalMutationGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     accountId: v.id("financialAccounts"),
@@ -1541,7 +1542,7 @@ export const setBudgetForBrain = mutationGeneric({
   },
 });
 
-export const monthlyReportForBrain = queryGeneric({
+export const monthlyReportForBrain = internalQueryGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     accountId: v.id("financialAccounts"),
@@ -1552,7 +1553,7 @@ export const monthlyReportForBrain = queryGeneric({
   },
 });
 
-export const insightsForBrain = queryGeneric({
+export const insightsForBrain = internalQueryGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     // Absent accountId = all of the brain's accounts combined.
@@ -1626,7 +1627,7 @@ function migrateBudgetKeyRecord(
  * Run AFTER deploying the dual-vocabulary schema; table validators may be
  * tightened to CSP-only in a follow-up once this has run for every brain.
  */
-export const migrateTaxonomyForBrain = mutationGeneric({
+export const migrateTaxonomyForBrain = internalMutationGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     actorId: v.optional(v.string()),

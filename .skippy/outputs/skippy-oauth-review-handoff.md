@@ -1,26 +1,26 @@
-# Skippy OAuth plan review handoff
+# Skippy OAuth implementation review handoff
 
-Prepared the execution plan and complete proposed permission inventory for the existing ChatGPT Skippy Dot. Application code and provider configuration are unchanged. The plan covers the provider compatibility spike, discovery, authenticated Convex handoff, all 83 registered tools, legacy token preservation, rollback, real Dot acceptance and nonsecret connection instructions.
+Implemented directly by Codex at the owner's request on the existing PR #198 branch. OAuth remains disabled by default and has not been deployed or connected to the real Skippy Dot.
 
-The main prerequisite discovered during inspection is the public Convex brain-facing surface: some functions authorize references against a caller-supplied brain ID without authenticating the caller. The implementation must close direct backend bypasses as well as protect the MCP route, while migrating existing static clients safely.
+## Code ready for review
 
-## Deliverables
+Protected-resource discovery, resource-bound Clerk access-JWT verification, read/write scope policy for all 83 tools, top-level and mirrored tool security metadata, HTTP/tool reconnect challenges, and a signed one-use Convex gateway are implemented. Convex resolves the authenticated identity to the owned brain and checks references. Previously public brain-facing functions and unauthenticated legacy aliases are now internal. Static tokens retain role policy and revocation checks; viewer/runner authentication stays separate.
 
-- `skippy-oauth-execution-plan.md`: ordered phases, decisions, gates and exact setup fields to collect.
-- `skippy-oauth-tool-inventory.md`: 83 unique tools with proposed permissions; provider support and side-effect audits must precede enforcement.
+The implementation and rollout instructions are in `docs/mcp-oauth.md`. In particular, both the MCP server and Convex require the same private bridge secret before the coordinated deployment. Ordinary remote agent clients keep their bearer tokens; trusted stdio servers must migrate to token-derived identity.
 
-## Verification performed
+## Verification
 
-On October 23, 2026, `pnpm check` exited 0: workspace and Convex typechecks passed; 92 test files and 1,182 tests passed, including the MCP and web suites. These are baseline regression results, not OAuth acceptance evidence. The inventory was compared with all 76 literal registrations plus the seven generated upsert registrations. Current official OpenAI and Clerk guidance was checked and linked in the plan.
+`pnpm check` passes: all workspace and Convex typechecks and the full automated suite. New coverage exercises access-token signature/issuer/audience/type/expiry/scope rejection, account ownership, gateway tampering/replay/static revocation, internal-only targets, all registered tool metadata, and HTTP error challenges. The wire-level metadata test checks both representations because the SDK convenience parser drops the top-level extension.
 
-## Remaining implementation acceptance
+The direct review used the Convex reviewer checklist. Remaining live acceptance is not replaced by unit tests.
 
-No provider configuration, public test origin, exact ChatGPT callback/client metadata URL, resource-binding proof, access format, registration mode or real Dot OAuth test has been established in this planning run. Login/consent, write/readback/cleanup, refresh, revocation and reconnection remain pending. New security suites must be implemented and passed. The nonsecret setup record must be completed from verified values before release.
+## Release gates still pending
 
-## Runner review proposal
+- Confirm canonical public host and exact ChatGPT callback/client metadata URL.
+- Configure Clerk custom scopes and the actual registration mode (CIMD preferred when the Dot supplies it; predefined client otherwise).
+- Prove the provider issues an OAuth access JWT bound to the exact MCP resource audience. Opaque tokens and client-ID-only audiences intentionally fail closed.
+- Verify refresh issuance/rotation and account reconnection with the real provider/client. Public-key JWT verification cannot provide instant individual token revocation; see rollout documentation.
+- Install server environment settings, deploy both components together, and smoke-test existing static agents.
+- Run the actual Dot's discovery/login/consent/read/write/read-back/cleanup/refresh flow and cross-user rejection tests.
 
-Suggested review title: Plan OAuth access for the existing Skippy ChatGPT Dot.
-
-Suggested review description: Adds a repository-grounded execution plan and proposed permission inventory for OAuth read/write access from the existing Skippy Dot. Defines a Clerk compatibility gate and authenticated Convex boundary, preserves scheduled static-token agents, and requires real Dot evidence before release. Baseline validation: pnpm check passed, including 1,182 tests. Implementation and provider/client verification remain pending.
-
-No push, remote PR, merge or deployment was performed. The runner owns publishing after approval. A subsequent implementation PR must include the verified provider record and actual Dot evidence; this planning review does not satisfy those release criteria.
+No provider configuration, merge, deployment, or real Dot write was performed during this implementation. Leave the task in review, not done.

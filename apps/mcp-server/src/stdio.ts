@@ -1,23 +1,14 @@
 #!/usr/bin/env node
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { hashMcpToken } from "@skippy/shared";
+import { bridgeCall } from "./bridge-client.js";
 import { createMcpServer } from "./mcp-server.js";
 import { createConvexSkippyClient } from "./skippy-client.js";
-
 const convexUrl = process.env.SKIPPY_CONVEX_URL;
-const brainInstanceId = process.env.SKIPPY_BRAIN_INSTANCE_ID;
-const authToken = process.env.SKIPPY_CONVEX_AUTH_TOKEN;
-// Optional agent-role scope (docs/agents.md): agenda, finance, task-executor,
-// or pm / pm:{projectId}. When set, only the role's tools are exposed.
-const role = process.env.SKIPPY_MCP_ROLE?.trim();
-
-if (!convexUrl) {
-  throw new Error("SKIPPY_CONVEX_URL is required");
-}
-
-if (!brainInstanceId) {
-  throw new Error("SKIPPY_BRAIN_INSTANCE_ID is required");
-}
-
-const client = createConvexSkippyClient(convexUrl, authToken);
-const server = role ? createMcpServer(client, brainInstanceId, { role }) : createMcpServer(client, brainInstanceId);
-await server.connect(new StdioServerTransport());
+const token = process.env.SKIPPY_MCP_TOKEN;
+const secret = process.env.SKIPPY_MCP_BRIDGE_SECRET;
+if (!convexUrl || !token || !secret) throw new Error("SKIPPY_CONVEX_URL, SKIPPY_MCP_TOKEN and SKIPPY_MCP_BRIDGE_SECRET are required for stdio");
+const connection = { secret, principal: { kind: "static" as const, tokenHash: await hashMcpToken(token) } };
+const identity = await bridgeCall(convexUrl, connection, "$identity", {});
+const client = createConvexSkippyClient(convexUrl, connection);
+await createMcpServer(client, identity.brainInstanceId, { role: identity.role }).connect(new StdioServerTransport());

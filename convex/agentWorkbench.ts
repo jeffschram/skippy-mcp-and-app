@@ -1,3 +1,4 @@
+import { internalMutationGeneric } from "convex/server";
 /**
  * Mac mini agent workbench control plane (docs/mac-mini-agent-workbench.md).
  *
@@ -629,7 +630,7 @@ export const executeTaskForViewer = mutationGeneric({
  * Attribution: activity is recorded with actorType "harness" so proxied
  * starts are always distinguishable from owner clicks.
  */
-export const executeTaskForBrain = mutationGeneric({
+export const executeTaskForBrain = internalMutationGeneric({
   args: {
     hostToken: v.string(),
     taskId: v.id("tasks"),
@@ -708,7 +709,7 @@ export const decideApprovalForViewer = mutationGeneric({
  * no weaker than the runner's own control-plane access. A proxied decision is
  * distinguishable from a viewer one by its missing `decidedByUserId`.
  */
-export const decideApprovalForBrain = mutationGeneric({
+export const decideApprovalForBrain = internalMutationGeneric({
   args: {
     hostToken: v.string(),
     approvalId: v.id("agentApprovals"),
@@ -1575,7 +1576,7 @@ export const enqueueCloseoutForViewer = mutationGeneric({
  * task X" in chat and the harness queues the SAME job the button does (same
  * consent convention as executeTaskForBrain, same host-token credential).
  */
-export const enqueueCloseoutForBrain = mutationGeneric({
+export const enqueueCloseoutForBrain = internalMutationGeneric({
   args: {
     hostToken: v.string(),
     taskId: v.id("tasks"),

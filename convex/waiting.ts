@@ -1,3 +1,4 @@
+import { internalMutationGeneric } from "convex/server";
 import { mutationGeneric } from "convex/server";
 import { v } from "convex/values";
 import { resolveWaitingReplies, type InboundMessage } from "@skippy/shared";
@@ -33,7 +34,8 @@ export const setWaitingOn = mutationGeneric({
     waitingSince: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    const brainInstanceId = args.brainInstanceId ?? (await requireOwnedBrain(ctx)).brain._id;
+    const brainInstanceId = (await requireOwnedBrain(ctx)).brain._id;
+    if (args.brainInstanceId && args.brainInstanceId !== brainInstanceId) throw new Error("Account mismatch");
     const task = await ctx.db.get(args.taskId);
     if (!task || task.brainInstanceId !== brainInstanceId) {
       throw new Error("task not found for brain instance");
@@ -116,7 +118,7 @@ export const nudgeWaitingTask = mutationGeneric({
  * completed: the reply may not contain what was actually needed, and silently
  * closing work the owner still owes is the worse failure.
  */
-export const resolveWaitingFromInbound = mutationGeneric({
+export const resolveWaitingFromInbound = internalMutationGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     messages: v.array(

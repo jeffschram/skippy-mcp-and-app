@@ -1,3 +1,4 @@
+import { internalQueryGeneric } from "convex/server";
 import { entityReferenceType } from "./entityReferenceType";
 import { completedTaskAttention } from "./attentionModel";
 import {
@@ -1388,7 +1389,7 @@ async function cancelDuplicateFocusCreatedTasks(db: any, brainInstanceId: any, a
   return { status: "completed", cancelledCount: cancelled.length, cancelled };
 }
 
-export const addSourceRef = mutationGeneric({
+export const addSourceRef = internalMutationGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     sourceRef: sourceRefInput,
@@ -1404,7 +1405,7 @@ export const addSourceRef = mutationGeneric({
   },
 });
 
-export const linkEntities = mutationGeneric({
+export const linkEntities = internalMutationGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     from: entityRef,
@@ -1456,7 +1457,7 @@ export const linkEntities = mutationGeneric({
   },
 });
 
-export const submitCandidateObject = mutationGeneric({
+export const submitCandidateObject = internalMutationGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     candidateEntityType: entityType,
@@ -1648,7 +1649,7 @@ export const submitCandidateObject = mutationGeneric({
   },
 });
 
-export const ingestObject = mutationGeneric({
+export const ingestObject = internalMutationGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     candidateEntityType: entityType,
@@ -1748,7 +1749,7 @@ export const ingestObject = mutationGeneric({
   },
 });
 
-export const approveTriageItem = mutationGeneric({
+export const approveTriageItem = internalMutationGeneric({
   args: {
     triageItemId: v.id("triageItems"),
     reviewedBy: v.optional(v.id("users")),
@@ -1929,7 +1930,7 @@ export const reviewTriageItem = mutationGeneric({
   },
 });
 
-export const rejectTriageItem = mutationGeneric({
+export const rejectTriageItem = internalMutationGeneric({
   args: {
     triageItemId: v.id("triageItems"),
     reviewedBy: v.optional(v.id("users")),
@@ -1967,7 +1968,7 @@ export const rejectTriageItem = mutationGeneric({
   },
 });
 
-export const listPendingTriage = queryGeneric({
+export const listPendingTriage = internalQueryGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     limit: v.optional(v.number()),
@@ -2458,7 +2459,7 @@ export const cancelDuplicateFocusTasksForViewer = mutationGeneric({
   },
 });
 
-export const cancelDuplicateFocusTasks = mutationGeneric({
+export const cancelDuplicateFocusTasks = internalMutationGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
   },
@@ -3489,7 +3490,7 @@ export const linkMemoryToEntitiesForViewer = mutationGeneric({
   },
 });
 
-export const updateLinkStatusForBrain = mutationGeneric({
+export const updateLinkStatusForBrain = internalMutationGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     linkId: v.id("knowledge"),
@@ -3510,7 +3511,7 @@ export const updateLinkStatusForBrain = mutationGeneric({
   },
 });
 
-export const updatePersonForBrain = mutationGeneric({
+export const updatePersonForBrain = internalMutationGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     personId: v.id("people"),
@@ -3553,7 +3554,7 @@ export const updatePersonForBrain = mutationGeneric({
   },
 });
 
-export const captureThoughtForBrain = mutationGeneric({
+export const captureThoughtForBrain = internalMutationGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     text: v.string(),
@@ -3635,7 +3636,7 @@ export const captureThoughtForBrain = mutationGeneric({
   },
 });
 
-export const recordMemoryForBrain = mutationGeneric({
+export const recordMemoryForBrain = internalMutationGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     content: v.string(),
@@ -3722,7 +3723,7 @@ export const recordMemoryForBrain = mutationGeneric({
   },
 });
 
-export const submitMemoryReviewCandidateForBrain = mutationGeneric({
+export const submitMemoryReviewCandidateForBrain = internalMutationGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     content: v.string(),
@@ -3797,7 +3798,7 @@ export const submitMemoryReviewCandidateForBrain = mutationGeneric({
   },
 });
 
-export const searchMemoriesForBrain = queryGeneric({
+export const searchMemoriesForBrain = internalQueryGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     query: v.optional(v.string()),
@@ -3814,7 +3815,7 @@ export const searchMemoriesForBrain = queryGeneric({
 
 export const searchMemoryForBrain = searchMemoriesForBrain;
 
-export const memoryLibraryForBrain = queryGeneric({
+export const memoryLibraryForBrain = internalQueryGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     query: v.optional(v.string()),
@@ -3829,7 +3830,7 @@ export const memoryLibraryForBrain = queryGeneric({
   },
 });
 
-export const getContextBundleForBrain = queryGeneric({
+export const getContextBundleForBrain = internalQueryGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     query: v.optional(v.string()),
@@ -3846,7 +3847,7 @@ export const getContextBundleForBrain = queryGeneric({
   },
 });
 
-export const memoryDetailForBrain = queryGeneric({
+export const memoryDetailForBrain = internalQueryGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     memoryId: v.id("knowledge"),
@@ -3869,7 +3870,7 @@ export const memoryDetailForBrain = queryGeneric({
   },
 });
 
-export const linkMemoryForBrain = mutationGeneric({
+export const linkMemoryForBrain = internalMutationGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     memoryId: v.id("knowledge"),
@@ -4028,7 +4029,7 @@ export const reviewPendingActionForViewer = mutationGeneric({
   },
 });
 
-export const markTaskDone = mutationGeneric({
+export const markTaskDone = internalMutationGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     taskId: v.id("tasks"),
@@ -4084,7 +4085,7 @@ export const markTaskDone = mutationGeneric({
   },
 });
 
-export const createContactDirect = mutationGeneric({
+export const createContactDirect = internalMutationGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     name: v.string(),
@@ -4130,7 +4131,7 @@ export const createContactDirect = mutationGeneric({
   },
 });
 
-export const markTaskInProgress = mutationGeneric({
+export const markTaskInProgress = internalMutationGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     taskId: v.id("tasks"),
@@ -4180,7 +4181,7 @@ export const markTaskInProgress = mutationGeneric({
   },
 });
 
-export const createProjectDirect = mutationGeneric({
+export const createProjectDirect = internalMutationGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     title: v.string(),
@@ -4270,7 +4271,7 @@ async function resolveTaskPhase(
   return phases[phases.length - 1]._id;
 }
 
-export const createTaskDirect = mutationGeneric({
+export const createTaskDirect = internalMutationGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     title: v.string(),
@@ -4584,7 +4585,7 @@ export const markTaskInProgressForViewer = mutationGeneric({
   },
 });
 
-export const listActiveProjectsAndTasks = queryGeneric({
+export const listActiveProjectsAndTasks = internalQueryGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
   },
@@ -4609,7 +4610,7 @@ export const listActiveProjectsAndTasks = queryGeneric({
   },
 });
 
-export const listContacts = queryGeneric({
+export const listContacts = internalQueryGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
   },
@@ -4631,7 +4632,7 @@ export const listContacts = queryGeneric({
   },
 });
 
-export const getLatestFocusSummary = queryGeneric({
+export const getLatestFocusSummary = internalQueryGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
   },
@@ -4644,7 +4645,7 @@ export const getLatestFocusSummary = queryGeneric({
   },
 });
 
-export const aiContextForBrain = queryGeneric({
+export const aiContextForBrain = internalQueryGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
   },
@@ -4760,7 +4761,7 @@ export const aiContextForBrain = queryGeneric({
   },
 });
 
-export const upsertEntityEmbedding = mutationGeneric({
+export const upsertEntityEmbedding = internalMutationGeneric({
   args: entityEmbeddingInput,
   handler: async ({ db }, args) => {
     const entityTable = entityTableByType[args.entityRef.entityType as keyof typeof entityTableByType];
@@ -4805,7 +4806,7 @@ export const upsertEntityEmbedding = mutationGeneric({
   },
 });
 
-export const upsertFocusSummary = mutationGeneric({
+export const upsertFocusSummary = internalMutationGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     summaryText: v.string(),
@@ -4847,7 +4848,7 @@ export const upsertFocusSummary = mutationGeneric({
   },
 });
 
-export const listPendingActions = queryGeneric({
+export const listPendingActions = internalQueryGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     status: v.optional(v.string()),
@@ -4869,7 +4870,7 @@ export const listPendingActions = queryGeneric({
   },
 });
 
-export const recordPendingActionResult = mutationGeneric({
+export const recordPendingActionResult = internalMutationGeneric({
   args: {
     pendingActionId: v.id("pendingActions"),
     status: v.union(v.literal("sent"), v.literal("failed"), v.literal("completed")),
@@ -4911,7 +4912,7 @@ export const recordPendingActionResult = mutationGeneric({
   },
 });
 
-export const recordEntityReview = mutationGeneric({
+export const recordEntityReview = internalMutationGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     entityRef,
@@ -5022,7 +5023,7 @@ export const recordEntityReview = mutationGeneric({
   },
 });
 
-export const recordIngestionRun = mutationGeneric({
+export const recordIngestionRun = internalMutationGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     harness: v.string(),
@@ -5044,7 +5045,7 @@ export const recordIngestionRun = mutationGeneric({
   },
 });
 
-export const updateSourceSyncStatus = mutationGeneric({
+export const updateSourceSyncStatus = internalMutationGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     statusKey: v.optional(v.string()),
@@ -5273,7 +5274,7 @@ export const deleteQuickCaptureForViewer = mutationGeneric({
   },
 });
 
-export const listQuickCapturesForBrain = queryGeneric({
+export const listQuickCapturesForBrain = internalQueryGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     status: v.optional(quickCaptureStatus),
@@ -5316,7 +5317,7 @@ export const listQuickCapturesForBrain = queryGeneric({
   },
 });
 
-export const markQuickCaptureHandledForBrain = mutationGeneric({
+export const markQuickCaptureHandledForBrain = internalMutationGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     captureId: v.id("quickCaptures"),
