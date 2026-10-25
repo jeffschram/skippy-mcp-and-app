@@ -1,3 +1,4 @@
+import { internalActionGeneric } from "convex/server";
 import {
   actionGeneric,
   internalMutationGeneric,
@@ -408,7 +409,7 @@ export const writeTaskBrief = internalMutationGeneric({
   },
 });
 
-export const briefTaskForBrain = mutationGeneric({
+export const briefTaskForBrain = internalMutationGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     taskId: v.id("tasks"),
@@ -615,7 +616,7 @@ export const briefTaskProposal = actionGeneric({
   },
 });
 
-export const planProjectForBrain = actionGeneric({
+export const planProjectForBrain = internalActionGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     projectId: v.id("projects"),

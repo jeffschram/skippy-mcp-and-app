@@ -1,98 +1,36 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-
-const mocks = vi.hoisted(() => ({
-  convexConstructor: vi.fn(),
-  convexMutation: vi.fn(),
-  convexSetAuth: vi.fn(),
-  createMcpServer: vi.fn(),
-  createSkippyClient: vi.fn(),
-  serverConnect: vi.fn(),
-  transportConstructor: vi.fn(),
-  transportHandleRequest: vi.fn(),
-}));
-
-vi.mock("convex/browser", () => ({
-  ConvexHttpClient: mocks.convexConstructor,
-}));
-
-vi.mock("./mcp-server.js", () => ({
-  createMcpServer: mocks.createMcpServer,
-}));
-
-vi.mock("./skippy-client.js", () => ({
-  createConvexSkippyClient: mocks.createSkippyClient,
-}));
-
-vi.mock("@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js", () => ({
-  WebStandardStreamableHTTPServerTransport: mocks.transportConstructor,
-}));
-
-describe("remote MCP transport authorization", () => {
+import { ConvexError } from "convex/values";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+const mocks = vi.hoisted(() => ({ bridge: vi.fn(), oauth: vi.fn(), create: vi.fn(), client: vi.fn(), connect: vi.fn(), handle: vi.fn() }));
+vi.mock("./bridge-client.js", () => ({ bridgeCall: mocks.bridge }));
+vi.mock("./oauth.js", async importOriginal => ({ ...await importOriginal<typeof import("./oauth.js")>(), verifyOAuthToken: mocks.oauth }));
+vi.mock("./mcp-server.js", () => ({ createMcpServer: mocks.create }));
+vi.mock("./skippy-client.js", () => ({ createConvexSkippyClient: mocks.client }));
+vi.mock("@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js", () => ({ WebStandardStreamableHTTPServerTransport: class { handleRequest = mocks.handle; } }));
+import { handleRemoteMcpRequest } from "./remote";
+describe("remote MCP authorization", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
-    mocks.convexConstructor.mockImplementation(function ConvexHttpClient() {
-      return {
-      mutation: mocks.convexMutation,
-      setAuth: mocks.convexSetAuth,
-      };
-    });
-    mocks.convexMutation.mockResolvedValue({ brainInstanceId: "brain_123" });
-    mocks.createSkippyClient.mockReturnValue({ skippy: true });
-    mocks.createMcpServer.mockReturnValue({ connect: mocks.serverConnect });
-    mocks.transportConstructor.mockImplementation(function WebStandardStreamableHTTPServerTransport() {
-      return {
-        handleRequest: mocks.transportHandleRequest,
-      };
-    });
-    mocks.transportHandleRequest.mockResolvedValue(new Response("ok", { status: 200 }));
+    vi.resetAllMocks(); vi.stubEnv("SKIPPY_MCP_BRIDGE_SECRET", "a".repeat(32));
+    mocks.bridge.mockResolvedValue({ brainInstanceId: "brain", role: "finance" });
+    mocks.create.mockReturnValue({ connect: mocks.connect }); mocks.client.mockReturnValue({}); mocks.handle.mockResolvedValue(new Response("ok"));
   });
-
-  it("authenticates the bearer token before creating a brain-scoped server", async () => {
-    const { handleRemoteMcpRequest } = await import("./remote");
-    const request = new Request("https://skippy.test/api/mcp", { method: "POST" });
-
-    const response = await handleRemoteMcpRequest(request, {
-      convexUrl: "https://convex.test",
-      convexAuthToken: "convex-auth",
-      bearerToken: "skippy-secret",
-    });
-
-    expect(response.status).toBe(200);
-    expect(mocks.convexConstructor).toHaveBeenCalledWith("https://convex.test");
-    expect(mocks.convexSetAuth).toHaveBeenCalledWith("convex-auth");
-    expect(mocks.convexMutation).toHaveBeenCalledWith(expect.anything(), { token: "skippy-secret" });
-    expect(mocks.createSkippyClient).toHaveBeenCalledWith("https://convex.test", "convex-auth");
-    expect(mocks.createMcpServer).toHaveBeenCalledWith({ skippy: true }, "brain_123");
-    expect(mocks.serverConnect).toHaveBeenCalledWith(expect.objectContaining({ handleRequest: expect.any(Function) }));
-    expect(mocks.transportHandleRequest).toHaveBeenCalledWith(request);
+  afterEach(() => vi.unstubAllEnvs());
+  const request = () => handleRemoteMcpRequest(new Request("https://skippy.test/api/mcp"), { convexUrl: "https://convex.test", bearerToken: "secret" });
+  it("resolves static-token identity and retains its role", async () => {
+    await request(); expect(mocks.oauth).not.toHaveBeenCalled();
+    expect(mocks.create).toHaveBeenCalledWith({}, "brain", { role: "finance", oauth: undefined });
+    expect(mocks.bridge.mock.calls[0]?.[1].principal.tokenHash).not.toBe("secret");
   });
-
-  it("passes the token's agent role through to server creation", async () => {
-    const { handleRemoteMcpRequest } = await import("./remote");
-    mocks.convexMutation.mockResolvedValueOnce({ brainInstanceId: "brain_123", role: "finance" });
-
-    const response = await handleRemoteMcpRequest(new Request("https://skippy.test/api/mcp", { method: "POST" }), {
-      convexUrl: "https://convex.test",
-      bearerToken: "skippy-secret",
-    });
-
-    expect(response.status).toBe(200);
-    expect(mocks.createMcpServer).toHaveBeenCalledWith({ skippy: true }, "brain_123", { role: "finance" });
+  it("resolves OAuth identity in Convex rather than from arguments", async () => {
+    const principal = { kind: "oauth", subject: "clerk-user", scopes: ["skippy:read", "skippy:write"] };
+    mocks.bridge.mockRejectedValueOnce(new ConvexError({ code: "invalid_static_token" })).mockResolvedValueOnce({ brainInstanceId: "oauth-brain" }); mocks.oauth.mockResolvedValue(principal);
+    await request(); expect(mocks.create).toHaveBeenCalledWith({}, "oauth-brain", { role: undefined, oauth: principal });
   });
-
-  it("does not create a server when token authentication fails", async () => {
-    const { handleRemoteMcpRequest } = await import("./remote");
-    mocks.convexMutation.mockRejectedValueOnce(new Error("invalid MCP token"));
-
-    await expect(
-      handleRemoteMcpRequest(new Request("https://skippy.test/api/mcp"), {
-        convexUrl: "https://convex.test",
-        bearerToken: "bad-token",
-      }),
-    ).rejects.toThrow("invalid MCP token");
-
-    expect(mocks.createSkippyClient).not.toHaveBeenCalled();
-    expect(mocks.createMcpServer).not.toHaveBeenCalled();
-    expect(mocks.transportHandleRequest).not.toHaveBeenCalled();
+  it("never creates a server for invalid tokens", async () => {
+    mocks.bridge.mockRejectedValue(new ConvexError({ code: "invalid_static_token" })); mocks.oauth.mockRejectedValue(new Error("invalid_token"));
+    await expect(request()).rejects.toThrow("invalid_token"); expect(mocks.create).not.toHaveBeenCalled();
+  });
+  it("denies OAuth accounts that have no owned brain", async () => {
+    mocks.bridge.mockRejectedValueOnce(new ConvexError({ code: "invalid_static_token" })).mockRejectedValueOnce(new ConvexError({ code: "account_not_authorized" })); mocks.oauth.mockResolvedValue({ kind: "oauth" });
+    await expect(request()).rejects.toMatchObject({ status: 403 }); expect(mocks.create).not.toHaveBeenCalled();
   });
 });

@@ -1,3 +1,4 @@
+import { internalMutationGeneric, internalQueryGeneric } from "convex/server";
 import { mutationGeneric, queryGeneric } from "convex/server";
 import { v } from "convex/values";
 import { requireOwnedBrain } from "./auth";
@@ -257,7 +258,7 @@ export const upsertOperatingRule = mutationGeneric({
   },
 });
 
-export const operatingRulesForBrain = queryGeneric({
+export const operatingRulesForBrain = internalQueryGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     scope: v.optional(v.string()),
@@ -369,7 +370,7 @@ async function composeEffectiveRubric(db: any, brainInstanceId: any) {
   return { manualRubric, goals, activeProjects, favoriteContacts, renderedText };
 }
 
-export const getEffectiveRubricForBrain = queryGeneric({
+export const getEffectiveRubricForBrain = internalQueryGeneric({
   args: { brainInstanceId: v.id("brainInstances") },
   handler: async ({ db }, args) => composeEffectiveRubric(db, args.brainInstanceId),
 });
@@ -513,7 +514,7 @@ export const disablePushSubscription = mutationGeneric({
   },
 });
 
-export const notificationDispatchContextForBrain = queryGeneric({
+export const notificationDispatchContextForBrain = internalQueryGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
   },
@@ -548,7 +549,7 @@ export const notificationDispatchContextForBrain = queryGeneric({
   },
 });
 
-export const recordNotificationDelivery = mutationGeneric({
+export const recordNotificationDelivery = internalMutationGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     pushSubscriptionId: v.optional(v.id("pushSubscriptions")),

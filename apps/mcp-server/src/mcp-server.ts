@@ -1,3 +1,6 @@
+import { OAUTH_TOOL_SCOPES } from "./oauth-tool-policy.js";
+import { authChallenge } from "./oauth.js";
+import type { McpPrincipal } from "@skippy/shared";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import {
@@ -898,12 +901,13 @@ function stripUndefined<T>(value: T): T {
 }
 
 export type CreateMcpServerOptions = {
+  oauth?: Extract<McpPrincipal, { kind: "oauth" }> | undefined;
   /**
    * Agent-role scope from the authenticated token (docs/agents.md). When set,
    * only the role's allowlisted tools are registered on this connection;
    * everything else is invisible and uncallable. Undefined = full access.
    */
-  role?: string;
+  role?: string | undefined;
 };
 
 export function createMcpServer(
@@ -922,18 +926,36 @@ export function createMcpServer(
   );
 
   const allowedTools = resolveAllowedTools(options?.role);
-  if (allowedTools) {
-    const registerToolUnrestricted = server.registerTool.bind(server) as (...args: unknown[]) => unknown;
-    (server as unknown as { registerTool: (name: string, ...rest: unknown[]) => unknown }).registerTool = (
-      name: string,
-      ...rest: unknown[]
-    ) => {
-      if (!allowedTools.has(name)) {
-        return undefined;
+  // The SDK currently emits only _meta, so extend its public list handler to
+  // preserve OpenAI's top-level securitySchemes compatibility field as well.
+  const setHandler = server.server.setRequestHandler.bind(server.server) as any;
+  (server.server as any).setRequestHandler = (schema: any, handler: any) => setHandler(schema, async (...args: any[]) => {
+    const result = await handler(...args);
+    if (Array.isArray(result?.tools)) return { ...result, tools: result.tools.map((tool: any) => ({ ...tool, securitySchemes: tool._meta?.securitySchemes })) };
+    return result;
+  });
+  const register = server.registerTool.bind(server) as any;
+  (server as any).registerTool = (name: string, config: any, callback: any) => {
+    if (allowedTools && !allowedTools.has(name)) return undefined;
+    const scopes = OAUTH_TOOL_SCOPES[name];
+    if (!scopes) throw new Error(`Missing OAuth policy for tool ${name}`);
+    const schemes = [{ type: "oauth2", scopes }];
+    return register(name, { ...config,
+      annotations: { ...config.annotations, readOnlyHint: scopes.length === 1,
+        destructiveHint: scopes.length > 1,
+        openWorldHint: config.annotations?.openWorldHint ?? false },
+      _meta: { ...config._meta, securitySchemes: schemes },
+    }, async (...args: any[]) => {
+      const principal = options?.oauth;
+      const expired = principal && principal.expiresAt <= Date.now();
+      if (principal && (expired || !scopes.every(scope => principal.scopes.includes(scope)))) {
+        const code = expired ? "invalid_token" : "insufficient_scope";
+        return { isError: true, content: [{ type: "text", text: "Reconnect Skippy with the required permissions." }],
+          _meta: { "mcp/www_authenticate": [authChallenge(code) + ', error_description="Reconnect Skippy with the required permissions"'] } };
       }
-      return registerToolUnrestricted(name, ...rest);
-    };
-  }
+      return callback(...args);
+    });
+  };
 
   // The role travels into the handlers, not just the allowlist: some tools are
   // allowed for an agent but must behave more conservatively for one (see
@@ -1679,8 +1701,8 @@ export function createMcpServer(
     {
       title: "Ask Skippy",
       description:
-        "Read-only retrieval of structured context already stored in Skippy. Internal synthesis may be disabled, so expect structured context rather than a polished answer.",
-      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+        "Retrieve stored context and optionally synthesize an answer. May save embeddings and send relevant context to the configured AI provider.",
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
       inputSchema: z.object({
         query: z.string().describe("Natural-language question or context request."),
       }),

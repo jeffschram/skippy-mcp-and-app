@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { describe, expect, it } from "vitest";
@@ -520,7 +521,7 @@ describe("Skippy MCP manifest", () => {
       expect(markQuickCaptureHandled?.inputSchema.properties?.processingNote).toBeDefined();
       expect(markQuickCaptureHandled?.inputSchema.properties?.sourceRunId).toBeDefined();
       expect(capture?.description).toContain("accepted note directly");
-      expect(ask?.annotations?.readOnlyHint).toBe(true);
+      expect(ask?.annotations?.readOnlyHint).toBe(false);
       expect(refreshFocusSummary?.description).toContain("Generate and store");
       expect(recordEntityReview?.description).toContain("Record a review of an accepted entity");
       expect(markTaskInProgress?.description).toContain("before doing meaningful work");
@@ -2147,7 +2148,7 @@ describe("life-layer tools", () => {
       }
       expect(
         tools.find((tool) => tool.name === "upsert_recurrence")?.annotations?.readOnlyHint,
-      ).toBeUndefined();
+      ).toBe(false);
     });
   });
 
@@ -2341,5 +2342,29 @@ describe("agent role tool scoping", () => {
     expect(names.has("get_skill")).toBe(true);
     expect(names.has("get_current_context")).toBe(true);
     expect(names.size).toBe(2);
+  });
+});
+
+describe("OAuth tool permissions", () => {
+  it("publishes all tool grants and rejects read-only writes before invoking the client", async () => {
+    const { OAUTH_TOOL_SCOPES } = await import("./oauth-tool-policy");
+    let writes = 0;
+    const server = createMcpServer(createFakeClient({ createTaskDirect: async () => { writes++; return {}; } }), "brain", { oauth: {
+      kind: "oauth", subject: "owner", issuer: "https://issuer", resource: "https://resource", scopes: ["skippy:read"], expiresAt: Date.now()+60_000,
+    } });
+    const client = new Client({ name: "oauth-test", version: "1" });
+    const [a,b] = InMemoryTransport.createLinkedPair(); await server.connect(a); await client.connect(b);
+    try {
+      // Inspect the wire shape: SDK listTools() strips nonstandard top-level fields.
+      const { tools } = await client.request({ method: "tools/list" }, z.object({ tools: z.array(z.any()) }));
+      expect(tools.map(t => t.name).sort()).toEqual(Object.keys(OAUTH_TOOL_SCOPES).sort());
+      for (const tool of tools) {
+        expect(tool._meta?.securitySchemes).toEqual([{ type: "oauth2", scopes: OAUTH_TOOL_SCOPES[tool.name] }]);
+        expect((tool as any).securitySchemes).toEqual(tool._meta?.securitySchemes);
+        expect(tool.annotations?.readOnlyHint).toBe(OAUTH_TOOL_SCOPES[tool.name]!.length === 1);
+      }
+      const result = await client.callTool({ name: "create_task", arguments: { title: "Blocked" } });
+      expect(result.isError).toBe(true); expect(result._meta?.["mcp/www_authenticate"]).toBeTruthy(); expect(writes).toBe(0);
+    } finally { await client.close(); await server.close(); }
   });
 });

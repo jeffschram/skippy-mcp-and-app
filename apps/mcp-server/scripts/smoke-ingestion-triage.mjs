@@ -6,6 +6,8 @@ import { makeFunctionReference } from "convex/server";
 const endpoint = process.env.SKIPPY_MCP_URL ?? "http://127.0.0.1:3000/api/mcp";
 const convexUrl = process.env.CONVEX_URL ?? process.env.NEXT_PUBLIC_CONVEX_URL;
 const token = process.env.SKIPPY_MCP_TOKEN;
+const viewerToken = process.env.SKIPPY_CONVEX_AUTH_TOKEN;
+if (!viewerToken) throw new Error("SKIPPY_CONVEX_AUTH_TOKEN (owner Clerk JWT with convex audience) is required for triage verification and cleanup");
 
 if (!token) {
   console.error("SKIPPY_MCP_TOKEN is required. Set it in your shell; do not commit it.");
@@ -25,14 +27,13 @@ const transport = new StreamableHTTPClientTransport(new URL(endpoint), {
   },
 });
 const convex = new ConvexHttpClient(convexUrl);
-const authenticate = makeFunctionReference("mcpTokens:authenticate");
-const listPendingTriage = makeFunctionReference("knowledge:listPendingTriage");
-const rejectTriageItem = makeFunctionReference("knowledge:rejectTriageItem");
+convex.setAuth(viewerToken);
+const listPendingTriage = makeFunctionReference("knowledge:triageForViewer");
+const rejectTriageItem = makeFunctionReference("knowledge:reviewTriageItem");
 
 let triageItemId;
 
 try {
-  const auth = await convex.mutation(authenticate, { token });
   await mcp.connect(transport);
   const uniqueTitle = `Skippy smoke candidate ${Date.now()}`;
   const submitted = await mcp.callTool({
@@ -54,10 +55,7 @@ try {
     throw new Error("submit_candidate_object did not return a triageItemId");
   }
 
-  const triageItems = await convex.query(listPendingTriage, {
-    brainInstanceId: auth.brainInstanceId,
-    limit: 25,
-  });
+  const triageItems = await convex.query(listPendingTriage, {});
   const found = triageItems.find((item) => item._id === triageItemId);
   if (!found) {
     throw new Error(`Created triage item ${triageItemId} was not returned by listTriage`);
@@ -68,6 +66,7 @@ try {
   if (triageItemId) {
     await convex.mutation(rejectTriageItem, {
       triageItemId,
+      action: "reject",
       rejectionReason: "Cleaned up by smoke-ingestion-triage.",
     });
     console.log(`Rejected smoke triage item ${triageItemId}`);

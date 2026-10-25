@@ -1,3 +1,4 @@
+import { internalMutationGeneric, internalQueryGeneric } from "convex/server";
 import { mutationGeneric, queryGeneric } from "convex/server";
 import { v } from "convex/values";
 import { effectiveProjectPaths, normalizeFolderPathInput, orderIndexBetween } from "@skippy/shared";
@@ -1413,7 +1414,7 @@ export const getViewerContext = queryGeneric({
   },
 });
 
-export const currentContextForBrain = queryGeneric({
+export const currentContextForBrain = internalQueryGeneric({
   args: { brainInstanceId: v.id("brainInstances") },
   handler: async ({ db }, args) => {
     return currentContext(db, args.brainInstanceId);
@@ -1439,14 +1440,14 @@ export const projectPlansForViewer = queryGeneric({
 /* Brain-facing (MCP token routing)                                   */
 /* ------------------------------------------------------------------ */
 
-export const projectBoardForBrain = queryGeneric({
+export const projectBoardForBrain = internalQueryGeneric({
   args: { brainInstanceId: v.id("brainInstances"), projectId: v.id("projects") },
   handler: async ({ db }, args) => {
     return buildBoard(db, args.brainInstanceId, args.projectId);
   },
 });
 
-export const updateProjectForBrain = mutationGeneric({
+export const updateProjectForBrain = internalMutationGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     projectId: v.id("projects"),
@@ -1474,7 +1475,7 @@ export const updateProjectForBrain = mutationGeneric({
   },
 });
 
-export const updatePhaseForBrain = mutationGeneric({
+export const updatePhaseForBrain = internalMutationGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     phaseId: v.id("phases"),
@@ -1503,7 +1504,7 @@ export const updatePhaseForBrain = mutationGeneric({
  * snapshots and prunes. Convention, not code-enforced: the harness only
  * edits the pad at the close of an owner-requested review.
  */
-export const projectNotesForBrain = queryGeneric({
+export const projectNotesForBrain = internalQueryGeneric({
   args: { brainInstanceId: v.id("brainInstances"), projectId: v.id("projects") },
   handler: async ({ db }, args) => {
     const project = await db.get(args.projectId);
@@ -1516,7 +1517,7 @@ export const projectNotesForBrain = queryGeneric({
   },
 });
 
-export const updateProjectNotesForBrain = mutationGeneric({
+export const updateProjectNotesForBrain = internalMutationGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     projectId: v.id("projects"),
@@ -1527,7 +1528,7 @@ export const updateProjectNotesForBrain = mutationGeneric({
   },
 });
 
-export const snapshotProjectNotesForBrain = mutationGeneric({
+export const snapshotProjectNotesForBrain = internalMutationGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     projectId: v.id("projects"),
@@ -1544,7 +1545,7 @@ export const snapshotProjectNotesForBrain = mutationGeneric({
  * can stand up a new plan section (create_phase -> create_task with phaseId)
  * without a UI round-trip.
  */
-export const createPhaseForBrain = mutationGeneric({
+export const createPhaseForBrain = internalMutationGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     projectId: v.id("projects"),
@@ -1595,7 +1596,7 @@ export const createPhaseForBrain = mutationGeneric({
  * hatch for tasks that predate phase-aware creation (created without a
  * phaseId) or that should move between phases.
  */
-export const setTaskPhaseForBrain = mutationGeneric({
+export const setTaskPhaseForBrain = internalMutationGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     taskId: v.id("tasks"),
@@ -1641,7 +1642,7 @@ export const setTaskPhaseForBrain = mutationGeneric({
   },
 });
 
-export const moveTasksToProjectForBrain = mutationGeneric({
+export const moveTasksToProjectForBrain = internalMutationGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     taskIds: v.array(v.id("tasks")),
@@ -1663,21 +1664,21 @@ export const moveTasksToProjectForBrain = mutationGeneric({
   },
 });
 
-export const readyTasksForBrain = queryGeneric({
+export const readyTasksForBrain = internalQueryGeneric({
   args: { brainInstanceId: v.id("brainInstances"), limit: v.optional(v.number()) },
   handler: async ({ db }, args) => {
     return readyTasks(db, args.brainInstanceId, args.limit ?? 12);
   },
 });
 
-export const requestedReadyTasksForBrain = queryGeneric({
+export const requestedReadyTasksForBrain = internalQueryGeneric({
   args: { brainInstanceId: v.id("brainInstances"), limit: v.optional(v.number()) },
   handler: async ({ db }, args) => {
     return requestedReadyTasks(db, args.brainInstanceId, args.limit ?? 12);
   },
 });
 
-export const tasksByStateForBrain = queryGeneric({
+export const tasksByStateForBrain = internalQueryGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     executionState: v.union(
@@ -1702,14 +1703,14 @@ export const tasksByStateForBrain = queryGeneric({
   },
 });
 
-export const getTaskBriefForBrain = queryGeneric({
+export const getTaskBriefForBrain = internalQueryGeneric({
   args: { brainInstanceId: v.id("brainInstances"), taskId: v.id("tasks") },
   handler: async ({ db }, args) => {
     return taskBrief(db, args.brainInstanceId, args.taskId);
   },
 });
 
-export const recordTaskResultForBrain = mutationGeneric({
+export const recordTaskResultForBrain = internalMutationGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     taskId: v.id("tasks"),
@@ -1743,7 +1744,7 @@ export const recordTaskResultForBrain = mutationGeneric({
   },
 });
 
-export const setTaskKindForBrain = mutationGeneric({
+export const setTaskKindForBrain = internalMutationGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     taskId: v.id("tasks"),
@@ -1773,7 +1774,7 @@ export const setTaskKindForBrain = mutationGeneric({
   },
 });
 
-export const cancelTaskForBrain = mutationGeneric({
+export const cancelTaskForBrain = internalMutationGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     taskId: v.id("tasks"),
@@ -1791,7 +1792,7 @@ export const cancelTaskForBrain = mutationGeneric({
   },
 });
 
-export const restoreTaskForBrain = mutationGeneric({
+export const restoreTaskForBrain = internalMutationGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     taskId: v.id("tasks"),
@@ -1836,7 +1837,7 @@ async function deleteTaskCascade(db: any, brainInstanceId: string, taskId: strin
   return removedEdges;
 }
 
-export const deleteTaskForBrain = mutationGeneric({
+export const deleteTaskForBrain = internalMutationGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     taskId: v.id("tasks"),
@@ -1857,7 +1858,7 @@ export const deleteTaskForBrain = mutationGeneric({
  * unless `deleteTasks` is set, so a caller can never silently vaporize work;
  * the alternative is moving tasks out first via `setTaskPhaseForBrain`.
  */
-export const deletePhaseForBrain = mutationGeneric({
+export const deletePhaseForBrain = internalMutationGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     phaseId: v.id("phases"),

@@ -1,3 +1,4 @@
+import { internalQueryGeneric } from "convex/server";
 import { mutationGeneric, queryGeneric } from "convex/server";
 import { v } from "convex/values";
 import { requireOwnedBrain } from "./auth";
@@ -634,7 +635,7 @@ export const getSkill = queryGeneric({
   },
 });
 
-export const getSkillForBrain = queryGeneric({
+export const getSkillForBrain = internalQueryGeneric({
   args: { brainInstanceId: v.id("brainInstances"), slug: v.string() },
   handler: async (ctx, args) => {
     const slug = args.slug.trim();

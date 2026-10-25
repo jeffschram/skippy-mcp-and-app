@@ -1,3 +1,4 @@
+import { internalMutationGeneric, internalQueryGeneric } from "convex/server";
 import { mutationGeneric, queryGeneric } from "convex/server";
 import { v } from "convex/values";
 import {
@@ -66,7 +67,7 @@ function validateRule(rule: any) {
 /* Writes                                                              */
 /* ------------------------------------------------------------------ */
 
-export const upsertRecurrence = mutationGeneric({
+export const upsertRecurrence = internalMutationGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     recurrenceId: v.optional(v.id("recurrences")),
@@ -143,7 +144,7 @@ export const upsertRecurrence = mutationGeneric({
  * Idempotent by construction: a recurrence holding a live `currentTaskId` is
  * skipped, so running this on every heartbeat cannot pile up duplicates.
  */
-export const fireDueRecurrences = mutationGeneric({
+export const fireDueRecurrences = internalMutationGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     now: v.optional(v.number()),
@@ -217,7 +218,7 @@ export const fireDueRecurrences = mutationGeneric({
  * Tuesday"). For completion-anchored recurrences that genuinely moves the next
  * due date, which is the whole point of the anchor.
  */
-export const completeRecurrence = mutationGeneric({
+export const completeRecurrence = internalMutationGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     recurrenceId: v.id("recurrences"),
@@ -289,7 +290,7 @@ export const recurrencesForViewer = queryGeneric({
 });
 
 /** Brain-scoped entry point for the MCP surface, which authenticates by token. */
-export const recurrencesForBrain = queryGeneric({
+export const recurrencesForBrain = internalQueryGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     dueOnly: v.optional(v.boolean()),

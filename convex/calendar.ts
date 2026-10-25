@@ -1,3 +1,5 @@
+import { internalQueryGeneric } from "convex/server";
+import { internalMutationGeneric } from "convex/server";
 import { mutationGeneric, queryGeneric } from "convex/server";
 import { v } from "convex/values";
 import {
@@ -117,7 +119,7 @@ async function upsertCalendarEventsInternal(
 }
 
 /** Upserts a batch of raw Google events. See upsertCalendarEventsInternal. */
-export const upsertCalendarEvents = mutationGeneric({
+export const upsertCalendarEvents = internalMutationGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     calendarId: v.string(),
@@ -138,7 +140,7 @@ async function findSyncStatusRow(db: any, brainInstanceId: any, calendarId: stri
 }
 
 /** Reads the stored incremental sync token for a calendar, if any. */
-export const getCalendarSyncToken = queryGeneric({
+export const getCalendarSyncToken = internalQueryGeneric({
   args: { brainInstanceId: v.id("brainInstances"), calendarId: v.string() },
   handler: async ({ db }, args) => {
     const row = await findSyncStatusRow(db, args.brainInstanceId, args.calendarId);
@@ -193,7 +195,7 @@ async function recordCalendarSyncTokenInternal(
   return { statusKey, updated: false };
 }
 
-export const recordCalendarSyncToken = mutationGeneric({
+export const recordCalendarSyncToken = internalMutationGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     calendarId: v.string(),
@@ -405,7 +407,7 @@ async function findMirrorConflicts(
  * Convex never calls Google. The harness executes the pending action and
  * reports back through recordCalendarEventRemoteResult.
  */
-export const draftCalendarEvent = mutationGeneric({
+export const draftCalendarEvent = internalMutationGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     calendarId: v.string(),
@@ -569,7 +571,7 @@ export const draftCalendarEvent = mutationGeneric({
  * `conflict` is success, not failure: a 409 means the id already exists, which
  * is exactly what a retry after a partial failure looks like.
  */
-export const recordCalendarEventRemoteResult = mutationGeneric({
+export const recordCalendarEventRemoteResult = internalMutationGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     externalId: v.string(),

@@ -1,3 +1,4 @@
+import { internalMutationGeneric, internalQueryGeneric } from "convex/server";
 import { mutationGeneric, queryGeneric } from "convex/server";
 import { v } from "convex/values";
 import { validateProjectFileInput } from "@skippy/shared";
@@ -259,7 +260,8 @@ async function abortUpload(ctx: any, brainInstanceId: any, args: any) {
   if (!file || file.brainInstanceId !== brainInstanceId) throw new Error("file not found for brain instance");
   if (fileStatus(file) === "ready") throw new Error("ready files cannot be aborted");
   if (fileStatus(file) !== "failed") await ctx.db.patch(file._id, { status: "failed", failureReason: args.reason?.slice(0, 500) ?? "upload aborted", updatedAt: Date.now() });
-  if (args.storageId) await ctx.storage.delete(args.storageId).catch(() => undefined);
+  // A supplied blob ID is not proof of ownership. Unbound uploads are left for cleanup.
+  if (file.storageId && args.storageId === file.storageId) await ctx.storage.delete(file.storageId).catch(() => undefined);
   return { fileId: file._id, status: "failed" };
 }
 
@@ -359,29 +361,29 @@ export const restoreFileForViewer = mutationGeneric({
 /* Brain-facing (MCP token routing)                                   */
 /* ------------------------------------------------------------------ */
 
-export const generateUploadUrlForBrain = mutationGeneric({
+export const generateUploadUrlForBrain = internalMutationGeneric({
   args: { brainInstanceId: v.id("brainInstances") },
   handler: async (ctx) => {
     return await ctx.storage.generateUploadUrl();
   },
 });
 
-export const beginUploadForBrain = mutationGeneric({
+export const beginUploadForBrain = internalMutationGeneric({
   args: { brainInstanceId: v.id("brainInstances"), ...beginArgs, actorId: v.optional(v.string()) },
   handler: async (ctx, args) => { const { brainInstanceId, actorId, ...fileArgs } = args; return await beginUpload(ctx, brainInstanceId, fileArgs, "harness", actorId); },
 });
 
-export const finalizeUploadForBrain = mutationGeneric({
+export const finalizeUploadForBrain = internalMutationGeneric({
   args: { brainInstanceId: v.id("brainInstances"), fileId: v.id("projectFiles"), storageId: v.id("_storage"), sha256: v.string() },
   handler: async (ctx, args) => await finalizeUpload(ctx, args.brainInstanceId, args),
 });
 
-export const abortUploadForBrain = mutationGeneric({
+export const abortUploadForBrain = internalMutationGeneric({
   args: { brainInstanceId: v.id("brainInstances"), fileId: v.id("projectFiles"), storageId: v.optional(v.id("_storage")), reason: v.optional(v.string()) },
   handler: async (ctx, args) => await abortUpload(ctx, args.brainInstanceId, args),
 });
 
-export const registerFileForBrain = mutationGeneric({
+export const registerFileForBrain = internalMutationGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     projectId: v.id("projects"),
@@ -402,7 +404,7 @@ export const registerFileForBrain = mutationGeneric({
   },
 });
 
-export const listFilesForBrain = queryGeneric({
+export const listFilesForBrain = internalQueryGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     projectId: v.id("projects"),
@@ -414,7 +416,7 @@ export const listFilesForBrain = queryGeneric({
   },
 });
 
-export const deleteFileForBrain = mutationGeneric({
+export const deleteFileForBrain = internalMutationGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     fileId: v.id("projectFiles"),
@@ -428,12 +430,12 @@ export const deleteFileForBrain = mutationGeneric({
   },
 });
 
-export const restoreFileForBrain = mutationGeneric({
+export const restoreFileForBrain = internalMutationGeneric({
   args: { brainInstanceId: v.id("brainInstances"), fileId: v.id("projectFiles") },
   handler: async (ctx, args) => await restoreFile(ctx, args.brainInstanceId, args.fileId),
 });
 
-export const getFileForBrain = queryGeneric({
+export const getFileForBrain = internalQueryGeneric({
   args: { brainInstanceId: v.id("brainInstances"), fileId: v.id("projectFiles") },
   handler: async (ctx, args) => {
     const row = await ctx.db.get(args.fileId);
@@ -469,7 +471,7 @@ export const finalizeArtifactUploadForRunner = mutationGeneric({
 
 /** Bounded cron target: expire pending uploads, then physically collect only
  * soft-deleted blobs whose retention elapsed. Ready/referenced blobs are never touched. */
-export const cleanupExpiredFiles = mutationGeneric({
+export const cleanupExpiredFiles = internalMutationGeneric({
   args: { now: v.optional(v.number()), limit: v.optional(v.number()) },
   handler: async (ctx, args) => {
     const now = args.now ?? Date.now(); const limit = Math.min(200, Math.max(1, args.limit ?? 50));

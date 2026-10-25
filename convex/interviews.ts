@@ -1,3 +1,4 @@
+import { internalMutationGeneric, internalQueryGeneric } from "convex/server";
 import { mutationGeneric, queryGeneric } from "convex/server";
 import { v } from "convex/values";
 import { requireOwnedBrain } from "./auth";
@@ -700,7 +701,7 @@ export const templates = queryGeneric({
   handler: async () => templateSummaries(),
 });
 
-export const templatesForBrain = queryGeneric({
+export const templatesForBrain = internalQueryGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
   },
@@ -718,7 +719,7 @@ export const templatesForBrain = queryGeneric({
   },
 });
 
-export const listForBrain = queryGeneric({
+export const listForBrain = internalQueryGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     recentLimit: v.optional(v.number()),
@@ -753,7 +754,7 @@ export const listForBrain = queryGeneric({
   },
 });
 
-export const detailForBrain = queryGeneric({
+export const detailForBrain = internalQueryGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     interviewId: v.id("interviews"),
@@ -761,7 +762,7 @@ export const detailForBrain = queryGeneric({
   handler: async (ctx, args) => interviewDetailForBrain(ctx.db, args),
 });
 
-export const startForBrain = mutationGeneric({
+export const startForBrain = internalMutationGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     kind: interviewKind,
@@ -777,7 +778,7 @@ export const startForBrain = mutationGeneric({
     }),
 });
 
-export const answerCurrentQuestionForBrain = mutationGeneric({
+export const answerCurrentQuestionForBrain = internalMutationGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     interviewId: v.id("interviews"),
@@ -794,7 +795,7 @@ export const answerCurrentQuestionForBrain = mutationGeneric({
     }),
 });
 
-export const completeForBrain = mutationGeneric({
+export const completeForBrain = internalMutationGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     interviewId: v.id("interviews"),
@@ -810,7 +811,7 @@ export const completeForBrain = mutationGeneric({
     }),
 });
 
-export const archiveForBrain = mutationGeneric({
+export const archiveForBrain = internalMutationGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     interviewId: v.id("interviews"),
