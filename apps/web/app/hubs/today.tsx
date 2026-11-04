@@ -662,7 +662,7 @@ export function TodayContent() {
       {plan ? <p className="m-0 text-xl leading-relaxed">{plan.summary}</p> : <LoadingRow label="Planning your day…" />}
       {sync ? <p className="mt-2 text-xs text-muted-foreground">Checking connected sources…</p> : failedSync ? <p className="mt-2 text-xs text-muted-foreground">Some sources could not update. This plan uses the information already saved.</p> : null}
     </section>
-    <div className="grid min-w-0 items-start gap-4 lg:grid-cols-2 [&>*]:min-w-0">
+    <div className="grid min-w-0 items-stretch gap-4 lg:grid-cols-2 [&>*]:min-w-0">
     <Section title="Today">
       {!plan ? <LoadingRow label="Choosing today's actions…" /> : plan.items.length ? <ol className="m-0 grid list-none gap-1 p-0">
         {plan.items.map(item => <li key={`${item.kind}:${item.id}`} className="flex items-center gap-3 border-b py-3 last:border-0">
