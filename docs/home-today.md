@@ -2,6 +2,8 @@
 
 Owner decision, 2026-11-04: keep Home, Quick Capture, and the weekly agenda. Replace Now and Needs attention with a short briefing and one system-selected Today list. Do not show per-item justifications. Retire routine Review; corrections happen through chat.
 
+Home places the briefing first, Today and This Week side by side on wide screens, and Quick Capture below them. On smaller screens, Today and This Week stack in that order.
+
 ## Daily behavior
 
 `convex/today.ts` gathers owned, accepted records. `todayModel.ts` selects the day and builds a two-sentence briefing from exactly the same selection. No independent prose checklist or task copies are created. Changes to tasks update the list and briefing reactively; the clock advances each minute and day boundaries use the viewer's local timezone, including daylight-saving days.
