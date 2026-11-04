@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 
 const state = vi.hoisted(() => ({ plan: { summary: 'One appointment remains. Start with your renewal.', limited: false, items: [
   { id: 'personal', title: 'Renew insurance', kind: 'task', href: '/tasks#task-personal', canComplete: true },
+  { id: 'step', title: 'Choose a font', kind: 'step', href: '/projects/p#task-step', canComplete: false },
   { id: 'project', title: 'Review: Skippy update', kind: 'task', href: '/projects/p#task-project', canComplete: false },
 ] } }));
 vi.mock('convex/react', async () => {
@@ -43,6 +44,7 @@ describe('consolidated Home', () => {
     expect(html).toContain('textarea');
     expect(html).toContain('Renew insurance');
     expect(html).toContain('Mark Renew insurance done');
+    expect(html).toContain('Mark Choose a font done');
     expect(html).not.toContain('Mark Review: Skippy update done');
     expect(html).not.toContain('Needs attention');
     expect(html).not.toContain('Needs your review');

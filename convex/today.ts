@@ -1,11 +1,11 @@
 import { v } from 'convex/values';
 import { agendaItemsAreDuplicates } from '@skippy/shared';
-import { query } from './_generated/server';
+import { mutation, query } from './_generated/server';
 import { requireOwnedBrain } from './auth';
 import { attentionHref, isAttentionArchived } from './attentionModel';
-import { selectToday, type TodayCandidate } from './todayModel';
+import { isConcreteAction, nextRecordedStep, selectToday, type TodayCandidate } from './todayModel';
 
-const item = v.object({ id: v.string(), title: v.string(), href: v.string(), kind: v.union(v.literal('task'), v.literal('recurrence'), v.literal('reminder'), v.literal('approval')), canComplete: v.optional(v.boolean()), recurrenceId: v.optional(v.string()), dueAt: v.optional(v.number()), priority: v.optional(v.number()), importance: v.optional(v.number()), order: v.optional(v.number()), urgent: v.optional(v.boolean()), required: v.optional(v.boolean()), inProgress: v.optional(v.boolean()), want: v.optional(v.boolean()) });
+const item = v.object({ id: v.string(), title: v.string(), href: v.string(), kind: v.union(v.literal('task'), v.literal('step'), v.literal('recurrence'), v.literal('reminder'), v.literal('approval')), projectStep: v.optional(v.boolean()), stepLine: v.optional(v.number()), stepSource: v.optional(v.string()), canComplete: v.optional(v.boolean()), recurrenceId: v.optional(v.string()), dueAt: v.optional(v.number()), priority: v.optional(v.number()), importance: v.optional(v.number()), order: v.optional(v.number()), urgent: v.optional(v.boolean()), required: v.optional(v.boolean()), inProgress: v.optional(v.boolean()), want: v.optional(v.boolean()) });
 export const forViewer = query({
   args: { now: v.number(), dayStart: v.number(), dayEnd: v.number() },
   returns: v.object({ items: v.array(item), summary: v.string(), busyMinutes: v.number(), overflow: v.boolean(), limited: v.boolean() }),
@@ -48,11 +48,13 @@ export const forViewer = query({
       const links = await ctx.db.query('relationships').withIndex('by_brain_from', q => q.eq('brainInstanceId', brain._id).eq('from.entityId', task._id)).take(17);
       if (links.length > 16) { limited = true; continue; }
       let excluded = false;
+      let projectWork = !!task.phaseId || ['coding', 'design', 'research', 'planning'].includes(task.kind);
       let href = attentionHref('task', task._id);
       let importance = task.importanceScore ?? 0;
       let priority = task.priorityScore ?? 0;
       for (const link of links) {
         if (link.type === 'belongs_to' && link.to.entityType === 'project') {
+          projectWork = true;
           const id = ctx.db.normalizeId('projects', link.to.entityId);
           const project = id ? await ctx.db.get(id) : null;
           if (!project || project.brainInstanceId !== brain._id || isAttentionArchived(project) || ['completed', 'cancelled'].includes(project.status)) excluded = true;
@@ -65,10 +67,24 @@ export const forViewer = query({
         }
       }
       if (excluded) continue;
-      candidates.push({ id: task._id, title: decision ? `${task.executionState === 'in_review' ? 'Review' : 'Unblock'}: ${task.title}` : task.title,
-        href, kind: 'task', canComplete: !decision, ...(task.dueAt !== undefined ? { dueAt: task.dueAt } : {}),
+      const required = decision || (a.reviewAt > 0 && a.reviewAt < dayEnd) || (a.scheduledAt > 0 && a.scheduledAt < dayEnd);
+      const deadline = task.commitment !== 'want' && task.dueAt < dayEnd;
+      const urgent = a.override === 'immediate';
+      const step = !decision && projectWork ? nextRecordedStep(task.description) : null;
+      // A deadline on a whole initiative needs a decision, not a checkbox that
+      // pretends the initiative can be finished today.
+      const hasChecklist = /^\s*[-*] \[[ xX]\] /m.test(task.description ?? '');
+      const concrete = (!hasChecklist && isConcreteAction(task.title)) || (!projectWork && deadline);
+      const needsPlan = !decision && ((projectWork && (deadline || urgent || required)) || (!step && !concrete && (required || deadline || urgent)));
+      if (!decision && !step && !concrete && !needsPlan) continue;
+      const title = decision ? `${task.executionState === 'in_review' ? 'Review' : 'Unblock'}: ${task.title}`
+        : needsPlan ? `Decide the next action for: ${task.title}` : step?.title ?? task.title;
+      candidates.push({ id: task._id, title, href, kind: step && !needsPlan ? 'step' : 'task', canComplete: !decision && !needsPlan && !step,
+        ...(step && !needsPlan ? { stepLine: step.stepLine, stepSource: step.stepSource } : {}),
+        projectStep: projectWork && !decision && !needsPlan,
+        ...(task.dueAt !== undefined ? { dueAt: task.dueAt } : {}),
         priority, importance, order: task.orderIndex ?? 9999,
-        urgent: a.override === 'immediate', required: decision || (a.reviewAt > 0 && a.reviewAt < dayEnd) || (a.scheduledAt > 0 && a.scheduledAt < dayEnd), inProgress: task.status === 'in_progress', want: task.commitment === 'want' });
+        urgent, required: required || needsPlan, inProgress: task.status === 'in_progress', want: task.commitment === 'want' });
     }
     const recurrences = await ctx.db.query('recurrences').withIndex('by_brain_status', q => q.eq('brainInstanceId', brain._id).eq('status', 'active')).take(101);
     if (recurrences.length > 100) limited = true;
@@ -77,7 +93,7 @@ export const forViewer = query({
       const task = r.currentTaskId ? await ctx.db.get(r.currentTaskId) : null;
       if (task && task.brainInstanceId === brain._id && !['done', 'cancelled'].includes(task.status)) {
         const candidate = candidates.find(c => c.id === task._id);
-        if (candidate) candidate.recurrenceId = r._id;
+        if (candidate && candidate.stepLine === undefined) candidate.recurrenceId = r._id;
         continue;
       }
       candidates.push({ id: r._id, title: r.title, kind: 'recurrence', href: '/tasks', dueAt: r.nextDueAt });
@@ -107,5 +123,30 @@ export const forViewer = query({
       { source: 'event', title: event.title, at: event.startAt }, { source: 'event', title: other.title, at: other.startAt },
     )));
     return { ...selectToday(candidates, uniqueEvents, now, dayEnd), limited };
+  },
+});
+
+/** Complete the recorded checklist step only; parent status and dependencies stay intact. */
+export const completeStepForViewer = mutation({
+  args: { taskId: v.id('tasks'), stepLine: v.number(), stepSource: v.string() },
+  returns: v.null(),
+  handler: async (ctx, { taskId, stepLine, stepSource }) => {
+    const { brain, user } = await requireOwnedBrain(ctx);
+    const task = await ctx.db.get(taskId);
+    if (!task || task.brainInstanceId !== brain._id) throw new Error('Task not found');
+    if (task.processingState !== 'accepted' || ['done', 'cancelled', 'waiting'].includes(task.status)
+      || task.ownerType === 'agent' || ['in_review', 'blocked'].includes(task.executionState ?? '')) throw new Error('This task is not available for step completion');
+    const lines = (task.description ?? '').split('\n');
+    if (!Number.isInteger(stepLine) || stepLine < 0 || stepLine >= lines.length) throw new Error('This step has changed. Refresh Today.');
+    const completedLine = stepSource.replace('[ ]', '[x]');
+    if (lines[stepLine] === completedLine && completedLine !== stepSource) return null;
+    const step = nextRecordedStep(task.description);
+    if (!step || step.stepLine !== stepLine || step.stepSource !== stepSource) throw new Error('This step has changed. Refresh Today.');
+    lines[stepLine] = completedLine;
+    const now = Date.now();
+    await ctx.db.patch(taskId, { description: lines.join('\n'), updatedAt: now });
+    await ctx.db.insert('activityEvents', { brainInstanceId: brain._id, entityRef: { entityType: 'task', entityId: taskId },
+      activityType: 'task_step_completed', actorType: 'user', actorId: user._id, timestamp: now, summary: `Completed step: ${step.title}` });
+    return null;
   },
 });

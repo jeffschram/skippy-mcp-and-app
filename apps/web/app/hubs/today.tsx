@@ -644,14 +644,16 @@ export function TodayContent() {
   const plan = useQuery(api.today.forViewer, viewerReady ? { now: Math.floor(now / 60000) * 60000, dayStart, dayEnd } : "skip");
   const sync = activeSourceSyncStatus<AnyRecord>(data?.sourceSyncStatuses, now);
   const failedSync = data?.sourceSyncStatuses?.some((status: AnyRecord) => status.status === "failed");
+  const completeStep = useMutation(api.today.completeStepForViewer);
   const completeTask = useMutation(api.knowledge.markTaskDoneForViewer);
   const completeRecurrence = useMutation(api.recurrences.completeRecurrenceForViewer);
   const [busyId, setBusyId] = useState<string | null>(null);
   const toast = useToast();
-  async function complete(item: { id: string; kind: string; recurrenceId?: string }) {
+  async function complete(item: { id: string; kind: string; recurrenceId?: string; stepLine?: number; stepSource?: string }) {
     setBusyId(item.id);
     try {
-      if (item.kind === "task" && !item.recurrenceId) await completeTask({ taskId: item.id as any });
+      if (item.stepLine !== undefined && item.stepSource !== undefined) await completeStep({ taskId: item.id as any, stepLine: item.stepLine, stepSource: item.stepSource });
+      else if (item.kind === "task" && !item.recurrenceId) await completeTask({ taskId: item.id as any });
       else await completeRecurrence({ recurrenceId: (item.recurrenceId ?? item.id) as any });
     } catch (error) { toast(error instanceof Error ? error.message : "Could not complete item", "error"); }
     finally { setBusyId(null); }
@@ -666,7 +668,7 @@ export function TodayContent() {
     <Section title="Today">
       {!plan ? <LoadingRow label="Choosing today's actions…" /> : plan.items.length ? <ol className="m-0 grid list-none gap-1 p-0">
         {plan.items.map(item => <li key={`${item.kind}:${item.id}`} className="flex items-center gap-3 border-b py-3 last:border-0">
-          {item.canComplete || item.kind === "recurrence" ?
+          {item.canComplete || item.kind === "recurrence" || item.kind === "step" ?
             <IconButton small title="Mark done" aria-label={`Mark ${item.title} done`} disabled={busyId !== null} onClick={() => void complete(item)}><Check size={16} /></IconButton> : null}
           {item.kind === "approval" ? <button className="text-left font-medium hover:underline" onClick={() => window.dispatchEvent(new CustomEvent("skippy:open-chat"))}>{item.title}</button> : <Link href={item.href} className="font-medium hover:underline">{item.title}</Link>}
         </li>)}
