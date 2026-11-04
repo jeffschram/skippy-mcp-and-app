@@ -671,7 +671,6 @@ export function TodayContent() {
           {item.kind === "approval" ? <button className="text-left font-medium hover:underline" onClick={() => window.dispatchEvent(new CustomEvent("skippy:open-chat"))}>{item.title}</button> : <Link href={item.href} className="font-medium hover:underline">{item.title}</Link>}
         </li>)}
       </ol> : <p className={mutedClass}>You're clear for now.</p>}
-      {plan?.limited ? <p className="mt-3 text-sm text-muted-foreground">Today is based on a limited selection. Your full records remain in Agenda and Projects.</p> : null}
     </Section>
     <AgendaSection />
     </div>

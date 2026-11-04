@@ -12,7 +12,7 @@ Include personal tasks, owner project tasks, project work awaiting review or a b
 
 Rank genuine due-today/overdue obligations and explicit decisions first, then saved importance, priority, in-progress work and project order. Optional wants never become overdue. The first version deliberately uses existing saved scores and deterministic selection: it does not introduce a new model provider or pretend to know task durations. With two/four hours of remaining timed calendar commitments, discretionary selection shrinks from five to three/two items. Overlapping appointments count once; all-day events remain appointments but do not consume a fabricated 24-hour work budget. The remaining hours before local midnight further reduce the discretionary count late in the day. Mandatory commitments are not silently hidden when the day is overloaded; the briefing says so.
 
-Candidate reads are bounded and indexed, with separate deadline reads so older obligations are not displaced by recent tasks. The UI reports when those bounds are reached. Home is a recommendation, not an exhaustive inventory. Agenda and Projects retain the full records. Events/recurrences/tasks keep their distinct semantics. The weekly agenda remains date-grouped and rolls over at local midnight.
+Candidate reads are bounded and indexed, with separate deadline reads so older obligations are not displaced by recent tasks. Home is a recommendation, not an exhaustive inventory. Agenda and Projects retain the full records. Events/recurrences/tasks keep their distinct semantics. The weekly agenda remains date-grouped and rolls over at local midnight.
 
 ## Retired surfaces and compatibility
 
