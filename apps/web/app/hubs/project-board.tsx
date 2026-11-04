@@ -1395,6 +1395,11 @@ export function ProjectBoardContent({ projectId }: { projectId: string }) {
   // A selected Plan task swaps the chat's slot for its detail panel; the chat
   // stays mounted underneath so its draft and scroll position survive.
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  useEffect(() => {
+    const readTask = () => { const match = window.location.hash.match(/^#task-(.+)$/); if (match?.[1]) setSelectedTaskId(decodeURIComponent(match[1])); };
+    readTask(); window.addEventListener("hashchange", readTask);
+    return () => window.removeEventListener("hashchange", readTask);
+  }, [projectId]);
   // Task-row actions track WHICH task is busy so only the clicked row's
   // button disables.
   const [busyTaskId, setBusyTaskId] = useState<string | null>(null);

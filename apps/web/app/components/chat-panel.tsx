@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from "react";
+import dynamic from "next/dynamic";
 import { usePathname } from "next/navigation";
 import { useConvexAuth, useMutation, useQuery } from "convex/react";
 import { ArrowDown, CheckCircle2, ExternalLink, File as FileIcon, FilePenLine, FilePlus2, GitPullRequest, ListChecks, MessageCircle, Paperclip, SendHorizontal, Sparkles, TerminalSquare, X } from "lucide-react";
@@ -28,6 +29,8 @@ import {
 import { CardCloseNotice } from "./card-close-notice";
 import { canCloseCompletedCard } from "../../lib/card-close";
 import { useMindChat } from "./mind-chat-context";
+
+const ChatPendingActions = dynamic(() => import("./chat-pending-actions"), { ssr: false });
 
 type AnyRecord = Record<string, any>;
 
@@ -850,6 +853,8 @@ function ChatSurface({
       ) : null}
       </div>
 
+      {!collapsed && scope.kind === "page" && scope.pageKey === "home" ? <ChatPendingActions /> : null}
+
       {!collapsed && pendingApprovals.length ? (
         // Conversational (chat-turn) approvals: same compact card and
         // decision path as run approvals, docked above the composer because
@@ -972,6 +977,12 @@ export function ChatPanel() {
   const { isAuthenticated } = useConvexAuth();
   const scope = useMemo(() => scopeForPathname(pathname), [pathname]);
   const [open, setOpen] = useState(false);
+  useEffect(() => {
+    const openChat = () => setOpen(true);
+    window.addEventListener("skippy:open-chat", openChat);
+    if (new URLSearchParams(window.location.search).get("chat") === "1") setOpen(true);
+    return () => window.removeEventListener("skippy:open-chat", openChat);
+  }, []);
   if (!isAuthenticated || scope.kind === "project") return null;
   if (pathname === "/mind") return <MindChat scope={scope} />;
   if (!open) {

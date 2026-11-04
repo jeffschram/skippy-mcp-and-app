@@ -417,7 +417,7 @@ export function LifeTasksContent() {
   async function onNudge(row: AgendaRow) {
     try {
       await nudge({ taskId: row.id as any });
-      toast("Nudge drafted — review it in Pending actions.", "success");
+      toast("Nudge drafted — open Home chat to discuss or approve it.", "success");
     } catch (error) {
       toast(error instanceof Error ? error.message : "Could not draft that.", "error");
     }

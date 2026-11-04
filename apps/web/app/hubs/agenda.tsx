@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useQuery } from "convex/react";
 import { CalendarDays, MapPin, Video } from "lucide-react";
 import { groupAgendaByDay, type AgendaItem } from "@skippy/shared";
@@ -18,8 +18,6 @@ import { textButtonClass, textButtonCompactClass } from "../page-classes";
 /* width and is not where the value is — the value is a correct merged  */
 /* ordering of calendar events, due tasks, and firing recurrences.     */
 /* ------------------------------------------------------------------ */
-
-const DAY_MS = 86_400_000;
 
 function viewerTimeZone(): string {
   try {
@@ -112,11 +110,13 @@ export function AgendaSection({ days = 7 }: { days?: number }) {
 
   // Anchored to the start of today so the range is stable across renders
   // rather than sliding with the clock and refetching constantly.
+  const [today, setToday] = useState(() => new Date().toDateString());
+  useEffect(() => { const timer = setInterval(() => setToday(new Date().toDateString()), 60000); return () => clearInterval(timer); }, []);
   const { from, to } = useMemo(() => {
     const now = new Date();
     const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-    return { from: startOfToday, to: startOfToday + days * DAY_MS };
-  }, [days]);
+    return { from: startOfToday, to: new Date(now.getFullYear(), now.getMonth(), now.getDate() + days).getTime() };
+  }, [days, today]);
 
   const items = useQuery(api.agenda.agendaForViewer, ready ? { from, to } : "skip") as
     | AgendaItem[]
@@ -133,12 +133,12 @@ export function AgendaSection({ days = 7 }: { days?: number }) {
     <Section
       title={
         <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-          <CalendarDays size={18} aria-hidden /> Agenda
+          <CalendarDays size={18} aria-hidden /> This week
         </span>
       }
       action={
         <Link className={`${textButtonClass} ${textButtonCompactClass}`} href="/tasks">
-          Tasks
+          Full agenda
         </Link>
       }
     >

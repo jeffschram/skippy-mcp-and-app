@@ -22,9 +22,6 @@ import {
   normalizeAcceptedEntityPayload,
   quickCaptureIntent,
   selectTaskDuplicate,
-  SOURCE_REF_DEDUPE_ENTITY_TYPES,
-  sourceRefIdentityKey,
-  sourceRefIdentityKeys,
   taskTitleLooksDuplicate,
 } from "@skippy/shared";
 import { requireOwnedBrain } from "./auth";
@@ -731,6 +728,9 @@ async function insertMemoryKnowledge(
   relatedEntityRefs: Array<{ entityType: string; entityId: string }>,
   createdBy: "user" | "harness" | "skippy_ai" | "system",
 ) {
+  // Older callers can still request inbox/review; the trusted workflow saves
+  // these memories directly while keeping their source and confidence.
+  if (document.status === "inbox") document = { ...document, status: "accepted", reviewState: "accepted", acceptedAt: document.createdAt };
   const { relatedEntityRefs: _legacyRefs, ...storedDocument } = document;
   const memoryId = await db.insert("knowledge", {
     ...storedDocument,
@@ -1469,183 +1469,36 @@ export const submitCandidateObject = internalMutationGeneric({
   },
   handler: async ({ db }, args) => {
     if (args.candidateEntityType === "memory") throw new Error("Use record_memory or capture_thought for memories.");
-    if (args.candidateEntityType === "knowledgeObject") {
-      args = { ...args, candidateEntityType: "note", candidatePayload: { ...args.candidatePayload,
-        properties: args.candidatePayload.properties ?? args.candidatePayload } };
+    const kind = args.candidateEntityType === "knowledgeObject" ? "note" : args.candidateEntityType;
+    const payload = args.candidateEntityType === "knowledgeObject"
+      ? { ...args.candidatePayload, properties: args.candidatePayload.properties ?? args.candidatePayload }
+      : args.candidatePayload;
+    const normalized = normalizeAcceptedEntityPayload(kind, payload);
+    const fingerprint = candidateFingerprint(kind, normalized);
+    // Keep an automatically settled receipt so retrying a legacy candidate
+    // remains idempotent even for reference kinds without fuzzy matching.
+    const receipt = await db.query("triageItems").withIndex("by_brain_fingerprint", (q: any) =>
+      q.eq("brainInstanceId", args.brainInstanceId).eq("candidateFingerprint", fingerprint)).first();
+    if (receipt?.status === "rejected") return { status: "skipped", duplicate: true, sourceRefIds: receipt.sourceRefIds };
+    if (receipt?.candidateEntityId && ["approved", "corrected", "merged"].includes(receipt.status)) {
+      const id = db.normalizeId(entityTableByType[kind as keyof typeof entityTableByType], receipt.candidateEntityId);
+      const existing = id ? await db.get(id) : null;
+      if (existing?.brainInstanceId === args.brainInstanceId && existing.processingState !== "accepted") return { status: "skipped", duplicate: true, sourceRefIds: receipt.sourceRefIds };
+      if (existing?.brainInstanceId === args.brainInstanceId && existing.processingState === "accepted") {
+        const now = Date.now();
+        const refs = [...(args.sourceRefIds ?? []), ...await insertSourceRefs(db, args.brainInstanceId, args.sourceRefs, now)];
+        await linkSourceRefsToEntity(db, args.brainInstanceId, { entityType: kind, entityId: receipt.candidateEntityId }, refs, "created_from", now);
+        return { status: "duplicate_existing", entityType: kind, entityId: receipt.candidateEntityId, duplicate: true, sourceRefIds: refs };
+      }
     }
+    const result = await ingestTrustedObject(db, {
+      ...args, rubricDecision: args.reviewReason || "Automatically retained under the owner's trusted ingestion policy.",
+    });
     const now = Date.now();
-    const normalizedPayload = normalizeAcceptedEntityPayload(args.candidateEntityType, args.candidatePayload);
-    const fingerprint = candidateFingerprint(args.candidateEntityType, normalizedPayload);
-    const existingPendingItem = await db
-      .query("triageItems")
-      .withIndex("by_brain_fingerprint", (q) => q.eq("brainInstanceId", args.brainInstanceId))
-      .filter((q) =>
-        q.and(q.eq(q.field("candidateFingerprint"), fingerprint), q.eq(q.field("status"), "pending")),
-      )
-      .first();
-    const sourceRefIds = [...(args.sourceRefIds ?? [])];
-
-    for (const sourceRef of args.sourceRefs ?? []) {
-      sourceRefIds.push(
-        await db.insert("sourceRefs", {
-          brainInstanceId: args.brainInstanceId,
-          ...sourceRef,
-          createdAt: now,
-          updatedAt: now,
-        }),
-      );
-    }
-
-    const existingAcceptedEntity = await findAcceptedEntityDuplicate(
-      db,
-      args.brainInstanceId,
-      args.candidateEntityType as keyof typeof entityTableByType,
-      normalizedPayload,
-    );
-    if (existingAcceptedEntity) {
-      const entityTypeName = args.candidateEntityType as keyof typeof entityTableByType;
-      await mergeIntoDuplicateEntity(
-        db,
-        args.brainInstanceId,
-        entityTypeName,
-        existingAcceptedEntity,
-        normalizedPayload,
-        sourceRefIds,
-        now,
-        `Duplicate suggested ${entityTypeName} matched an existing accepted ${entityTypeName}.`,
-        { candidateFingerprint: fingerprint },
-      );
-
-      return {
-        entityRef: { entityType: entityTypeName, entityId: existingAcceptedEntity._id },
-        entityId: existingAcceptedEntity._id,
-        sourceRefIds,
-        duplicate: true,
-        status: "duplicate_existing",
-        candidateFingerprint: fingerprint,
-      };
-    }
-
-    if (existingPendingItem) {
-      const mergedSourceRefIds = Array.from(new Set([...(existingPendingItem.sourceRefIds ?? []), ...sourceRefIds]));
-      await db.patch(existingPendingItem._id, {
-        sourceRefIds: mergedSourceRefIds,
-        updatedAt: now,
-      });
-
-      await db.insert("activityEvents", {
-        brainInstanceId: args.brainInstanceId,
-        activityType: "candidate_duplicate_detected",
-        actorType: "harness",
-        timestamp: now,
-        summary: `Duplicate suggested ${args.candidateEntityType} matched an existing pending triage item.`,
-        metadata: {
-          triageItemId: existingPendingItem._id,
-          candidateFingerprint: fingerprint,
-        },
-        sourceRefIds,
-      });
-
-      return {
-        triageItemId: existingPendingItem._id,
-        sourceRefIds: mergedSourceRefIds,
-        duplicate: true,
-        status: "duplicate_pending",
-        candidateFingerprint: fingerprint,
-      };
-    }
-
-    // 2026-09-07: three differently-worded copies of the same Netlify email
-    // reached the Finds queue. The fingerprint above only catches EXACT
-    // payload repeats, and notes/links/KOs have no accepted-entity similarity
-    // merge — so when the ingestion cursor doesn't advance (failed pass, or
-    // the 15-min overlap window), every re-read minted a fresh pending item.
-    // The wording drifts between passes; the source message ID does not.
-    if ((SOURCE_REF_DEDUPE_ENTITY_TYPES as readonly string[]).includes(args.candidateEntityType)) {
-      const incomingKeys = sourceRefIdentityKeys(args.sourceRefs);
-      for (const refId of args.sourceRefIds ?? []) {
-        const row = await db.get(refId);
-        const key = row ? sourceRefIdentityKey(row) : null;
-        if (key) incomingKeys.add(key);
-      }
-      if (incomingKeys.size > 0) {
-        const pendingItems = await db
-          .query("triageItems")
-          .withIndex("by_brain_status", (q: any) =>
-            q.eq("brainInstanceId", args.brainInstanceId).eq("status", "pending"),
-          )
-          .collect();
-        for (const item of pendingItems) {
-          if (item.candidateEntityType !== args.candidateEntityType) continue;
-          let matchedKey: string | null = null;
-          for (const refId of item.sourceRefIds ?? []) {
-            const row = await db.get(refId);
-            const key = row ? sourceRefIdentityKey(row) : null;
-            if (key && incomingKeys.has(key)) {
-              matchedKey = key;
-              break;
-            }
-          }
-          if (!matchedKey) continue;
-
-          const mergedSourceRefIds = Array.from(
-            new Set([...(item.sourceRefIds ?? []), ...sourceRefIds]),
-          );
-          await db.patch(item._id, {
-            sourceRefIds: mergedSourceRefIds,
-            updatedAt: now,
-          });
-
-          await db.insert("activityEvents", {
-            brainInstanceId: args.brainInstanceId,
-            activityType: "candidate_duplicate_detected",
-            actorType: "harness",
-            timestamp: now,
-            summary: `Duplicate suggested ${args.candidateEntityType} matched a pending triage item from the same source.`,
-            metadata: {
-              triageItemId: item._id,
-              candidateFingerprint: fingerprint,
-              matchedBy: "source_ref",
-              sourceRefKey: matchedKey,
-            },
-            sourceRefIds,
-          });
-
-          return {
-            triageItemId: item._id,
-            sourceRefIds: mergedSourceRefIds,
-            duplicate: true,
-            status: "duplicate_pending",
-            candidateFingerprint: fingerprint,
-          };
-        }
-      }
-    }
-
-    const triageItemId = await db.insert("triageItems", {
-      brainInstanceId: args.brainInstanceId,
-      candidateEntityType: args.candidateEntityType,
-      candidatePayload: normalizedPayload,
-      candidateFingerprint: fingerprint,
-      status: "pending",
-      confidence: args.confidence,
-      reviewReason: args.reviewReason,
-      sourceRefIds,
-      createdAt: now,
-      updatedAt: now,
-    });
-
-    await db.insert("activityEvents", {
-      brainInstanceId: args.brainInstanceId,
-      activityType: "candidate_submitted",
-      actorType: "harness",
-      timestamp: now,
-      summary: `Suggested ${args.candidateEntityType} submitted for triage.`,
-      metadata: { triageItemId, candidateFingerprint: fingerprint },
-      sourceRefIds,
-    });
-
-    return { triageItemId, sourceRefIds, duplicate: false, status: "submitted_for_review", candidateFingerprint: fingerprint };
+    const settled = { candidateEntityId: result.entityId, status: "approved" as const, reviewedAt: now, updatedAt: now };
+    if (receipt) await db.patch(receipt._id, settled);
+    else await db.insert("triageItems", { brainInstanceId: args.brainInstanceId, candidateEntityType: kind, candidatePayload: normalized, candidateFingerprint: fingerprint, sourceRefIds: result.sourceRefIds, createdAt: now, ...settled });
+    return result;
   },
 });
 
@@ -1660,7 +1513,10 @@ export const ingestObject = internalMutationGeneric({
     sourceRefIds: v.optional(v.array(v.id("sourceRefs"))),
     sourceRefs: v.optional(v.array(sourceRefInput)),
   },
-  handler: async ({ db }, args) => {
+  handler: async ({ db }, args) => ingestTrustedObject(db, args),
+});
+
+async function ingestTrustedObject(db: any, args: any) {
     if (args.candidateEntityType === "memory") throw new Error("Use record_memory or capture_thought for memories.");
     if (args.candidateEntityType === "knowledgeObject") {
       args = { ...args, candidateEntityType: "note", candidatePayload: { ...args.candidatePayload,
@@ -1746,8 +1602,7 @@ export const ingestObject = internalMutationGeneric({
       sourceRefIds,
       rubricDecision: args.rubricDecision,
     };
-  },
-});
+}
 
 export const approveTriageItem = internalMutationGeneric({
   args: {
@@ -3165,8 +3020,8 @@ export const submitMemoryReviewCandidateForViewer = mutationGeneric({
       title,
       summary: optionalTrimmed(args.summary),
       body,
-      status: "inbox",
-      reviewState: "pending_review",
+      status: "accepted",
+      reviewState: "accepted",
       confidence: args.confidence,
       sourceRefIds,
       relatedEntityRefs,
@@ -3183,7 +3038,7 @@ export const submitMemoryReviewCandidateForViewer = mutationGeneric({
       actorType: "user",
       actorId: user._id,
       timestamp: now,
-      summary: `Memory review candidate submitted: ${title}`,
+      summary: `Memory saved automatically: ${title}`,
       metadata: {
         memoryId,
         memoryType: args.memoryType,
@@ -3193,7 +3048,7 @@ export const submitMemoryReviewCandidateForViewer = mutationGeneric({
       sourceRefIds,
     });
 
-    return { memoryId, status: "inbox", reviewState: "pending_review" };
+    return { memoryId, status: "accepted", reviewState: "accepted" };
   },
 });
 
@@ -3582,8 +3437,8 @@ export const captureThoughtForBrain = internalMutationGeneric({
     const sourceRefIds = await memorySourceRefIdsFromArgs(db, args.brainInstanceId, args.sourceRefIds, args.sourceRefs, now);
     const relatedEntityRefs = await requireRelatedEntityRefsForBrain(db, args.brainInstanceId, args.relatedEntityRefs as any);
     const title = memoryTitleFor(memoryTypeName, undefined, body);
-    const submitForReview = reviewBehavior === "submit_for_review";
-    const directAccept = reviewBehavior === "accept";
+    const submitForReview = false; // Review retired: trusted writes are accepted.
+    const directAccept = true;
 
     const memoryDocument = {
       brainInstanceId: args.brainInstanceId,
@@ -3666,7 +3521,7 @@ export const recordMemoryForBrain = internalMutationGeneric({
     const now = Date.now();
     const memoryTypeName = args.kind ?? "memory";
     const reviewBehavior = args.reviewBehavior ?? "accept";
-    const submitForReview = reviewBehavior === "submit_for_review";
+    const submitForReview = false; // Review retired: trusted writes are accepted.
     const sourceRefIds = await memorySourceRefIdsFromArgs(db, args.brainInstanceId, args.sourceRefIds, args.sourceRefs, now);
     const relatedEntityRefs = await requireRelatedEntityRefsForBrain(db, args.brainInstanceId, args.relatedEntityRefs as any);
     const title = memoryTitleFor(memoryTypeName, args.title, body);
@@ -3754,8 +3609,8 @@ export const submitMemoryReviewCandidateForBrain = internalMutationGeneric({
       memoryType: memoryTypeName,
       title,
       body,
-      status: "inbox",
-      reviewState: "pending_review",
+      status: "accepted",
+      reviewState: "accepted",
       confidence: args.confidence,
       sourceRefIds,
       relatedEntityRefs,
@@ -3772,7 +3627,7 @@ export const submitMemoryReviewCandidateForBrain = internalMutationGeneric({
       actorType: "harness",
       actorId: args.createdBy,
       timestamp: now,
-      summary: `Memory review candidate submitted: ${title}`,
+      summary: `Memory saved automatically: ${title}`,
       metadata: {
         memoryId,
         memoryType: memoryTypeName,
@@ -3785,7 +3640,7 @@ export const submitMemoryReviewCandidateForBrain = internalMutationGeneric({
     });
 
     return {
-      status: "submitted_for_review",
+      status: "accepted",
       memoryId,
       reviewItemId: memoryId,
       kind: memoryTypeName,
@@ -5363,5 +5218,80 @@ export const markQuickCaptureHandledForBrain = internalMutationGeneric({
     });
 
     return { captureId: args.captureId, status: args.outcome };
+  },
+});
+
+/** Drain legacy Review items in bounded, separately committed transactions.
+ * External pendingActions deliberately never enter this migration.
+ */
+export const retireReviewItem = internalMutationGeneric({
+  args: { id: v.id("triageItems") },
+  returns: v.union(v.null(), v.object({ needsReference: v.boolean() })),
+  handler: async ({ db }, { id }) => {
+    const row = await db.get(id);
+    if (!row || row.status !== "pending") return null;
+    // Only a classification/normalization failure should change the kind.
+    // A transient database failure must never turn a valid task into a note.
+    try {
+      if (row.candidateEntityType === "memory") return { needsReference: true };
+      const kind = row.candidateEntityType === "knowledgeObject" ? "note" : row.candidateEntityType;
+      normalizeAcceptedEntityPayload(kind, row.candidatePayload);
+    } catch { return { needsReference: true }; }
+    const result = await ingestTrustedObject(db, {
+      brainInstanceId: row.brainInstanceId, candidateEntityType: row.candidateEntityType,
+      candidatePayload: row.candidatePayload, sourceRefIds: row.sourceRefIds,
+      confidence: row.confidence, rubricDecision: row.reviewReason || "Retained while retiring the Review queue.",
+    });
+    await db.patch(id, { status: "approved", candidateEntityId: result.entityId, reviewedAt: Date.now(), updatedAt: Date.now() });
+    return null;
+  },
+});
+export const retainUnclassifiedReviewItem = internalMutationGeneric({
+  args: { id: v.id("triageItems") },
+  returns: v.null(),
+  handler: async ({ db }, { id }) => {
+    const row = await db.get(id);
+    if (!row || row.status !== "pending") return null;
+    // Invalid legacy shapes stay intact in the audit row; preserve readable
+    // content as a reference rather than invent an obligation or lose it.
+    const payload = row.candidatePayload ?? {};
+    const result = await ingestTrustedObject(db, {
+      brainInstanceId: row.brainInstanceId, candidateEntityType: "note",
+      candidatePayload: { title: String(payload.title || payload.name || "Retained capture"), body: String(payload.body || payload.description || JSON.stringify(payload)) },
+      sourceRefIds: row.sourceRefIds, rubricDecision: "Retained as reference during Review retirement; original classification could not be accepted.",
+    });
+    await db.patch(id, { status: "corrected", candidateEntityId: result.entityId, reviewedAt: Date.now(), updatedAt: Date.now() });
+    return null;
+  },
+});
+
+/** Home no longer reads the legacy focus checklist or routine Review queues. */
+export const homeForViewer = queryGeneric({
+  args: { now: v.number() },
+  returns: v.object({ quickCaptures: v.array(v.any()), sourceSyncStatuses: v.array(v.any()) }),
+  handler: async (ctx, { now }) => {
+    const { brain } = await requireOwnedBrain(ctx);
+    const nowForCaptures = now;
+    const quickCaptureRows = await ctx.db
+      .query("quickCaptures")
+      .withIndex("by_brain_created", (q) => q.eq("brainInstanceId", brain._id))
+      .order("desc")
+      .take(20);
+    const quickCaptures = [];
+    for (const row of quickCaptureRows) {
+      if (isQuickCaptureHoldExpired(row, nowForCaptures)) continue;
+      quickCaptures.push({
+        ...row,
+        intent: quickCaptureIntent(row),
+        // Time-limited download URL resolved at read time. Never persist it.
+        fileUrl: row.storageId ? await ctx.storage.getUrl(row.storageId) : null,
+        // Deep-link targets for the "Actions taken" digest (processed rows).
+        relatedEntities: await resolveCaptureEntityLinks(ctx.db, brain._id, row.relatedEntityRefs),
+      });
+    }
+
+    const sourceSyncStatuses = await ctx.db.query("sourceSyncStatuses")
+      .withIndex("by_brain_key", q => q.eq("brainInstanceId", brain._id)).take(30);
+    return { quickCaptures, sourceSyncStatuses };
   },
 });

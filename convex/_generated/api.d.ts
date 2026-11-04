@@ -8,6 +8,7 @@
  * @module
  */
 
+import type * as today from "../today.js";
 import type * as agenda from "../agenda.js";
 import type * as agentConfigs from "../agentConfigs.js";
 import type * as agentWorkbench from "../agentWorkbench.js";
@@ -55,6 +56,7 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  today: typeof today;
   agenda: typeof agenda;
   agentConfigs: typeof agentConfigs;
   agentWorkbench: typeof agentWorkbench;

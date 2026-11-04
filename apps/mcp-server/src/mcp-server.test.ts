@@ -435,7 +435,7 @@ describe("Skippy MCP manifest", () => {
       expect(upsertLink?.description).toContain("Prefer ingest_object");
       expect(upsertNote?.description).not.toContain("status defaults to 'saved'");
       expect(ingestObject?.inputSchema.properties?.rubricDecision).toBeDefined();
-      expect(submitCandidate?.description).toContain("Review-queue fallback");
+      expect(submitCandidate?.description).toContain("trusted direct ingestion");
       expect(submitCandidate?.inputSchema.properties?.reviewReason).toBeDefined();
       expect(createTask?.description).toContain("when the user explicitly asks");
       expect(createTask?.inputSchema.properties?.ownerType).toBeDefined();
@@ -531,7 +531,7 @@ describe("Skippy MCP manifest", () => {
       expect(recordMemory?.inputSchema.properties?.rubricDecision).toBeDefined();
       expect(recordDecision?.description).toContain("durable decision memory");
       expect(recordPrinciple?.description).toContain("operating principle");
-      expect(submitMemoryReviewCandidate?.description).toContain("Queue a possible memory");
+      expect(submitMemoryReviewCandidate?.description).toContain("saves a useful memory directly");
       expect(submitMemoryReviewCandidate?.description).toContain("transient alerts");
       expect(listMemory?.annotations?.readOnlyHint).toBe(true);
       expect(getContextBundle?.description).toContain("context bundle");
