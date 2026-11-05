@@ -40,7 +40,7 @@ describe('consolidated Home', () => {
     expect(html).toContain('Home');
     expect(html).toContain(state.plan.summary);
     expect(html).toContain('Today');
-    expect(html).toContain('This week');
+    expect(html).toContain('This Week');
     expect(html).toContain('textarea');
     expect(html).toContain('Renew insurance');
     expect(html).toContain('Mark Renew insurance done');

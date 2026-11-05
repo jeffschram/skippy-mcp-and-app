@@ -49,7 +49,7 @@ const rowClass =
 const linkRowClass = `${rowClass} hover:rounded-lg hover:bg-secondary focus-visible:rounded-lg focus-visible:bg-secondary`;
 const metaItemClass = "inline-flex min-w-0 items-center gap-[3px] [overflow-wrap:anywhere]";
 
-function AgendaRow({
+export function AgendaRow({
   item,
   timeZone,
   dayPrefix,

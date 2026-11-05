@@ -5,6 +5,12 @@ export type TodayCandidate = {
   dueAt?: number; priority?: number; importance?: number; order?: number;
   canComplete?: boolean; recurrenceId?: string; urgent?: boolean; required?: boolean; inProgress?: boolean; want?: boolean;
 };
+/** Explicit owner actions mentioning autopay still need action; notices do not. */
+export function isAutomaticOccurrence(title: string) {
+  if (/(?:^|[—–:;!?]\s*| - )(check|confirm|review|cancel|stop|change|update|enable|disable|set up|pay|move|transfer|ensure|verify|decide|renew|call|contact|approve)\b/i.test(title.trim())) return false;
+  return /\bauto[ -]?(pay(?:ment)?s?|renew(?:s|al)?)\b|\bautomatically (?:renews|processes|charges|deducts)\b/i.test(title);
+}
+
 /** Conservative evidence of a single owner action, not a duration estimate. */
 export function isConcreteAction(title: string) {
   const text = title.trim();

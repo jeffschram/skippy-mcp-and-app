@@ -23,7 +23,9 @@ import { api } from "../../lib/skippy-api";
 import { formatRelative } from "../../lib/display";
 import { LiveGate } from "../live-auth";
 import { Badge, Button, IconButton, LoadingRow, Section, TextArea, useToast } from "../components";
-import { AgendaSection } from "./agenda";
+import { HomePeriodCard } from "./home-period-card";
+import { homeBounds, splitHomeRows } from "./home-period-helpers";
+import type { AgendaItem } from "@skippy/shared";
 import { useViewerReady } from "./use-viewer";
 import { formatFileSize } from "./project-library-helpers";
 import { QUICK_CAPTURE_INTENT_STORAGE_KEY, checkQuickCaptureFile, parseStoredIntent } from "./quick-capture-helpers";
@@ -637,11 +639,14 @@ export function TodayContent() {
   useSharedParamToast();
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 60000); return () => clearInterval(timer); }, []);
-  const day = new Date(now);
-  const dayStart = new Date(day.getFullYear(), day.getMonth(), day.getDate()).getTime();
-  const dayEnd = new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1).getTime();
+  const { dayStart, dayEnd, weekEnd } = homeBounds(now);
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
   const data = useQuery(api.knowledge.homeForViewer, viewerReady ? { now: Math.floor(now / 60000) * 60000 } : "skip") as AnyRecord | undefined;
   const plan = useQuery(api.today.forViewer, viewerReady ? { now: Math.floor(now / 60000) * 60000, dayStart, dayEnd } : "skip");
+  const weeklyPlan = useQuery(api.today.forViewer, viewerReady ? { now: Math.floor(now / 60000) * 60000, dayStart: dayEnd, dayEnd: weekEnd, period: 'week' } : "skip");
+  // Extra boundary days let all-day UTC dates be grouped in their intended local date.
+  const schedule = useQuery(api.agenda.agendaForViewer, viewerReady ? { from: dayStart - 86400000, to: weekEnd + 86400000 } : "skip") as AgendaItem[] | undefined;
+  const periods = plan && weeklyPlan && schedule ? splitHomeRows(plan.items, weeklyPlan.items, schedule, now, timeZone) : undefined;
   const sync = activeSourceSyncStatus<AnyRecord>(data?.sourceSyncStatuses, now);
   const failedSync = data?.sourceSyncStatuses?.some((status: AnyRecord) => status.status === "failed");
   const completeStep = useMutation(api.today.completeStepForViewer);
@@ -665,16 +670,8 @@ export function TodayContent() {
       {sync ? <p className="mt-2 text-xs text-muted-foreground">Checking connected sources…</p> : failedSync ? <p className="mt-2 text-xs text-muted-foreground">Some sources could not update. This plan uses the information already saved.</p> : null}
     </section>
     <div className="grid min-w-0 items-stretch gap-4 lg:grid-cols-2 [&>*]:min-w-0">
-    <Section title="Today">
-      {!plan ? <LoadingRow label="Choosing today's actions…" /> : plan.items.length ? <ol className="m-0 grid list-none gap-1 p-0">
-        {plan.items.map(item => <li key={`${item.kind}:${item.id}`} className="flex items-center gap-3 border-b py-3 last:border-0">
-          {item.canComplete || item.kind === "recurrence" || item.kind === "step" ?
-            <IconButton small title="Mark done" aria-label={`Mark ${item.title} done`} disabled={busyId !== null} onClick={() => void complete(item)}><Check size={16} /></IconButton> : null}
-          {item.kind === "approval" ? <button className="text-left font-medium hover:underline" onClick={() => window.dispatchEvent(new CustomEvent("skippy:open-chat"))}>{item.title}</button> : <Link href={item.href} className="font-medium hover:underline">{item.title}</Link>}
-        </li>)}
-      </ol> : <p className={mutedClass}>You're clear for now.</p>}
-    </Section>
-    <AgendaSection />
+      <HomePeriodCard title="Today" rows={periods?.today} busyId={busyId} onComplete={item => void complete(item)} timeZone={timeZone} />
+      <HomePeriodCard title="This Week" rows={periods?.week} busyId={busyId} onComplete={item => void complete(item)} timeZone={timeZone} weekly />
     </div>
     <QuickCaptureBox captures={data?.quickCaptures} />
   </div></LiveGate>;

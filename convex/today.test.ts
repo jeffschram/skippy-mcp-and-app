@@ -112,6 +112,15 @@ describe("Home daily plan", () => {
     task.brainInstanceId = 'brain:other';
     await expect(run(completeStepForViewer, ctx, args)).rejects.toThrow('not found');
   });
+  it("keeps automatic notices out of action recommendations and supports the upcoming week", async () => {
+    const rows = [item('tasks:auto', { status: 'todo', title: 'GEICO auto-pay processes', dueAt: now }),
+      item('recurrences:auto', { title: 'Figma auto-renews', status: 'active', nextDueAt: now }),
+      item('tasks:funds', { status: 'todo', title: 'Chase checking is low — move money before upcoming auto-payments', dueAt: now }),
+      item('tasks:future', { status: 'todo', title: 'Book a dentist visit', dueAt: dayEnd + 86400000 })];
+    expect((await plan(rows)).items.map((x: Row) => x.id)).toEqual(['tasks:funds']);
+    const week = await run(forViewer, fixture(rows), { now, dayStart: dayEnd, dayEnd: dayEnd + 7 * 86400000, period: 'week' });
+    expect(week.items.map((x: Row) => x.id)).toEqual(['tasks:future']);
+  });
   it("counts mirrored events once and ignores cancelled copies", async () => {
     const result = await plan([
       item("calendarEvents:a", { title: "Dinner", startAt: now, endAt: now + 3600000, status: "confirmed" }),

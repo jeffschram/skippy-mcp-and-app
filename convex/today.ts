@@ -3,15 +3,17 @@ import { agendaItemsAreDuplicates } from '@skippy/shared';
 import { mutation, query } from './_generated/server';
 import { requireOwnedBrain } from './auth';
 import { attentionHref, isAttentionArchived } from './attentionModel';
-import { isConcreteAction, nextRecordedStep, selectToday, type TodayCandidate } from './todayModel';
+import { isAutomaticOccurrence, isConcreteAction, nextRecordedStep, selectToday, type TodayCandidate } from './todayModel';
 
 const item = v.object({ id: v.string(), title: v.string(), href: v.string(), kind: v.union(v.literal('task'), v.literal('step'), v.literal('recurrence'), v.literal('reminder'), v.literal('approval')), projectStep: v.optional(v.boolean()), stepLine: v.optional(v.number()), stepSource: v.optional(v.string()), canComplete: v.optional(v.boolean()), recurrenceId: v.optional(v.string()), dueAt: v.optional(v.number()), priority: v.optional(v.number()), importance: v.optional(v.number()), order: v.optional(v.number()), urgent: v.optional(v.boolean()), required: v.optional(v.boolean()), inProgress: v.optional(v.boolean()), want: v.optional(v.boolean()) });
 export const forViewer = query({
-  args: { now: v.number(), dayStart: v.number(), dayEnd: v.number() },
+  args: { now: v.number(), dayStart: v.number(), dayEnd: v.number(), period: v.optional(v.union(v.literal('today'), v.literal('week'))) },
   returns: v.object({ items: v.array(item), summary: v.string(), busyMinutes: v.number(), overflow: v.boolean(), limited: v.boolean() }),
-  handler: async (ctx, { now, dayStart, dayEnd }) => {
+  handler: async (ctx, { now, dayStart, dayEnd, period = 'today' }) => {
     const { brain } = await requireOwnedBrain(ctx);
-    if (![now, dayStart, dayEnd].every(Number.isFinite) || dayEnd <= dayStart || now < dayStart || now >= dayEnd || dayEnd - dayStart > 26 * 3600000) throw new Error('Invalid day');
+    if (![now, dayStart, dayEnd].every(Number.isFinite) || dayEnd <= dayStart || now >= dayEnd
+      || (period === 'today' ? now < dayStart || dayEnd - dayStart > 26 * 3600000
+        : dayStart <= now || dayStart - now > 26 * 3600000 || dayEnd - dayStart > 7 * 86400000 + 3600000)) throw new Error('Invalid period');
     const candidates: TodayCandidate[] = [];
     let limited = false;
     const tasks = new Map<string, any>();
@@ -39,6 +41,7 @@ export const forViewer = query({
     if (ranked.length > 200) limited = true;
     for (const task of ranked.slice(0, 200)) {
       if (task.processingState !== 'accepted' || isAttentionArchived(task) || ['done', 'cancelled'].includes(task.status) || task.focusSnoozedUntil > now) continue;
+      if (isAutomaticOccurrence(task.title)) continue;
       const a = task.attention ?? {};
       const overdue = task.commitment !== 'want' && task.dueAt < now;
       if (!overdue && (a.override === 'ok' || a.scheduledAt >= dayEnd)) continue;
@@ -89,6 +92,7 @@ export const forViewer = query({
     const recurrences = await ctx.db.query('recurrences').withIndex('by_brain_status', q => q.eq('brainInstanceId', brain._id).eq('status', 'active')).take(101);
     if (recurrences.length > 100) limited = true;
     for (const r of recurrences.slice(0, 100)) {
+      if (isAutomaticOccurrence(r.title)) continue;
       if (r.nextDueAt - (r.leadTimeDays ?? 0) * 86400000 >= dayEnd) continue;
       const task = r.currentTaskId ? await ctx.db.get(r.currentTaskId) : null;
       if (task && task.brainInstanceId === brain._id && !['done', 'cancelled'].includes(task.status)) {
@@ -122,7 +126,7 @@ export const forViewer = query({
     const uniqueEvents = activeEvents.filter((event, index) => !activeEvents.slice(0, index).some(other => agendaItemsAreDuplicates(
       { source: 'event', title: event.title, at: event.startAt }, { source: 'event', title: other.title, at: other.startAt },
     )));
-    return { ...selectToday(candidates, uniqueEvents, now, dayEnd), limited };
+    return { ...selectToday(period === 'week' ? candidates.filter(c => c.dueAt === undefined || c.dueAt >= dayStart) : candidates, uniqueEvents, now, dayEnd), limited };
   },
 });
 

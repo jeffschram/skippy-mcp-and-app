@@ -16,6 +16,7 @@ export type AgendaItem = {
   source: AgendaSource;
   id: string;
   title: string;
+  recurrenceId?: string | undefined;
   /** Sort key. For all-day items this is the start of their day. */
   at: number;
   endAt?: number | undefined;
@@ -173,6 +174,7 @@ export function buildAgenda(
 
     items.push({
       source: "task",
+      recurrenceId: task.recurrenceId ? String(task.recurrenceId) : undefined,
       id: String(task._id),
       title: task.title,
       at: task.dueAt,

@@ -4,6 +4,14 @@ Owner decision, 2026-11-04: keep Home, Quick Capture, and the weekly agenda. Rep
 
 Home places the briefing first, Today and This Week side by side on wide screens, and Quick Capture below them. On smaller screens, Today and This Week stack in that order.
 
+## Time periods
+
+Both Home cards combine recommended actions, personal task deadlines, appointments, and recurring items. Today covers the current local calendar day plus outstanding action recommendations. This Week covers tomorrow through seven days from today (seven complete upcoming calendar days, not the rest of the calendar week). Calendar-day boundaries handle daylight saving changes. Today’s records are excluded from This Week.
+
+Scheduled entries show time/date and their event/due/recurring type. Only actionable tasks and recurrence obligations have completion buttons; automatic payment/renewal notices and appointments are informational. Explicit actions such as “Check funds before auto-pay” retain their checkbox. This distinction currently uses conservative title rules rather than model inference.
+
+The weekly action selection uses the same bounded task and project-step rules over the upcoming window. Agenda and recommendation rows merge by task/recurrence identity, retaining completion semantics and adding schedule context. A spawned recurring task carries its recurrence identity so completing it advances the recurrence. The Full agenda link remains available.
+
 ## Daily behavior
 
 `convex/today.ts` gathers owned, accepted records. `todayModel.ts` selects the day and builds a two-sentence briefing from exactly the same selection. No independent prose checklist or task copies are created. Changes to tasks update the list and briefing reactively; the clock advances each minute and day boundaries use the viewer's local timezone, including daylight-saving days.
@@ -20,7 +28,7 @@ Candidate reads are bounded and indexed, with separate deadline reads so older o
 
 ## Retired surfaces and compatibility
 
-Review, Attention, triage, resurfacing, and pending-actions routes redirect to Home. Their records and internal compatibility APIs remain; nothing is deleted. The legacy focus summary is still available to older MCP clients, but does not control Home. Home uses a lightweight query for Quick Capture and sync state rather than loading the old focus/review dashboard.
+Review, Attention, triage, resurfacing, and pending-actions routes redirect to Home. Their records and internal compatibility APIs remain; nothing is deleted. The legacy focus summary is still available to older MCP clients, but does not control Home. Home uses a lightweight query for Quick Capture and sync state, daily and weekly action queries, and the shared agenda rather than loading the old focus/review dashboard.
 
 The legacy submit-candidate and memory-candidate tools now save directly with source evidence and confidence. Agents should retain ambiguous action intent as reference notes, never invent obligations from announcements, and skip noise. Stored ingestion skill versions receive a current-policy addendum so old prompts cannot revive the queue. Quick Capture's private Hold mode is unchanged.
 
