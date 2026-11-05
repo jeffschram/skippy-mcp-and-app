@@ -89,11 +89,11 @@ const skippyInstructions = [
   "When a user first connects or asks what Skippy can do, offer the skippy_intro prompt/message if the harness supports MCP prompts.",
   "When a user asks for slash commands or types slash-command shorthand, load skippy_slash_commands if the harness supports MCP prompts.",
   "Use the user's evolving importance rubric. Directly ingest source-backed objects when they are actionable, deadline-bearing, relationship-building, decision-relevant, financially/security relevant, or clearly useful later.",
-  "Classify before saving: a task requires a concrete action or decision for the owner, not merely a dated event. Book releases, birthdays, availability notices and routine confirmations are informational; use a note/reference, an actual calendar event when appropriate, or skip noise. Do not invent a download, purchase, reply or follow-up obligation from an announcement. dueAt is only an action deadline, never a release/start/event date. Use itemIntent: action/event/reference and dateKind: deadline/event in candidate payloads to make the distinction explicit. If action is uncertain, send it for review instead of creating an accepted task.",
+  "Classify before saving: a task requires a concrete action or decision for the owner, not merely a dated event. Book releases, birthdays, availability notices and routine confirmations are informational; use a note/reference, an actual calendar event when appropriate, or skip noise. Do not invent a download, purchase, reply or follow-up obligation from an announcement. dueAt is only an action deadline, never a release/start/event date. Use itemIntent: action/event/reference and dateKind: deadline/event in candidate payloads to make the distinction explicit. If action is uncertain, retain useful context as a note rather than inventing a task. Routine Review is retired; classify and save useful information directly, and skip noise.",
   "For direct ingestion, call ingest_object and include a concise rubricDecision explaining why the item clears the importance bar.",
-  "Use submit_candidate_object only as a legacy fallback when the harness cannot decide whether the item belongs in Skippy.",
+  "Use ingest_object for useful information. submit_candidate_object is a compatibility alias that now accepts records directly; it does not request owner review.",
   "Extract useful objects, not raw dumps. Prefer task, project, person, company, link, note or goal records. Use notes for structured reference information, preserving extra properties.",
-  "Links are reference material, not a reading queue. Confident, rubric-clearing links: ingest directly (status defaults to 'saved'; no user interaction expected). Pass status 'unread' only when the user explicitly wants to read it later. Genuinely uncertain whether a link is valid or important: use submit_candidate_object so it lands in Review for a one-tap decision.",
+  "Links are reference material, not a reading queue. Confident, rubric-clearing links: ingest directly (status defaults to 'saved'; no user interaction expected). Pass status 'unread' only when the user explicitly wants to read it later. For uncertain links, retain useful context as a saved reference or skip noise; do not create a review queue.",
   "Include lightweight sourceRefs whenever possible: sourceSystem, messageId/threadId/eventId, timestamp, participants, URL/deepLink, summary, and a short excerpt.",
   "Avoid storing full raw emails, full calendar descriptions, or unnecessary private text. Store concise summaries and fields needed for future retrieval/focus.",
   "For noisy sources, submit only items that are actionable, relationship-building, deadline-bearing, decision-relevant, or clearly useful later.",
@@ -101,7 +101,7 @@ const skippyInstructions = [
   "Use capture_thought, record_memory, record_decision, and record_principle for durable second-brain memory. Include source refs, related entity refs, confidence, captureReason/rubricDecision, and reviewBehavior when available.",
   "On a project page, use get_project_plan to understand phases and ordered tasks. Use update_project for the Overview description and links, and update_phase for a phase title or Markdown description when the user asks chat to change them.",
   "Each project also has a freeform plain-text Notes pad (the Notes tab) where the owner dumps unstructured thoughts. When the owner asks to review their notes, call get_project_notes, help fold actionable ideas into the Plan, then — only with the owner's explicit OK — call snapshot_project_notes to preserve the pad and update_project_notes to prune the processed text. Never edit the pad outside an owner-requested review.",
-  "Use submit_memory_review_candidate when a possible memory is useful but uncertain. Do not queue transient alerts (balance notifications, promo deadlines, ToS notices); skip them or record directly with expiry context. Use list_memory/get_context_bundle/get_memory_detail before adding likely duplicates or answering from memory, and link_memory to attach memories to accepted entities.",
+  "Record useful memories directly, preserving uncertainty and provenance. The legacy submit_memory_review_candidate tool also saves directly. Do not queue transient alerts (balance notifications, promo deadlines, ToS notices); skip them or record directly with expiry context. Use list_memory/get_context_bundle/get_memory_detail before adding likely duplicates or answering from memory, and link_memory to attach memories to accepted entities.",
   "Use list_interview_templates/start_interview/get_interview/answer_interview_question/complete_interview/archive_interview to run guided second-brain interviews inside the harness chat. Ask one question at a time in chat, using the assistantDisplayName returned by Skippy.",
   "During scheduled or batch source-ingestion runs, also drain the Home quick-capture inbox in addition to external sources: call list_quick_captures for pending captures the owner dropped on the home page, turn useful ones into Skippy objects with the ingestion tools (ingest_object etc.), then call mark_quick_capture_handled with 'processed' or 'discarded' for each. Hold-intent captures are private device-to-device transfers: they are never returned by list_quick_captures and must never be ingested.",
   "The life layer covers everything that is not project work. A one-off errand or obligation is a task with no project: set `area` and leave `commitment` as 'must'. Something the owner would simply enjoy — a restaurant to try, a book to read — is a task with `commitment: \"want\"`, not a link and not a note; wants never carry due dates and never go overdue.",
@@ -164,7 +164,7 @@ function buildSlashCommandsMessage() {
     "| `/ask ...` | Retrieve context or answer from Skippy. | `ask` or `get_context_bundle` |",
     "| `/focus` | Summarize or refresh current focus. | `summarize_focus` or `refresh_focus_summary` |",
     "| `/interview ...` | Start or continue a guided interview in the harness chat. | `list_interview_templates` plus `start_interview` |",
-    "| `/inbox ...` | Send uncertain or review-needed memory/object candidates to Skippy Review. | `submit_memory_review_candidate` or `submit_candidate_object` |",
+    "| `/inbox ...` | Save useful context directly; preserve uncertainty in reference notes. | `submit_memory_review_candidate` or `submit_candidate_object` |",
     "| `/link ...` | Link accepted entities or memories when IDs/context are known. | `link_entities` or `link_memory` |",
     "| `/plan ...` | Decompose a project into executable task briefs. | `plan_project` |",
     "| `/next` | Show the next ready-to-execute task(s). | `list_ready_tasks` |",
@@ -177,7 +177,7 @@ function buildSlashCommandsMessage() {
     "- Preserve the user's wording in titles/summaries, but keep descriptions concise.",
     "- For source-derived items, include source refs and a rubric/capture reason when available.",
     "- For ambiguous `/remember`, choose `capture_thought` for free-form user thoughts and `record_memory` when you can structure a durable memory.",
-    "- For `/focus`, use `summarize_focus` when answering from current Skippy context; use `refresh_focus_summary` when the user asks to update the dashboard.",
+    "- For `/focus`, use `summarize_focus` when answering from current Skippy context; Home now derives its briefing and Today list from live records; correct those records rather than writing a separate dashboard checklist.",
     "- For `/done`, retrieve or ask for the target task if the command does not identify one clearly.",
   ].join("\n");
 }
@@ -204,11 +204,11 @@ function buildSkillsMessage() {
     "",
     "3. Choose the narrowest tool.",
     "   - `ingest_object`: primary accepted write for source-backed tasks, projects, people, companies, links, notes, goals, or knowledge objects. Include `rubricDecision`.",
-    "   - Link routing: links are reference material, not a reading queue. Confident, rubric-clearing links go straight through `ingest_object` (status defaults to `saved`; no user interaction expected). Pass `status: \"unread\"` only when the user explicitly wants to read it later. Genuinely uncertain whether a link is valid or important? Use `submit_candidate_object` so it lands in Review for a one-tap decision.",
+    "   - Link routing: links are reference material, not a reading queue. Confident, rubric-clearing links go straight through `ingest_object` (status defaults to `saved`; no user interaction expected). Pass `status: \"unread\"` only when the user explicitly wants to read it later. Genuinely uncertain whether a link is valid or important? Use `submit_candidate_object` which now saves directly without a review step.",
     "   - `record_memory`, `record_decision`, `record_principle`: durable second-brain memory when the harness can explain why it belongs.",
     "   - `capture_thought`: explicit user thought or preference that should become memory or review.",
-    "   - `submit_memory_review_candidate`: possible memory that seems useful but uncertain.",
-    "   - `submit_candidate_object`: legacy review fallback for non-memory objects when classification or importance is uncertain.",
+    "   - `submit_memory_review_candidate`: legacy direct-save alias for useful memories with uncertainty preserved.",
+    "   - `submit_candidate_object`: legacy direct-ingestion alias; preserve uncertainty as reference information.",
     "   - `create_project` / `create_task`: only for explicit user commands. For a task with no project, set `area` and `commitment` (`want` for things the owner would enjoy, so they never nag).",
     "   - `upsert_recurrence`: anything that comes around again. Prefer it over a dated task whenever the thing repeats — completing a task destroys the record of when it was last done.",
     "   - `list_agenda`: what is happening and what is due over a range; use before proposing times.",
@@ -499,19 +499,9 @@ function reviewUrl(path: string) {
 
 function candidateConfirmation(input: CandidateObjectInput, result: unknown) {
   const resultRecord = objectResult(result);
-  const duplicate = resultRecord.duplicate === true;
   return {
-    status: resultRecord.status ?? (duplicate ? "duplicate_pending" : "submitted_for_review"),
-    entityType: input.candidateEntityType,
-    title: payloadTitle(input.candidateEntityType, input.candidatePayload),
-    triageItemId: resultRecord.triageItemId,
-    sourceRefIds: resultRecord.sourceRefIds,
-    duplicate,
-    candidateFingerprint: resultRecord.candidateFingerprint,
-    reviewUrl: reviewUrl("/triage"),
-    nextAction: duplicate
-      ? "This candidate already has a pending review item in Skippy."
-      : "Review, approve, correct, merge, reclassify, or reject this candidate in Skippy.",
+    ...ingestConfirmation({ ...input, rubricDecision: resultRecord.rubricDecision as string ?? "Trusted ingestion" }, result),
+    nextAction: "Saved automatically. Correct the record through chat if needed.",
   };
 }
 
@@ -1470,7 +1460,7 @@ export function createMcpServer(
     {
       title: "Submit memory review candidate",
       description:
-        "Queue a possible memory for user review when unsure it should be stored directly; prefer record_memory/record_decision/record_principle when it clearly clears the rubric. Never queue transient alerts — see the memory-rubric skill.",
+        "Compatibility alias that saves a useful memory directly, preserving confidence and provenance. Routine Review is retired; skip transient alerts.",
       annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: true },
       inputSchema: z.object({
         content: z.string(),
@@ -1758,7 +1748,7 @@ export function createMcpServer(
     {
       title: "Ingest accepted object",
       description:
-        "Primary write for source-derived knowledge that clears the importance rubric: creates an accepted Skippy object directly, with sourceRefs and a concise rubricDecision. Links default to status 'saved'; pass 'unread' only for explicit read-later intent, and use submit_candidate_object when genuinely uncertain.",
+        "Primary write for source-derived knowledge that clears the importance rubric: creates an accepted Skippy object directly, with sourceRefs and a concise rubricDecision. Links default to status 'saved'; pass 'unread' only for explicit read-later intent, and retain uncertain action intent as a note.",
       annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: true },
       inputSchema: z.object({
         candidateEntityType: z.enum(entityTypeValues),
@@ -1785,13 +1775,13 @@ export function createMcpServer(
     {
       title: "Submit candidate object",
       description:
-        "Review-queue fallback for source-derived knowledge when unsure it clears the importance rubric. Prefer ingest_object for clearly important items.",
+        "Compatibility alias for trusted direct ingestion. Review is retired. Prefer ingest_object; preserve uncertain action intent as a note.",
       annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: true },
       inputSchema: z.object({
         candidateEntityType: z.enum(entityTypeValues),
         candidatePayload: jsonObjectSchema,
         confidence: z.number().min(0).max(1).optional(),
-        reviewReason: z.string().optional().describe("Why the user should review this candidate."),
+        reviewReason: z.string().optional().describe("Context for the automatic classification decision."),
         sourceRefs: z.array(sourceRefSchema).optional(),
         sourceRefIds: z.array(z.string()).optional(),
       }),

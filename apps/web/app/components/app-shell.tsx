@@ -9,11 +9,9 @@ import {
   Brain,
   Network,
   Menu,
-  Focus,
   CalendarDays,
   FolderKanban,
   House,
-  Inbox,
   Settings,
   Wallet,
   type LucideIcon,
@@ -61,12 +59,6 @@ export const primaryHubs: Hub[] = [
     match: (p) => p.startsWith("/finances"),
   },
   {
-    href: "/review",
-    label: "Review",
-    icon: Inbox,
-    match: (p) => p.startsWith("/review"),
-  },
-  {
     href: "/projects",
     label: "Projects",
     icon: FolderKanban,
@@ -75,7 +67,6 @@ export const primaryHubs: Hub[] = [
 ];
 
 export const secondaryHubs: Hub[] = [
-  { href: "/attention", label: "Attention", icon: Focus, match: (p) => p.startsWith("/attention") },
   { href: "/mind", label: "Mind", icon: Network, match: (p) => p.startsWith("/mind") },
   {
     href: "/brain",
@@ -227,12 +218,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const activeProjects = useQuery(api.projects.activeProjectsForViewer, isAuthenticated ? {} : "skip") as
     | NavProject[]
     | undefined;
-  const reviewCounts = useQuery(api.knowledge.reviewCountsForViewer, isAuthenticated ? {} : "skip") as
-    | { finds: number; approvals: number }
-    | undefined;
-  const navBadges = {
-    "/review": (reviewCounts?.finds ?? 0) + (reviewCounts?.approvals ?? 0),
-  };
+  const navBadges: Record<string, number> = {};
 
   if (pathname === "/mind") return (
     <ToastProvider>

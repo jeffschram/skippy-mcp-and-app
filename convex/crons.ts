@@ -20,4 +20,7 @@ crons.interval(
   {},
 );
 
+// Keep old clients and already-pending records from rebuilding a retired inbox.
+crons.interval("retire routine review backlog", { minutes: 5 }, makeFunctionReference<"action">("reviewRetirement:drain"), {});
+
 export default crons;

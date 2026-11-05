@@ -27,10 +27,10 @@ Before capture or retrieval work that may create durable memory, read `reference
    - `get_importance_rubric`: use before nontrivial source ingestion so the decision follows the user's current rules.
    - `update_source_sync_status`: for batch or scheduled ingestion, set `status: "running"` before reading sources, send heartbeat updates during long runs, and set `status: "completed"` or `"failed"` before ending so the Skippy Home NOW area reflects live updates.
    - `ingest_object`: primary source-ingestion tool when an item clears the rubric; include `rubricDecision`.
-   - Link routing: links are reference material, not a reading queue — the user is never required to interact with them. Confident, rubric-clearing links go straight through `ingest_object` (status defaults to `saved`; no user interaction expected). Pass `status: "unread"` only when the user explicitly wants to read the link later. If you are genuinely uncertain whether a link is valid or important, use `submit_candidate_object` so it lands in Review for a one-tap decision. Use `update_link_status` for genuine lifecycle changes on stored links (`read` after actually ingesting the content, `saved` for reference reclassification, `discarded` during cleanup) — never to fake user engagement.
+   - Link routing: links are reference material, not a reading queue — the user is never required to interact with them. Confident, rubric-clearing links go straight through `ingest_object` (status defaults to `saved`; no user interaction expected). Pass `status: "unread"` only when the user explicitly wants to read the link later. If you are genuinely uncertain whether a link is valid or important, use `submit_candidate_object` which now saves directly without a review step. Use `update_link_status` for genuine lifecycle changes on stored links (`read` after actually ingesting the content, `saved` for reference reclassification, `discarded` during cleanup) — never to fake user engagement.
    - `create_project` / `create_task`: only for explicit user commands.
    - `upsert_task`, `upsert_person`, etc.: convenience accepted-object tools when the item clearly clears the rubric but no source refs or custom decision are needed.
-   - `submit_candidate_object`: review fallback when an item seems useful but is ambiguous, potentially duplicate, weakly inferred, or not safe to accept silently.
+   - `submit_candidate_object`: compatibility alias for direct ingestion. Save ambiguous useful context as a note, check duplicates, and preserve uncertainty.
    - `capture`: only for useful free-form notes when a typed entity is not clear.
    - `list_interview_templates` / `start_interview` / `get_interview` / `answer_interview_question` / `complete_interview`: run guided second-brain interviews inside the harness chat. Use the returned `assistantDisplayName` when offering the interview.
    - `link_entities`: only after accepted entity IDs are known.
@@ -45,7 +45,7 @@ Before capture or retrieval work that may create durable memory, read `reference
 5. Apply the consent model.
    - Direct capture: explicit user requests, low-risk source-backed commitments, deadlines, decisions, principles, and project facts with clear evidence.
    - Ask first: sensitive personal context, health/legal/financial/family/relationship details, exact addresses, negative judgments about people, major inferred projects, priority changes, or anything the user may not expect to be retained.
-   - Review candidate: useful but uncertain, possible duplicate/conflict, weakly inferred, or needs user classification.
+   - Useful but uncertain context: retain as a reference note with uncertainty explicit; resolve duplicates against existing records.
    - Ignore: noise, marketing, routine confirmations, stale source data, raw dumps, and anything with no future-use signal.
 
 6. Include provenance.
@@ -55,7 +55,7 @@ Before capture or retrieval work that may create durable memory, read `reference
    Prefer concise fields over long transcripts. Do not store full raw emails, full calendar descriptions, secrets, auth tokens, payment numbers, medical/legal detail, or private content unrelated to the extracted object.
 
 8. Confirm in chat.
-   Tell the user what was stored, skipped, asked, or sent to Review; include the entity type/title, consent path, rubric decision or capture reason, and the Skippy URL returned by the MCP tool. If you retrieved context first, mention only the context that mattered.
+   Tell the user what was stored, skipped, or corrected; include the entity type/title, consent path, rubric decision or capture reason, and the Skippy URL returned by the MCP tool. If you retrieved context first, mention only the context that mattered.
 
 9. Close batch status.
    If you started a source sync status, always close it with `update_source_sync_status` even when some connectors fail. Use `failed` only when the whole run cannot finish; otherwise use `completed` with short source error summaries.
@@ -139,7 +139,7 @@ Use plain confirmations:
 
 - "Stored `Pay Optimum bill` as an accepted Skippy task because it has a financial deadline: http://127.0.0.1:3000/projects"
 - "Created the accepted task `Improve MCP chat confirmations` in Skippy: http://127.0.0.1:3000/projects"
-- "Sent `Ambiguous renewal note` to Skippy Review because the source hinted at a possible commitment, but the rubric decision was unclear: http://127.0.0.1:3000/triage"
+- "Saved the renewal information as a reference note; the source did not establish an action you need to take."
 - "Want to do a project interview for Skippy?"
 - "I skipped the newsletter because it did not contain a deadline, decision, relationship, or reusable context."
 
@@ -150,6 +150,6 @@ Do not store source-derived items just because they exist. Store them only when 
 
 Before saving a task, identify the concrete action or decision the owner needs to take. A date alone is not evidence of an obligation. Book releases, birthdays, availability notices, routine confirmations, and announcements are informational; save useful ones as notes/reference material with the date in the body, or use calendar events when appropriate. Skip noise. Do not invent a download, purchase, reply, or follow-up task from an announcement.
 
-Use `itemIntent: "action"`, `"event"`, or `"reference"` on candidate payloads to express the classification. Tasks explicitly marked event/reference/informational or `actionRequired: false` are rejected with routing guidance. Use `dueAt` only for an actual action deadline, with `dateKind: "deadline"` when known. `start` and `eventAt` never become task deadlines; `dateKind: "event"` preserves a date as context and removes its deadline meaning. An explicit action such as "Download the audiobook" may be a task, but its release date is not a deadline. Unclear actions belong in Review rather than the accepted task queue.
+Use `itemIntent: "action"`, `"event"`, or `"reference"` on candidate payloads to express the classification. Tasks explicitly marked event/reference/informational or `actionRequired: false` are rejected with routing guidance. Use `dueAt` only for an actual action deadline, with `dateKind: "deadline"` when known. `start` and `eventAt` never become task deadlines; `dateKind: "event"` preserves a date as context and removes its deadline meaning. An explicit action such as "Download the audiobook" may be a task, but its release date is not a deadline. Unclear actions should be retained as reference notes rather than invented tasks. Routine Review is retired.
 
 When the owner confirms an action was already handled, complete the existing task rather than creating a follow-up. Retain the record and its provenance. Do not infer that all similarly named tasks have been completed.

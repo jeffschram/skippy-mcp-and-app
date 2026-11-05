@@ -372,8 +372,8 @@ async function createMemoryReviewCandidate(db: any, args: {
     title: args.title,
     ...(args.summary ? { summary: args.summary } : {}),
     body: args.body,
-    status: "inbox",
-    reviewState: "pending_review",
+    status: "accepted",
+    reviewState: "accepted",
     confidence: 0.8,
     ...(args.relatedEntityRefs?.length ? { relatedEntityRefs: args.relatedEntityRefs } : {}),
     captureReason: args.captureReason,
@@ -383,7 +383,7 @@ async function createMemoryReviewCandidate(db: any, args: {
   const memoryId = await db.insert("knowledge", {
     ...memoryDocument,
     kind: "memory",
-    processingState: "suggested",
+    processingState: "accepted",
   });
 
   await db.insert("activityEvents", {
@@ -392,7 +392,7 @@ async function createMemoryReviewCandidate(db: any, args: {
     actorType: args.actor?.actorType ?? "user",
     actorId: args.actor?.actorId ?? args.userId,
     timestamp: args.now,
-    summary: `Memory review candidate submitted: ${args.title}`,
+    summary: `Memory saved automatically: ${args.title}`,
     metadata: {
       memoryId,
       memoryType: args.memoryType,

@@ -133,14 +133,14 @@ const AGENDA_INGESTION_BODY = [
   "3. Read the sources in scope since the last successful run. Your pass prompt includes the exact cutoff timestamp and the per-connector parameters to apply (`since` on iMessage tools, `after:` in Gmail searches, `time_min` on calendar reads) — use them mechanically; do not improvise a wider window. If the prompt says no recent completed pass is on record, read the last 48 hours only. Also call `list_quick_captures` for pending Home quick captures — they are part of every ingestion pass.",
   "4. For each item, decide under the rubric:",
   "   - **Store**: clear deadline, money, commitment, relationship, focus-relevant, or security signal. Use `ingest_object` with a specific `rubricDecision` and at least one `sourceRef` (IDs, timestamp, one-line summary, shortest useful excerpt — never raw bodies).",
-  "   - **Review**: genuinely uncertain but inspectable later. Use `submit_candidate_object`.",
+  "   - **Reference**: retain useful uncertain context as an accepted note, keeping uncertainty explicit. Never infer an obligation from an announcement.",
   // 2026-08-30: added after Knowmad beta feedback from a group text was stored as a
   // floating review candidate instead of landing on the project it was clearly about.
   "   - **Project-linked**: when an item clearly references one of the user's live projects (the rubric lists them), don't leave it floating — ingest the note, then `link_entities` (`belongs_to`) it to that project so feedback, ideas, and status land on the project itself. Only create a project task when the item is specifically actionable (a bug report, an explicitly requested change); suggestions, opinions, and half-formed ideas stay as notes on the project.",
   "   - **Ignore**: marketing, newsletters, shipping notices, generic confirmations, transient alerts, secrets/credentials. Write nothing.",
   "   - Durable preferences, decisions, or principles evidenced by a source go through `record_memory` / `record_decision` / `record_principle` with provenance.",
   "5. For each pending quick capture, create the useful objects, then call `mark_quick_capture_handled` with `processed` (listing `relatedEntityRefs` you created) or `discarded` with a short note.",
-  "6. Call `refresh_focus_summary` so the dashboard reflects the new state.",
+  "6. Keep task priorityScore and importanceScore current, including important undated work. Home selects Today automatically from current records; refresh_focus_summary is only a legacy narrative, not the Home plan.",
   "7. Call `record_ingestion_run` with sources checked, object counts, errors, and `metadata.role: \"agenda\"`.",
   "8. Call `update_source_sync_status` with `completed` (or `failed` plus short error summaries). For long runs, heartbeat with `lastHeartbeatAt` while work continues.",
   "",
@@ -343,9 +343,9 @@ const MEMORY_RUBRIC_BODY = [
   "",
   "- **record_memory / record_decision / record_principle**: direct durable writes when you can explain why the item belongs. `memory` = stable preference, personal fact, or recurring context; `decision` = a choice, direction, or tradeoff clearly established; `principle` = durable operating rule about how Skippy or harnesses should behave, not a one-off observation. Direct memory writes require a `rubricDecision` explaining why the item clears the rubric.",
   "- **capture_thought**: an explicit user thought to remember; `reviewBehavior` picks direct write vs review queue.",
-  "- **submit_memory_review_candidate**: only when genuinely unsure an item should be stored. Unreviewed candidates auto-archive after 14 days, so only queue items worth a durable memory.",
+  "- **submit_memory_review_candidate**: legacy alias that saves directly. Preserve uncertainty and source evidence; skip transient noise.",
   "- **ingest_object**: the primary write for source-derived typed knowledge (task, person, link, note, ...). Include `sourceRefs` and a concise `rubricDecision` naming the signal: deadline, money, relationship, commitment, focus relevance, security.",
-  "- **submit_candidate_object**: legacy fallback when you cannot decide whether a source item clears the rubric.",
+  "- **submit_candidate_object**: legacy direct-ingestion alias. Use notes for uncertain actions; do not request routine owner review.",
   "",
   "## What NOT to store",
   "",
@@ -353,7 +353,7 @@ const MEMORY_RUBRIC_BODY = [
   "",
   "## Links",
   "",
-  "Links are reference material: status defaults to `saved` (no user interaction expected). Pass `unread` only for explicit read-later intent. If genuinely uncertain a link is valid or important, use submit_candidate_object so it lands in Review for a one-tap decision. `update_link_status` is for genuine lifecycle changes only — never fake user engagement.",
+  "Links are reference material: status defaults to `saved` (no user interaction expected). Pass `unread` only for explicit read-later intent. If genuinely uncertain a link is valid or important, use submit_candidate_object which now saves directly without a review step. `update_link_status` is for genuine lifecycle changes only — never fake user engagement.",
   "",
   "## Provenance",
   "",
@@ -590,7 +590,11 @@ function toPublicSkill(skill: any, fallback?: (typeof DEFAULT_SKILLS)[number]) {
     slug: skill?.slug ?? fallback?.slug,
     title: skill?.title ?? fallback?.title,
     description: skill?.description ?? fallback?.description,
-    body: skill?.body ?? fallback?.body,
+    // Stored skill versions may predate Review retirement. Apply the current
+    // product contract without overwriting owner-authored skill history.
+    body: ["agenda-ingestion", "memory-rubric", "harness-bootstrap"].includes(skill?.slug ?? fallback?.slug)
+      ? `${skill?.body ?? fallback?.body ?? ""}\n\n## Current Home and ingestion policy (supersedes older Review instructions)\nRoutine Review is retired. Decide what is useful, save directly with provenance, skip noise, and retain uncertain actions as reference notes. Never invent a task from an event or announcement. Maintain task priorities and importance, including undated work. Home chooses Today and its short briefing from live records; legacy focus summaries do not control Home. The owner corrects classifications and priorities through chat. External side effects still require explicit authorization; list_pending_actions retrieves them for discussion in chat.`
+      : skill?.body ?? fallback?.body,
     usageDescription: skill?.usageDescription ?? fallback?.usageDescription,
     usageLeadIn: skill?.usageLeadIn ?? fallback?.usageLeadIn,
     schedulerInstructions: skill?.schedulerInstructions ?? fallback?.schedulerInstructions,

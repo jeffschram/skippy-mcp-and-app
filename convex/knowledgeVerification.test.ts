@@ -164,16 +164,18 @@ describe("canonical Knowledge paths after dual-write retirement", () => {
       ).rejects.toThrow("already been reviewed");
     });
   }
-  it("routes legacy review submissions into note candidates with full properties", async () => {
+  it("accepts legacy review submissions as notes with full properties", async () => {
     const ctx = fixture();
     const result = await run(knowledge.submitCandidateObject, ctx, {
       brainInstanceId, candidateEntityType: "knowledgeObject",
       candidatePayload: { title: "Legacy reference", properties: { body: "Original full text", tags: ["home"] } },
     });
-    const candidate = ctx.rows.find(r => r._id === result.triageItemId)!;
-    expect(candidate.candidateEntityType).toBe("note");
-    expect(candidate.candidatePayload.body).toBe("Original full text");
-    expect(candidate.candidatePayload.properties.tags).toEqual(["home"]);
+    const candidate = ctx.rows.find(r => r._id === result.entityId)!;
+    expect(candidate.kind).toBe("note");
+    expect(candidate.processingState).toBe("accepted");
+    expect(ctx.rows.some(r => r._id.startsWith("triageItems:") && r.status === "pending")).toBe(false);
+    expect(candidate.body).toBe("Original full text");
+    expect(candidate.properties.tags).toEqual(["home"]);
   });
   it("captures, links, retrieves and isolates memories by brain", async () => {
     const ctx = fixture();
@@ -205,7 +207,7 @@ describe("canonical Knowledge paths after dual-write retirement", () => {
       }),
     ).toBeNull();
   });
-  it("interview answers point to canonical review memories", async () => {
+  it("interview answers save canonical memories directly", async () => {
     const ctx = fixture();
     const started = await run(interviews.startForBrain, ctx, {
       brainInstanceId,
@@ -224,6 +226,48 @@ describe("canonical Knowledge paths after dual-write retirement", () => {
     }
     const row = ctx.rows.find((r) => r._id === answered.memoryCandidateId);
     expect(row?.kind).toBe("memory");
-    expect(row?.reviewState).toBe("pending_review");
+    expect(row?.reviewState).toBe("accepted");
+  });
+});
+
+describe("trusted ingestion and Review retirement", () => {
+  it("deduplicates retried legacy reference submissions without an owner queue", async () => {
+    const ctx = fixture();
+    const args = { brainInstanceId, candidateEntityType: "note", candidatePayload: { title: "Reference", body: "Keep this" } };
+    const first = await run(knowledge.submitCandidateObject, ctx, args);
+    const second = await run(knowledge.submitCandidateObject, ctx, args);
+    expect(first.entityId).toBe(second.entityId);
+    expect(second.duplicate).toBe(true);
+    expect(ctx.rows.filter(r => r.kind === "note")).toHaveLength(1);
+    expect(ctx.rows.some(r => r._id.startsWith("triageItems:") && r.status === "pending")).toBe(false);
+  });
+  it("accepts a legacy memory candidate with provenance without creating a queue", async () => {
+    const ctx = fixture();
+    const result = await run(knowledge.submitMemoryReviewCandidateForBrain, ctx, { brainInstanceId, content: "A useful but uncertain preference", confidence: 0.6, sourceRefs: [{ sourceSystem: "test", messageId: "memory-source" }] });
+    const row = ctx.rows.find(r => r._id === result.memoryId)!;
+    expect(row.processingState).toBe("accepted");
+    expect(row.reviewState).toBe("accepted");
+    expect(row.confidence).toBe(0.6);
+    expect(row.sourceRefIds).toHaveLength(1);
+    expect(result.status).toBe("accepted");
+  });
+  it("drains a legacy candidate idempotently and never approves external actions", async () => {
+    const ctx = fixture();
+    const id = await ctx.db.insert("triageItems", { brainInstanceId, candidateEntityType: "note", candidatePayload: { title: "Keep me", body: "Important context" }, status: "pending", sourceRefIds: [] });
+    const action = await ctx.db.insert("pendingActions", { brainInstanceId, status: "pending_approval", actionType: "send_email" });
+    await run(knowledge.retireReviewItem, ctx, { id });
+    await run(knowledge.retireReviewItem, ctx, { id });
+    expect(ctx.rows.filter(r => r.kind === "note")).toHaveLength(1);
+    expect(ctx.rows.find(r => r._id === id)?.status).toBe("approved");
+    expect(ctx.rows.find(r => r._id === action)?.status).toBe("pending_approval");
+  });
+  it("preserves malformed legacy action intent as reference rather than a task", async () => {
+    const ctx = fixture();
+    const id = await ctx.db.insert("triageItems", { brainInstanceId, candidateEntityType: "task", candidatePayload: { title: "Book release", itemIntent: "event" }, status: "pending", sourceRefIds: [] });
+    expect(await run(knowledge.retireReviewItem, ctx, { id })).toEqual({ needsReference: true });
+    await run(knowledge.retainUnclassifiedReviewItem, ctx, { id });
+    expect(ctx.rows.find(r => r.kind === "note")?.title).toBe("Book release");
+    expect(ctx.rows.some(r => r._id.startsWith("tasks:"))).toBe(false);
+    expect(ctx.rows.find(r => r._id === id)?.candidatePayload.itemIntent).toBe("event");
   });
 });

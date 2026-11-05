@@ -1,5 +1,7 @@
 # Shared attention
 
+As of 2026-11-04, Home uses the consolidated Today plan and the standalone Attention page redirects to Home. Existing attention metadata and detail editors remain for chat corrections and explicit reminders. See [Home and trusted ingestion](home-today.md) for the current product behavior. The description below documents the retained resolver and compatibility APIs.
+
 Attention is separate from task/project lifecycle and acceptance/archive states. Optional `attention` metadata on canonical records stores a manual override, reason, scheduled time, review time, and assessment timestamp. Existing records require no backfill: attention is derived at read time, including for newly created records.
 
 The shared resolver in `convex/attentionModel.ts` supplies status, explanation, and manual/automatic provenance. Mind uses the same palette as the Attention page and Home's live Needs attention queue. Task and project details and Mind inspectors expose the same editor. Every canonical category can be reviewed in the paginated Attention page.

@@ -12,23 +12,20 @@ import {
   Eye,
   File as FileIcon,
   FileText,
-  Inbox,
   Link as LinkIcon,
   Paperclip,
   PenLine,
-  RefreshCw,
-  ShieldCheck,
   Sparkles,
   X,
 } from "lucide-react";
 import { activeSourceSyncStatus, type QuickCaptureIntent } from "@skippy/shared";
 import { api } from "../../lib/skippy-api";
-import { agentRoleDisplayName, agentRoleFromMetadata, formatRelative } from "../../lib/display";
-import { focusItemKey, parseFocusSummary } from "../focus-summary";
+import { formatRelative } from "../../lib/display";
 import { LiveGate } from "../live-auth";
-import { Badge, Button, Card, IconButton, InlineMarkdown, LoadingRow, Section, TextArea, useToast } from "../components";
-import { AttentionFocus } from "../components/attention";
-import { AgendaSection } from "./agenda";
+import { Badge, Button, IconButton, LoadingRow, Section, TextArea, useToast } from "../components";
+import { HomePeriodCard } from "./home-period-card";
+import { homeBounds, splitHomeRows } from "./home-period-helpers";
+import type { AgendaItem } from "@skippy/shared";
 import { useViewerReady } from "./use-viewer";
 import { formatFileSize } from "./project-library-helpers";
 import { QUICK_CAPTURE_INTENT_STORAGE_KEY, checkQuickCaptureFile, parseStoredIntent } from "./quick-capture-helpers";
@@ -36,32 +33,12 @@ import { cn } from "@/lib/utils";
 import {
   cardClass,
   eyebrowClass,
-  itemClass,
-  itemIconClass,
   itemMetaClass,
-  itemTitleClass,
   mutedClass,
-  projectRowClass,
   sectionClass,
-  textButtonClass,
-  textButtonCompactClass,
 } from "../page-classes";
 
 type AnyRecord = Record<string, any>;
-
-/* Focus hero + sync status classes (translated from the legacy globals.css
-   focus-summary / sync-status families). */
-const focusSummaryClass = "grid min-h-[260px] content-between gap-[18px] border-l-4 border-l-blue";
-const focusSummaryHeadClass = "mb-1.5 flex items-center gap-2.5";
-const focusHeadingClass = "mb-[18px] max-w-[760px] text-[clamp(28px,4vw,44px)] leading-[1.08]";
-const focusSummaryListClass =
-  "grid max-w-[680px] gap-3 pl-[1.15em] text-xl leading-[1.42] text-foreground marker:text-green [&_li]:pl-0.5 [&_li>span:first-child]:mr-2.5";
-/* Paragraphs inside the focus hero (legacy `.focus-summary p:not(.eyebrow)`). */
-const focusSummaryParagraphClass = "mb-0 max-w-[680px] text-xl leading-[1.42] text-foreground";
-const focusItemActionsClass = "inline-flex gap-1.5 align-middle [&_button]:h-[30px] [&_button]:min-h-[30px]";
-const syncStatusPillClass =
-  "inline-flex min-h-[26px] items-center gap-1.5 rounded-lg border bg-blue/10 px-[9px] text-xs font-extrabold text-blue [&_svg]:animate-spin";
-const syncStatusCopyClass = "m-0 mb-3 max-w-[680px] text-sm text-muted-foreground";
 
 /* ------------------------------------------------------------------ */
 /* Quick capture: a quiet inbox slot on the home page — one inbox, two */
@@ -660,212 +637,42 @@ function useSharedParamToast() {
 export function TodayContent() {
   const viewerReady = useViewerReady();
   useSharedParamToast();
-  const data = useQuery(api.knowledge.dashboardForViewer, viewerReady ? {} : "skip") as AnyRecord | undefined;
-
-  const recordFocusItemAction = useMutation(api.knowledge.recordFocusItemActionForViewer);
-  const createTaskFromFocusItem = useMutation(api.knowledge.createTaskFromFocusItemForViewer);
-  const [busyKey, setBusyKey] = useState<string | null>(null);
-
-  const { headline, bullets } = useMemo(
-    () => parseFocusSummary(data?.focusSummary?.summaryText),
-    [data?.focusSummary?.summaryText],
-  );
-  // Stale running rows (dead harness, no heartbeat) read as inactive — the
-  // "Updating" pill self-heals instead of pinning forever.
-  const sync = useMemo(
-    () => activeSourceSyncStatus<AnyRecord>(data?.sourceSyncStatuses, Date.now()),
-    [data?.sourceSyncStatuses],
-  );
-  const actionedKeys = useMemo(() => {
-    const set = new Set<string>();
-    for (const action of data?.focusItemActions ?? []) set.add(action.itemKey);
-    // Dismissals from recent prior summaries: regenerated bullets with the exact same
-    // text must never flash back.
-    for (const dismissal of data?.recentFocusDismissals ?? []) {
-      if (dismissal.itemKey) set.add(dismissal.itemKey);
-    }
-    return set;
-  }, [data?.focusItemActions, data?.recentFocusDismissals]);
-  const visibleBullets = useMemo(
-    () => bullets.map((text) => ({ text, key: focusItemKey(text) })).filter((item) => !actionedKeys.has(item.key)),
-    [bullets, actionedKeys],
-  );
-
-  const focusStale = Boolean(data?.focusSummaryStale);
-  const unclear = data?.triageItems?.length ?? 0;
-  const pending = data?.pendingActions?.length ?? 0;
-
-  const recordAction = async (item: { text: string; key: string }, action: "dismissed" | "done") => {
-    if (!data?.focusSummary?._id) return;
-    setBusyKey(item.key);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 60000); return () => clearInterval(timer); }, []);
+  const { dayStart, dayEnd, weekEnd } = homeBounds(now);
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  const data = useQuery(api.knowledge.homeForViewer, viewerReady ? { now: Math.floor(now / 60000) * 60000 } : "skip") as AnyRecord | undefined;
+  const plan = useQuery(api.today.forViewer, viewerReady ? { now: Math.floor(now / 60000) * 60000, dayStart, dayEnd } : "skip");
+  const weeklyPlan = useQuery(api.today.forViewer, viewerReady ? { now: Math.floor(now / 60000) * 60000, dayStart: dayEnd, dayEnd: weekEnd, period: 'week' } : "skip");
+  // Extra boundary days let all-day UTC dates be grouped in their intended local date.
+  const schedule = useQuery(api.agenda.agendaForViewer, viewerReady ? { from: dayStart - 86400000, to: weekEnd + 86400000 } : "skip") as AgendaItem[] | undefined;
+  const periods = plan && weeklyPlan && schedule ? splitHomeRows(plan.items, weeklyPlan.items, schedule, now, timeZone) : undefined;
+  const sync = activeSourceSyncStatus<AnyRecord>(data?.sourceSyncStatuses, now);
+  const failedSync = data?.sourceSyncStatuses?.some((status: AnyRecord) => status.status === "failed");
+  const completeStep = useMutation(api.today.completeStepForViewer);
+  const completeTask = useMutation(api.knowledge.markTaskDoneForViewer);
+  const completeRecurrence = useMutation(api.recurrences.completeRecurrenceForViewer);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const toast = useToast();
+  async function complete(item: { id: string; kind: string; recurrenceId?: string; stepLine?: number; stepSource?: string }) {
+    setBusyId(item.id);
     try {
-      await recordFocusItemAction({
-        focusSummaryId: data.focusSummary._id,
-        itemKey: item.key,
-        itemText: item.text,
-        action,
-      } as any);
-    } finally {
-      setBusyKey(null);
-    }
-  };
-  const promote = async (item: { text: string; key: string }) => {
-    if (!data?.focusSummary?._id) return;
-    setBusyKey(item.key);
-    try {
-      await createTaskFromFocusItem({
-        focusSummaryId: data.focusSummary._id,
-        itemKey: item.key,
-        itemText: item.text,
-      } as any);
-    } finally {
-      setBusyKey(null);
-    }
-  };
-
-  return (
-    <LiveGate>
-      {!data ? (
-        <Card>
-          <LoadingRow label="Loading your focus…" />
-        </Card>
-      ) : (
-        <div className="grid gap-4">
-          <AttentionFocus />
-          {/* Focus hero */}
-          <section className={cn(cardClass, sectionClass, focusSummaryClass)} style={{ minHeight: 0 }}>
-            <div>
-              <div className={focusSummaryHeadClass}>
-                <p className={cn(eyebrowClass, "mb-0")}>Now</p>
-                {sync ? (
-                  <span
-                    className={syncStatusPillClass}
-                    title={sync.message ?? `Source sync is running on ${sync.harness}`}
-                  >
-                    <RefreshCw size={14} aria-hidden />{" "}
-                    {agentRoleDisplayName(agentRoleFromMetadata(sync.metadata)) ?? "Updating"}
-                  </span>
-                ) : null}
-              </div>
-              {sync ? (
-                <p className={syncStatusCopyClass}>
-                  {sync.message ?? `Checking ${(sync.sourceSystemsChecked ?? []).join(", ") || "connected sources"}.`}
-                </p>
-              ) : null}
-              <h1 className={focusHeadingClass}>
-                {visibleBullets.length ? (
-                  <InlineMarkdown>{headline}</InlineMarkdown>
-                ) : focusStale ? (
-                  "Focus summary is out of date."
-                ) : (
-                  "Nothing new needs focus right now."
-                )}
-              </h1>
-              {focusStale ? (
-                <p className={cn(mutedClass, focusSummaryParagraphClass)}>
-                  Last updated {formatRelative(data.focusSummary?.generatedAt ?? data.focusSummary?.createdAt)} — a
-                  refresh is due on the next Skippy run.
-                </p>
-              ) : null}
-              {visibleBullets.length ? (
-                <ul className={focusSummaryListClass}>
-                  {visibleBullets.map((item) => (
-                    <li key={item.key}>
-                      <span>
-                        <InlineMarkdown>{item.text}</InlineMarkdown>
-                      </span>
-                      <span className={focusItemActionsClass}>
-                        <IconButton
-                          small
-                          title="Dismiss from focus"
-                          aria-label={`Dismiss ${item.text}`}
-                          disabled={busyKey === item.key}
-                          onClick={() => void recordAction(item, "dismissed")}
-                        >
-                          <X size={15} aria-hidden />
-                        </IconButton>
-                        <button
-                          className={cn(textButtonClass, textButtonCompactClass)}
-                          type="button"
-                          title="Turn into task"
-                          disabled={busyKey === item.key}
-                          onClick={() => void promote(item)}
-                        >
-                          Task
-                        </button>
-                        <IconButton
-                          small
-                          title="Already done"
-                          aria-label={`Mark ${item.text} already done`}
-                          disabled={busyKey === item.key}
-                          onClick={() => void recordAction(item, "done")}
-                        >
-                          <Check size={15} aria-hidden />
-                        </IconButton>
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className={cn(mutedClass, focusSummaryParagraphClass)}>New source items and remaining focus bullets appear here when they need attention.</p>
-              )}
-            </div>
-          </section>
-
-          {/* Right rail */}
-          <div className="grid content-start gap-4">
-            <QuickCaptureBox captures={data?.quickCaptures} />
-
-            {/* Calendar events, due tasks, and firing recurrences merged into
-                one list — the answer to "what does my day look like". */}
-            <AgendaSection />
-
-            <Section title="Needs your review">
-              {unclear === 0 && pending === 0 ? (
-                <p className={mutedClass} style={{ margin: 0, fontSize: 14 }}>
-                  Inbox zero — nothing waiting for a decision.
-                </p>
-              ) : (
-                <div style={{ display: "grid", gap: 8 }}>
-                  {unclear > 0 ? (
-                    <Link
-                      className={cn(itemClass, projectRowClass)}
-                      href="/review?filter=finds"
-                      style={{ gridTemplateColumns: "auto 1fr auto" }}
-                    >
-                      <span className={itemIconClass}>
-                        <Inbox size={17} aria-hidden />
-                      </span>
-                      <div>
-                        <p className={itemTitleClass}>{unclear} unclear signal{unclear === 1 ? "" : "s"}</p>
-                        <p className={itemMetaClass}>Need a rubric decision.</p>
-                      </div>
-                      <Badge tone="gold">Review</Badge>
-                    </Link>
-                  ) : null}
-                  {pending > 0 ? (
-                    <Link
-                      className={cn(itemClass, projectRowClass)}
-                      href="/review?filter=approvals"
-                      style={{ gridTemplateColumns: "auto 1fr auto" }}
-                    >
-                      <span className={itemIconClass}>
-                        <ShieldCheck size={17} aria-hidden />
-                      </span>
-                      <div>
-                        <p className={itemTitleClass}>{pending} pending action{pending === 1 ? "" : "s"}</p>
-                        <p className={itemMetaClass}>External effects awaiting approval.</p>
-                      </div>
-                      <Badge tone="red">Approve</Badge>
-                    </Link>
-                  ) : null}
-                </div>
-              )}
-            </Section>
-
-          </div>
-        </div>
-      )}
-    </LiveGate>
-  );
+      if (item.stepLine !== undefined && item.stepSource !== undefined) await completeStep({ taskId: item.id as any, stepLine: item.stepLine, stepSource: item.stepSource });
+      else if (item.kind === "task" && !item.recurrenceId) await completeTask({ taskId: item.id as any });
+      else await completeRecurrence({ recurrenceId: (item.recurrenceId ?? item.id) as any });
+    } catch (error) { toast(error instanceof Error ? error.message : "Could not complete item", "error"); }
+    finally { setBusyId(null); }
+  }
+  return <LiveGate><div className="grid gap-4">
+    <section className={cn(cardClass, sectionClass)}>
+      <h1 className={eyebrowClass}>Home</h1>
+      {plan ? <p className="m-0 text-xl leading-relaxed">{plan.summary}</p> : <LoadingRow label="Planning your day…" />}
+      {sync ? <p className="mt-2 text-xs text-muted-foreground">Checking connected sources…</p> : failedSync ? <p className="mt-2 text-xs text-muted-foreground">Some sources could not update. This plan uses the information already saved.</p> : null}
+    </section>
+    <div className="grid min-w-0 items-stretch gap-4 lg:grid-cols-2 [&>*]:min-w-0">
+      <HomePeriodCard title="Today" rows={periods?.today} busyId={busyId} onComplete={item => void complete(item)} timeZone={timeZone} />
+      <HomePeriodCard title="This Week" rows={periods?.week} busyId={busyId} onComplete={item => void complete(item)} timeZone={timeZone} weekly />
+    </div>
+    <QuickCaptureBox captures={data?.quickCaptures} />
+  </div></LiveGate>;
 }

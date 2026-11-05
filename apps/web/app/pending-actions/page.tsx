@@ -1,5 +1,2 @@
 import { redirect } from "next/navigation";
-
-export default function Page() {
-  redirect("/review");
-}
+export default function RetiredPage() { redirect("/"); }

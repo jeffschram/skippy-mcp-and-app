@@ -2266,7 +2266,7 @@ export function LiveApprovalHistoryContent() {
   );
 }
 
-function PendingActionItem({
+export function PendingActionItem({
   action,
   reviewPendingAction,
 }: {

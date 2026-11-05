@@ -455,6 +455,7 @@ export default defineSchema({
     createdAt: v.number(),
     updatedAt: v.number(),
   })
+    .index("by_brain_state_priority", ["brainInstanceId", "processingState", "priorityScore"])
     .index("by_brain_state", ["brainInstanceId", "processingState"])
     .index("by_brain_status", ["brainInstanceId", "status"])
     .index("by_brain_due", ["brainInstanceId", "dueAt"])
@@ -619,6 +620,7 @@ export default defineSchema({
     createdAt: v.number(),
     updatedAt: v.number(),
   })
+    .index("by_kind_review_state", ["kind", "reviewState"])
     .index("by_brain_kind_state", ["brainInstanceId", "kind", "processingState"])
     .index("by_brain_kind_status", ["brainInstanceId", "kind", "status"])
     .index("by_brain_kind_review_state", ["brainInstanceId", "kind", "reviewState"])
@@ -761,6 +763,7 @@ export default defineSchema({
     createdAt: v.number(),
     updatedAt: v.number(),
   })
+    .index("by_status", ["status"])
     .index("by_brain_status", ["brainInstanceId", "status"])
     .index("by_brain_fingerprint", ["brainInstanceId", "candidateFingerprint"])
     .index("by_candidate", ["brainInstanceId", "candidateEntityType", "candidateEntityId"]),
@@ -1091,6 +1094,7 @@ export default defineSchema({
   })
     .index("by_brain_external", ["brainInstanceId", "sourceSystem", "externalId"])
     .index("by_brain_start", ["brainInstanceId", "startAt"])
+    .index("by_brain_end", ["brainInstanceId", "endAt"])
     .index("by_brain_series", ["brainInstanceId", "recurringEventId", "originalStartAt"]),
 
   activityEvents: defineTable({

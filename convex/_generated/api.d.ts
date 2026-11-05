@@ -32,8 +32,11 @@ import type * as knowledge from "../knowledge.js";
 import type * as knowledgeMigration from "../knowledgeMigration.js";
 import type * as knowledgeMigrationHelpers from "../knowledgeMigrationHelpers.js";
 import type * as lifeTasks from "../lifeTasks.js";
+import type * as mcpGateway from "../mcpGateway.js";
+import type * as mcpOwnership from "../mcpOwnership.js";
 import type * as mcpTokens from "../mcpTokens.js";
 import type * as memoryGraph from "../memoryGraph.js";
+import type * as mindChatContext from "../mindChatContext.js";
 import type * as mindGraphHelpers from "../mindGraphHelpers.js";
 import type * as noteConsolidation from "../noteConsolidation.js";
 import type * as noteConsolidationHelpers from "../noteConsolidationHelpers.js";
@@ -42,10 +45,13 @@ import type * as projectFiles from "../projectFiles.js";
 import type * as projects from "../projects.js";
 import type * as recurrences from "../recurrences.js";
 import type * as resurfacing from "../resurfacing.js";
+import type * as reviewRetirement from "../reviewRetirement.js";
 import type * as settings from "../settings.js";
 import type * as skills from "../skills.js";
 import type * as taskExecution from "../taskExecution.js";
 import type * as taskOrder from "../taskOrder.js";
+import type * as today from "../today.js";
+import type * as todayModel from "../todayModel.js";
 import type * as waiting from "../waiting.js";
 
 import type {
@@ -79,8 +85,11 @@ declare const fullApi: ApiFromModules<{
   knowledgeMigration: typeof knowledgeMigration;
   knowledgeMigrationHelpers: typeof knowledgeMigrationHelpers;
   lifeTasks: typeof lifeTasks;
+  mcpGateway: typeof mcpGateway;
+  mcpOwnership: typeof mcpOwnership;
   mcpTokens: typeof mcpTokens;
   memoryGraph: typeof memoryGraph;
+  mindChatContext: typeof mindChatContext;
   mindGraphHelpers: typeof mindGraphHelpers;
   noteConsolidation: typeof noteConsolidation;
   noteConsolidationHelpers: typeof noteConsolidationHelpers;
@@ -89,10 +98,13 @@ declare const fullApi: ApiFromModules<{
   projects: typeof projects;
   recurrences: typeof recurrences;
   resurfacing: typeof resurfacing;
+  reviewRetirement: typeof reviewRetirement;
   settings: typeof settings;
   skills: typeof skills;
   taskExecution: typeof taskExecution;
   taskOrder: typeof taskOrder;
+  today: typeof today;
+  todayModel: typeof todayModel;
   waiting: typeof waiting;
 }>;
 
