@@ -315,13 +315,9 @@ const CONFLICT_LOOKBACK_MS = 26 * 60 * 60 * 1000;
  * already produced a warning worth reading. */
 const CONFLICT_SCAN_LIMIT = 50;
 
-/**
- * Statuses that mean "staged but not yet settled by the owner". `approved` is
- * deliberately excluded: an approved action is the owner's explicit yes and is
- * about to execute — a new proposal colliding with it will surface through the
- * mirror conflict warning once the event lands.
- */
-const PENDING_PROPOSAL_STATUSES = ["pending_approval", "drafted"] as const;
+/** Ready actions participate in deduplication until execution settles them.
+ * Legacy gate states remain readable for old rows; new writes never produce them. */
+const PENDING_PROPOSAL_STATUSES = ["approved", "pending_approval", "drafted"] as const;
 
 /**
  * Loads unsettled calendar_event_create actions with their bodies decoded into
@@ -387,7 +383,7 @@ async function findMirrorConflicts(
     .take(CONFLICT_SCAN_LIMIT);
 
   // 2026-09-03: split real Google events from Skippy's own staged rows. The
-  // pre-insert mirror write (the echo-loop defense below) means unapproved
+  // pre-insert mirror write (the echo-loop defense below) means queued
   // drafts live in this table too, and counting them as "existing events"
   // reported "Overlaps 13 existing events" when Google held zero — each new
   // duplicate inflated the warning on the next one.
@@ -529,7 +525,7 @@ export const draftCalendarEvent = internalMutationGeneric({
     const pendingActionId = await db.insert("pendingActions", {
       brainInstanceId: args.brainInstanceId,
       actionType: "calendar_event_create",
-      status: args.requireApproval === false ? "approved" : "pending_approval",
+      status: "approved",
       subject: args.title,
       body: JSON.stringify({
         calendarId: args.calendarId,
@@ -549,6 +545,12 @@ export const draftCalendarEvent = internalMutationGeneric({
       externalMessageId: externalId,
       createdAt: now,
       updatedAt: now,
+    });
+
+    await db.insert("activityEvents", {
+      brainInstanceId: args.brainInstanceId, pendingActionId,
+      activityType: "calendar_action_queued", actorType: "harness", timestamp: now,
+      summary: `Calendar event queued: ${args.title}`, metadata: { reviewWarning, externalId },
     });
 
     return {
@@ -612,7 +614,7 @@ export const recordCalendarEventRemoteResult = internalMutationGeneric({
 /*                                                                     */
 /* Convex never calls Google — the OAuth token lives only on the mini   */
 /* (docs/connectors.md: "No credential storage in Convex"). So an       */
-/* approval in the web app has to travel to the runner, which is what   */
+/* queued action has to travel to the runner, which is what            */
 /* these two host-token functions are for. The runner already polls     */
 /* every couple of seconds for runs and chat turns; approved calendar   */
 /* actions are a third claim type on that same loop.                    */
@@ -711,9 +713,7 @@ export const claimNextCalendarAction = mutationGeneric({
  * disagree.
  *
  * A failure lands the action in `failed` with the Google error attached rather
- * than retrying forever: the /review Actions tab already renders `failed` as
- * re-reviewable, so a bad event surfaces to the owner instead of hammering
- * Google with an insert it will keep rejecting.
+ * than retrying forever. Activity exposes the error.
  */
 export const recordCalendarActionResult = mutationGeneric({
   args: {
@@ -773,6 +773,14 @@ export const recordCalendarActionResult = mutationGeneric({
       }
     }
 
+    await ctx.db.insert("activityEvents", {
+      brainInstanceId: host.brainInstanceId, pendingActionId: action._id,
+      activityType: succeeded ? "calendar_action_completed" : "calendar_action_failed",
+      actorType: "system", timestamp: now,
+      summary: `Calendar event ${succeeded ? "created" : "failed"}: ${action.subject ?? "Untitled"}`,
+      metadata: { outcome: args.outcome, error: args.error, htmlLink: args.htmlLink },
+    });
+
     return {
       status: succeeded ? ("completed" as const) : ("failed" as const),
       calendarEventId,
@@ -810,9 +818,13 @@ export const hostSweepDuplicatePendingActions = mutationGeneric({
 
     const pending = await loadPendingCalendarProposals(ctx.db, host.brainInstanceId);
     const groups = groupDuplicatePendingCalendarActions(pending.map((entry) => entry.proposal));
+    // Never invalidate an in-flight executor. Skip the whole group: its lease
+    // holder may already have inserted remotely, even before reporting success.
+    const leasedIds = new Set(pending.filter(entry => (entry.action.leaseExpiresAt ?? 0) > now).map(entry => entry.proposal.id));
 
     const swept: Array<{ pendingActionId: string; supersededBy: string; subject: string }> = [];
     for (const group of groups) {
+      if ([group.keep, ...group.sweep].some(proposal => leasedIds.has(proposal.id))) continue;
       for (const duplicateProposal of group.sweep) {
         swept.push({
           pendingActionId: duplicateProposal.id,
@@ -826,11 +838,12 @@ export const hostSweepDuplicatePendingActions = mutationGeneric({
         const approvalNotes = `auto-swept duplicate (2026-09-03): superseded by ${group.keep.id}`;
         await ctx.db.patch(entry.action._id, {
           status: "rejected",
+          claimToken: undefined,
+          leaseExpiresAt: undefined,
           approvalNotes,
           updatedAt: now,
         });
-        // Same audit trail as reviewPendingActionForViewer's reject path, with
-        // a system actor since no human clicked anything.
+        // Record the automatic duplicate disposition.
         await ctx.db.insert("activityEvents", {
           brainInstanceId: host.brainInstanceId,
           activityType: "pending_action_rejected",
@@ -842,7 +855,7 @@ export const hostSweepDuplicatePendingActions = mutationGeneric({
           sourceRefIds: entry.action.sourceRefIds,
         });
 
-        // Cancel the staged mirror row so the never-approved draft stops
+        // Cancel the staged mirror row so the superseded action stops
         // rendering as an event in agenda views.
         if (entry.action.externalMessageId) {
           const mirrorRow = await findByExternalId(

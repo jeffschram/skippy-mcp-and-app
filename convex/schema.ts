@@ -756,6 +756,19 @@ export default defineSchema({
   }).index("by_source", ["sourceRefId"])
     .index("by_brain_entity", ["brainInstanceId", "entityRef.entityType", "entityRef.entityId"]),
 
+  reviewQueueMigrations: defineTable({
+    brainInstanceId: v.id("brainInstances"),
+    version: v.literal("retire-review-v1"),
+    cutoff: v.number(),
+    triageCursor: v.union(v.string(), v.null()),
+    memoryCursor: v.union(v.string(), v.null()),
+    triageDone: v.boolean(),
+    memoryDone: v.boolean(),
+    triageAccepted: v.number(),
+    memoriesAccepted: v.number(),
+    updatedAt: v.number(),
+  }).index("by_brain_version", ["brainInstanceId", "version"]),
+
   triageItems: defineTable({
     brainInstanceId: v.id("brainInstances"),
     candidateEntityType: entityType,
@@ -868,7 +881,7 @@ export default defineSchema({
     leaseExpiresAt: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number(),
-  }).index("by_brain_status", ["brainInstanceId", "status"]),
+  }).index("by_brain_status", ["brainInstanceId", "status"]).index("by_status", ["status"]).index("by_brain_created", ["brainInstanceId", "createdAt"]),
 
   // Audit of automated AI project-planning runs (decompose a project into tasks).
   projectPlans: defineTable({

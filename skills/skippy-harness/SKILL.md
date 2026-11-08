@@ -27,10 +27,10 @@ Before capture or retrieval work that may create durable memory, read `reference
    - `get_importance_rubric`: use before nontrivial source ingestion so the decision follows the user's current rules.
    - `update_source_sync_status`: for batch or scheduled ingestion, set `status: "running"` before reading sources, send heartbeat updates during long runs, and set `status: "completed"` or `"failed"` before ending so the Skippy Home NOW area reflects live updates.
    - `ingest_object`: primary source-ingestion tool when an item clears the rubric; include `rubricDecision`.
-   - Link routing: links are reference material, not a reading queue — the user is never required to interact with them. Confident, rubric-clearing links go straight through `ingest_object` (status defaults to `saved`; no user interaction expected). Pass `status: "unread"` only when the user explicitly wants to read the link later. If you are genuinely uncertain whether a link is valid or important, use `submit_candidate_object` so it lands in Review for a one-tap decision. Use `update_link_status` for genuine lifecycle changes on stored links (`read` after actually ingesting the content, `saved` for reference reclassification, `discarded` during cleanup) — never to fake user engagement.
+   - Link routing: links are reference material, not a reading queue — the user is never required to interact with them. Confident, rubric-clearing links go straight through `ingest_object` (status defaults to `saved`; no user interaction expected). Pass `status: "unread"` only when the user explicitly wants to read the link later. Skip links whose validity or importance is uncertain. Use `update_link_status` for genuine lifecycle changes on stored links (`read` after actually ingesting the content, `saved` for reference reclassification, `discarded` during cleanup) — never to fake user engagement.
    - `create_project` / `create_task`: only for explicit user commands.
    - `upsert_task`, `upsert_person`, etc.: convenience accepted-object tools when the item clearly clears the rubric but no source refs or custom decision are needed.
-   - `submit_candidate_object`: review fallback when an item seems useful but is ambiguous, potentially duplicate, weakly inferred, or not safe to accept silently.
+   - Skip ambiguous or weakly inferred items. Knowledge writes accept directly; there is no owner review queue.
    - `capture`: only for useful free-form notes when a typed entity is not clear.
    - `list_interview_templates` / `start_interview` / `get_interview` / `answer_interview_question` / `complete_interview`: run guided second-brain interviews inside the harness chat. Use the returned `assistantDisplayName` when offering the interview.
    - `link_entities`: only after accepted entity IDs are known.
@@ -139,11 +139,11 @@ Use plain confirmations:
 
 - "Stored `Pay Optimum bill` as an accepted Skippy task because it has a financial deadline: http://127.0.0.1:3000/projects"
 - "Created the accepted task `Improve MCP chat confirmations` in Skippy: http://127.0.0.1:3000/projects"
-- "Sent `Ambiguous renewal note` to Skippy Review because the source hinted at a possible commitment, but the rubric decision was unclear: http://127.0.0.1:3000/triage"
+- "Skipped an ambiguous renewal note because the source did not establish a commitment."
 - "Want to do a project interview for Skippy?"
 - "I skipped the newsletter because it did not contain a deadline, decision, relationship, or reusable context."
 
-Do not store source-derived items just because they exist. Store them only when the rubric decision is clear, or use the review fallback when the uncertainty itself is worth surfacing.
+Do not store source-derived items just because they exist. Store them only when the rubric decision is clear, and skip uncertain candidates.
 
 
 ## Action versus event classification

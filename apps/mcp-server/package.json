@@ -24,8 +24,7 @@
     "test": "vitest run --passWithNoTests",
     "lint": "tsc -p tsconfig.json --noEmit",
     "smoke:remote": "node scripts/smoke-remote-mcp.mjs",
-    "prod:check": "node scripts/check-production-env.mjs",
-    "smoke:ingestion-triage": "node scripts/smoke-ingestion-triage.mjs"
+    "prod:check": "node scripts/check-production-env.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",

@@ -47,8 +47,8 @@ export const primaryHubs: Hub[] = [
     match: (p) => p.startsWith("/finances"),
   },
   {
-    href: "/review",
-    label: "Review",
+    href: "/review/history",
+    label: "Activity",
     icon: Inbox,
     match: (p) => p.startsWith("/review"),
   },
@@ -212,12 +212,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const activeProjects = useQuery(api.projects.activeProjectsForViewer, isAuthenticated ? {} : "skip") as
     | NavProject[]
     | undefined;
-  const reviewCounts = useQuery(api.knowledge.reviewCountsForViewer, isAuthenticated ? {} : "skip") as
-    | { finds: number; approvals: number }
-    | undefined;
-  const navBadges = {
-    "/review": (reviewCounts?.finds ?? 0) + (reviewCounts?.approvals ?? 0),
-  };
+  const navBadges: Record<string, number> = {};
 
   if (pathname === "/mind") return (
     <ToastProvider>

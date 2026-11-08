@@ -40,20 +40,6 @@ Use a short confirmation:
 
 If the user declines, do not store it. If there is a non-sensitive task, store only that task.
 
-### Review Candidate
-
-Use Review when the item may matter but should not be silently accepted.
-
-Send to Review for:
-
-- Ambiguous commitments.
-- Possible duplicates or conflicts.
-- Weakly inferred projects, people, or principles.
-- Items that need classification or merge decisions.
-- Uncertain source-derived memories that are useful enough to inspect later.
-
-Preferred tool: `submit_candidate_object`.
-
 ### Ignore
 
 Do not write anything for:
@@ -89,9 +75,9 @@ After a write or review submission, tell the user:
 Examples:
 
 - "Stored `Keep ingestion rubric-first` as a Skippy decision because you stated it as the architecture direction for this rollout."
-- "Sent `Possible vendor renewal` to Skippy Review because the email hints at a commitment, but the owner/date is unclear."
+- "Skipped `Possible vendor renewal` because the source did not establish a commitment."
 - "I skipped the newsletter because it had no deadline, relationship signal, decision, or reusable project context."
-- "Before editing, I checked Skippy for the rollout context and found the current decision to keep Review as the uncertainty fallback."
+- "Before editing, I checked Skippy for the rollout context and found the current decision to keep skipping uncertain candidates."
 
 ## Retrieval Before Work
 
@@ -144,11 +130,11 @@ If explicit: create or ingest a project.
 }
 ```
 
-If inferred from passing discussion: ask "Should I create a Skippy project for this rollout?" or submit a review candidate.
+If inferred from passing discussion: ask "Should I create a Skippy project for this rollout?" or skip it.
 
 ### Decision Capture
 
-User says: "Let's keep source ingestion rubric-first and use Review only when uncertain."
+User says: "Let's keep source ingestion rubric-first and skip uncertain items."
 
 Directly capture:
 
@@ -158,9 +144,9 @@ Directly capture:
   "candidatePayload": {
     "objectType": "decision",
     "title": "Keep Skippy ingestion rubric-first",
-    "summary": "Source ingestion should write accepted objects directly when the rubric decision is clear; Review is only for uncertainty.",
+    "summary": "Source ingestion should write accepted objects directly when the rubric decision is clear; uncertain items are skipped.",
     "properties": {
-      "decision": "Use rubric-first direct ingestion with Review as the uncertainty fallback.",
+      "decision": "Use rubric-first direct ingestion with skipping uncertain candidates.",
       "rationale": "Keeps useful memory flowing while preserving user control for ambiguous items."
     }
   },
@@ -169,7 +155,7 @@ Directly capture:
     {
       "sourceSystem": "codex",
       "summary": "User chose the ingestion architecture.",
-      "excerpt": "rubric-first and use Review only when uncertain"
+      "excerpt": "rubric-first and skip uncertain items"
     }
   ]
 }
@@ -232,9 +218,9 @@ Start example:
 }
 ```
 
-When the user answers, call `answer_interview_question`. Leave `createMemoryCandidate` false unless the user explicitly wants that answer sent to Memory Inbox.
+When the user answers, call `answer_interview_question`. Leave `createMemoryCandidate` false unless the user explicitly wants that answer sent to accepted memory.
 
-When all questions are answered, ask whether to complete the interview and whether to submit a distilled summary to Memory Inbox. If the user cancels or it was only a test, call `archive_interview`.
+When all questions are answered, ask whether to complete the interview and whether to submit a distilled summary to accepted memory. If the user cancels or it was only a test, call `archive_interview`.
 
 ### Context Retrieval Before Work
 
@@ -248,4 +234,4 @@ Before editing:
 
 User-facing explanation:
 
-"I checked Skippy context first and found the standing rule: accepted ingestion should be rubric-first, with Review only for uncertain signals. I used that as the basis for the docs update."
+"I checked Skippy context first and found the standing rule: accepted ingestion should be rubric-first, skipping uncertain signals. I used that as the basis for the docs update."

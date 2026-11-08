@@ -42,7 +42,6 @@ import type * as planning from "../planning.js";
 import type * as projectFiles from "../projectFiles.js";
 import type * as projects from "../projects.js";
 import type * as recurrences from "../recurrences.js";
-import type * as resurfacing from "../resurfacing.js";
 import type * as settings from "../settings.js";
 import type * as skills from "../skills.js";
 import type * as taskExecution from "../taskExecution.js";
@@ -90,7 +89,6 @@ declare const fullApi: ApiFromModules<{
   projectFiles: typeof projectFiles;
   projects: typeof projects;
   recurrences: typeof recurrences;
-  resurfacing: typeof resurfacing;
   settings: typeof settings;
   skills: typeof skills;
   taskExecution: typeof taskExecution;

@@ -277,7 +277,7 @@ export function LiveInterviewDetail({ interviewId }: { interviewId: string }) {
       });
       setAnswerText("");
       setCreateMemoryCandidate(false);
-      setNotice(result.memoryCandidateId ? "Answer saved and sent to memory review." : "Answer saved.");
+      setNotice(result.memoryCandidateId ? "Answer saved and saved as memory." : "Answer saved.");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not save answer.");
     } finally {
@@ -297,7 +297,7 @@ export function LiveInterviewDetail({ interviewId }: { interviewId: string }) {
         ...(trimmedSummary ? { summary: trimmedSummary } : {}),
         createSummaryMemoryCandidate,
       });
-      setNotice(result.memoryCandidateId ? "Interview completed and sent to memory review." : "Interview completed.");
+      setNotice(result.memoryCandidateId ? "Interview completed and saved as memory." : "Interview completed.");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not complete interview.");
     } finally {
@@ -370,7 +370,7 @@ export function LiveInterviewDetail({ interviewId }: { interviewId: string }) {
                       checked={createMemoryCandidate}
                       onChange={(event) => setCreateMemoryCandidate(event.target.checked)}
                     />
-                    Send this answer to memory review
+                    Save this answer as memory
                   </label>
                 ) : null}
                 <div className={toolbarClass}>
@@ -393,7 +393,7 @@ export function LiveInterviewDetail({ interviewId }: { interviewId: string }) {
                   </span>
                   <div>
                     <p className={itemTitleClass}>All questions answered</p>
-                    <p className={itemMetaClass}>Complete the interview, optionally sending a summary to memory review.</p>
+                    <p className={itemMetaClass}>Complete the interview, optionally saving a summary as memory.</p>
                   </div>
                   <span className={cn(badgeClass, badgeBlueClass)}>ready</span>
                 </article>
@@ -411,7 +411,7 @@ export function LiveInterviewDetail({ interviewId }: { interviewId: string }) {
                         checked={createSummaryMemoryCandidate}
                         onChange={(event) => setCreateSummaryMemoryCandidate(event.target.checked)}
                       />
-                      Send interview summary to memory review
+                      Save interview summary as memory
                     </label>
                     <div className={toolbarClass}>
                       <button className={textButtonClass} type="button" disabled={submitting} onClick={handleComplete}>
@@ -443,7 +443,7 @@ export function LiveInterviewDetail({ interviewId }: { interviewId: string }) {
                     <div>
                       <p className={itemTitleClass}>{response.prompt}</p>
                       <p className={itemMetaClass}>{response.answerText}</p>
-                      {response.memoryCandidateId ? <span className={cn(badgeClass, badgeBlueClass)}>memory review</span> : null}
+                      {response.memoryCandidateId ? <span className={cn(badgeClass, badgeBlueClass)}>memory</span> : null}
                     </div>
                   </article>
                 ))}

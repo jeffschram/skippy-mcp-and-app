@@ -1,88 +1,21 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import { useMemo, useState, type MouseEvent } from "react";
 import { useConvexAuth, useMutation, useQuery } from "convex/react";
 import { activeSourceSyncStatus } from "@skippy/shared";
 import { api } from "../lib/skippy-api";
 import { cn } from "@/lib/utils";
-import {
-  badgeBlueClass,
-  badgeClass,
-  badgeGoldClass,
-  badgeGreenClass,
-  badgeRedClass,
-  cardClass,
-  checkboxFieldBottomClass,
-  checkboxFieldClass,
-  codeClass,
-  errorTextClass,
-  eyebrowClass,
-  fieldClass,
-  fieldLabelClass,
-  formGridClass,
-  gridClass,
-  iconButtonClass,
-  iconButtonFavoriteClass,
-  inputClass,
-  itemClass,
-  itemIconActiveClass,
-  itemIconClass,
-  itemListClass,
-  itemMetaClass,
-  itemTitleClass,
-  mutedClass,
-  pendingActionItemClass,
-  pendingActionSideClass,
-  projectRowClass,
-  projectRowSideClass,
-  reviewWarningClass,
-  sectionClass,
-  selectClass,
-  settingsRowClass,
-  span12Class,
-  span4Class,
-  span5Class,
-  span6Class,
-  span7Class,
-  span8Class,
-  splitListClass,
-  taskItemClass,
-  taskSideClass,
-  textButtonClass,
-  textButtonCompactClass,
-  textareaClass,
-  toolbarClass,
-} from "./page-classes";
+import { badgeBlueClass, badgeClass, badgeGoldClass, badgeGreenClass, badgeRedClass, cardClass, checkboxFieldBottomClass, checkboxFieldClass, codeClass, errorTextClass, eyebrowClass, fieldClass, fieldLabelClass, formGridClass, gridClass, iconButtonClass, iconButtonFavoriteClass, inputClass, itemClass, itemIconActiveClass, itemIconClass, itemListClass, itemMetaClass, itemTitleClass, mutedClass, projectRowClass, projectRowSideClass, sectionClass, selectClass, settingsRowClass, span12Class, span5Class, span6Class, span7Class, splitListClass, taskItemClass, taskSideClass, textButtonClass, textButtonCompactClass, textareaClass, toolbarClass } from "./page-classes";
 import { agentRoleDisplayName, agentRoleFromMetadata } from "../lib/display";
 import { focusItemKey, focusSummaryBullets, focusSummaryPresentation } from "./focus-summary";
 import { contactDetailFields, contactMetaLabel } from "./contact-helpers";
-import { formatEventWhen, parseCalendarActionBody } from "./pending-action-helpers";
-import { triageMetaLabel } from "./triage-helpers";
 import { LiveGate } from "./live-auth";
-import { SuggestionGroup } from "./resurfacing/live-client";
 import { icons } from "./ui";
-import { IconButton, InlineMarkdown, Tabs, useToast } from "./components";
+import { InlineMarkdown } from "./components";
 
 type AnyRecord = Record<string, any>;
-type MergeOption = AnyRecord & {
-  entityId: string;
-  entityType: string;
-  title: string;
-  summary?: string;
-  status?: string;
-  matchScore: number;
-};
-
-const entityTypes = ["goal", "project", "task", "note", "person", "company", "link"] as const;
-
-const statusOptions: Record<string, string[]> = {
-  goal: ["active", "paused", "achieved", "abandoned"],
-  project: ["idea", "planned", "in_progress", "paused", "completed", "cancelled", "archived"],
-  task: ["todo", "in_progress", "waiting", "done", "cancelled"],
-  link: ["unread", "read", "saved", "discarded"],
-};
-
+const statusOptions = { goal: ["active", "paused", "achieved", "abandoned"] };
 function useViewerReady() {
   const { isAuthenticated } = useConvexAuth();
   const viewer = useQuery(api.auth.viewer, isAuthenticated ? {} : "skip") as
@@ -91,11 +24,6 @@ function useViewerReady() {
     | undefined;
 
   return Boolean(viewer?.brain);
-}
-
-function titleForReviewItem(item: AnyRecord) {
-  const payload = item.candidatePayload ?? {};
-  return payload.title ?? payload.name ?? payload.url ?? payload.body ?? "Untitled signal";
 }
 
 function textValue(...values: unknown[]) {
@@ -107,70 +35,6 @@ function textValue(...values: unknown[]) {
   return "";
 }
 
-function editablePayloadFor(type: string, payload: AnyRecord) {
-  switch (type) {
-    case "goal":
-      return {
-        title: textValue(payload.title, payload.name, payload.summary),
-        description: textValue(payload.description, payload.summary, payload.sourceSummary),
-        status: textValue(payload.status) || "active",
-      };
-    case "project":
-      return {
-        title: textValue(payload.title, payload.name, payload.summary),
-        summary: textValue(payload.summary, payload.description, payload.sourceSummary),
-        status: textValue(payload.status) || "idea",
-        priorityReason: textValue(payload.priorityReason),
-      };
-    case "task":
-      return {
-        title: textValue(payload.title, payload.name, payload.summary),
-        description: textValue(payload.description, payload.summary),
-        status: textValue(payload.status) || "todo",
-        ownerType: textValue(payload.ownerType, payload.taskOwner, payload.assignedTo, payload.assignee),
-        dueDate: textValue(payload.dueDate, payload.due, payload.start),
-        sourceSummary: textValue(payload.sourceSummary),
-        priorityReason: textValue(payload.priorityReason),
-      };
-    case "note":
-      return {
-        ...payload,
-        title: textValue(payload.title),
-        body: textValue(payload.body, payload.text, payload.summary, payload.sourceSummary, payload.title),
-      };
-    case "person":
-      return {
-        name: textValue(payload.name, payload.personName, payload.title),
-        email: textValue(payload.email, Array.isArray(payload.emails) ? payload.emails[0] : undefined),
-        relationshipContext: textValue(payload.relationshipContext, payload.relationshipLabel, payload.sourceSummary),
-        notes: textValue(payload.notes, payload.summary),
-      };
-    case "company":
-      return {
-        name: textValue(payload.name, payload.companyName, payload.title),
-        website: textValue(payload.website, payload.url),
-        relationshipLabel: textValue(payload.relationshipLabel) || "other",
-        notes: textValue(payload.notes, payload.summary, payload.sourceSummary),
-      };
-    case "link":
-      return {
-        url: textValue(payload.url, payload.deepLink),
-        title: textValue(payload.title),
-        summary: textValue(payload.summary, payload.sourceSummary),
-        whyItMatters: textValue(payload.whyItMatters, payload.priorityReason),
-        // Approving a candidate marks it valid reference material, not read-later homework.
-        status: textValue(payload.status) || "saved",
-      };
-
-    default:
-      return { ...payload };
-  }
-}
-
-function compactPayload(payload: AnyRecord) {
-  return Object.fromEntries(Object.entries(payload).filter(([, value]) => value !== ""));
-}
-
 function displayLabelsFrom(data: AnyRecord | undefined) {
   return {
     ownerName: textValue(data?.displayLabels?.ownerName, data?.user?.displayName, data?.user?.name) || "Owner",
@@ -178,54 +42,6 @@ function displayLabelsFrom(data: AnyRecord | undefined) {
       textValue(data?.displayLabels?.agentName, data?.config?.assistantDisplayName, data?.brain?.displayName) ||
       "Agent",
   };
-}
-
-function words(value: string) {
-  return new Set(value.toLowerCase().match(/[a-z0-9]+/g) ?? []);
-}
-
-function overlapScore(left: string, right: string) {
-  const leftWords = words(left);
-  const rightWords = words(right);
-  if (leftWords.size === 0 || rightWords.size === 0) {
-    return 0;
-  }
-  let overlap = 0;
-  for (const word of leftWords) {
-    if (rightWords.has(word)) {
-      overlap += 1;
-    }
-  }
-  return overlap / Math.max(leftWords.size, rightWords.size);
-}
-
-function candidateMatchText(item: AnyRecord, payload: AnyRecord) {
-  return [
-    titleForReviewItem(item),
-    payload.title,
-    payload.name,
-    payload.email,
-    payload.url,
-    payload.summary,
-    payload.description,
-    payload.body,
-    payload.sourceSummary,
-  ]
-    .filter((value) => typeof value === "string" && value.trim())
-    .join(" ");
-}
-
-function matchOptions(item: AnyRecord, payload: AnyRecord, targetEntityType: string, entityOptions: AnyRecord[]): MergeOption[] {
-  const candidateText = candidateMatchText(item, payload);
-  return entityOptions
-    .filter((option): option is AnyRecord & { entityId: string; entityType: string; title: string } =>
-      option.entityType === targetEntityType && typeof option.entityId === "string" && typeof option.title === "string",
-    )
-    .map((option) => ({
-      ...option,
-      matchScore: overlapScore(candidateText, [option.title, option.summary, option.status].filter(Boolean).join(" ")),
-    }))
-    .sort((left, right) => right.matchScore - left.matchScore || String(left.title).localeCompare(String(right.title)));
 }
 
 function textOrUndefined(value: string) {
@@ -296,9 +112,6 @@ export function LiveHomeContent() {
     [focusActionByKey, focusDetails],
   );
   const displayedFocusHeading = visibleFocusDetails.length ? focusHeading : "Nothing new needs focus right now.";
-  const unclearSignalCount = data?.triageItems.length ?? 0;
-  const pendingActionCount = data?.pendingActions.length ?? 0;
-  const hasDecisionQueueItems = unclearSignalCount > 0 || pendingActionCount > 0;
   const recordFocusAction = async (item: { text: string; itemKey: string }, action: "dismissed" | "done") => {
     if (!data?.focusSummary?._id) {
       return;
@@ -344,7 +157,7 @@ export function LiveHomeContent() {
             className={cn(
               cardClass,
               sectionClass,
-              hasDecisionQueueItems ? span8Class : span12Class,
+              span12Class,
               "grid min-h-[260px] content-between gap-[18px] border-l-4 border-l-blue",
             )}
           >
@@ -418,41 +231,6 @@ export function LiveHomeContent() {
               )}
             </div>
           </section>
-          {hasDecisionQueueItems ? (
-            <section className={cn(span4Class, sectionClass)}>
-              <h2>Needs your review</h2>
-              <div className={itemListClass}>
-                {unclearSignalCount > 0 ? (
-                  <Link href="/review?filter=finds" className={cn(itemClass, projectRowClass)}>
-                    <span className={itemIconClass}>
-                      <icons.Archive size={17} aria-hidden />
-                    </span>
-                    <div>
-                      <p className={itemTitleClass}>
-                        {unclearSignalCount} {unclearSignalCount === 1 ? "find" : "finds"} waiting for a yes or no
-                      </p>
-                      <p className={itemMetaClass}>Things Skippy pulled from your sources but wasn&apos;t sure about.</p>
-                    </div>
-                    <span className={cn(badgeClass, badgeGoldClass)}>Review</span>
-                  </Link>
-                ) : null}
-                {pendingActionCount > 0 ? (
-                  <Link href="/review?filter=approvals" className={cn(itemClass, projectRowClass)}>
-                    <span className={itemIconClass}>
-                      <icons.MessageSquareText size={17} aria-hidden />
-                    </span>
-                    <div>
-                      <p className={itemTitleClass}>
-                        {pendingActionCount} {pendingActionCount === 1 ? "thing" : "things"} Skippy wants to do
-                      </p>
-                      <p className={itemMetaClass}>Nothing happens until you approve it.</p>
-                    </div>
-                    <span className={cn(badgeClass, badgeGoldClass)}>Approve</span>
-                  </Link>
-                ) : null}
-              </div>
-            </section>
-          ) : null}
         </div>
       )}
     </LiveGate>
@@ -1230,7 +1008,6 @@ function ContactRow({
 const expectedMemoryApi = api.knowledge as AnyRecord;
 
 // Expected backend queries:
-// - knowledge.listMemoryInboxForViewer({ limit?, memoryType? }) -> memory[]
 // - knowledge.listAcceptedMemoryLibraryForViewer({ limit?, memoryType? }) -> memory[]
 // - knowledge.getMemoryDetailForViewer({ memoryId }) -> { memory, sourceRefs?, relatedEntities? } | null
 type MemoryCollectionFilter = {
@@ -1317,81 +1094,18 @@ function relatedEntityMeta(entity: AnyRecord) {
   return textValue(ref?.entityType, entity.entityType, entity.type, entity.relationship, entity.reason) || "related";
 }
 
-// Mirrors MEMORY_REVIEW_EXPIRY_MS in convex/knowledge.ts; the server enforces its own default.
-const MEMORY_REVIEW_EXPIRY_MS = 14 * 24 * 60 * 60 * 1000;
-
-function memoryIsPendingReview(memory: AnyRecord) {
-  return memory.reviewState === "pending_review";
-}
-
-function MemoryReviewActions({ memory, small }: { memory: AnyRecord; small?: boolean }) {
-  const toast = useToast();
-  const acceptMemory = useMutation(expectedMemoryApi.acceptMemoryForViewer);
-  const rejectMemory = useMutation(expectedMemoryApi.rejectMemoryForViewer);
-  const [busy, setBusy] = useState(false);
-  const title = memoryTitle(memory);
-  const memoryId = textValue(memory._id, memory.id);
-
-  const resolve = async (event: MouseEvent, action: "accept" | "reject") => {
-    event.preventDefault();
-    event.stopPropagation();
-    if (!memoryId || busy) {
-      return;
-    }
-    setBusy(true);
-    try {
-      if (action === "accept") {
-        await acceptMemory({ memoryId: memoryId as any });
-        toast(`Memory accepted: ${title}`, "success");
-      } else {
-        await rejectMemory({ memoryId: memoryId as any });
-        toast(`Memory rejected: ${title}`, "success");
-      }
-    } catch (error) {
-      toast(error instanceof Error ? error.message : `Could not ${action} memory.`, "error");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <>
-      <IconButton
-        small={small ?? false}
-        title="Accept memory"
-        aria-label={`Accept ${title}`}
-        disabled={busy}
-        onClick={(event) => void resolve(event, "accept")}
-      >
-        <icons.Check size={15} aria-hidden />
-      </IconButton>
-      <IconButton
-        small={small ?? false}
-        title="Reject memory"
-        aria-label={`Reject ${title}`}
-        disabled={busy}
-        onClick={(event) => void resolve(event, "reject")}
-      >
-        <icons.X size={15} aria-hidden />
-      </IconButton>
-    </>
-  );
-}
-
 function memoryKindLabel(memory: AnyRecord) {
   const kind = memoryKind(memory);
   if (kind === "memory") return "Fact";
   return `${kind.charAt(0).toUpperCase()}${kind.slice(1)}`;
 }
 
-function MemoryRow({ memory, variant = "memory" }: { memory: AnyRecord; variant?: "inbox" | "memory" }) {
-  const state = memoryState(memory);
+function MemoryRow({ memory }: { memory: AnyRecord }) {
   const reason = memoryReason(memory);
   const sourceRefs = arrayValue(memory.sourceRefs ?? memory.sources);
   const sourceRefIds = Array.isArray(memory.sourceRefIds) ? memory.sourceRefIds : [];
   const [expanded, setExpanded] = useState(false);
 
-  if (variant === "memory") {
     return (
       <article className={itemClass}>
         <span className={itemIconClass}>
@@ -1438,34 +1152,6 @@ function MemoryRow({ memory, variant = "memory" }: { memory: AnyRecord; variant?
       </article>
     );
   }
-
-  return (
-    <Link className={cn(itemClass, projectRowClass)} href={memoryHref(memory)}>
-      <span className={cn(itemIconClass, variant === "inbox" && itemIconActiveClass)}>
-        {variant === "inbox" ? <icons.Brain size={17} aria-hidden /> : <icons.BookOpen size={17} aria-hidden />}
-      </span>
-      <div className={formGridClass}>
-        <div>
-          <p className={itemTitleClass}>{memoryTitle(memory)}</p>
-          <p className={itemMetaClass}>
-            {memoryKind(memory)}
-            {memory.confidence ? ` · ${Math.round(Number(memory.confidence) * 100)}% confidence` : ""}
-            {memory.updatedAt || memory.createdAt ? ` · ${formatDate(memory.updatedAt ?? memory.createdAt)}` : ""}
-          </p>
-        </div>
-        <p className={itemMetaClass}>{memorySummary(memory)}</p>
-        {reason ? <p className={itemMetaClass}>Capture: {reason}</p> : null}
-        <InlineSourceRefs sourceRefs={sourceRefs} sourceRefIds={sourceRefIds} />
-        <InlineRelatedEntities entities={arrayValue(memory.relatedEntities)} />
-      </div>
-      <span className={projectRowSideClass}>
-        {variant === "inbox" && memoryIsPendingReview(memory) ? <MemoryReviewActions memory={memory} small /> : null}
-        <span className={cn(badgeClass, badgeColorForState(state))}>{state}</span>
-        <icons.ChevronRight size={18} aria-hidden />
-      </span>
-    </Link>
-  );
-}
 
 function InlineSourceRefs({ sourceRefs, sourceRefIds }: { sourceRefs: AnyRecord[]; sourceRefIds?: unknown[] }) {
   if (sourceRefs.length === 0 && (!sourceRefIds || sourceRefIds.length === 0)) {
@@ -1661,7 +1347,7 @@ export function LiveMemoryDetailContent({ memoryId }: { memoryId: string }) {
                 <p className={mutedClass}>{memorySummary(memory)}</p>
               </div>
               <span className={projectRowSideClass}>
-                {memoryIsPendingReview(memory) ? <MemoryReviewActions memory={memory} /> : null}
+
                 <span className={cn(badgeClass, badgeColorForState(memoryState(memory)))}>{memoryState(memory)}</span>
               </span>
             </div>
@@ -1716,766 +1402,6 @@ export function LiveMemoryDetailContent({ memoryId }: { memoryId: string }) {
   );
 }
 
-export type ReviewQueueFilter = "all" | "approvals" | "finds" | "revisit";
-
-export function isReviewQueueFilter(value: unknown): value is ReviewQueueFilter {
-  return value === "all" || value === "approvals" || value === "finds" || value === "revisit";
-}
-
-function ReviewSectionHeader({ label, count, hint }: { label: string; count: number; hint: string }) {
-  return (
-    <div className="mb-2.5">
-      <p className={eyebrowClass}>
-        {label} · {count}
-      </p>
-      <p className={mutedClass}>{hint}</p>
-    </div>
-  );
-}
-
-/**
- * The one Review queue (owner decision Sep 4, ui-ux-improvement-plan.md):
- * Approvals pinned first, then Finds — triage signals plus the old Brain Inbox
- * memory candidates, merged so there is one review surface — then Revisit at
- * the bottom. Filter chips replace the Signals/Actions/Routines tabs; order,
- * not tabs, carries the priority. Empty sections vanish instead of rendering
- * headers, and settled approvals live behind /review/history because a queue
- * is not a log.
- */
-export function LiveReviewQueueContent({ initialFilter = "all" }: { initialFilter?: ReviewQueueFilter }) {
-  const viewerReady = useViewerReady();
-  const toast = useToast();
-  const viewer = useQuery(api.auth.viewer, viewerReady ? {} : "skip") as AnyRecord | undefined;
-  const triageItems = useQuery(api.knowledge.triageForViewer, viewerReady ? {} : "skip") as AnyRecord[] | undefined;
-  const entityOptions = useQuery(api.knowledge.acceptedEntityOptionsForViewer, viewerReady ? {} : "skip") as AnyRecord[] | undefined;
-  const actions = useQuery(api.knowledge.pendingActionsForViewer, viewerReady ? { scope: "open" } : "skip") as
-    | AnyRecord[]
-    | undefined;
-  const memoryData = useQuery(expectedMemoryApi.listMemoryInboxForViewer, viewerReady ? { limit: 50 } : "skip") as
-    | AnyRecord
-    | AnyRecord[]
-    | undefined;
-  const revisitData = useQuery(
-    (api as AnyRecord).resurfacing.reviewSuggestionsForViewer,
-    viewerReady ? { limit: 35 } : "skip",
-  ) as AnyRecord | undefined;
-  const reviewPendingActionMutation = useMutation(api.knowledge.reviewPendingActionForViewer);
-  const reviewPendingAction = async (args: AnyRecord) => reviewPendingActionMutation(args as any);
-  const expireStaleCandidates = useMutation(expectedMemoryApi.expireStaleMemoryCandidatesForViewer);
-
-  const [filter, setFilter] = useState<ReviewQueueFilter>(initialFilter);
-  const displayLabels = displayLabelsFrom(viewer);
-  const memoryCandidates = collectionItems(memoryData);
-
-  // Auto-archive stale memory candidates — carried over from the old Brain
-  // Inbox when it merged into Finds so the housekeeping didn't get lost.
-  const hasStaleCandidates = memoryCandidates.some(
-    (memory) =>
-      memoryIsPendingReview(memory) &&
-      typeof memory.createdAt === "number" &&
-      memory.createdAt < Date.now() - MEMORY_REVIEW_EXPIRY_MS,
-  );
-  const expiryTriggered = useRef(false);
-  useEffect(() => {
-    if (!viewerReady || !hasStaleCandidates || expiryTriggered.current) {
-      return;
-    }
-    expiryTriggered.current = true;
-    void (async () => {
-      try {
-        const result = (await expireStaleCandidates({})) as AnyRecord | undefined;
-        const expiredCount = Number(result?.expiredCount ?? 0);
-        if (expiredCount > 0) {
-          toast(`Auto-archived ${expiredCount} stale review ${expiredCount === 1 ? "candidate" : "candidates"}.`);
-        }
-      } catch {
-        // Auto-expiry is best-effort; the queue stays usable if it fails.
-      }
-    })();
-  }, [viewerReady, hasStaleCandidates, expireStaleCandidates, toast]);
-
-  const loading = !triageItems || !entityOptions || !actions || memoryData === undefined || revisitData === undefined;
-  if (loading) {
-    return (
-      <LiveGate>
-        <section className={cn(cardClass, sectionClass)}>
-          <h2>Loading your review queue</h2>
-          <p className={mutedClass}>Gathering approvals, finds, and revisit suggestions.</p>
-        </section>
-      </LiveGate>
-    );
-  }
-
-  const approvalsCount = actions.length;
-  const findsCount = triageItems.length + memoryCandidates.length;
-  const revisitGroups = arrayValue(revisitData?.groups).filter((group) => arrayValue(group.suggestions).length > 0);
-  const revisitCount = arrayValue(revisitData?.suggestions).length;
-  const total = approvalsCount + findsCount + revisitCount;
-
-  const chips = [
-    { key: "all", label: "All", count: total },
-    { key: "approvals", label: "Approvals", count: approvalsCount },
-    { key: "finds", label: "Finds", count: findsCount },
-    { key: "revisit", label: "Revisit", count: revisitCount },
-  ];
-
-  // A section renders when it matches the filter and has items; on "All" the
-  // empty ones disappear entirely — no headers over nothing.
-  const showApprovals = filter === "approvals" || (filter === "all" && approvalsCount > 0);
-  const showFinds = filter === "finds" || (filter === "all" && findsCount > 0);
-  const showRevisit = filter === "revisit" || (filter === "all" && revisitCount > 0);
-
-  return (
-    <LiveGate>
-      <div className="mb-[18px]">
-        <Tabs items={chips} active={filter} onChange={(key) => setFilter(isReviewQueueFilter(key) ? key : "all")} />
-      </div>
-      {filter === "all" && total === 0 ? (
-        <section className={cn(cardClass, sectionClass)}>
-          <h2>Review zero</h2>
-          <p className={mutedClass}>Nothing needs a decision right now.</p>
-        </section>
-      ) : (
-        <div className="grid gap-7">
-          {showApprovals ? (
-            <section aria-label="Approvals">
-              <ReviewSectionHeader
-                label="Approvals"
-                count={approvalsCount}
-                hint="Things Skippy wants to do in the real world — highest stakes, always first."
-              />
-              {approvalsCount === 0 ? (
-                <p className={mutedClass}>Nothing waiting for approval.</p>
-              ) : (
-                <div className={itemListClass}>
-                  {actions.map((action) => (
-                    <PendingActionItem key={action._id} action={action} reviewPendingAction={reviewPendingAction} />
-                  ))}
-                </div>
-              )}
-            </section>
-          ) : null}
-          {showFinds ? (
-            <section aria-label="Finds">
-              <ReviewSectionHeader
-                label="Finds"
-                count={findsCount}
-                hint="Things Skippy found but wasn't sure about — candidate memories live here too."
-              />
-              {findsCount === 0 ? (
-                <p className={mutedClass}>No finds waiting for a yes or no.</p>
-              ) : (
-                <div className={itemListClass}>
-                  {triageItems.map((item) => (
-                    <TriageItem key={item._id} item={item} entityOptions={entityOptions} displayLabels={displayLabels} />
-                  ))}
-                  {memoryCandidates.map((memory) => (
-                    <MemoryRow key={textValue(memory._id, memory.id, memoryTitle(memory))} memory={memory} variant="inbox" />
-                  ))}
-                </div>
-              )}
-            </section>
-          ) : null}
-          {showRevisit ? (
-            <section aria-label="Revisit">
-              <ReviewSectionHeader
-                label="Revisit"
-                count={revisitCount}
-                hint="Old assumptions, open questions, and past decisions worth a second look. Suggestions only — nothing changes without you."
-              />
-              {revisitCount === 0 ? (
-                <p className={mutedClass}>Nothing here looks stale or forgotten right now.</p>
-              ) : (
-                <div className={itemListClass}>
-                  {revisitGroups.map((group) => (
-                    <SuggestionGroup key={textValue(group.type, group.label)} group={group} />
-                  ))}
-                </div>
-              )}
-            </section>
-          ) : null}
-        </div>
-      )}
-    </LiveGate>
-  );
-}
-
-function TriageItem({
-  item,
-  entityOptions,
-  displayLabels,
-}: {
-  item: AnyRecord;
-  entityOptions: AnyRecord[];
-  displayLabels: { ownerName: string; agentName: string };
-}) {
-  const review = useMutation(api.knowledge.reviewTriageItem);
-  // Collapsed by default: the Phase 2 card pattern (ui-ux-improvement-plan.md)
-  // makes editing opt-in — the always-open form was the worst offender on Review.
-  const [expanded, setExpanded] = useState(false);
-  const [targetEntityType, setTargetEntityType] = useState(item.candidateEntityType ?? "note");
-  const [editedPayload, setEditedPayload] = useState(() =>
-    editablePayloadFor(item.candidateEntityType ?? "note", item.candidatePayload ?? {}),
-  );
-  const [mergeTargetId, setMergeTargetId] = useState("");
-  const mergeOptions = useMemo(
-    () => matchOptions(item, editedPayload, targetEntityType, entityOptions),
-    [editedPayload, entityOptions, item, targetEntityType],
-  );
-  const bestMergeOptions = mergeOptions.filter((option) => option.matchScore > 0).slice(0, 8);
-  const remainingMergeOptions = mergeOptions.filter((option) => option.matchScore === 0).slice(0, 20);
-
-  useEffect(() => {
-    if (mergeTargetId && !mergeOptions.some((option) => option.entityId === mergeTargetId)) {
-      setMergeTargetId("");
-    }
-  }, [mergeOptions, mergeTargetId]);
-
-  async function submit(action: "approve" | "reject" | "correct" | "merge" | "reclassify") {
-    if (action === "merge" && !mergeTargetId) {
-      return;
-    }
-    const args: AnyRecord = { triageItemId: item._id, action };
-    if (action === "correct" || action === "reclassify") {
-      args.correctedPayload = compactPayload(editedPayload);
-    }
-    if (action === "reclassify") {
-      args.targetEntityType = targetEntityType;
-    }
-    if (action === "merge") {
-      args.mergeTarget = { entityType: targetEntityType, entityId: mergeTargetId };
-    }
-    await review(args as any);
-  }
-
-  const title = titleForReviewItem(item);
-
-  return (
-    <article className={itemClass}>
-      <span className={itemIconClass}>
-        <icons.Archive size={17} aria-hidden />
-      </span>
-      {expanded ? (
-        <div className={formGridClass}>
-          <div>
-            <p className={itemTitleClass}>{title}</p>
-            <p className={itemMetaClass}>{triageMetaLabel(item)}</p>
-          </div>
-          <PayloadEditor
-            entityType={targetEntityType}
-            payload={editedPayload}
-            setPayload={setEditedPayload}
-            displayLabels={displayLabels}
-          />
-          <div className={splitListClass}>
-            <label className={fieldClass}>
-              <span>Target type</span>
-              <select
-                className={selectClass}
-                value={targetEntityType}
-                onChange={(event) => {
-                  const nextType = event.target.value;
-                  setTargetEntityType(nextType);
-                  setEditedPayload(editablePayloadFor(nextType, editedPayload));
-                }}
-              >
-                {entityTypes.map((type) => (
-                  <option key={type} value={type}>
-                    {type}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className={fieldClass}>
-              <span>Merge target</span>
-              <select className={selectClass} value={mergeTargetId} onChange={(event) => setMergeTargetId(event.target.value)}>
-                <option value="">Select existing {targetEntityType}</option>
-                {bestMergeOptions.length ? <option disabled>Suggested matches</option> : null}
-                {bestMergeOptions.map((option) => (
-                  <option key={option.entityId} value={option.entityId}>
-                    {option.title} - {Math.round(option.matchScore * 100)}%
-                  </option>
-                ))}
-                {remainingMergeOptions.length ? <option disabled>Other accepted {targetEntityType}s</option> : null}
-                {remainingMergeOptions.map((option) => (
-                  <option key={option.entityId} value={option.entityId}>
-                    {option.title}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-        </div>
-      ) : (
-        <div>
-          <p className={itemTitleClass}>{title}</p>
-          <p className={itemMetaClass}>{triageMetaLabel(item)}</p>
-        </div>
-      )}
-      {expanded ? (
-        <CardActions
-          label={`Review actions for ${title}`}
-          actions={[
-            { label: "Accept as edited", ariaLabel: `Accept ${title} with edited payload`, primary: true, onClick: () => void submit("correct") },
-            { label: "Reclassify", ariaLabel: `Reclassify ${title} to selected target type`, onClick: () => void submit("reclassify") },
-            { label: "Merge", ariaLabel: `Merge ${title} into selected target`, disabled: !mergeTargetId, onClick: () => void submit("merge") },
-            { label: "Dismiss", ariaLabel: `Dismiss ${title}`, onClick: () => void submit("reject") },
-            { label: "Cancel", ariaLabel: `Collapse ${title} without submitting`, onClick: () => setExpanded(false) },
-          ]}
-        />
-      ) : (
-        <CardActions
-          label={`Review actions for ${title}`}
-          actions={[
-            { label: "Accept", ariaLabel: `Accept ${title} as-is`, primary: true, onClick: () => void submit("approve") },
-            { label: "Edit…", ariaLabel: `Edit ${title} before accepting`, onClick: () => setExpanded(true) },
-            { label: "Dismiss", ariaLabel: `Dismiss ${title}`, onClick: () => void submit("reject") },
-          ]}
-        />
-      )}
-    </article>
-  );
-}
-
-/**
- * Labeled text-button strip for the Phase 2 read cards. Replaces icon-only
- * toolbars — every action reads as a word, matching the Phase-1
- * PendingActionItem buttons. Reused by the Finds/Goals/Contacts card work.
- */
-function CardActions({
-  label,
-  actions,
-}: {
-  label: string;
-  actions: { label: string; ariaLabel?: string; onClick: () => void; disabled?: boolean; primary?: boolean }[];
-}) {
-  return (
-    <div className={toolbarClass} aria-label={label}>
-      {actions.map((action) => (
-        <button
-          key={action.label}
-          className={cn(textButtonClass, textButtonCompactClass, action.primary && "border-primary")}
-          type="button"
-          aria-label={action.ariaLabel}
-          disabled={action.disabled}
-          onClick={action.onClick}
-        >
-          {action.label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function PayloadEditor({
-  entityType,
-  payload,
-  setPayload,
-  displayLabels,
-}: {
-  entityType: string;
-  payload: AnyRecord;
-  setPayload: (payload: AnyRecord) => void;
-  displayLabels: { ownerName: string; agentName: string };
-}) {
-  function update(field: string, value: string) {
-    setPayload({ ...payload, [field]: value });
-  }
-
-  const field = (name: string, label: string, options?: { multiline?: boolean; type?: string }) => (
-    <label className={fieldClass} key={name}>
-      <span>{label}</span>
-      {options?.multiline ? (
-        <textarea className={textareaClass} value={payload[name] ?? ""} onChange={(event) => update(name, event.target.value)} />
-      ) : (
-        <input
-          className={inputClass}
-          type={options?.type ?? "text"}
-          value={payload[name] ?? ""}
-          onChange={(event) => update(name, event.target.value)}
-        />
-      )}
-    </label>
-  );
-
-  const status = statusOptions[entityType] ? (
-    <label className={fieldClass}>
-      <span>Status</span>
-      <select className={selectClass} value={payload.status ?? statusOptions[entityType][0]} onChange={(event) => update("status", event.target.value)}>
-        {statusOptions[entityType].map((statusValue) => (
-          <option key={statusValue} value={statusValue}>
-            {statusValue}
-          </option>
-        ))}
-      </select>
-    </label>
-  ) : null;
-
-  if (entityType === "task") {
-    const ownerType = (
-      <label className={fieldClass}>
-        <span>Owner</span>
-        <select className={selectClass} value={payload.ownerType ?? ""} onChange={(event) => update("ownerType", event.target.value)}>
-          <option value="">Unspecified</option>
-          <option value="owner">{displayLabels.ownerName}</option>
-          <option value="agent">{displayLabels.agentName}</option>
-        </select>
-      </label>
-    );
-
-    return (
-      <div className={formGridClass}>
-        {field("title", "Title")}
-        <div className={splitListClass}>
-          {status}
-          {ownerType}
-          {field("dueDate", "Due date")}
-        </div>
-        {field("description", "Description", { multiline: true })}
-        {field("sourceSummary", "Source summary", { multiline: true })}
-        {field("priorityReason", "Priority reason")}
-      </div>
-    );
-  }
-
-  if (entityType === "project") {
-    return (
-      <div className={formGridClass}>
-        {field("title", "Title")}
-        {status}
-        {field("summary", "Summary", { multiline: true })}
-        {field("priorityReason", "Priority reason")}
-      </div>
-    );
-  }
-
-  if (entityType === "person") {
-    return (
-      <div className={formGridClass}>
-        <div className={splitListClass}>
-          {field("name", "Name")}
-          {field("email", "Email", { type: "email" })}
-        </div>
-        {field("relationshipContext", "Relationship context", { multiline: true })}
-        {field("notes", "Notes", { multiline: true })}
-      </div>
-    );
-  }
-
-  if (entityType === "company") {
-    return (
-      <div className={formGridClass}>
-        <div className={splitListClass}>
-          {field("name", "Name")}
-          {field("website", "Website", { type: "url" })}
-        </div>
-        <label className={fieldClass}>
-          <span>Relationship</span>
-          <select
-            className={selectClass}
-            value={payload.relationshipLabel ?? "other"}
-            onChange={(event) => update("relationshipLabel", event.target.value)}
-          >
-            {["client", "vendor", "employer", "partner", "prospect", "other"].map((relationship) => (
-              <option key={relationship} value={relationship}>
-                {relationship}
-              </option>
-            ))}
-          </select>
-        </label>
-        {field("notes", "Notes", { multiline: true })}
-      </div>
-    );
-  }
-
-  if (entityType === "link") {
-    return (
-      <div className={formGridClass}>
-        {field("url", "URL", { type: "url" })}
-        {field("title", "Title")}
-        {status}
-        {field("summary", "Summary", { multiline: true })}
-        {field("whyItMatters", "Why it matters")}
-      </div>
-    );
-  }
-
-  if (entityType === "note") {
-    return (
-      <div className={formGridClass}>
-        {field("title", "Title")}
-        {field("body", "Body", { multiline: true })}
-      </div>
-    );
-  }
-
-  if (entityType === "goal") {
-    return (
-      <div className={formGridClass}>
-        {field("title", "Title")}
-        {status}
-        {field("description", "Description", { multiline: true })}
-      </div>
-    );
-  }
-
-  return (
-    <div className={formGridClass}>
-      {field("objectType", "Object type")}
-      {field("title", "Title")}
-      {field("summary", "Summary", { multiline: true })}
-    </div>
-  );
-}
-
-/**
- * Settled approvals (approved / executed / rejected) behind the quiet History
- * link. Read-only by construction: PendingActionItem renders settled statuses
- * without review buttons.
- */
-export function LiveApprovalHistoryContent() {
-  const viewerReady = useViewerReady();
-  const actions = useQuery(api.knowledge.pendingActionsForViewer, viewerReady ? { scope: "settled" } : "skip") as
-    | AnyRecord[]
-    | undefined;
-  const reviewPendingActionMutation = useMutation(api.knowledge.reviewPendingActionForViewer);
-  const reviewPendingAction = async (args: AnyRecord) => reviewPendingActionMutation(args as any);
-  const sorted = (actions ?? [])
-    .slice()
-    .sort((a, b) => Number(b.updatedAt ?? b.createdAt ?? 0) - Number(a.updatedAt ?? a.createdAt ?? 0));
-
-  return (
-    <LiveGate>
-      {!actions ? (
-        <section className={cn(cardClass, sectionClass)}>
-          <h2>Loading history</h2>
-        </section>
-      ) : sorted.length === 0 ? (
-        <section className={cn(cardClass, sectionClass)}>
-          <h2>No settled approvals yet</h2>
-          <p className={mutedClass}>Approvals you approve or reject move here, out of the queue.</p>
-        </section>
-      ) : (
-        <div className={itemListClass}>
-          {sorted.map((action) => (
-            <PendingActionItem key={action._id} action={action} reviewPendingAction={reviewPendingAction} />
-          ))}
-        </div>
-      )}
-    </LiveGate>
-  );
-}
-
-function PendingActionItem({
-  action,
-  reviewPendingAction,
-}: {
-  action: AnyRecord;
-  reviewPendingAction: (args: AnyRecord) => Promise<unknown>;
-}) {
-  const [draft, setDraft] = useState(() => editablePendingAction(action));
-  const [busyAction, setBusyAction] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const reviewable = ["drafted", "pending_approval", "failed"].includes(action.status);
-  // Calendar actions store the executor payload as JSON in `body`; decode it
-  // for display instead of dumping it (docs/ui-audit). Null falls through to
-  // the raw text so a malformed payload stays visible.
-  const calendarEvent = parseCalendarActionBody(action);
-  const primaryText = textValue(action.body, action.messageBody, action.approvalNotes, action.status);
-
-  function update(field: string, value: string) {
-    setDraft({ ...draft, [field]: value });
-  }
-
-  async function submit(nextAction: "approve" | "reject" | "revise") {
-    setBusyAction(nextAction);
-    setError(null);
-    try {
-      const args: AnyRecord = {
-        pendingActionId: action._id,
-        action: nextAction,
-        approvalNotes: textOrUndefined(draft.approvalNotes),
-      };
-      if (nextAction === "revise") {
-        args.recipients = parseRecipients(draft.recipients);
-        args.subject = draft.subject;
-        args.body = draft.body;
-        args.messageBody = draft.messageBody;
-      }
-      await reviewPendingAction(args);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Unable to update pending action.");
-    } finally {
-      setBusyAction(null);
-    }
-  }
-
-  return (
-    <article className={cn(itemClass, pendingActionItemClass)}>
-      <span className={itemIconClass}>
-        {calendarEvent ? <icons.CalendarDays size={17} aria-hidden /> : <icons.MessageSquareText size={17} aria-hidden />}
-      </span>
-      <div className={formGridClass}>
-        <div>
-          <p className={itemTitleClass}>{calendarEvent?.summary ?? action.subject ?? action.actionType}</p>
-          {calendarEvent ? (
-            <>
-              <p className={itemMetaClass}>{formatEventWhen(calendarEvent)}</p>
-              {calendarEvent.location ? (
-                <p className={itemMetaClass}>
-                  <icons.MapPin size={13} aria-hidden className="mr-1 inline-block align-[-2px]" />
-                  {calendarEvent.location}
-                </p>
-              ) : null}
-              {calendarEvent.description ? <p className={itemMetaClass}>{calendarEvent.description}</p> : null}
-            </>
-          ) : (
-            <p className={itemMetaClass}>{primaryText}</p>
-          )}
-        </div>
-        {/* Rendered above the form on purpose: the point of the warning is to be
-            read BEFORE the Approve button, not discovered after the tap. */}
-        {typeof action.reviewWarning === "string" && action.reviewWarning ? (
-          <p className={reviewWarningClass}>{action.reviewWarning}</p>
-        ) : null}
-        {!reviewable ? (
-          <p className={mutedClass}>{statusDescription(action)}</p>
-        ) : calendarEvent ? (
-          /* No payload form for calendar actions: the executor parses `body`
-             as JSON, so the only safe edit here is the owner's own note. */
-          <div className={formGridClass}>
-            <label className={fieldClass}>
-              <span>Review notes</span>
-              <input className={inputClass} value={draft.approvalNotes} onChange={(event) => update("approvalNotes", event.target.value)} />
-            </label>
-            {error ? <p className={errorTextClass}>{error}</p> : null}
-          </div>
-        ) : (
-          <div className={formGridClass}>
-            <div className={splitListClass}>
-              <label className={fieldClass}>
-                <span>Recipients</span>
-                <input className={inputClass} value={draft.recipients} onChange={(event) => update("recipients", event.target.value)} />
-              </label>
-              <label className={fieldClass}>
-                <span>Subject</span>
-                <input className={inputClass} value={draft.subject} onChange={(event) => update("subject", event.target.value)} />
-              </label>
-            </div>
-            <label className={fieldClass}>
-              <span>Message</span>
-              <textarea className={textareaClass} value={draft.messageBody || draft.body} onChange={(event) => update("messageBody", event.target.value)} />
-            </label>
-            <label className={fieldClass}>
-              <span>Review notes</span>
-              <input className={inputClass} value={draft.approvalNotes} onChange={(event) => update("approvalNotes", event.target.value)} />
-            </label>
-            {error ? <p className={errorTextClass}>{error}</p> : null}
-          </div>
-        )}
-      </div>
-      <div className={pendingActionSideClass}>
-        <span className={cn(badgeClass, badgeForPendingAction(action.status))}>{action.status}</span>
-        {reviewable ? (
-          <div className={toolbarClass} aria-label={`Review actions for ${action.subject ?? action.actionType}`}>
-            <button
-              className={cn(textButtonClass, textButtonCompactClass, "border-primary")}
-              type="button"
-              aria-label={`Approve ${action.subject ?? action.actionType}`}
-              disabled={Boolean(busyAction)}
-              onClick={() => void submit("approve")}
-            >
-              Approve
-            </button>
-            {!calendarEvent ? (
-              <button
-                className={cn(textButtonClass, textButtonCompactClass)}
-                type="button"
-                aria-label={`Save revisions for ${action.subject ?? action.actionType}`}
-                disabled={Boolean(busyAction)}
-                onClick={() => void submit("revise")}
-              >
-                Save changes
-              </button>
-            ) : null}
-            <button
-              className={cn(textButtonClass, textButtonCompactClass)}
-              type="button"
-              aria-label={`Reject ${action.subject ?? action.actionType}`}
-              disabled={Boolean(busyAction)}
-              onClick={() => void submit("reject")}
-            >
-              Reject
-            </button>
-          </div>
-        ) : null}
-      </div>
-    </article>
-  );
-}
-
-function editablePendingAction(action: AnyRecord) {
-  return {
-    recipients: formatRecipients(action.recipients),
-    subject: textValue(action.subject),
-    body: textValue(action.body),
-    messageBody: textValue(action.messageBody, action.body),
-    approvalNotes: textValue(action.approvalNotes),
-  };
-}
-
-function formatRecipients(recipients: unknown) {
-  if (Array.isArray(recipients)) {
-    return recipients.join(", ");
-  }
-  if (typeof recipients === "string") {
-    return recipients;
-  }
-  return recipients ? JSON.stringify(recipients) : "";
-}
-
-function parseRecipients(recipients: string) {
-  const trimmed = recipients.trim();
-  if (!trimmed) {
-    return [];
-  }
-  if (trimmed.startsWith("[") || trimmed.startsWith("{")) {
-    try {
-      return JSON.parse(trimmed);
-    } catch {
-      return trimmed.split(",").map((recipient) => recipient.trim()).filter(Boolean);
-    }
-  }
-  return trimmed.split(",").map((recipient) => recipient.trim()).filter(Boolean);
-}
-
-function badgeForPendingAction(status: string) {
-  // Palette lanes (docs/ui-audit): green = settled/approved, red = rejected or
-  // failed, gold = still needs the owner's attention.
-  if (status === "approved" || status === "sent" || status === "completed") {
-    return badgeGreenClass;
-  }
-  if (status === "rejected" || status === "failed") {
-    return badgeRedClass;
-  }
-  return badgeGoldClass;
-}
-
-function statusDescription(action: AnyRecord) {
-  if (action.status === "approved") {
-    return action.actionType === "calendar_event_create"
-      ? "Approved — on its way to your calendar."
-      : "Approved and waiting for execution.";
-  }
-  if (action.status === "sent" || action.status === "completed") {
-    return `Recorded${action.executedAt ? ` ${formatDate(action.executedAt)}` : ""}.`;
-  }
-  if (action.status === "rejected") {
-    return "Rejected during review.";
-  }
-  return action.error ?? "No further review available.";
-}
-
 const defaultNotificationPreferences = {
   urgentEnabled: true,
   pendingActionEnabled: true,
@@ -2510,11 +1436,6 @@ const defaultRecallPreferences = {
   allowProactiveRecall: true,
 };
 
-const defaultHarnessAutonomyPolicy = {
-  ingestionMode: "auto_accept_high_confidence",
-  actionApproval: "always_require",
-  notes: "Harnesses may write high-confidence, source-backed memories. External actions should stay drafted until reviewed.",
-};
 
 function base64UrlToUint8Array(value: string) {
   const padding = "=".repeat((4 - (value.length % 4)) % 4);
@@ -2584,10 +1505,6 @@ export function LiveSettingsContent() {
   const recallPreferences = {
     ...defaultRecallPreferences,
     ...(config?.recallPreferences ?? {}),
-  };
-  const harnessAutonomyPolicy = {
-    ...defaultHarnessAutonomyPolicy,
-    ...(config?.harnessAutonomyPolicy ?? {}),
   };
 
   return (
@@ -2756,57 +1673,6 @@ export function LiveSettingsContent() {
                   onBlur={(event) =>
                     void updateSecondBrainSettings({
                       recallPreferences: { ...recallPreferences, focusWindow: event.target.value },
-                    } as any)
-                  }
-                />
-              </label>
-            </div>
-          </section>
-          <section className={cn(cardClass, sectionClass, span6Class)}>
-            <h2>Harness autonomy</h2>
-            <p className={mutedClass}>How much local harnesses may do before asking you to review.</p>
-            <div className={formGridClass}>
-              <label className={fieldClass}>
-                <span>Memory ingestion</span>
-                <select
-                  className={selectClass}
-                  value={harnessAutonomyPolicy.ingestionMode}
-                  onChange={(event) =>
-                    void updateSecondBrainSettings({
-                      harnessAutonomyPolicy: { ...harnessAutonomyPolicy, ingestionMode: event.target.value },
-                    } as any)
-                  }
-                >
-                  <option value="suggest_only">Suggest only</option>
-                  <option value="auto_accept_high_confidence">Auto-accept high confidence memories</option>
-                  <option value="auto_accept_with_action_review">Auto-accept memory, review actions</option>
-                </select>
-              </label>
-              <label className={fieldClass}>
-                <span>External actions</span>
-                <select
-                  className={selectClass}
-                  value={harnessAutonomyPolicy.actionApproval}
-                  onChange={(event) =>
-                    void updateSecondBrainSettings({
-                      harnessAutonomyPolicy: { ...harnessAutonomyPolicy, actionApproval: event.target.value },
-                    } as any)
-                  }
-                >
-                  <option value="always_require">Always require approval</option>
-                  <option value="allow_low_risk_drafts">Allow low-risk drafts</option>
-                  <option value="allow_low_risk_send">Allow low-risk sends</option>
-                </select>
-              </label>
-              <label className={fieldClass}>
-                <span>Autonomy notes</span>
-                <textarea
-                  className={textareaClass}
-                  key={`autonomy-${harnessAutonomyPolicy.notes}`}
-                  defaultValue={harnessAutonomyPolicy.notes}
-                  onBlur={(event) =>
-                    void updateSecondBrainSettings({
-                      harnessAutonomyPolicy: { ...harnessAutonomyPolicy, notes: event.target.value },
                     } as any)
                   }
                 />
@@ -3032,14 +1898,6 @@ function NotificationSettings({
         <label className={checkboxFieldClass}>
           <input
             type="checkbox"
-            checked={preferences.pendingActionEnabled}
-            onChange={(event) => void setPreference("pendingActionEnabled", event.target.checked)}
-          />
-          <span>Pending actions</span>
-        </label>
-        <label className={checkboxFieldClass}>
-          <input
-            type="checkbox"
             checked={preferences.focusSummaryEnabled}
             onChange={(event) => void setPreference("focusSummaryEnabled", event.target.checked)}
           />
@@ -3140,13 +1998,28 @@ function NotificationSettings({
 }
 
 
-/** Reuse the existing review workflows in an expanded Mind row. */
-export function MindReviewDetail({ type, item }: { type: "approval" | "triage" | "memory"; item: AnyRecord }) {
-  const ready = useViewerReady();
-  const options = useQuery(api.knowledge.acceptedEntityOptionsForViewer, ready && type === "triage" ? {} : "skip");
-  const viewer = useQuery(api.auth.viewer, ready && type === "triage" ? {} : "skip");
-  const review = useMutation(api.knowledge.reviewPendingActionForViewer);
-  if (type === "approval") return <PendingActionItem action={item} reviewPendingAction={args => review(args as any)} />;
-  if (type === "triage") return options && viewer ? <TriageItem item={item} entityOptions={options} displayLabels={displayLabelsFrom(viewer)} /> : <p role="status">Loading review…</p>;
-  return <div className="grid gap-3"><p>{memorySummary(item)}</p><InlineSourceRefs sourceRefs={arrayValue(item.sourceRefs)} sourceRefIds={item.sourceRefIds ?? []} /><div className="flex gap-2"><MemoryReviewActions memory={item} /></div></div>;
+
+function CardActions({
+  label,
+  actions,
+}: {
+  label: string;
+  actions: { label: string; ariaLabel?: string; onClick: () => void; disabled?: boolean; primary?: boolean }[];
+}) {
+  return (
+    <div className={toolbarClass} aria-label={label}>
+      {actions.map((action) => (
+        <button
+          key={action.label}
+          className={cn(textButtonClass, textButtonCompactClass, action.primary && "border-primary")}
+          type="button"
+          aria-label={action.ariaLabel}
+          disabled={action.disabled}
+          onClick={action.onClick}
+        >
+          {action.label}
+        </button>
+      ))}
+    </div>
+  );
 }

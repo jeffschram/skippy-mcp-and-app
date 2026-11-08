@@ -40,8 +40,7 @@ try:
         if kind == 'link':
             reviewed_payload['url'] = 'https://example.invalid/review'
         candidate = run('knowledge:submitCandidateObject', {'brainInstanceId': brain, 'candidateEntityType': kind, 'candidatePayload': reviewed_payload})
-        approved = run('knowledge:approveTriageItem', {'triageItemId': candidate['triageItemId']})
-        created.append(approved['entityRef']['entityId'])
+        created.append(candidate['entityId'])
         if kind == 'link':
             run('knowledge:updateLinkStatusForBrain', {'brainInstanceId': brain, 'linkId': direct['entityId'], 'status': 'read'})
             links = run('knowledge:listLinksForViewer', {})['links']
@@ -49,24 +48,21 @@ try:
         if kind == 'note':
             notes = run('knowledge:listNotesForViewer', {})['notes']
             assert any(row['_id'] == direct['entityId'] and row['body'] == payload['body'] and row['sourceRefIds'] for row in notes)
-        print(kind + ': direct ingestion, review approval, and canonical pointer passed', flush=True)
-    visible = run('knowledge:acceptedEntityOptionsForViewer', {})
-    assert set(created).issubset({row['entityId'] for row in visible})
+        print(kind + ': direct ingestion, compatibility acceptance, and canonical pointer passed', flush=True)
     memory = run('knowledge:recordMemoryForBrain', {'brainInstanceId': brain, 'content': 'Known memory content', 'title': 'Verification memory',
                  'rubricDecision': 'Isolated verification', 'reviewBehavior': 'submit_for_review',
                  'relatedEntityRefs': [{'entityType': 'note', 'entityId': created[0]}],
                  'sourceRefs': [{'sourceSystem': 'verification', 'messageId': 'memory'}]})
-    run('knowledge:acceptMemoryForViewer', {'memoryId': memory['memoryId'], 'body': 'Updated memory content'})
     detail = run('knowledge:memoryDetailForBrain', {'brainInstanceId': brain, 'memoryId': memory['memoryId']})
-    assert detail['memory']['body'] == 'Updated memory content'
+    assert detail['memory']['body'] == 'Known memory content'
     assert len(detail['relatedEntities']) == 1 and len(detail['sourceRefs']) == 1
-    print('memory: capture, approval, update, provenance, and relationship read passed', flush=True)
+    print('memory: capture, direct acceptance, provenance, and relationship read passed', flush=True)
     started = run('interviews:startForBrain', {'brainInstanceId': brain, 'kind': 'decision', 'title': 'Verification interview'})
     for _ in range(started['interview']['questionCount']):
         answered = run('interviews:answerCurrentQuestionForBrain', {'brainInstanceId': brain, 'interviewId': started['interviewId'], 'answerText': 'A test decision', 'createMemoryCandidate': True})
         if answered.get('memoryCandidateId'):
             detail = run('knowledge:memoryDetailForBrain', {'brainInstanceId': brain, 'memoryId': answered['memoryCandidateId']})
-            assert detail['memory']['reviewState'] == 'pending_review'
+            assert detail['memory']['reviewState'] == 'accepted'
             break
     else:
         raise AssertionError('No interview memory candidate')
