@@ -3,7 +3,7 @@ import { AttentionBadge } from "../components/attention";
 
 import { useState, type ReactNode, type FormEvent } from "react";
 import { useMutation } from "convex/react";
-import { BellRing, CalendarDays, Check, MapPin, PauseCircle } from "lucide-react";
+import { BellRing, CalendarDays, Check, ClipboardList, ListTodo, MapPin, PauseCircle, Repeat2 } from "lucide-react";
 import { TASK_AREAS } from "@skippy/shared";
 import { api } from "../../lib/skippy-api";
 import { formatRelative } from "../../lib/display";
@@ -65,22 +65,28 @@ export function HomeItemRow({
 }) {
   const waited = row.isWaiting ? waitingDayCount(row, now) : undefined;
   const when = dateLabel(row);
+  const kindVisual = {
+    task: { icon: ListTodo, tone: "text-muted-foreground" },
+    event: { icon: CalendarDays, tone: "text-blue" },
+    recurrence: { icon: Repeat2, tone: "text-gold" },
+    review: { icon: ClipboardList, tone: "text-green" },
+  }[row.kind];
+  const KindIcon = kindVisual.icon;
 
   return (
     <div
-      className="flex items-start gap-3 border-b border-border px-1 py-3 last:border-b-0"
+      className="flex items-start gap-2 sm:gap-3 border-b border-border px-1 py-3 last:border-b-0"
 
     >
       {/* Events are attended, not completed, so they get no check control —
-          a checkbox that does nothing is worse than no checkbox. */}
-      {row.kind === "review" ? null : actions ?? (row.kind === "event" ? (
-        <span
-          className="mt-px grid size-6 flex-none place-items-center text-muted-foreground"
-          aria-hidden
-        >
-          <CalendarDays size={15} />
-        </span>
-      ) : (
+          a checkbox that does nothing is worse than no checkbox. Reviews are
+          actioned by the buttons below their content instead. Both still
+          reserve the control's 44px so every row's kind icon and title land on
+          the same vertical line; without the spacer a mixed list reads as
+          ragged columns. The spacer is inert, not an empty affordance. */}
+      {row.kind === "review" || row.kind === "event" ? (
+        <span aria-hidden="true" className="size-11 flex-none" />
+      ) : actions ?? (
         <button
           type="button"
           disabled={pending || row.status === "done" || row.status === "cancelled"}
@@ -89,14 +95,16 @@ export function HomeItemRow({
           aria-label={`Complete ${row.title}`}
           title={row.kind === "recurrence" ? "Log that you did this" : "Complete"}
         >
-          <Check size={14} />
+          <Check size={14} aria-hidden="true" />
         </button>
-      ))}
+      )}
 
-      <div className="grid min-w-0 flex-auto gap-[3px]">
+      <KindIcon size={18} aria-hidden="true" className={cn("mt-3 shrink-0", kindVisual.tone)} />
+      <div className={cn("relative grid min-w-0 flex-auto gap-[3px]", when && "md:pr-44")}>
         <button type="button" className="min-h-11 text-left text-[15px] [overflow-wrap:anywhere] focus-visible:outline-2" onClick={() => onOpen(row)}>{row.title}</button>
         <span className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
           {row.attentionResult ? <AttentionBadge result={row.attentionResult} /> : null}
+          {row.kind === "task" && !row.attentionResult ? <Badge tone="neutral">Task</Badge> : null}
           {row.kind === "review" ? <Badge tone="neutral">Review · {row.entityKind}</Badge> : null}
           {row.kind === "event" ? <Badge tone="blue">Event</Badge> : null}
           {row.kind === "recurrence" || row.fromRecurrence ? (
@@ -107,7 +115,7 @@ export function HomeItemRow({
           {row.areaLabel ? <Badge tone="neutral">{row.areaLabel}</Badge> : null}
 
           {when ? (
-            <span className={row.isOverdue ? "font-semibold text-red" : undefined}>
+            <span className={cn("md:absolute md:right-0 md:top-0 md:flex md:min-h-11 md:w-40 md:items-center md:justify-end md:text-right", row.isOverdue && "font-semibold text-red")}>
               {row.isOverdue ? "overdue — " : ""}
               {when}
             </span>
@@ -128,7 +136,7 @@ export function HomeItemRow({
         {row.kind === "review" ? actions : null}
       </div>
 
-      <div className="flex flex-none items-start gap-1">
+      <div className="flex flex-none items-start gap-1 empty:hidden">
         {row.isWaiting && onNudge ? (
           <IconButton
             className="size-11"
@@ -137,7 +145,7 @@ export function HomeItemRow({
             disabled={pending}
             onClick={() => onNudge(row)}
           >
-            <BellRing size={15} />
+            <BellRing size={15} aria-hidden="true" />
           </IconButton>
         ) : null}
         {row.kind === "recurrence" && onPause ? (
@@ -148,7 +156,7 @@ export function HomeItemRow({
             title={row.recurrenceStatus === "active" ? "Pause this repeat" : "Resume this repeat"}
             onClick={() => onPause(row)}
           >
-            <PauseCircle size={15} />
+            <PauseCircle size={15} aria-hidden="true" />
           </IconButton>
         ) : null}
       </div>
