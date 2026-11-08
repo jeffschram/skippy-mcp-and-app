@@ -129,7 +129,7 @@ export function AgendaSection({ days = 7, showSummary = false }: { days?: number
   );
 
   const summary = showSummary
-    ? buildTodaySummary(sections.find((section) => section.key === "today")?.items.map(({ item }) => item) ?? [])
+    ? buildTodaySummary(sections.find((section) => section.key === "today")?.items.map(({ item }) => item) ?? [], { now, start: from })
     : null;
 
   return (
