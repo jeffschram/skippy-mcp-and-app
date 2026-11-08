@@ -5,6 +5,8 @@ import { useMemo } from "react";
 import { useQuery } from "convex/react";
 import { CalendarDays, MapPin, Video } from "lucide-react";
 import { groupAgendaByDay, type AgendaItem } from "@skippy/shared";
+import { buildTodaySummary } from "../../../../convex/todayModel";
+import { useAttentionClock } from "../components/attention";
 import { sectionAgendaDays } from "./agenda-helpers";
 import { api } from "../../lib/skippy-api";
 import { Badge, EmptyState, LoadingRow, Section } from "../components";
@@ -18,8 +20,6 @@ import { textButtonClass, textButtonCompactClass } from "../page-classes";
 /* width and is not where the value is — the value is a correct merged  */
 /* ordering of calendar events, due tasks, and firing recurrences.     */
 /* ------------------------------------------------------------------ */
-
-const DAY_MS = 86_400_000;
 
 function viewerTimeZone(): string {
   try {
@@ -106,28 +106,31 @@ function AgendaRow({
   );
 }
 
-export function AgendaSection({ days = 7 }: { days?: number }) {
+export function AgendaSection({ days = 7, showSummary = false }: { days?: number; showSummary?: boolean }) {
+  const now = useAttentionClock();
   const ready = useViewerReady();
   const timeZone = viewerTimeZone();
 
   // Anchored to the start of today so the range is stable across renders
   // rather than sliding with the clock and refetching constantly.
-  const { from, to } = useMemo(() => {
-    const now = new Date();
-    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-    return { from: startOfToday, to: startOfToday + days * DAY_MS };
-  }, [days]);
+  const date = new Date(now);
+  const from = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+  const to = new Date(date.getFullYear(), date.getMonth(), date.getDate() + days).getTime();
 
-  const items = useQuery(api.agenda.agendaForViewer, ready ? { from, to } : "skip") as
+  const items = useQuery(api.agenda.agendaForViewer, ready && now ? { from, to } : "skip") as
     | AgendaItem[]
     | undefined;
 
   // Day groups collapse into pinned sections: Overdue (pulled out of its
   // day, red accent) → Today → Tomorrow → This week (far days merged).
   const sections = useMemo(
-    () => (items ? sectionAgendaDays(groupAgendaByDay(items, timeZone), timeZone) : []),
-    [items, timeZone],
+    () => (items ? sectionAgendaDays(groupAgendaByDay(items, timeZone), timeZone, now) : []),
+    [items, timeZone, now],
   );
+
+  const summary = showSummary
+    ? buildTodaySummary(sections.find((section) => section.key === "today")?.items.map(({ item }) => item) ?? [])
+    : null;
 
   return (
     <Section
@@ -142,6 +145,7 @@ export function AgendaSection({ days = 7 }: { days?: number }) {
         </Link>
       }
     >
+      {summary ? <p className="mb-3 mt-0 text-sm" aria-label="Today summary">{summary}</p> : null}
       {items === undefined ? (
         <LoadingRow label="Loading agenda…" />
       ) : sections.length === 0 ? (
