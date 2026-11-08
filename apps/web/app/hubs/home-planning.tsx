@@ -4,9 +4,8 @@ import { Component, useEffect, useMemo, useRef, useState, type ReactNode } from 
 import { useQuery } from "convex/react";
 import { HomeActionsProvider, HomeItemActions, ItemActionFeedback } from "./home-item-actions";
 import { ItemDetailsModal } from "./item-details-modal";
-import { TASK_AREAS } from "@skippy/shared";
 import { api } from "../../lib/skippy-api";
-import { Button, Dialog, LoadingRow, Section, Select } from "../components";
+import { Button, Dialog, LoadingRow, Section } from "../components";
 import { useViewerReady } from "./use-viewer";
 import { AddRow, HomeItemRow } from "./life-tasks";
 import { areaLabel } from "./life-tasks-helpers";
@@ -14,7 +13,7 @@ import type { AgendaRow } from "./agenda-rows";
 import { homePeriods, parseHomeHash } from "./home-planning-helpers";
 import { buildTodaySummary } from "../../../../convex/todayModel";
 
-type Scope = ReturnType<typeof homePeriods> & { area: string | null; status: "open" | "completed" | "paused" };
+type Scope = ReturnType<typeof homePeriods> & { status: "open" };
 type Page = { rows: any[]; hasMore: boolean; cursor: string | null };
 function adapt(row: any, start: number): AgendaRow {
   return { ...row, at: row.at ?? undefined, area: row.area ?? undefined, areaLabel: row.area ? areaLabel(row.area) : undefined,
@@ -22,7 +21,7 @@ function adapt(row: any, start: number): AgendaRow {
 }
 
 // Each mounted page stays reactive. Parent-owned cursors preserve loaded pages
-// when All collapses or a dialog opens; changed filters start a fresh list.
+// when All collapses or a dialog opens; changed time windows start a fresh list.
 function Inventory({ period, scope, now, renderRow, moreInAll, children }: {
   period: "today" | "week" | "all"; scope: Scope; now: number;
   renderRow: (row: any) => React.ReactNode; moreInAll: () => void;
@@ -70,7 +69,7 @@ function Inventory({ period, scope, now, renderRow, moreInAll, children }: {
       </li>;
     })}</ul>
     {loading ? <LoadingRow label={`Loading ${period === "week" ? "Upcoming" : period}…`} /> : null}
-    {!loading && unique.length === 0 ? <p className="text-sm text-muted-foreground">{last.hasMore ? "No matching items in this batch. Continue to see more." : "Nothing here for these filters."}</p> : null}
+    {!loading && unique.length === 0 ? <p className="text-sm text-muted-foreground">{last.hasMore ? "No matching items in this batch. Continue to see more." : "Nothing here right now."}</p> : null}
     {last?.hasMore || unique.length > limit ? (
       period !== "all" ? <Button small onClick={moreInAll}>More in All</Button> :
       <Button small disabled={loading} onClick={() => { if (unique.length >= target) setTarget(value => value + 50); setBatchLimit(value => value + 10); }}>Load more</Button>
@@ -112,8 +111,6 @@ function HomePlanningContent() {
     document.addEventListener("visibilitychange", returnToHome);
     return () => { clearInterval(timer); window.removeEventListener("focus", returnToHome); document.removeEventListener("visibilitychange", returnToHome); };
   }, []);
-  const [area, setArea] = useState<string | null>(null);
-  const [status, setStatus] = useState<Scope["status"]>("open");
   const [allOpen, setAllOpen] = useState(false);
   const [allMounted, setAllMounted] = useState(false);
   const [years, setYears] = useState(1);
@@ -131,7 +128,7 @@ function HomePlanningContent() {
   // Minute ticks expire visible events; do not invalidate pagination on each tick.
   const [snapshot, setSnapshot] = useState(periods);
   if (snapshot.start !== periods.start || snapshot.tomorrow !== periods.tomorrow) setSnapshot(periods);
-  const scope: Scope = { ...snapshot, area, status: "open", horizon: new Date(new Date(snapshot.start).getFullYear(), new Date(snapshot.start).getMonth(), new Date(snapshot.start).getDate() + 365 * years).getTime() };
+  const scope: Scope = { ...snapshot, status: "open", horizon: new Date(new Date(snapshot.start).getFullYear(), new Date(snapshot.start).getMonth(), new Date(snapshot.start).getDate() + 365 * years).getTime() };
   function open(row: AgendaRow) {
     opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     if (window.location.hash !== `#${row.kind}-${row.id}`) window.history.pushState(null, "", `${window.location.pathname}${window.location.search}#${row.kind}-${row.id}`);
@@ -147,10 +144,6 @@ function HomePlanningContent() {
   if (!ready || !now) return <LoadingRow label="Loading Home…" />;
   return <div id="home-planning" tabIndex={-1} className="grid min-w-0 gap-4">
     <div className="flex flex-wrap items-center gap-2">
-      <Select aria-label="Filter area" value={area ?? ""} onChange={e => setArea(e.target.value || null)}>
-        <option value="">All areas</option><option value="unsorted">Unsorted</option>
-        {TASK_AREAS.map(value => <option key={value} value={value}>{areaLabel(value)}</option>)}
-      </Select>
       <Button onClick={() => setAddOpen(true)}>Add task / repeat</Button>
     </div>
     <Inventory key={`today-${key}`} scope={scope} now={now} period="today" renderRow={renderRow} moreInAll={openAll}>
@@ -173,10 +166,7 @@ function HomePlanningContent() {
     </Section>
     <Section title={<button className="min-h-11 text-left" aria-expanded={allOpen} aria-controls="home-all" onClick={() => { setAllOpen(!allOpen); setAllMounted(true); }}>{allOpen ? "▾" : "▸"} All</button>}>
       <div id="home-all" hidden={!allOpen}>
-        <Select aria-label="Item status" value={status} onChange={e => setStatus(e.target.value as Scope["status"])}>
-          <option value="open">Open</option><option value="completed">Completed/cancelled</option><option value="paused">Paused/retired</option>
-        </Select>
-        {allMounted ? <Inventory key={`all-${key}-${status}`} scope={{ ...scope, status }} now={now} period="all" renderRow={renderRow} moreInAll={openAll} /> : null}
+        {allMounted ? <Inventory key={`all-${key}`} scope={scope} now={now} period="all" renderRow={renderRow} moreInAll={openAll} /> : null}
         <Button small onClick={() => setYears(value => value + 1)}>Include another year of calendar events</Button>
       </div>
     </Section>
