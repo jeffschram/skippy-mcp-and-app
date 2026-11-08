@@ -291,7 +291,9 @@ export function nextCalendarOccurrence(
     );
 
   if (rule.freq === "DAILY") {
-    let candidate = at(cursor.year, cursor.month, cursor.day);
+    const civilDays = Math.round((Date.UTC(cursor.year, cursor.month - 1, cursor.day) - Date.UTC(time.year, time.month - 1, time.day)) / DAY_MS);
+    const offset = ((-civilDays % rule.interval) + rule.interval) % rule.interval;
+    let candidate = addCalendarDays(at(cursor.year, cursor.month, cursor.day), offset, timeZone);
     for (let step = 0; step < MAX_PERIOD_SCAN; step += 1) {
       if (candidate > after) return candidate;
       candidate = addCalendarDays(candidate, rule.interval, timeZone);
@@ -322,9 +324,11 @@ export function nextCalendarOccurrence(
   }
 
   if (rule.freq === "MONTHLY") {
-    const targetDay = rule.byMonthDay ?? cursor.day;
+    const targetDay = rule.byMonthDay ?? time.day;
+    const monthsFromAnchor = (cursor.year - time.year) * 12 + cursor.month - time.month;
+    const offset = ((-monthsFromAnchor % rule.interval) + rule.interval) % rule.interval;
     for (let step = 0; step < MAX_PERIOD_SCAN; step += 1) {
-      const monthIndex = cursor.month - 1 + step * rule.interval;
+      const monthIndex = cursor.month - 1 + offset + step * rule.interval;
       const year = cursor.year + Math.floor(monthIndex / 12);
       const month = (monthIndex % 12) + 1;
       const candidate = at(year, month, Math.min(targetDay, daysInMonth(year, month)));
@@ -333,10 +337,11 @@ export function nextCalendarOccurrence(
     throw new Error("could not resolve next monthly occurrence");
   }
 
-  const targetMonth = rule.byMonth ?? cursor.month;
-  const targetDay = rule.byMonthDay ?? cursor.day;
+  const targetMonth = rule.byMonth ?? time.month;
+  const targetDay = rule.byMonthDay ?? time.day;
+  const offset = ((-(cursor.year - time.year) % rule.interval) + rule.interval) % rule.interval;
   for (let step = 0; step < MAX_PERIOD_SCAN; step += 1) {
-    const year = cursor.year + step * rule.interval;
+    const year = cursor.year + offset + step * rule.interval;
     const candidate = at(year, targetMonth, Math.min(targetDay, daysInMonth(year, targetMonth)));
     if (candidate > after) return candidate;
   }
@@ -376,8 +381,11 @@ export function computeNextDue(
 
   if (recurrence.rule.kind === "interval") {
     const everyDays = recurrence.rule.everyDays;
-    let candidate = recurrence.nextDueAt;
-    for (let step = 0; step < MAX_PERIOD_SCAN && candidate <= searchFrom; step += 1) {
+    const start = zonedParts(recurrence.nextDueAt, timeZone);
+    const end = zonedParts(searchFrom, timeZone);
+    const civilDays = Math.round((Date.UTC(end.year, end.month - 1, end.day) - Date.UTC(start.year, start.month - 1, start.day)) / DAY_MS);
+    let candidate = addCalendarDays(recurrence.nextDueAt, Math.max(0, Math.floor(civilDays / everyDays)) * everyDays, timeZone);
+    while (candidate <= searchFrom) {
       candidate = addCalendarDays(candidate, everyDays, timeZone);
     }
     return candidate;

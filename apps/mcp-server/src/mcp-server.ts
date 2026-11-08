@@ -1887,6 +1887,7 @@ export function createMcpServer(
       annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: false },
       inputSchema: z.object({
         recurrenceId: z.string().optional().describe("Existing recurrence ID to update."),
+        expectedOccurrenceVersion: z.number().int().min(0).optional().describe("Required for edits; read occurrenceVersion from list_recurrences."),
         title: z.string(),
         description: z.string().optional(),
         area: z
@@ -1957,9 +1958,11 @@ export function createMcpServer(
       title: "Log a completion of a repeating obligation",
       description:
         "Record that a recurring obligation was done, advancing its schedule. Pass completedAt to backdate — for completion-anchored recurrences it determines the next due date.",
-      annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      annotations: { destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: z.object({
         recurrenceId: z.string(),
+        expectedOccurrenceVersion: z.number().int().min(0).describe("Read occurrenceVersion from list_recurrences."),
+        requestId: z.string().min(1).max(200).describe("Unique request ID; reuse this exact ID for retries."),
         completedAt: z.number().optional().describe("Epoch ms; defaults to now, earlier to backdate."),
         note: z.string().optional(),
       }),

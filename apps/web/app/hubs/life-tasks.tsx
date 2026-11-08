@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useState, type ReactNode, type FormEvent } from "react";
 import { useMutation } from "convex/react";
 import { BellRing, CalendarDays, Check, MapPin, PauseCircle } from "lucide-react";
 import { TASK_AREAS } from "@skippy/shared";
@@ -51,14 +51,16 @@ export function HomeItemRow({
   onPause,
   onOpen,
   pending = false,
+  actions,
 }: {
   row: AgendaRow;
   now: number;
-  onComplete: (row: AgendaRow) => void;
-  onNudge: (row: AgendaRow) => void;
-  onPause: (row: AgendaRow) => void;
+  onComplete?: (row: AgendaRow) => void;
+  onNudge?: (row: AgendaRow) => void;
+  onPause?: (row: AgendaRow) => void;
   onOpen: (row: AgendaRow) => void;
   pending?: boolean;
+  actions?: ReactNode;
 }) {
   const waited = row.isWaiting ? waitingDayCount(row, now) : undefined;
   const when = dateLabel(row);
@@ -70,7 +72,7 @@ export function HomeItemRow({
     >
       {/* Events are attended, not completed, so they get no check control —
           a checkbox that does nothing is worse than no checkbox. */}
-      {row.kind === "event" ? (
+      {actions ?? (row.kind === "event" ? (
         <span
           className="mt-px grid size-6 flex-none place-items-center text-muted-foreground"
           aria-hidden
@@ -82,13 +84,13 @@ export function HomeItemRow({
           type="button"
           disabled={pending || row.status === "done" || row.status === "cancelled"}
           className="mt-px grid size-11 flex-none cursor-pointer appearance-none place-items-center rounded-full border-[1.5px] border-border bg-transparent text-muted-foreground hover:border-gold hover:text-gold"
-          onClick={() => onComplete(row)}
+          onClick={() => onComplete?.(row)}
           aria-label={`Complete ${row.title}`}
           title={row.kind === "recurrence" ? "Log that you did this" : "Complete"}
         >
           <Check size={14} />
         </button>
-      )}
+      ))}
 
       <div className="grid min-w-0 flex-auto gap-[3px]">
         <button type="button" className="min-h-11 text-left text-[15px] [overflow-wrap:anywhere] focus-visible:outline-2" onClick={() => onOpen(row)}>{row.title}</button>
@@ -123,7 +125,7 @@ export function HomeItemRow({
       </div>
 
       <div className="flex flex-none items-start gap-1">
-        {row.isWaiting ? (
+        {row.isWaiting && onNudge ? (
           <IconButton
             className="size-11"
             aria-label={`Nudge about ${row.title}`}
@@ -134,7 +136,7 @@ export function HomeItemRow({
             <BellRing size={15} />
           </IconButton>
         ) : null}
-        {row.kind === "recurrence" ? (
+        {row.kind === "recurrence" && onPause ? (
           <IconButton
             className="size-11"
             aria-label={`${row.recurrenceStatus === "active" ? "Pause" : "Resume"} ${row.title}`}

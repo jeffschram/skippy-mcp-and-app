@@ -1,0 +1,21 @@
+Implemented phase action controls
+
+Home rows and the item detail modal share completion controls and per-item pending/error state with synchronous submission guards. Secondary actions live in details. Task forms persist title/description/deadline edits, including ordinary deadline clearing; support an owned waiting-person picker and clearing waiting; preserve draft-only nudge approval; and link the same task to an existing project with an explanation that it leaves all personal Home sections.
+
+Event details show stored calendar/conference HTTP(S) links, an encoded Maps location link, and description. Invalid or missing links are hidden. Events have no completion control. No calendar writes were added.
+
+Repeat details support plain-language cadence changes, anchor/timezone/explicit next-due edits, completion, skip, pause/resume, and recent history. The occurrence lifecycle atomically preserves task identity, closes the live task, updates the schedule/version, and stores a durable request outcome. Replaying a request returns its original result; another stale request cannot advance the occurrence. Skip records a separate outcome, leaves lastCompletedAt unchanged, cancels the live task, and advances from the scheduled cadence. Edits update a live task's deadline without replacing its identity or description. Pause/resume preserves dates/history and leaves the task open. History remains capped at 24 entries, including legacy completion records.
+
+Home, Mind, knowledge task completion, project-linked task execution, and MCP repeat completion use the protected lifecycle. Completion retains attention/execution/dependency updates. Waiting targets and linked records are owner checked. Wants cannot receive deadlines; blank titles and invalid dates are rejected. Old interval schedules now advance beyond the former 400-day ceiling; multi-period calendar schedules retain their original cadence across missed periods.
+
+Validation
+- All workspace TypeScript checks passed; final Convex and web checks passed after fixing a test fixture annotation.
+- pnpm test: 1,245 tests passed across backend/root and all workspace packages.
+- After final retired-action visibility adjustment: shared action rendering tests passed (3 tests).
+- git diff --check passed.
+- New regression coverage includes completion replay, stale requests, ownership, spawned identity, skip semantics, DST, long-overdue schedules, calendar cadence, pause/resume, deadline clearing, waiting changes, Home period projections, source links and event/terminal action visibility.
+
+Runner handoff
+No push, merge, deployment, cloud mutation, or calendar write was performed. Live authenticated browser and deployed Convex validation were not run. The runner should publish schema/backend/frontend/MCP together: occurrenceActions is new, task/recurrence provenance/version fields are optional for existing records, and completion requires an occurrence version plus retry request ID. MCP list_recurrences exposes that version. Pause/resume requires a version. Existing live associations acquire durable provenance when edited, paused/resumed, completed/skipped, or encountered by the due-task firing job; older already-completed tasks without provenance cannot be reconstructed reliably.
+
+The local source is the implementation deliverable. These output files are disposable upload artifacts; no canonical projectFiles records were modified directly.

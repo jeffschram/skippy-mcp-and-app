@@ -1,3 +1,4 @@
+import { transitionTask, taskRecurrence, patchSchedule, validDate, isTerminal } from "./occurrenceLifecycle";
 import { internalMutationGeneric, internalQueryGeneric } from "convex/server";
 import { mutationGeneric, queryGeneric } from "convex/server";
 import { v } from "convex/values";
@@ -210,6 +211,9 @@ export const createLifeTask = mutationGeneric({
       throw new Error("title is required");
     }
 
+    if (args.dueAt !== undefined) validDate(args.dueAt);
+    if (args.commitment === "want" && args.dueAt !== undefined) throw new Error("Wants cannot have deadlines");
+
     // No belongs_to relationship is written, which is exactly what makes this a
     // life task rather than a project task.
     const taskId = await ctx.db.insert("tasks", {
@@ -252,12 +256,14 @@ export const setLifeTaskStatus = mutationGeneric({
       throw new Error("task not found for brain instance");
     }
 
-    const now = Date.now();
-    await ctx.db.patch(task._id, {
-      status: args.status,
-      completedAt: args.status === "done" ? now : undefined,
-      updatedAt: now,
-    });
+    if (args.status === "done" || args.status === "cancelled") {
+      await transitionTask(ctx.db, brain._id, task, args.status === "done" ? "complete" : "skip");
+    } else {
+      if (task.recurrenceId && isTerminal(task)) throw new Error("Past occurrences cannot be reopened");
+      if (args.status === "waiting" && !task.waitingOn) throw new Error("Choose who this task is waiting on");
+      await ctx.db.patch(task._id, { status: args.status, completedAt: undefined,
+        ...(args.status !== "waiting" ? { waitingOn: undefined, waitingSince: undefined, lastNudgedAt: undefined } : {}), updatedAt: Date.now() });
+    }
 
     return { taskId: task._id, status: args.status };
   },
@@ -266,6 +272,8 @@ export const setLifeTaskStatus = mutationGeneric({
 export const updateLifeTask = mutationGeneric({
   args: {
     taskId: v.id("tasks"),
+    expectedUpdatedAt: v.optional(v.number()),
+    expectedOccurrenceVersion: v.optional(v.number()),
     title: v.optional(v.string()),
     description: v.optional(v.string()),
     area: v.optional(taskArea),
@@ -279,6 +287,17 @@ export const updateLifeTask = mutationGeneric({
       throw new Error("task not found for brain instance");
     }
 
+    if (args.expectedUpdatedAt !== undefined && args.expectedUpdatedAt !== task.updatedAt) throw new Error("Task changed. Reopen details before saving.");
+    if (args.title !== undefined && !args.title.trim()) throw new Error("Title is required");
+    if (args.dueAt != null) validDate(args.dueAt);
+    const recurrence = await taskRecurrence(ctx.db, brain._id, task);
+    if (recurrence && (args.commitment === "want" || args.dueAt === null)) throw new Error("A scheduled occurrence must retain its deadline");
+    if ((args.commitment ?? task.commitment) === "want" && args.dueAt != null) throw new Error("Wants cannot have deadlines");
+    if (recurrence && args.dueAt !== undefined) {
+      if (args.expectedOccurrenceVersion === undefined) throw new Error("Refresh this occurrence before changing its deadline");
+      await patchSchedule(ctx.db, brain._id, { recurrenceId: recurrence._id, expectedOccurrenceVersion: args.expectedOccurrenceVersion, nextDueAt: args.dueAt! });
+    }
+
     await ctx.db.patch(task._id, {
       ...(args.title !== undefined ? { title: args.title.trim() } : {}),
       ...(args.description !== undefined ? { description: args.description } : {}),
@@ -286,6 +305,7 @@ export const updateLifeTask = mutationGeneric({
       ...(args.commitment !== undefined ? { commitment: args.commitment } : {}),
       // null clears the due date; undefined leaves it alone.
       ...(args.dueAt !== undefined ? { dueAt: args.dueAt ?? undefined } : {}),
+      ...(args.commitment === "want" ? { dueAt: undefined } : {}),
       updatedAt: Date.now(),
     });
 

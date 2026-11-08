@@ -32,6 +32,7 @@ export const setWaitingOn = mutationGeneric({
     taskId: v.id("tasks"),
     waitingOn: v.union(entityRef, v.null()),
     waitingSince: v.optional(v.number()),
+    expectedUpdatedAt: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const brainInstanceId = (await requireOwnedBrain(ctx)).brain._id;
@@ -41,6 +42,15 @@ export const setWaitingOn = mutationGeneric({
       throw new Error("task not found for brain instance");
     }
 
+    if (args.expectedUpdatedAt !== undefined && args.expectedUpdatedAt !== task.updatedAt) throw new Error("Task changed. Reopen details before saving.");
+    if (task.status === "done" || task.status === "cancelled") throw new Error("Task is no longer open");
+    if (args.waitingSince !== undefined && !Number.isFinite(args.waitingSince)) throw new Error("Invalid waiting date");
+    if (args.waitingOn) {
+      const tables = { goal: "goals", project: "projects", task: "tasks", note: "knowledge", person: "people", company: "companies", link: "knowledge", memory: "knowledge" } as const;
+      const id = ctx.db.normalizeId(tables[args.waitingOn.entityType], args.waitingOn.entityId);
+      const target = id ? await ctx.db.get(id) : null;
+      if (!target || target.brainInstanceId !== brainInstanceId) throw new Error("Waiting target unavailable");
+    }
     const now = Date.now();
 
     if (args.waitingOn === null) {

@@ -291,3 +291,16 @@ describe("appendCompletion", () => {
     expect(history[0]?.completedAt).toBe(10);
   });
 });
+
+
+describe("missed multi-period calendar cadence", () => {
+  it("retains the original daily, quarterly and biennial slots", () => {
+    for (const [rrule, due, now, expected] of [
+      ["FREQ=DAILY;INTERVAL=3", "2026-01-01T08:00:00Z", "2026-01-05T09:00:00Z", "2026-01-07T08:00:00Z"],
+      ["FREQ=MONTHLY;INTERVAL=3;BYMONTHDAY=1", "2026-01-01T08:00:00Z", "2026-05-05T09:00:00Z", "2026-07-01T08:00:00Z"],
+      ["FREQ=YEARLY;INTERVAL=2;BYMONTH=1;BYMONTHDAY=1", "2020-01-01T08:00:00Z", "2025-05-05T09:00:00Z", "2026-01-01T08:00:00Z"],
+    ]) {
+      expect(computeNextDue({ rule: { kind: "calendar", rrule: rrule! }, anchor: "schedule", timeZone: "UTC", nextDueAt: Date.parse(due!) }, Date.parse(now!))).toBe(Date.parse(expected!));
+    }
+  });
+});

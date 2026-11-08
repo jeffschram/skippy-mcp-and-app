@@ -399,7 +399,15 @@ export default defineSchema({
     .index("by_brain_review", ["brainInstanceId", "processingState", "attention.reviewAt"])
     .index("by_brain_scheduled", ["brainInstanceId", "processingState", "attention.scheduledAt"]),
 
+  occurrenceActions: defineTable({
+    brainInstanceId: v.id("brainInstances"), recurrenceId: v.id("recurrences"), requestId: v.string(),
+    version: v.number(), action: v.union(v.literal("complete"), v.literal("skip")),
+    result: v.object({ recurrenceId: v.id("recurrences"), nextDueAt: v.number(), completedAt: v.union(v.number(), v.null()) }),
+  }).index("by_brain_request", ["brainInstanceId", "requestId"]),
+
   tasks: defineTable({
+    recurrenceId: v.optional(v.id("recurrences")),
+    occurrenceVersion: v.optional(v.number()),
     brainInstanceId: v.id("brainInstances"),
     title: v.string(),
     description: v.optional(v.string()),
@@ -486,6 +494,7 @@ export default defineSchema({
   // union: this is scheduling state, not owner-authored knowledge, and must
   // stay off the ingestObject/triageItems rubric path.
   recurrences: defineTable({
+    occurrenceVersion: v.optional(v.number()),
     brainInstanceId: v.id("brainInstances"),
     title: v.string(),
     description: v.optional(v.string()),
@@ -520,7 +529,9 @@ export default defineSchema({
     // Capped completion log — see RECURRENCE_HISTORY_LIMIT in @skippy/shared.
     // "When did I last change the filter?" is half the value of this table.
     history: v.optional(
-      v.array(v.object({ completedAt: v.number(), note: v.optional(v.string()) })),
+      v.array(v.object({ completedAt: v.optional(v.number()), note: v.optional(v.string()),
+        outcome: v.optional(v.union(v.literal("completed"), v.literal("skipped"))),
+        occurredAt: v.optional(v.number()), scheduledFor: v.optional(v.number()), taskId: v.optional(v.id("tasks")), })),
     ),
 
     // The car, the house, the person this obligation attaches to.

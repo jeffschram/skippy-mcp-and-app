@@ -2213,7 +2213,7 @@ describe("life-layer tools", () => {
       });
       await client.callTool({
         name: "complete_recurrence",
-        arguments: { recurrenceId: "rec_1", completedAt: 1000 },
+        arguments: { recurrenceId: "rec_1", completedAt: 1000, expectedOccurrenceVersion: 0, requestId: "completion-1" },
       });
     });
 

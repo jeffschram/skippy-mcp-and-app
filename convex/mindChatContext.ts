@@ -6,9 +6,10 @@ const TABLES = ["tasks", "projects", "goals", "people", "companies", "knowledge"
 const TYPES: Record<string, string> = { tasks: "task", projects: "project", goals: "goal", people: "person", companies: "company" };
 const CATEGORIES = new Set(["event", "goal", "project", "task", "person", "company", "note", "link", "memory"]);
 const PREFIX = "mind-item:";
-const FIELDS = ["title", "name", "subject", "description", "summary", "body", "relationshipContext", "status", "reviewState", "executionState", "url", "htmlLink", "conferenceUrl", "isAllDay", "dueAt", "startAt", "endAt", "nextDueAt", "actionType", "kind", "memoryType", "messageBody", "location", "timeZone", "lastCompletedAt", "rule", "anchor", "recurrence", "recurringEventId", "currentTaskId", "projectId", "phaseId", "candidateEntityType", "candidateEntityId"];
+const FIELDS = ["title", "name", "subject", "description", "summary", "body", "relationshipContext", "status", "reviewState", "executionState", "url", "htmlLink", "conferenceUrl", "isAllDay", "dueAt", "startAt", "endAt", "nextDueAt", "actionType", "kind", "memoryType", "messageBody", "location", "timeZone", "lastCompletedAt", "rule", "anchor", "recurrence", "recurringEventId", "currentTaskId", "occurrenceVersion", "recurrenceId", "history", "projectId", "phaseId", "candidateEntityType", "candidateEntityId"];
 function details(row: Record<string, unknown>) {
   const result = Object.fromEntries(FIELDS.flatMap(key => row[key] === undefined ? [] : [[key, typeof row[key] === "string" ? row[key].slice(0, 4000) : row[key]]]));
+  if (Array.isArray(row.history)) result.history = row.history.slice(-24).map(entry => ({ ...entry, ...(entry.note ? { note: String(entry.note).slice(0, 1000) } : {}) }));
   if (row.candidatePayload && typeof row.candidatePayload === "object") result.candidate = detailsWithoutCandidate(row.candidatePayload as Record<string, unknown>);
   return result;
 }
