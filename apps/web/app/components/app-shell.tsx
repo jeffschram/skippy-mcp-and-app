@@ -9,7 +9,6 @@ import {
   Brain,
   Network,
   Menu,
-  Focus,
   CalendarDays,
   FolderKanban,
   House,
@@ -62,7 +61,6 @@ export const primaryHubs: Hub[] = [
 ];
 
 export const secondaryHubs: Hub[] = [
-  { href: "/attention", label: "Attention", icon: Focus, match: (p) => p.startsWith("/attention") },
   { href: "/mind", label: "Mind", icon: Network, match: (p) => p.startsWith("/mind") },
   {
     href: "/brain",

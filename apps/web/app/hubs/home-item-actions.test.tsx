@@ -20,6 +20,13 @@ describe("shared action capabilities", () => {
     expect(repeated).toContain("Log completion"); expect(repeated).toContain("Skip occurrence"); expect(repeated).toContain("Resume repeat");
     expect(repeated).not.toContain("Cancel task");
   });
+  it("offers review transitions in both rows and details without lifecycle controls", () => {
+    for (const details of [false, true]) {
+      const html = render({ kind: "review", entityKind: "project", id: "p", title: "Project" }, details);
+      expect(html).toContain("Done reviewing"); expect(html).toContain("Later");
+      expect(html).not.toContain("Complete"); expect(html).not.toContain("Cancel task");
+    }
+  });
   it("allows only valid HTTP(S) sources without embedded credentials", () => {
     for (const url of ["javascript:alert(1)", "https://", "file:///tmp/a", "https://user:pass@example.com"]) expect(safeExternalUrl(url)).toBe(false);
     expect(safeExternalUrl("https://calendar.google.com/calendar/event?eid=a")).toBe(true);

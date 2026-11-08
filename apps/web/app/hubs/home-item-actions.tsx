@@ -5,7 +5,7 @@ import { useMutation } from "convex/react";
 import { api } from "../../lib/skippy-api";
 import { Button } from "../components";
 
-type ActionRow = { kind: string; id: string; title: string; status?: string; recurrenceId?: string | null | undefined; occurrenceVersion?: number | null | undefined; recurrenceStatus?: string | null | undefined; isWaiting?: boolean | undefined };
+type ActionRow = { entityKind?: import("../../../../convex/attentionModel").AttentionKind | null; kind: string; id: string; title: string; status?: string; recurrenceId?: string | null | undefined; occurrenceVersion?: number | null | undefined; recurrenceStatus?: string | null | undefined; isWaiting?: boolean | undefined };
 type Feedback = { pending?: boolean; error?: string; message?: string };
 const keyFor = (row: ActionRow) => row.recurrenceId ? `recurrence:${row.recurrenceId}` : `${row.kind}:${row.id}`;
 type ActionState = { state: Record<string, Feedback>; run: (row: ActionRow, work: () => Promise<unknown>, message?: string) => Promise<boolean> };
@@ -54,6 +54,7 @@ export function HomeItemActions({ row, details = false }: { row: ActionRow; deta
       } else await taskStatus({ taskId: row.id as any, status: action === "complete" ? "done" : "cancelled" });
     }, action === "complete" ? "Completed." : row.recurrenceId ? "Occurrence skipped." : "Cancelled.");
   }
+  if (row.kind === "review") return <ReviewActions row={row} />;
   if (row.kind === "event") return null;
   return <div className="flex flex-wrap items-center gap-2">
     {details && row.recurrenceStatus === "retired" ? <p className="text-sm">This repeat is retired. Its history remains available.</p> : null}
@@ -64,5 +65,28 @@ export function HomeItemActions({ row, details = false }: { row: ActionRow; deta
       const result = await nudge({ taskId: row.id as any });
       if (!result.pendingActionId) throw new Error("No nudge was drafted. Choose who this task is waiting on first.");
     }, "Nudge drafted — review it in Pending actions.")}>Draft nudge</Button> : null}
+  </div>;
+}
+
+function ReviewActions({ row }: { row: ActionRow }) {
+  const { pending, run } = useItemAction(row);
+  const save = useMutation(api.attention.setForViewer);
+  const [later, setLater] = useState(false);
+  const [date, setDate] = useState("");
+  const submit = (reviewAt?: number) => run(async () => {
+    if (!row.entityKind || row.entityKind === "task") throw new Error("Review is unavailable");
+    if (reviewAt !== undefined && (!Number.isFinite(reviewAt) || reviewAt <= Date.now())) throw new Error("Choose a future review time");
+    await save({ kind: row.entityKind, id: row.id, reviewAction: reviewAt === undefined ? "done" : "later", attention: reviewAt === undefined ? {} : { reviewAt } });
+  }, reviewAt === undefined ? "Review finished." : "Review moved.");
+  return <div className="flex flex-wrap items-center gap-2">
+    <Button className="min-h-11" disabled={pending} onClick={() => void submit()}>Done reviewing</Button>
+    <Button className="min-h-11" disabled={pending} onClick={() => setLater(true)}>Later</Button>
+    {later ? <form className="flex flex-wrap items-center gap-2" onSubmit={event => {
+      event.preventDefault(); void submit(new Date(date).getTime()).then(saved => { if (saved) setLater(false); });
+    }}>
+      <label className="text-sm">Review on <input aria-label="Review on" type="datetime-local" required disabled={pending} value={date} onChange={event => setDate(event.target.value)} /></label>
+      <Button disabled={pending} type="submit">Move review</Button>
+      <Button disabled={pending} type="button" onClick={() => setLater(false)}>Cancel</Button>
+    </form> : null}
   </div>;
 }

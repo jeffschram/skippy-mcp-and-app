@@ -25,7 +25,6 @@ import { api } from "../../lib/skippy-api";
 import { agentRoleDisplayName, agentRoleFromMetadata, formatRelative } from "../../lib/display";
 import { LiveGate } from "../live-auth";
 import { Badge, Button, Card, IconButton, LoadingRow, Section, TextArea, useToast } from "../components";
-import { AttentionFocus } from "../components/attention";
 import { HomePlanning } from "./home-planning";
 import { useViewerReady } from "./use-viewer";
 import { formatFileSize } from "./project-library-helpers";
@@ -663,7 +662,6 @@ export function TodayContent() {
       ) : (
         <div className="grid gap-4">
           <HomePlanning />
-          <AttentionFocus />
           {sync ? (
             <div role="status">
               <span className={syncStatusPillClass}>

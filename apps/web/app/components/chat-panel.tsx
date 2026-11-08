@@ -938,7 +938,7 @@ export function ProjectChatWorkspace({
 }
 
 /** Key the entire surface so drafts, async sends and subscriptions stay with their entity. */
-export function ItemDetailsChat({ kind, id, label }: { kind: "task" | "event" | "recurrence"; id: string; label: string }) {
+export function ItemDetailsChat({ kind, id, label }: { kind: "task" | "event" | "recurrence" | "review"; id: string; label: string }) {
   // Canonical Convex IDs encode table identity; preserve the Mind transcript key.
   const pageKey = `mind-item:${id}`;
   return <ChatSurface key={`${kind}:${id}`} scope={{ kind: "page", pageKey, label }}

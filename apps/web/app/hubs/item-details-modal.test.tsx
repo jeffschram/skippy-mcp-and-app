@@ -5,6 +5,7 @@ import { useQuery } from "convex/react";
 import { ItemDetailsModal } from "./item-details-modal";
 
 vi.mock("./home-item-actions", () => ({ HomeItemActions: () => null, ItemActionFeedback: () => null }));
+vi.mock("../components/attention", () => ({ AttentionEditor: ({ kind, id }: any) => <div data-editor={`${kind}:${id}`} /> }));
 vi.mock("./item-editors", () => ({ TaskEditor: () => null, ScheduleEditor: () => null }));
 vi.mock("convex/react", () => ({ useQuery: vi.fn() }));
 vi.mock("../components", () => ({ Button: () => null, LoadingRow: () => <p>Loading item…</p> }));
@@ -17,7 +18,7 @@ vi.mock("../components/chat-panel", () => ({
   ItemDetailsChat: ({ kind, id }: { kind: string; id: string }) => <div data-chat={`${kind}:${id}`} />,
 }));
 const selection = { kind: "task" as const, id: "canonical-a" };
-function render(detail: any, selected = selection) {
+function render(detail: any, selected: import("./item-details-modal").ItemSelection = selection) {
   vi.mocked(useQuery).mockReturnValue(detail);
   return renderToStaticMarkup(createElement(ItemDetailsModal, { selection: selected, onClose: () => {}, opener: { current: null } }));
 }
@@ -40,6 +41,13 @@ describe("item details", () => {
     const next = render({ ...detail, row: { ...detail.row, id: "canonical-b", title: "Other item" } }, { kind: "task", id: "canonical-b" });
     expect(next).toContain('data-chat="task:canonical-b"');
     expect(next).not.toContain("canonical-a");
+  });
+  it("uses the resolved review subtype for editing and preserves the canonical chat ID", () => {
+    const html = render({ ...detail, row: { kind: "review", entityKind: "person", id: "person-a", title: "Person", status: "active", href: "/brain/contacts" } }, { kind: "review", id: "person-a" });
+    expect(html).toContain('data-editor="person:person-a"');
+    expect(html).toContain('data-chat="review:person-a"');
+    expect(html).toContain("Review details");
+    expect(html).toContain("Open person");
   });
   it("does not mount chat while loading or after deletion/access loss", () => {
     expect(render(undefined)).toContain("Loading item");

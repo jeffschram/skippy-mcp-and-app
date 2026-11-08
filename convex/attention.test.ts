@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { getForViewer, setForViewer, focusForViewer, browseForViewer } from "./attention";
+import { getForViewer, setForViewer, eligible } from "./attention";
 
 type Row = Record<string, any>;
 function fixture(rows: Row[], signedIn = true) {
@@ -76,39 +76,35 @@ describe("attention access and persistence", () => {
     expect(ctx.db.patch).not.toHaveBeenCalled();
   });
 });
-describe("attention focus and browse", () => {
-  it("includes automatic and manual In Progress while respecting ownership, snoozes, and archives", async () => {
-    const ctx = fixture([
-      item("projects:active", { status: "in_progress" }),
-      item("knowledge:manual", { kind: "note", attention: { override: "in_progress" } }),
-      item("projects:snoozed", { status: "in_progress", focusSnoozedUntil: now + 1 }),
-      item("projects:archived", { status: "in_progress", processingState: "archived" }),
-      item("projects:other", { status: "in_progress", brainInstanceId: "brain:other" }),
-      item("tasks:todo", { status: "todo" }),
-    ]);
-    const focus = await run(focusForViewer, ctx, { now });
-    expect(focus.items.map((row: Row) => row.id)).toEqual(["tasks:todo", "knowledge:manual", "projects:active"]);
-    expect(focus.items.slice(1).every((row: Row) => row.result.status === "in_progress")).toBe(true);
+describe("review transitions", () => {
+  it("acknowledges without changing lifecycle and preserves the latest reason", async () => {
+    const row = item("projects:a", { status: "in_progress", attention: { override: "immediate", reviewAt: 0, scheduledAt: 1, reason: "Latest context" } });
+    const ctx = fixture([row]);
+    await run(setForViewer, ctx, { kind: "project", id: row._id, reviewAction: "done", attention: { reason: "Stale context" } });
+    expect(row.status).toBe("in_progress");
+    expect(row.attention).toEqual({ override: "ok", reason: "Latest context", assessedAt: expect.any(Number) });
+    expect((await run(getForViewer, ctx, { kind: "project", id: row._id, now })).result.status).toBe("ok");
+    const reviewAt = Date.now() + 100000;
+    await run(setForViewer, ctx, { kind: "project", id: row._id, reviewAction: "later", attention: { reviewAt } });
+    expect(row.attention).toEqual({ override: "ok", reason: "Latest context", reviewAt, assessedAt: expect.any(Number) });
+    expect((await run(getForViewer, ctx, { kind: "project", id: row._id, now: reviewAt })).result.status).toBe("stale");
   });
-  it("ranks actionable items and excludes archives, completed work, and archived-project tasks", async () => {
-    const rows = [
-      item("tasks:urgent", { status: "todo", dueAt: now - 1 }),
-      item("people:review", { name: "Review contact", attention: { reviewAt: now } }),
-      item("tasks:open", { status: "todo" }),
-      item("tasks:done", { status: "done", dueAt: now - 1 }),
-      item("tasks:hidden", { status: "todo", dueAt: now - 1 }),
-      item("projects:archive", { status: "archived" }),
-      item("relationships:parent", { type: "belongs_to", from: { entityType: "task", entityId: "tasks:hidden" }, to: { entityType: "project", entityId: "projects:archive" } }),
-      item("people:other", { brainInstanceId: "brain:other", attention: { override: "immediate" } }),
-    ];
-    const ctx = fixture(rows);
-    const focus = await run(focusForViewer, ctx, { now });
-    expect(focus.items.map((row: Row) => row.id)).toEqual(["tasks:urgent", "people:review", "tasks:open"]);
-    const browse = await run(browseForViewer, ctx, { kind: "task", now, paginationOpts: { numItems: 25, cursor: null } });
-    expect(browse.page.map((row: Row) => row.id)).toEqual(["tasks:urgent", "tasks:open", "tasks:done"]);
+  it("rejects stale editor saves, past Later times, and task review dates", async () => {
+    const row = item("people:a", { attention: { reason: "Changed" } });
+    const ctx = fixture([row, item("tasks:a")]);
+    await expect(run(setForViewer, ctx, { kind: "person", id: row._id, attention: {}, expectedAttention: {} })).rejects.toThrow("Attention changed");
+    await expect(run(setForViewer, ctx, { kind: "person", id: row._id, attention: { reviewAt: 0 }, reviewAction: "later" })).rejects.toThrow("future");
+    await expect(run(setForViewer, ctx, { kind: "task", id: "tasks:a", attention: { reviewAt: Date.now() + 10000 } })).rejects.toThrow("deadlines");
+    expect(ctx.db.patch).not.toHaveBeenCalled();
+  });
+  it("retains the shared archived-parent and relationship-budget checks", async () => {
+    const task = item("tasks:a");
+    const parent = item("projects:p", { status: "archived" });
+    const link = item("relationships:l", { type: "belongs_to", from: { entityType: "task", entityId: task._id }, to: { entityType: "project", entityId: parent._id } });
+    expect(await eligible(fixture([task, parent, link]) as any, task as any, "task", "brain:mine")).toBe(false);
+    expect(await eligible(fixture(Array.from({ length: 65 }, (_, i) => ({ ...link, _id: `relationships:${i}` }))) as any, task as any, "task", "brain:mine")).toBe(false);
   });
 });
-
 
 it("returns only linked sources in the owner's brain", async () => {
   const ctx = fixture([

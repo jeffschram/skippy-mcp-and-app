@@ -9,9 +9,10 @@ import { Dialog, DialogContent, DialogTitle } from "../components/ui/dialog";
 import { HomeItemActions, ItemActionFeedback } from "./home-item-actions";
 import { safeExternalUrl } from "./item-action-helpers";
 import { TaskEditor, ScheduleEditor } from "./item-editors";
+import { AttentionEditor } from "../components/attention";
 import { ItemDetailsChat } from "../components/chat-panel";
 
-export type ItemSelection = { kind: "task" | "event" | "recurrence"; id: string };
+export type ItemSelection = { kind: "task" | "event" | "recurrence" | "review"; id: string };
 
 class DetailsBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
   state = { failed: false };
@@ -38,7 +39,7 @@ export function ItemDetailsModal({ selection, onClose, opener }: {
         target?.focus();
       }}
       className="z-[80] flex max-h-[calc(100dvh-24px)] w-[calc(100%-24px)] max-w-3xl flex-col gap-0 overflow-y-auto p-0 [overflow-wrap:anywhere]">
-      <DialogTitle ref={heading} tabIndex={-1} className="px-5 pb-3 pt-5 pr-12">{selection?.kind === "event" ? "Event" : selection?.kind === "recurrence" ? "Recurrence" : "Task"} details</DialogTitle>
+      <DialogTitle ref={heading} tabIndex={-1} className="px-5 pb-3 pt-5 pr-12">{selection?.kind === "event" ? "Event" : selection?.kind === "recurrence" ? "Recurrence" : selection?.kind === "review" ? "Review" : "Task"} details</DialogTitle>
       {selection ? <DetailsBoundary key={`${selection.kind}:${selection.id}`}><ItemDetails selection={selection} /></DetailsBoundary> : null}
     </DialogContent>
   </Dialog>;
@@ -54,6 +55,8 @@ function ItemDetails({ selection }: { selection: ItemSelection }) {
       <h3 className="text-lg font-semibold">{row.title}</h3>
       <HomeItemActions row={row} details />
       <ItemActionFeedback row={row} />
+      {row.entityKind ? <AttentionEditor kind={row.entityKind} id={row.id} hideTaskCompletion /> : null}
+      {row.kind === "review" && row.href ? <Link className="underline" href={row.href}>Open {row.entityKind}</Link> : null}
       <p className="text-sm">Status: {row.status}{row.area ? ` · ${row.area}` : ""}</p>
       <p className="whitespace-pre-wrap">{detail.description || "No description."}</p>
       <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 text-sm">
