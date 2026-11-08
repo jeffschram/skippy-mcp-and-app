@@ -3,7 +3,7 @@ import { query } from "./_generated/server";
 import { compareValues, v } from "convex/values";
 import { eligible, resultValidator } from "./attention";
 import { attentionKind, attentionMetadata } from "./attentionValidators";
-import { attentionHref, resolveAttention, type AttentionKind } from "./attentionModel";
+import { attentionHref, resolveAttention, taskSourceLinks, type AttentionKind } from "./attentionModel";
 import { requireOwnedBrain } from "./auth";
 
 const kind = v.union(v.literal("task"), v.literal("event"), v.literal("recurrence"), v.literal("review"));
@@ -259,7 +259,10 @@ export const getForViewer = query({
     const sources: { label: string; url: string }[] = [];
     for (const sourceId of [...new Set([...refs.map(ref => ref.sourceRefId), ...(data.sourceRefIds ?? [])])].slice(0, 20)) {
       const source = await ctx.db.get(sourceId as import("./_generated/dataModel").Id<"sourceRefs">);
-      if (source && source.brainInstanceId === brain._id && (source.url || source.deepLink)) sources.push({ label: source.sourceSystem, url: (source.url || source.deepLink)! });
+      if (!source || source.brainInstanceId !== brain._id) continue;
+      for (const link of taskSourceLinks(source)) {
+        if (!sources.some(existing => existing.url === link.href)) sources.push({ label: link.label, url: link.href });
+      }
     }
     if (data.htmlLink) sources.push({ label: "Calendar event", url: data.htmlLink });
     if (args.kind === "event" && data.location?.trim()) sources.push({ label: "Open in Maps", url: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(data.location)}` });
@@ -273,7 +276,8 @@ export const getForViewer = query({
       updatedAt: data.updatedAt ?? 0, waitingOn: data.waitingOn ?? null,
       schedule: repeatRecord?.rule ? { rule: repeatRecord.rule, anchor: repeatRecord.anchor, nextDueAt: repeatRecord.nextDueAt,
         history: (repeatRecord.history ?? []).map((entry: any) => ({ outcome: entry.outcome ?? "completed", at: entry.occurredAt ?? entry.completedAt, scheduledFor: entry.scheduledFor ?? null, note: entry.note ?? null })) } : null,
-      dates, timeZone: data.timeZone ?? repeatRecord?.timeZone ?? null, recurrence: repeatDescription, sources };
+      dates, timeZone: data.timeZone ?? repeatRecord?.timeZone ?? null, recurrence: repeatDescription,
+      sources: sources.filter(source => taskSourceLinks({ sourceSystem: "", url: source.url }).length > 0) };
 
   },
 });

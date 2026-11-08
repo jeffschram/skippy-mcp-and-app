@@ -947,11 +947,11 @@ export function ItemDetailsChat({ kind, id, label }: { kind: "task" | "event" | 
 
 export function MindCardChat({ itemId, label, taskId, onCompletedClose }: { itemId: string; label: string; taskId?: string | undefined; onCompletedClose?: (() => void) | undefined }) {
   const { isAuthenticated } = useConvexAuth();
-  const task = useQuery(api.attention.getForViewer, isAuthenticated && taskId ? { kind: "task", id: taskId, now: 0 } : "skip");
+  const task = useQuery(api.homeInventory.getForViewer, isAuthenticated && taskId ? { kind: "task", id: taskId } : "skip");
   const { setCardActive } = useMindChat();
   useEffect(() => { setCardActive(true); return () => setCardActive(false); }, [setCardActive]);
   return <ChatSurface key={itemId} scope={{ kind: "page", pageKey: `mind-item:${itemId}`, label }}
-    mind card completedTaskStatus={task?.taskStatus} onCompletedCardClose={onCompletedClose} className="mt-3 max-h-[45%] shrink-0 border-t border-[var(--mind-border)] pt-2" />;
+    mind card completedTaskStatus={task?.row.status} onCompletedCardClose={onCompletedClose} className="mt-3 max-h-[45%] shrink-0 border-t border-[var(--mind-border)] pt-2" />;
 }
 
 function MindChat({ scope }: { scope: ChatScope }) {

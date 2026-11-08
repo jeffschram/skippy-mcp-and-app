@@ -1,16 +1,15 @@
 "use client";
 
 import { MindCardChat } from "../components/chat-panel";
-import { MindAttentionCard } from "./mind-attention";
-import { todayRange, type FeedRow } from "./mind-attention-model";
-import { withMindEvents, eventFeedRow } from "./mind-events";
+import { ItemDetailsModal } from "../hubs/item-details-modal";
+import { withMindEvents, todayRange } from "./mind-events";
 import { MindList } from "./mind-list";
 import { MindCategoryIcon } from "./mind-category-icon";
 import { AttentionEditor, useAttentionClock } from "../components/attention";
 import { ATTENTION, resolveAttention } from "../../../../convex/attentionModel";
 import dynamic from "next/dynamic";
 import { Component, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { useMutation, useQuery } from "convex/react";
+import { useQuery } from "convex/react";
 import {
   ArrowUpRight,
   Focus,
@@ -22,7 +21,6 @@ import {
 import { api } from "../../lib/skippy-api";
 import { useViewerReady } from "../hubs/use-viewer";
 import { LiveGate } from "../live-auth";
-import type { Id } from "../../../../convex/_generated/dataModel";
 import type { MindGraph, MindKind } from "../../../../convex/mindGraphHelpers";
 import { layoutKey, relationshipPositions } from "./relationship-layout";
 import { completionProject } from "./completion-context";
@@ -80,38 +78,25 @@ export function MindContent() {
   );
 }
 export function MindExplorer({ graph: liveGraph }: { graph: MindGraph }) {
-  const completeTask = useMutation(api.knowledge.markTaskDoneForViewer);
-  const [completion, setCompletion] = useState<{ graph: MindGraph; id: string; projectId: string | null; fading: boolean } | null>(null);
   const now = useAttentionClock();
   const ready = useViewerReady();
-  const agenda = useQuery(api.agenda.agendaForViewer, ready && now ? { ...todayRange(now), includeProjectTasks: true } : "skip");
-  const eventGraph = useMemo(() => withMindEvents(liveGraph, agenda ?? [], now), [liveGraph, agenda, now]);
-  const graph = completion?.graph ?? eventGraph;
+  const events = useQuery(api.calendar.calendarEventsInRange, ready && now ? todayRange(now) : "skip");
+  const graph = useMemo(() => withMindEvents(liveGraph, (events ?? []).filter(event => !event.isMaster).map(event => ({
+    id: event._id, source: "event" as const, title: event.title, at: event.startAt,
+    endAt: event.endAt, isAllDay: event.isAllDay, location: event.location, href: event.htmlLink,
+  })), now), [liveGraph, events, now]);
+  const eventOpener = useRef<HTMLElement | null>(null);
   const previousSelection = useRef<string | null>(null);
-  const latestSelection = useRef<string | null>(null);
 
   const [query, setQuery] = useState("");
   const [enabled, setEnabled] = useState(
     () => new Set(Object.keys(KINDS) as MindKind[]),
   );
-  const [attentionCard, setAttentionCard] = useState<FeedRow | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
-  latestSelection.current = selected;
-  useEffect(() => {
-    if (!completion?.fading) return;
-    const timer = setTimeout(() => {
-      if (latestSelection.current === completion.id) {
-        setSelected(completion.projectId && liveGraph.nodes.some(n => n.id === completion.projectId) ? completion.projectId : null);
-        setReset(n => n + 1);
-      }
-      setCompletion(null);
-    }, window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 700);
-    return () => clearTimeout(timer);
-  }, [completion, liveGraph]);
   const [branch, setBranch] = useState<MindKind | null>(null);
   const [list, setList] = useState(false);
   useEffect(() => {
-    const close = (event: KeyboardEvent) => { if (event.key === "Escape" && !(event.target instanceof HTMLElement && event.target.closest("input, textarea, select, form"))) { setSelected(null); setAttentionCard(null); setQuery(""); setBranch(null); setEnabled(new Set(Object.keys(KINDS) as MindKind[])); setReset(n => n + 1); } };
+    const close = (event: KeyboardEvent) => { if (event.key === "Escape" && !(event.target instanceof HTMLElement && event.target.closest("input, textarea, select, form"))) { setSelected(null); setQuery(""); setBranch(null); setEnabled(new Set(Object.keys(KINDS) as MindKind[])); setReset(n => n + 1); } };
     window.addEventListener("keydown", close);
     return () => window.removeEventListener("keydown", close);
   }, []);
@@ -147,7 +132,7 @@ export function MindExplorer({ graph: liveGraph }: { graph: MindGraph }) {
     if (node?.kind === "task") completionParent.current = { id: node.id, parentId: completionProject(graph, node.id, previousSelection.current) };
   }, [node, graph]);
   const [closingCard, setClosingCard] = useState<string | null>(null);
-  const currentCardId = attentionCard?.key ?? selected;
+  const currentCardId = selected;
   const swipe = useRef<{ x: number; y: number; horizontal: boolean } | null>(null);
   const [swipeOffset, setSwipeOffset] = useState<number | null>(null);
   const [swipeClosing, setSwipeClosing] = useState(false);
@@ -159,7 +144,7 @@ export function MindExplorer({ graph: liveGraph }: { graph: MindGraph }) {
   useEffect(() => {
     if (!swipeClosing) return;
     const timer = setTimeout(() => {
-      setAttentionCard(null);
+
       setSelected(null);
       setReset(n => n + 1);
       setSwipeClosing(false);
@@ -171,7 +156,7 @@ export function MindExplorer({ graph: liveGraph }: { graph: MindGraph }) {
     if (!closingCard || closingCard !== currentCardId) { setClosingCard(null); return; }
     const timer = setTimeout(() => {
       const parentId = completionParent.current?.id === closingCard ? completionParent.current.parentId : null;
-      setAttentionCard(null);
+
       setSelected(!list && parentId && liveGraph.nodes.some(record => record.id === parentId) ? parentId : null);
       setReset(n => n + 1);
       setClosingCard(null);
@@ -184,7 +169,8 @@ export function MindExplorer({ graph: liveGraph }: { graph: MindGraph }) {
   const recordLeftMap = Boolean(selected && selected !== owner.id && !selectedKind && !node);
   const records = visible.nodes.filter((n) => n.id !== owner.personId);
   function selectNode(id: string | null) {
-    setAttentionCard(null);
+
+    eventOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     previousSelection.current = selected;
     if (id === null) { clear(); return; }
     if (id === owner.id || id === owner.personId) {
@@ -205,19 +191,6 @@ export function MindExplorer({ graph: liveGraph }: { graph: MindGraph }) {
       setEnabled(new Set(Object.keys(KINDS) as MindKind[]));
     }
     setSelected(id);
-  }
-  async function finishSelectedTask() {
-    if (!node || node.kind !== "task" || completion) return;
-    const projectId = completionProject(graph, node.id, previousSelection.current);
-    const pending = { graph, id: node.id, projectId, fading: false };
-    setCompletion(pending);
-    try {
-      await completeTask({ taskId: node.id as Id<"tasks"> });
-      setCompletion({ ...pending, fading: true });
-    } catch (error) {
-      setCompletion(null);
-      throw error;
-    }
   }
   const neighbors = useMemo(
     () =>
@@ -262,7 +235,7 @@ export function MindExplorer({ graph: liveGraph }: { graph: MindGraph }) {
               aria-label="Search mind"
               placeholder="Find a thought, person, project…"
               value={query}
-              onChange={(e) => { setQuery(e.target.value); setAttentionCard(null); setSelected(null); setBranch(null); }}
+              onChange={(e) => { setQuery(e.target.value); setSelected(null); setBranch(null); }}
             />
             {query && (
               <button
@@ -278,7 +251,7 @@ export function MindExplorer({ graph: liveGraph }: { graph: MindGraph }) {
             <button type="button" className={cn(mindControlClass, mindToolClass, "rounded-full")} aria-pressed={list} onClick={() => setList(true)}>
               <List size={16} /> List
             </button>
-            <button type="button" className={cn(mindControlClass, mindToolClass, "rounded-full")} aria-pressed={!list} onClick={() => { setList(false); setAttentionCard(null); }}>
+            <button type="button" className={cn(mindControlClass, mindToolClass, "rounded-full")} aria-pressed={!list} onClick={() => { setList(false); }}>
               <Network size={16} /> Map
             </button>
           </div>
@@ -302,11 +275,11 @@ export function MindExplorer({ graph: liveGraph }: { graph: MindGraph }) {
         <div data-mind-view={list ? "list" : "map"} className={cn("absolute inset-x-0", list ? "bottom-[210px] top-[130px] sm:bottom-[190px] sm:top-[95px]" : "inset-y-0")}>
           <div className="relative h-full min-w-0 overflow-hidden">
             {list ? (
-              <MindList graph={graph} records={records} selected={selected} query={query} onSelect={selectNode} attentionSelected={Boolean(attentionCard)} onOpenAttention={row => { setSelected(null); setAttentionCard(row); }} />
+              <MindList graph={graph} records={records} selected={selected} query={query} onSelect={selectNode} />
             ) : (
               <MapBoundary>
                 <Scene
-                  graph={completion?.fading ? { ...world, exitingId: completion.id } : world}
+                  graph={world}
                   selected={selected}
                   onSelect={selectNode}
                   reset={reset}
@@ -317,7 +290,7 @@ export function MindExplorer({ graph: liveGraph }: { graph: MindGraph }) {
 
           </div>
           {!list && query.trim() && !records.length && <p role="status" className="pointer-events-none absolute inset-x-0 top-[140px] z-20 text-center text-sm text-[var(--mind-muted)]">No matching records</p>}
-          {(selected || attentionCard) && <aside
+          {selected && node?.kind !== "event" && <aside
             className="mind-detail-card flex flex-col absolute bottom-4 top-4 z-30 w-[450px] max-w-[calc(100%-32px)] overflow-hidden rounded-xl border border-[var(--mind-border)] bg-[color-mix(in_srgb,var(--mind-panel)_96.08%,transparent)] p-[22px] shadow-[0_12px_45px_color-mix(in_srgb,var(--mind-ink)_5.1%,transparent)] [scrollbar-width:thin] max-[1023px]:p-5"
             onPointerDown={event => {
               if (event.pointerType !== "touch" || !event.isPrimary || !window.matchMedia("(max-width: 1023px)").matches || swipeClosing) return;
@@ -350,8 +323,8 @@ export function MindExplorer({ graph: liveGraph }: { graph: MindGraph }) {
             aria-live="polite"
           >
             <div className="min-h-0 flex-1 overflow-y-auto [scrollbar-width:thin]">
-            {(!node || node.kind === "event") && <button className={cn("float-right p-1", mindControlClass)} onClick={() => { selectNode(null); setAttentionCard(null); }} aria-label="Close browser"><X size={18} /></button>}
-            {attentionCard ? <MindAttentionCard key={attentionCard.key} row={attentionCard} onClose={() => setAttentionCard(null)} /> : node?.kind === "event" && node.agenda ? <MindAttentionCard key={node.id} row={eventFeedRow(node.agenda)} onClose={() => selectNode(null)} /> : selectedKind ? (
+            {!node && <button className={cn("float-right p-1", mindControlClass)} onClick={() => { selectNode(null); }} aria-label="Close browser"><X size={18} /></button>}
+            {selectedKind ? (
               <div>
                 <p className="text-[12px] uppercase tracking-[.15em] text-[var(--mind-muted)]">
                   {owner.title} / category
@@ -417,10 +390,10 @@ export function MindExplorer({ graph: liveGraph }: { graph: MindGraph }) {
                   </button>
                 </div>
                 <h2 className="my-3 flex items-start gap-3 font-serif text-[28px] font-normal leading-[1.35] tracking-[-0.025em] [overflow-wrap:anywhere]">
-                  <span className="mt-[.5em] size-2.5 shrink-0 rounded-full" role="img" aria-label={ATTENTION[resolveAttention(node.kind === "event" ? "task" : node.kind, node, now).status].label} style={{ background: ATTENTION[resolveAttention(node.kind === "event" ? "task" : node.kind, node, now).status].color }} />
+                  <span className="mt-[.5em] size-2.5 shrink-0 rounded-full" role="img" aria-label={ATTENTION[resolveAttention(node.kind, node, now).status].label} style={{ background: ATTENTION[resolveAttention(node.kind, node, now).status].color }} />
                   <span className="min-w-0">{node.title}</span>
                 </h2>
-                {node.kind !== "event" && <AttentionEditor key={node.id} kind={node.kind} id={node.id} onCompleteTask={finishSelectedTask} />}
+                <AttentionEditor key={node.id} kind={node.kind} id={node.id} hideTaskCompletion />
                 <p className="mb-[18px] mt-3 whitespace-pre-wrap text-[14px] leading-[1.8] text-[var(--mind-muted)] [overflow-wrap:anywhere]">
                   {node.summary || "No description saved yet."}
                 </p>
@@ -502,14 +475,15 @@ export function MindExplorer({ graph: liveGraph }: { graph: MindGraph }) {
             )}
             </div>
             <MindCardChat
-              taskId={attentionCard ? (attentionCard.focus?.kind === "task" || attentionCard.agenda?.source === "task" ? attentionCard.entityId ?? attentionCard.agenda?.id : undefined) : (node ?? (lastRecord.current?.id === selected ? lastRecord.current : undefined))?.kind === "task" ? selected! : undefined}
+              taskId={(node ?? (lastRecord.current?.id === selected ? lastRecord.current : undefined))?.kind === "task" ? selected! : undefined}
               onCompletedClose={() => setClosingCard(currentCardId)}
-              itemId={attentionCard ? attentionCard.entityId ?? attentionCard.agenda?.id ?? attentionCard.key : selected === owner.id ? "owner:self" : selected!}
-              label={attentionCard?.title ?? node?.title ?? (selectedKind ? KINDS[selectedKind].label : recordLeftMap ? retainedTitle : owner.title)}
+              itemId={selected === owner.id ? "owner:self" : selected!}
+              label={node?.title ?? (selectedKind ? KINDS[selectedKind].label : recordLeftMap ? retainedTitle : owner.title)}
             />
           </aside>}
         </div>
       </section>
+      <ItemDetailsModal selection={node?.kind === "event" ? { kind: "event", id: node.id } : null} onClose={() => selectNode(null)} opener={eventOpener} />
     </div>
   );
 }
