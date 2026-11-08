@@ -1,9 +1,12 @@
 import type { AgendaItem } from "@skippy/shared";
 import type { MindGraph, MindNode } from "../../../../convex/mindGraphHelpers";
-import { todayRange } from "./mind-attention-model";
-import type { FeedRow } from "./mind-attention-model";
+export function todayRange(now: number) {
+  const start = new Date(now); start.setHours(0, 0, 0, 0);
+  const end = new Date(start); end.setDate(end.getDate() + 1);
+  return { from: start.getTime(), to: end.getTime() - 1 };
+}
 
-/** Use the same day/eligibility rules as Attention; never invent event relationships. */
+/** Browse upcoming events today; never invent event relationships. */
 export function withMindEvents(graph: MindGraph, agenda: AgendaItem[], now: number): MindGraph {
   const { from, to } = todayRange(now);
   const existing = new Set(graph.nodes.map(node => node.id));
@@ -11,8 +14,4 @@ export function withMindEvents(graph: MindGraph, agenda: AgendaItem[], now: numb
     id: item.id, kind: "event", title: item.title, summary: item.location ?? "", status: "scheduled", href: item.href ?? "", agenda: item,
   }));
   return { ...graph, nodes: [...graph.nodes, ...events] };
-}
-export function eventFeedRow(item: AgendaItem): FeedRow {
-  const when = item.isAllDay ? "All day" : new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(item.at);
-  return { key: `event:${item.id}`, entityId: item.id, title: item.title, reason: `Event · ${when}`, group: "today", agenda: item };
 }

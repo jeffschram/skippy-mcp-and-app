@@ -80,23 +80,24 @@ function AttentionForm({ kind, id, initial, onClose }: { kind: AttentionKind; id
 function AttentionEditorContent({ kind, id, actionsOnly = false, hideTaskCompletion = false, onCompleteTask }: { kind: AttentionKind; id: string; actionsOnly?: boolean; hideTaskCompletion?: boolean; onCompleteTask?: () => Promise<void> }) {
   const ready = useViewerReady();
   const now = useAttentionClock();
-  const result = useQuery(api.attention.getForViewer, ready && now ? { kind, id, now } : "skip");
+  const result = useQuery(api.homeInventory.getForViewer, ready && now ? { kind: kind === "task" ? "task" : "review", id } : "skip");
   const item = useAttentionRefresh(result, ready ? `${kind}:${id}` : null);
   const [open, setOpen] = useState(false);
   const complete = useMutation(api.knowledge.markTaskDoneForViewer);
   const [completing, setCompleting] = useState(false);
   const [completeError, setCompleteError] = useState("");
   useEffect(() => { setOpen(false); setCompleteError(""); }, [id, kind]);
-  if (!item || (actionsOnly && kind !== "task")) return null;
+  if (!item || item.row.entityKind !== kind || !item.row.attentionResult || (actionsOnly && kind !== "task")) return null;
+  const attentionResult = item.row.attentionResult;
   return <div className={actionsOnly ? "my-3" : "my-3 rounded-lg border border-current/15 p-3"}>
     {!actionsOnly && <>
-    <div className="flex items-center justify-between gap-3"><AttentionBadge result={item.result} /><button type="button" aria-expanded={open} className="text-sm underline underline-offset-2" onClick={() => setOpen(v => !v)}>Edit</button></div>
-    <p className="mb-0 mt-1 text-xs opacity-75">{item.result.reason}{item.result.at ? ` · ${new Date(item.result.at).toLocaleString()}` : ""}</p>
+    <div className="flex items-center justify-between gap-3"><AttentionBadge result={attentionResult} /><button type="button" aria-expanded={open} className="text-sm underline underline-offset-2" onClick={() => setOpen(v => !v)}>Edit</button></div>
+    <p className="mb-0 mt-1 text-xs opacity-75">{attentionResult.reason}{attentionResult.at ? ` · ${new Date(attentionResult.at).toLocaleString()}` : ""}</p>
     </>}
     {kind === "task" && <div className="mt-3 grid gap-2">
       <div className="flex flex-wrap items-center gap-3">
-        {(item.sources || []).map(source => <a key={source.href} href={source.href} target="_blank" rel="noopener noreferrer" className="text-sm underline underline-offset-2">{source.label} ↗</a>)}
-        {hideTaskCompletion ? null : item.taskStatus === "done" ? <span className="text-sm">✓ Done</span> : item.taskStatus !== "cancelled" && <button type="button" disabled={completing} className="rounded-md bg-teal-800 px-3 py-1.5 text-sm text-white disabled:opacity-50" onClick={async () => {
+        {(item.sources || []).map(source => <a key={source.url} href={source.url} target="_blank" rel="noopener noreferrer" className="text-sm underline underline-offset-2">{source.label} ↗</a>)}
+        {hideTaskCompletion ? null : item.row.status === "done" ? <span className="text-sm">✓ Done</span> : item.row.status !== "cancelled" && <button type="button" disabled={completing} className="rounded-md bg-teal-800 px-3 py-1.5 text-sm text-white disabled:opacity-50" onClick={async () => {
           setCompleting(true); setCompleteError("");
           try { await (onCompleteTask ? onCompleteTask() : complete({ taskId: id as Id<"tasks"> })); setOpen(false); } catch (error) { setCompleteError(error instanceof Error ? error.message : "Could not complete task"); } finally { setCompleting(false); }
         }}>{completing ? "Saving…" : "✓ Done"}</button>}
@@ -104,7 +105,7 @@ function AttentionEditorContent({ kind, id, actionsOnly = false, hideTaskComplet
       {!item.sources?.length && <p className="m-0 text-xs opacity-70">No source link saved for this task.</p>}
       {completeError && <p role="alert" className="m-0 text-sm text-red-600">{completeError}</p>}
     </div>}
-    {!actionsOnly && open && <AttentionForm key={`${kind}:${id}`} kind={kind} id={id} initial={item.attention} onClose={() => setOpen(false)} />}
+    {!actionsOnly && open && <AttentionForm key={`${kind}:${id}`} kind={kind} id={id} initial={item.row.attention ?? {}} onClose={() => setOpen(false)} />}
   </div>;
 }
 export class AttentionBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {

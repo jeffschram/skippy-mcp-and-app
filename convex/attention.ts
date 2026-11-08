@@ -1,17 +1,13 @@
 import { v } from "convex/values";
-import { query, mutation, type QueryCtx } from "./_generated/server";
+import { mutation, type QueryCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { requireOwnedBrain } from "./auth";
 import { attentionKind, attentionMetadata, attentionStatus } from "./attentionValidators";
-import { taskSourceLinks, attentionHref, isAttentionArchived, resolveAttention, type AttentionKind, type AttentionRecord } from "./attentionModel";
+import { isAttentionArchived, type AttentionKind, type AttentionRecord } from "./attentionModel";
 
 const tables = { goal: "goals", project: "projects", task: "tasks", person: "people", company: "companies", note: "knowledge", link: "knowledge", memory: "knowledge" } as const;
 type Entity = AttentionRecord & { _id: string; brainInstanceId: string; kind?: string; title?: string; name?: string };
 export const resultValidator = v.object({ status: attentionStatus, reason: v.string(), source: v.union(v.literal("manual"), v.literal("automatic")), at: v.optional(v.number()) });
-const itemValidator = v.object({ id: v.string(), kind: attentionKind, title: v.string(), href: v.string(), attention: attentionMetadata, result: resultValidator });
-function present(row: Entity, kind: AttentionKind, now: number) {
-  return { id: String(row._id), kind, title: row.title || row.name || "Untitled", href: attentionHref(kind, row._id), attention: row.attention || {}, result: resolveAttention(kind, row, now) };
-}
 export async function eligible(ctx: QueryCtx, row: Entity, kind: AttentionKind, brainId: string) {
   if (row.brainInstanceId !== brainId || row.processingState !== "accepted" || isAttentionArchived(row)) return false;
   if (kind !== "task") return true;
@@ -26,25 +22,6 @@ export async function eligible(ctx: QueryCtx, row: Entity, kind: AttentionKind, 
   return true;
 }
 const refArgs = { kind: attentionKind, id: v.string() };
-export const getForViewer = query({
-  args: { ...refArgs, now: v.number() }, returns: v.union(v.object({ ...itemValidator.fields, sources: v.array(v.object({ label: v.string(), href: v.string() })), taskStatus: v.optional(v.string()) }), v.null()),
-  handler: async (ctx, args) => {
-    const { brain } = await requireOwnedBrain(ctx);
-    const id = ctx.db.normalizeId(tables[args.kind], args.id);
-    const row = id ? await ctx.db.get(id) as Entity | null : null;
-    if (!row || row.brainInstanceId !== brain._id || (tables[args.kind] === "knowledge" && row.kind !== args.kind)) return null;
-    const sources: { label: string; href: string }[] = [];
-    if (args.kind === "task") {
-      const links = await ctx.db.query("entitySourceRefs").withIndex("by_brain_entity", q => q.eq("brainInstanceId", brain._id).eq("entityRef.entityType", "task").eq("entityRef.entityId", args.id)).take(30);
-      const refs = await Promise.all(links.map(link => ctx.db.get(link.sourceRefId)));
-      for (const ref of refs) {
-        if (!ref || ref.brainInstanceId !== brain._id) continue;
-        for (const source of taskSourceLinks(ref)) if (!sources.some(existing => existing.href === source.href)) sources.push(source);
-      }
-    }
-    return { ...present(row, args.kind, args.now), sources, ...(args.kind === "task" && row.status ? { taskStatus: row.status } : {}) };
-  },
-});
 export const setForViewer = mutation({
   args: { ...refArgs, attention: attentionMetadata, expectedAttention: v.optional(attentionMetadata), reviewAction: v.optional(v.union(v.literal("done"), v.literal("later"))) }, returns: v.null(),
   handler: async (ctx, args) => {

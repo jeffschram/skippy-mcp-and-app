@@ -8,15 +8,14 @@ import type { MindGraph, MindKind } from "../../../../convex/mindGraphHelpers";
 import { KINDS } from "./graph-layout";
 import { MindCategoryIcon } from "./mind-category-icon";
 import { mindControlClass } from "./mind-classes";
-import type { FeedRow } from "./mind-attention-model";
 import { cn } from "@/lib/utils";
 
-type Props = { graph: MindGraph; records: MindGraph["nodes"]; selected: string | null; query: string; onSelect: (id: string) => void; attentionSelected: boolean; onOpenAttention: (row: FeedRow) => void };
+type Props = { graph: MindGraph; records: MindGraph["nodes"]; selected: string | null; query: string; onSelect: (id: string) => void };
 const rowClass = "flex w-full items-center gap-3 border-b border-[var(--mind-border)] px-2 py-4 text-left hover:bg-[var(--mind-surface)]";
 export function MindList(props: Props) {
   const [category, setCategory] = useState<MindKind | null>(null);
   const now = useAttentionClock();
-  return <div className="mind-list-scroll h-full overflow-y-auto pb-8" data-selected={Boolean(props.selected) || props.attentionSelected}>
+  return <div className="mind-list-scroll h-full overflow-y-auto pb-8" data-selected={Boolean(props.selected)}>
     <div className="mind-list-column">
       <nav aria-label="Record categories" className="mt-4">
         {(Object.keys(KINDS) as MindKind[]).map(kind => {

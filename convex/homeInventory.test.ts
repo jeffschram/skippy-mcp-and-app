@@ -153,7 +153,7 @@ describe("bounded Home inventory", () => {
     expect(detail.description).toBe("Canonical description");
     expect(detail.recurrence).toContain("Every 3 days");
     expect(detail.dates).toContainEqual({ label: "Last completed", at: 800 });
-    expect(detail.sources).toEqual([{ label: "email", url: "https://example.com/message" }]);
+    expect(detail.sources).toEqual([{ label: "Open source · example.com", url: "https://example.com/message" }]);
     records[0]!.description = "Changed";
     expect((await run(getForViewer, ctx, input)).description).toBe("Changed");
     records.shift();
@@ -239,4 +239,26 @@ it("encodes missing index values explicitly across a seek cursor", async () => {
   expect((await seek(db, source, null, 1))[0]._id).toBe("tasks:a");
   const cursor = JSON.parse(JSON.stringify([{ undefined: true }, 1, "tasks:a"]));
   expect((await seek(db, source, cursor, 2)).map(row => row._id)).toEqual(["tasks:b", "tasks:c"]);
+});
+
+
+it("validates source protocols on the server and falls back to Gmail IDs", async () => {
+  const refs = [
+    { url: "javascript:alert(1)", deepLink: "https://example.com/safe" },
+    { url: "https://user:password@example.com/private" },
+    { sourceSystem: "gmail", threadId: "18abc123456789ab", url: "data:text/html,bad" },
+    { sourceSystem: "google_mail", messageId: "18abc123456789ac" },
+    { sourceSystem: "gmail", threadId: "bad/id" },
+    { url: "https://example.com/safe" },
+    { sourceSystem: "gmail", threadId: "18abc123456789ad", brainInstanceId: "other" },
+  ].map((extra, i) => ({ _id: `sourceRefs:${i}`, sourceSystem: "web", brainInstanceId: "mine", ...extra }));
+  const { ctx } = fixture([task("sources", { sourceRefIds: refs.map(ref => ref._id) }), ...refs]);
+  const detail = await run(getForViewer, ctx, { kind: "task", id: "tasks:sources" });
+  expect(detail.sources.map((source: any) => source.url)).toEqual([
+    "https://example.com/safe", "https://mail.google.com/mail/u/0/#all/18abc123456789ab",
+    "https://mail.google.com/mail/u/0/#all/18abc123456789ac",
+  ]);
+  const unsafe = await run(getForViewer, fixture([event("unsafe", { htmlLink: "javascript:alert(1)", conferenceUrl: "data:text/html,bad" })]).ctx,
+    { kind: "event", id: "calendarEvents:unsafe" });
+  expect(unsafe.sources).toEqual([]);
 });

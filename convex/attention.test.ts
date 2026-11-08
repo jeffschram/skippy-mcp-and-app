@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
-import { getForViewer, setForViewer, eligible } from "./attention";
+import { setForViewer, eligible } from "./attention";
+import { getForViewer } from "./homeInventory";
 
 type Row = Record<string, any>;
 function fixture(rows: Row[], signedIn = true) {
@@ -24,7 +25,7 @@ function fixture(rows: Row[], signedIn = true) {
       const chain = {
         filter: () => chain,
         unique: async () => ({ _id: "users:me" }),
-        first: async () => ({ _id: "brain:mine" }),
+        first: async () => table === "brainInstances" ? ({ _id: "brain:mine" }) : matches[0] ?? null,
         withIndex: (_name: string, callback: (range: Row) => unknown) => { callback(range); return chain; },
         order: () => chain,
         take: async (count: number) => matches.slice(0, count),
@@ -44,9 +45,9 @@ describe("attention access and persistence", () => {
     const ctx = fixture([row]);
     await run(setForViewer, ctx, { kind: "project", id: row._id, attention: { override: "in_progress" } });
     expect(row.status).toBe("planned");
-    expect((await run(getForViewer, ctx, { kind: "project", id: row._id, now })).result.status).toBe("in_progress");
+    expect((await run(getForViewer, ctx, { kind: "review", id: row._id, now })).row.attentionResult.status).toBe("in_progress");
     await run(setForViewer, ctx, { kind: "project", id: row._id, attention: {} });
-    expect((await run(getForViewer, ctx, { kind: "project", id: row._id, now })).result.status).toBe("unassessed");
+    expect((await run(getForViewer, ctx, { kind: "review", id: row._id, now })).row.attentionResult.status).toBe("unassessed");
   });
   it("requires sign-in", async () => {
     await expect(run(getForViewer, fixture([], false), { kind: "task", id: "tasks:a", now })).rejects.toThrow("authentication required");
@@ -65,10 +66,10 @@ describe("attention access and persistence", () => {
     const row = item("tasks:a", { status: "todo" }); const ctx = fixture([row]);
     await run(setForViewer, ctx, { kind: "task", id: row._id, attention: { override: "ok", reason: "  Handled  " } });
     expect(row.attention.reason).toBe("Handled");
-    expect((await run(getForViewer, ctx, { kind: "task", id: row._id, now })).result.status).toBe("ok");
+    expect((await run(getForViewer, ctx, { kind: "task", id: row._id, now })).row.attentionResult.status).toBe("ok");
     await run(setForViewer, ctx, { kind: "task", id: row._id, attention: {} });
     expect(row.attention.override).toBeUndefined();
-    expect((await run(getForViewer, ctx, { kind: "task", id: row._id, now })).result.status).toBe("todo");
+    expect((await run(getForViewer, ctx, { kind: "task", id: row._id, now })).row.attentionResult.status).toBe("todo");
   });
   it("rejects invalid schedules and dates before writing", async () => {
     const ctx = fixture([item("tasks:a")]);
@@ -83,11 +84,13 @@ describe("review transitions", () => {
     await run(setForViewer, ctx, { kind: "project", id: row._id, reviewAction: "done", attention: { reason: "Stale context" } });
     expect(row.status).toBe("in_progress");
     expect(row.attention).toEqual({ override: "ok", reason: "Latest context", assessedAt: expect.any(Number) });
-    expect((await run(getForViewer, ctx, { kind: "project", id: row._id, now })).result.status).toBe("ok");
+    expect((await run(getForViewer, ctx, { kind: "review", id: row._id, now })).row.attentionResult.status).toBe("ok");
     const reviewAt = Date.now() + 100000;
     await run(setForViewer, ctx, { kind: "project", id: row._id, reviewAction: "later", attention: { reviewAt } });
     expect(row.attention).toEqual({ override: "ok", reason: "Latest context", reviewAt, assessedAt: expect.any(Number) });
-    expect((await run(getForViewer, ctx, { kind: "project", id: row._id, now: reviewAt })).result.status).toBe("stale");
+    vi.spyOn(Date, "now").mockReturnValue(reviewAt);
+    expect((await run(getForViewer, ctx, { kind: "review", id: row._id })).row.attentionResult.status).toBe("stale");
+    vi.restoreAllMocks();
   });
   it("rejects stale editor saves, past Later times, and task review dates", async () => {
     const row = item("people:a", { attention: { reason: "Changed" } });
@@ -117,6 +120,6 @@ it("returns only linked sources in the owner's brain", async () => {
     item("sourceRefs:other", { sourceSystem: "web", url: "https://unrelated.example.com/" }),
   ]);
   const result = await run(getForViewer, ctx, { kind: "task", id: "tasks:invite", now });
-  expect(result.taskStatus).toBe("todo");
-  expect(result.sources).toEqual([{ label: "Open source email", href: "https://mail.google.com/mail/u/0/#all/18abc123456789ab" }]);
+  expect(result.row.status).toBe("todo");
+  expect(result.sources).toEqual([{ label: "Open source email", url: "https://mail.google.com/mail/u/0/#all/18abc123456789ab" }]);
 });
