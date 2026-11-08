@@ -6,7 +6,6 @@ import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEve
 import { useMutation, useQuery } from "convex/react";
 import {
   ArrowRight,
-  Check,
   Copy,
   Download,
   Eye,
@@ -24,9 +23,8 @@ import {
 import { activeSourceSyncStatus, type QuickCaptureIntent } from "@skippy/shared";
 import { api } from "../../lib/skippy-api";
 import { agentRoleDisplayName, agentRoleFromMetadata, formatRelative } from "../../lib/display";
-import { focusItemKey, parseFocusSummary } from "../focus-summary";
 import { LiveGate } from "../live-auth";
-import { Badge, Button, Card, IconButton, InlineMarkdown, LoadingRow, Section, TextArea, useToast } from "../components";
+import { Badge, Button, Card, IconButton, LoadingRow, Section, TextArea, useToast } from "../components";
 import { AttentionFocus } from "../components/attention";
 import { AgendaSection } from "./agenda";
 import { useViewerReady } from "./use-viewer";
@@ -34,31 +32,16 @@ import { formatFileSize } from "./project-library-helpers";
 import { QUICK_CAPTURE_INTENT_STORAGE_KEY, checkQuickCaptureFile, parseStoredIntent } from "./quick-capture-helpers";
 import { cn } from "@/lib/utils";
 import {
-  cardClass,
-  eyebrowClass,
   itemClass,
   itemIconClass,
   itemMetaClass,
   itemTitleClass,
   mutedClass,
   projectRowClass,
-  sectionClass,
-  textButtonClass,
-  textButtonCompactClass,
 } from "../page-classes";
 
 type AnyRecord = Record<string, any>;
 
-/* Focus hero + sync status classes (translated from the legacy globals.css
-   focus-summary / sync-status families). */
-const focusSummaryClass = "grid min-h-[260px] content-between gap-[18px] border-l-4 border-l-blue";
-const focusSummaryHeadClass = "mb-1.5 flex items-center gap-2.5";
-const focusHeadingClass = "mb-[18px] max-w-[760px] text-[clamp(28px,4vw,44px)] leading-[1.08]";
-const focusSummaryListClass =
-  "grid max-w-[680px] gap-3 pl-[1.15em] text-xl leading-[1.42] text-foreground marker:text-green [&_li]:pl-0.5 [&_li>span:first-child]:mr-2.5";
-/* Paragraphs inside the focus hero (legacy `.focus-summary p:not(.eyebrow)`). */
-const focusSummaryParagraphClass = "mb-0 max-w-[680px] text-xl leading-[1.42] text-foreground";
-const focusItemActionsClass = "inline-flex gap-1.5 align-middle [&_button]:h-[30px] [&_button]:min-h-[30px]";
 const syncStatusPillClass =
   "inline-flex min-h-[26px] items-center gap-1.5 rounded-lg border bg-blue/10 px-[9px] text-xs font-extrabold text-blue [&_svg]:animate-spin";
 const syncStatusCopyClass = "m-0 mb-3 max-w-[680px] text-sm text-muted-foreground";
@@ -662,66 +645,14 @@ export function TodayContent() {
   useSharedParamToast();
   const data = useQuery(api.knowledge.dashboardForViewer, viewerReady ? {} : "skip") as AnyRecord | undefined;
 
-  const recordFocusItemAction = useMutation(api.knowledge.recordFocusItemActionForViewer);
-  const createTaskFromFocusItem = useMutation(api.knowledge.createTaskFromFocusItemForViewer);
-  const [busyKey, setBusyKey] = useState<string | null>(null);
-
-  const { headline, bullets } = useMemo(
-    () => parseFocusSummary(data?.focusSummary?.summaryText),
-    [data?.focusSummary?.summaryText],
-  );
   // Stale running rows (dead harness, no heartbeat) read as inactive — the
   // "Updating" pill self-heals instead of pinning forever.
   const sync = useMemo(
     () => activeSourceSyncStatus<AnyRecord>(data?.sourceSyncStatuses, Date.now()),
     [data?.sourceSyncStatuses],
   );
-  const actionedKeys = useMemo(() => {
-    const set = new Set<string>();
-    for (const action of data?.focusItemActions ?? []) set.add(action.itemKey);
-    // Dismissals from recent prior summaries: regenerated bullets with the exact same
-    // text must never flash back.
-    for (const dismissal of data?.recentFocusDismissals ?? []) {
-      if (dismissal.itemKey) set.add(dismissal.itemKey);
-    }
-    return set;
-  }, [data?.focusItemActions, data?.recentFocusDismissals]);
-  const visibleBullets = useMemo(
-    () => bullets.map((text) => ({ text, key: focusItemKey(text) })).filter((item) => !actionedKeys.has(item.key)),
-    [bullets, actionedKeys],
-  );
-
-  const focusStale = Boolean(data?.focusSummaryStale);
   const unclear = data?.triageItems?.length ?? 0;
   const pending = data?.pendingActions?.length ?? 0;
-
-  const recordAction = async (item: { text: string; key: string }, action: "dismissed" | "done") => {
-    if (!data?.focusSummary?._id) return;
-    setBusyKey(item.key);
-    try {
-      await recordFocusItemAction({
-        focusSummaryId: data.focusSummary._id,
-        itemKey: item.key,
-        itemText: item.text,
-        action,
-      } as any);
-    } finally {
-      setBusyKey(null);
-    }
-  };
-  const promote = async (item: { text: string; key: string }) => {
-    if (!data?.focusSummary?._id) return;
-    setBusyKey(item.key);
-    try {
-      await createTaskFromFocusItem({
-        focusSummaryId: data.focusSummary._id,
-        itemKey: item.key,
-        itemText: item.text,
-      } as any);
-    } finally {
-      setBusyKey(null);
-    }
-  };
 
   return (
     <LiveGate>
@@ -732,85 +663,17 @@ export function TodayContent() {
       ) : (
         <div className="grid gap-4">
           <AttentionFocus />
-          {/* Focus hero */}
-          <section className={cn(cardClass, sectionClass, focusSummaryClass)} style={{ minHeight: 0 }}>
-            <div>
-              <div className={focusSummaryHeadClass}>
-                <p className={cn(eyebrowClass, "mb-0")}>Now</p>
-                {sync ? (
-                  <span
-                    className={syncStatusPillClass}
-                    title={sync.message ?? `Source sync is running on ${sync.harness}`}
-                  >
-                    <RefreshCw size={14} aria-hidden />{" "}
-                    {agentRoleDisplayName(agentRoleFromMetadata(sync.metadata)) ?? "Updating"}
-                  </span>
-                ) : null}
-              </div>
-              {sync ? (
-                <p className={syncStatusCopyClass}>
-                  {sync.message ?? `Checking ${(sync.sourceSystemsChecked ?? []).join(", ") || "connected sources"}.`}
-                </p>
-              ) : null}
-              <h1 className={focusHeadingClass}>
-                {visibleBullets.length ? (
-                  <InlineMarkdown>{headline}</InlineMarkdown>
-                ) : focusStale ? (
-                  "Focus summary is out of date."
-                ) : (
-                  "Nothing new needs focus right now."
-                )}
-              </h1>
-              {focusStale ? (
-                <p className={cn(mutedClass, focusSummaryParagraphClass)}>
-                  Last updated {formatRelative(data.focusSummary?.generatedAt ?? data.focusSummary?.createdAt)} — a
-                  refresh is due on the next Skippy run.
-                </p>
-              ) : null}
-              {visibleBullets.length ? (
-                <ul className={focusSummaryListClass}>
-                  {visibleBullets.map((item) => (
-                    <li key={item.key}>
-                      <span>
-                        <InlineMarkdown>{item.text}</InlineMarkdown>
-                      </span>
-                      <span className={focusItemActionsClass}>
-                        <IconButton
-                          small
-                          title="Dismiss from focus"
-                          aria-label={`Dismiss ${item.text}`}
-                          disabled={busyKey === item.key}
-                          onClick={() => void recordAction(item, "dismissed")}
-                        >
-                          <X size={15} aria-hidden />
-                        </IconButton>
-                        <button
-                          className={cn(textButtonClass, textButtonCompactClass)}
-                          type="button"
-                          title="Turn into task"
-                          disabled={busyKey === item.key}
-                          onClick={() => void promote(item)}
-                        >
-                          Task
-                        </button>
-                        <IconButton
-                          small
-                          title="Already done"
-                          aria-label={`Mark ${item.text} already done`}
-                          disabled={busyKey === item.key}
-                          onClick={() => void recordAction(item, "done")}
-                        >
-                          <Check size={15} aria-hidden />
-                        </IconButton>
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className={cn(mutedClass, focusSummaryParagraphClass)}>New source items and remaining focus bullets appear here when they need attention.</p>
-              )}
+          {sync ? (
+            <div role="status">
+              <span className={syncStatusPillClass}>
+                <RefreshCw size={14} aria-hidden />{" "}
+                {agentRoleDisplayName(agentRoleFromMetadata(sync.metadata)) ?? "Updating"}
+              </span>
+              <p className={syncStatusCopyClass}>
+                {sync.message ?? `Checking ${(sync.sourceSystemsChecked ?? []).join(", ") || "connected sources"}.`}
+              </p>
             </div>
-          </section>
+          ) : null}
 
           {/* Right rail */}
           <div className="grid content-start gap-4">
@@ -818,7 +681,7 @@ export function TodayContent() {
 
             {/* Calendar events, due tasks, and firing recurrences merged into
                 one list — the answer to "what does my day look like". */}
-            <AgendaSection />
+            <AgendaSection showSummary />
 
             <Section title="Needs your review">
               {unclear === 0 && pending === 0 ? (
