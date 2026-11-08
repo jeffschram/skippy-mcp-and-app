@@ -139,11 +139,7 @@ export function AgendaSection({ days = 7, showSummary = false }: { days?: number
           <CalendarDays size={18} aria-hidden /> Agenda
         </span>
       }
-      action={
-        <Link className={`${textButtonClass} ${textButtonCompactClass}`} href="/tasks">
-          Tasks
-        </Link>
-      }
+
     >
       {summary ? <p className="mb-3 mt-0 text-sm" aria-label="Today summary">{summary}</p> : null}
       {items === undefined ? (

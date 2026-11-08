@@ -458,6 +458,8 @@ export default defineSchema({
     .index("by_brain_state", ["brainInstanceId", "processingState"])
     .index("by_brain_status", ["brainInstanceId", "status"])
     .index("by_brain_due", ["brainInstanceId", "dueAt"])
+    .index("home_dated", ["brainInstanceId", "processingState", "commitment", "dueAt", "title"])
+    .index("home_wants", ["brainInstanceId", "processingState", "commitment", "title"])
     .index("by_brain_status_due", ["brainInstanceId", "processingState", "status", "dueAt"])
     .index("by_brain_commitment", ["brainInstanceId", "commitment"])
     .index("by_brain_execution_state", ["brainInstanceId", "executionState"])
@@ -528,6 +530,8 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_brain_next_due", ["brainInstanceId", "nextDueAt"])
+    .index("home_due", ["brainInstanceId", "nextDueAt", "title"])
+    .index("by_brain_current_task", ["brainInstanceId", "currentTaskId"])
     .index("by_brain_status", ["brainInstanceId", "status"]),
 
   people: defineTable({
@@ -702,6 +706,7 @@ export default defineSchema({
     // scanning the brain's whole edge set (which is far past function read
     // limits). Used by the task deletion cascade; general-purpose by design.
     .index("by_brain_from", ["brainInstanceId", "from.entityId"])
+    .index("home_project", ["brainInstanceId", "from.entityId", "type", "to.entityType"])
     .index("by_brain_to", ["brainInstanceId", "to.entityId"]),
 
   sourceRefs: defineTable({
@@ -1091,6 +1096,7 @@ export default defineSchema({
   })
     .index("by_brain_external", ["brainInstanceId", "sourceSystem", "externalId"])
     .index("by_brain_start", ["brainInstanceId", "startAt"])
+    .index("home_start", ["brainInstanceId", "startAt", "title"])
     .index("by_brain_series", ["brainInstanceId", "recurringEventId", "originalStartAt"]),
 
   activityEvents: defineTable({

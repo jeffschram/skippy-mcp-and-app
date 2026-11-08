@@ -1,0 +1,20 @@
+Home consolidation implementation
+
+Home now contains Today, This Week, and collapsed-by-default All. The three inventories use the same row and action controls. Add task/want/repeat controls and area filtering (including Unsorted and All areas) remain available. All adds Completed/cancelled and Paused/retired filters and calendar horizon continuation.
+
+Removed the Agenda navigation destination and its Home link. /tasks performs a client-side redirect preserving search and hash. Home resolves task, event, and recurrence hashes with an owned exact-record query, including completed and project-linked records. Missing records display an unavailable state.
+
+New inventory reads use bounded indexed seeks and source continuations. All displays 50 rows at a time; periods display at most 20. Filtered source batches can be short. Automatic scanning stops after ten batches and offers continuation instead of unbounded background work. Historical event starts are scanned in bounded batches to preserve ongoing events that began before the lookback; very large calendar histories can therefore need continuation before current events appear. Distinct canonical records remain separate; repeat claims are resolved against owned live tasks before filtering.
+
+Verification:
+- pnpm check passed (repository typechecks and test suites).
+- New backend suite: 8 tests passed, covering bounded pagination, equal-key boundaries, undated/want reachability, repeat claims, project exclusion, status filters, ownership, all-day events, exclusive periods, and horizon extension.
+- Web suite: 379 tests passed, including new DST/week/hash and shared-row tests.
+- Final web typecheck passed.
+- git diff --check passed.
+
+Limitations / phase handoff:
+- No authenticated desktop/mobile browser session was available in this worktree; layout and controls were checked through code and rendered-markup tests, not live browser interaction.
+- Full detail/chat composition and atomic occurrence-version controls remain later phase work. This change provides a minimal shared detail dialog and reuses existing mutations.
+- Indexed tie ordering uses Convex's implicit creation-time/ID tail after date/title.
+- No push, merge, deployment, calendar writes, or task/event/recurrence data deletion was performed. New indexes and queries require the runner's normal publishing process.

@@ -1,36 +1,14 @@
 "use client";
 
-import { useMemo, useState, type FormEvent } from "react";
-import { useMutation, useQuery } from "convex/react";
-import { BellRing, CalendarDays, Check, Inbox, MapPin, PauseCircle, Plus } from "lucide-react";
+import { useState, type FormEvent } from "react";
+import { useMutation } from "convex/react";
+import { BellRing, CalendarDays, Check, MapPin, PauseCircle } from "lucide-react";
 import { TASK_AREAS } from "@skippy/shared";
 import { api } from "../../lib/skippy-api";
 import { formatRelative } from "../../lib/display";
-import { LiveGate } from "../live-auth";
-import {
-  Badge,
-  Button,
-  Checkbox,
-  Dialog,
-  EmptyState,
-  IconButton,
-  LoadingRow,
-  Section,
-  Select,
-  TextInput,
-  useToast,
-} from "../components";
-import { useViewerReady } from "./use-viewer";
+import { Badge, Button, Checkbox, IconButton, Select, TextInput, useToast } from "../components";
 import { areaLabel } from "./life-tasks-helpers";
-import type { LifeTask } from "./life-tasks-helpers";
-import {
-  agendaAreas,
-  buildAgendaRows,
-  filterAgendaRows,
-  type AgendaRow,
-  type CalendarEventRow,
-  type RecurrenceRowInput,
-} from "./agenda-rows";
+import type { AgendaRow } from "./agenda-rows";
 import { CADENCE_PRESETS, type CadencePresetKey } from "./recurrences-helpers";
 import { cn } from "@/lib/utils";
 
@@ -41,17 +19,7 @@ const commitmentToggleClass = "inline-flex items-center gap-0.5 rounded-full bor
 const commitmentOptionClass =
   "min-h-8 cursor-pointer appearance-none rounded-full border-none bg-transparent px-3.5 py-1.5 text-[13px] text-muted-foreground";
 const commitmentOptionActiveClass = "bg-gold/[0.16] text-inherit";
-const filterChipClass =
-  "min-h-[34px] cursor-pointer appearance-none rounded-full border border-border bg-transparent px-3 py-1.5 text-[13px] text-inherit";
-const filterChipActiveClass = "border-gold bg-gold/[0.12]";
-
-/* ------------------------------------------------------------------ */
-/* Agenda: one table for everything the owner is on the hook for —      */
-/* tasks, calendar events, and repeating obligations. Type is carried   */
-/* by a badge rather than by which section a row lives in, so there is  */
-/* one place to look instead of four.                                   */
-/* ------------------------------------------------------------------ */
-
+// Shared Home rows and creation controls, retained from the former Agenda.
 const DAY_MS = 86_400_000;
 const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
@@ -75,18 +43,22 @@ function waitingDayCount(row: AgendaRow, now: number): number | undefined {
   return Math.max(0, Math.floor((now - since) / DAY_MS));
 }
 
-function AgendaRowView({
+export function HomeItemRow({
   row,
   now,
   onComplete,
   onNudge,
   onPause,
+  onOpen,
+  pending = false,
 }: {
   row: AgendaRow;
   now: number;
   onComplete: (row: AgendaRow) => void;
   onNudge: (row: AgendaRow) => void;
   onPause: (row: AgendaRow) => void;
+  onOpen: (row: AgendaRow) => void;
+  pending?: boolean;
 }) {
   const waited = row.isWaiting ? waitingDayCount(row, now) : undefined;
   const when = dateLabel(row);
@@ -94,7 +66,7 @@ function AgendaRowView({
   return (
     <div
       className="flex items-start gap-3 border-b border-border px-1 py-3 last:border-b-0"
-      id={`${row.kind}-${row.id}`}
+
     >
       {/* Events are attended, not completed, so they get no check control —
           a checkbox that does nothing is worse than no checkbox. */}
@@ -108,7 +80,8 @@ function AgendaRowView({
       ) : (
         <button
           type="button"
-          className="mt-px grid size-6 flex-none cursor-pointer appearance-none place-items-center rounded-full border-[1.5px] border-border bg-transparent text-muted-foreground hover:border-gold hover:text-gold"
+          disabled={pending || row.status === "done" || row.status === "cancelled"}
+          className="mt-px grid size-11 flex-none cursor-pointer appearance-none place-items-center rounded-full border-[1.5px] border-border bg-transparent text-muted-foreground hover:border-gold hover:text-gold"
           onClick={() => onComplete(row)}
           aria-label={`Complete ${row.title}`}
           title={row.kind === "recurrence" ? "Log that you did this" : "Complete"}
@@ -118,11 +91,11 @@ function AgendaRowView({
       )}
 
       <div className="grid min-w-0 flex-auto gap-[3px]">
-        <span className="text-[15px] [overflow-wrap:anywhere]">{row.title}</span>
+        <button type="button" className="min-h-11 text-left text-[15px] [overflow-wrap:anywhere] focus-visible:outline-2" onClick={() => onOpen(row)}>{row.title}</button>
         <span className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
           {row.kind === "event" ? <Badge tone="blue">Event</Badge> : null}
           {row.kind === "recurrence" || row.fromRecurrence ? (
-            <Badge tone="gold">Recurring</Badge>
+            <Badge tone="gold">{row.recurrenceStatus === "paused" ? "Repeat paused" : "Recurring"}</Badge>
           ) : null}
           {row.isWaiting ? <Badge tone="neutral">Waiting</Badge> : null}
           {row.isWant ? <Badge tone="neutral">Want</Badge> : null}
@@ -152,8 +125,10 @@ function AgendaRowView({
       <div className="flex flex-none items-start gap-1">
         {row.isWaiting ? (
           <IconButton
+            className="size-11"
             aria-label={`Nudge about ${row.title}`}
             title="Draft a nudge"
+            disabled={pending}
             onClick={() => onNudge(row)}
           >
             <BellRing size={15} />
@@ -161,8 +136,10 @@ function AgendaRowView({
         ) : null}
         {row.kind === "recurrence" ? (
           <IconButton
-            aria-label={`Pause ${row.title}`}
-            title="Pause this repeat"
+            className="size-11"
+            aria-label={`${row.recurrenceStatus === "active" ? "Pause" : "Resume"} ${row.title}`}
+            disabled={pending}
+            title={row.recurrenceStatus === "active" ? "Pause this repeat" : "Resume this repeat"}
             onClick={() => onPause(row)}
           >
             <PauseCircle size={15} />
@@ -178,7 +155,7 @@ function AgendaRowView({
  * from the same box as one-off work: ticking "Repeats" reveals the cadence
  * fields and switches the submit from a task to a recurrence.
  */
-function AddRow({ onAdded }: { onAdded: () => void }) {
+export function AddRow({ onAdded }: { onAdded: () => void }) {
   const createLifeTask = useMutation(api.lifeTasks.createLifeTask);
   const upsertRecurrence = useMutation(api.recurrences.upsertRecurrenceForViewer);
   const toast = useToast();
@@ -355,162 +332,5 @@ function AddRow({ onAdded }: { onAdded: () => void }) {
         </div>
       ) : null}
     </form>
-  );
-}
-
-export function LifeTasksContent() {
-  const ready = useViewerReady();
-  const now = Date.now();
-
-  // Events are windowed; tasks and recurrences are not, because an undated
-  // obligation has no date to filter on and must always stay visible.
-  const dayBucket = Math.floor(now / DAY_MS);
-  const range = useMemo(
-    () => ({ from: dayBucket * DAY_MS - 7 * DAY_MS, to: dayBucket * DAY_MS + 365 * DAY_MS }),
-    [dayBucket],
-  );
-
-  const tasks = useQuery(api.lifeTasks.lifeTasksForViewer, ready ? {} : "skip") as
-    | LifeTask[]
-    | undefined;
-  const events = useQuery(api.calendar.calendarEventsInRange, ready ? range : "skip") as
-    | CalendarEventRow[]
-    | undefined;
-  const recurrences = useQuery(api.recurrences.recurrencesForViewer, ready ? {} : "skip") as
-    | RecurrenceRowInput[]
-    | undefined;
-
-  const setStatus = useMutation(api.lifeTasks.setLifeTaskStatus);
-  const completeRecurrence = useMutation(api.recurrences.completeRecurrenceForViewer);
-  const setRecurrenceStatus = useMutation(api.recurrences.setRecurrenceStatusForViewer);
-  const nudge = useMutation(api.waiting.nudgeWaitingTask);
-  const toast = useToast();
-
-  const [area, setArea] = useState<string | null>(null);
-  const [addOpen, setAddOpen] = useState(false);
-
-  const rows = useMemo(
-    () => buildAgendaRows(tasks, events, recurrences, now),
-    // `now` is bucketed by day: overdue is a day-scale concept, and depending
-    // on the raw clock would rebuild the list on every render.
-    [tasks, events, recurrences, dayBucket],
-  );
-  const areas = useMemo(() => agendaAreas(rows), [rows]);
-  const visible = useMemo(() => filterAgendaRows(rows, area), [rows, area]);
-
-  async function onComplete(row: AgendaRow) {
-    try {
-      if (row.kind === "recurrence") {
-        // Completing a repeat logs the completion and advances its schedule
-        // rather than closing anything permanently.
-        await completeRecurrence({ recurrenceId: row.id as any });
-        toast(`Logged "${row.title}".`, "success");
-      } else {
-        await setStatus({ taskId: row.id as any, status: "done" });
-        toast(`Done: ${row.title}`, "success");
-      }
-    } catch (error) {
-      toast(error instanceof Error ? error.message : "Could not update that.", "error");
-    }
-  }
-
-  async function onNudge(row: AgendaRow) {
-    try {
-      await nudge({ taskId: row.id as any });
-      toast("Nudge drafted — review it in Pending actions.", "success");
-    } catch (error) {
-      toast(error instanceof Error ? error.message : "Could not draft that.", "error");
-    }
-  }
-
-  async function onPause(row: AgendaRow) {
-    try {
-      await setRecurrenceStatus({ recurrenceId: row.id as any, status: "paused" });
-      toast(`Paused "${row.title}".`, "success");
-    } catch (error) {
-      toast(error instanceof Error ? error.message : "Could not pause that.", "error");
-    }
-  }
-
-  if (tasks === undefined) {
-    return <LoadingRow label="Loading agenda…" />;
-  }
-
-  return (
-    <div className="grid gap-4 min-[720px]:grid-cols-2 min-[720px]:items-start">
-      <Section
-        title="Agenda"
-        className="min-[720px]:col-span-full"
-        action={
-          <span className="inline-flex items-center gap-2">
-            <Badge tone="neutral">{visible.length}</Badge>
-            <Button variant="primary" small onClick={() => setAddOpen(true)}>
-              <Plus size={15} aria-hidden /> Add
-            </Button>
-          </span>
-        }
-      >
-        {areas.length > 1 ? (
-          <div className="mb-3 flex flex-wrap gap-1.5">
-            <button
-              type="button"
-              className={cn(
-                filterChipClass,
-                area === null && filterChipActiveClass,
-              )}
-              onClick={() => setArea(null)}
-            >
-              All
-            </button>
-            {areas.map((value) => (
-              <button
-                key={value}
-                type="button"
-                className={cn(
-                  filterChipClass,
-                  area === value && filterChipActiveClass,
-                )}
-                onClick={() => setArea(area === value ? null : value)}
-              >
-                {areaLabel(value === "unsorted" ? undefined : value)}
-              </button>
-            ))}
-          </div>
-        ) : null}
-
-        {visible.length === 0 ? (
-          <EmptyState icon={<Inbox size={18} />} title="Nothing on your plate">
-            Tasks, events, and repeating items all show up here.
-          </EmptyState>
-        ) : (
-          <div className="grid gap-0.5">
-            {visible.map((row) => (
-              <AgendaRowView
-                key={`${row.kind}-${row.id}`}
-                row={row}
-                now={now}
-                onComplete={onComplete}
-                onNudge={onNudge}
-                onPause={onPause}
-              />
-            ))}
-          </div>
-        )}
-      </Section>
-
-      {/* The add form starts out of the way: the agenda is read far more often
-          than it is written to, so adding is a deliberate click. */}
-      <Dialog open={addOpen} onClose={() => setAddOpen(false)} title="Add to your agenda">
-        <AddRow onAdded={() => setAddOpen(false)} />
-      </Dialog>
-    </div>
-  );
-}
-
-export function LifeTasksPage() {
-  return (
-    <LiveGate>
-      <LifeTasksContent />
-    </LiveGate>
   );
 }
