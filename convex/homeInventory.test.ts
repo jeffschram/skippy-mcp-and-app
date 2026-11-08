@@ -36,7 +36,7 @@ function fixture(records: Row[]) {
   } } };
 }
 const args = { period: "all", now: 1000, start: 900, tomorrow: 2000, weekEnd: 8000, overdueStart: 200,
-  horizon: 100000, utcToday: 900, utcTomorrow: 2000, utcWeekEnd: 8000, area: null, status: "open" };
+  horizon: 100000, utcToday: 900, utcTomorrow: 2000, utcWeekEnd: 8000, status: "open" };
 const task = (id: string, extra: Row = {}) => ({ _id: `tasks:${id}`, _creationTime: 1, brainInstanceId: "mine", title: id,
   processingState: "accepted", status: "todo", dueAt: 1200, ...extra });
 const recurrence = (id: string, extra: Row = {}) => ({ _id: `recurrences:${id}`, _creationTime: 1, brainInstanceId: "mine", title: id, status: "active", nextDueAt: 1300, ...extra });
@@ -62,15 +62,27 @@ describe("bounded Home inventory", () => {
     expect(rows).toHaveLength(130); expect(new Set(rows.map(r => r.id)).size).toBe(130);
     expect(rows.at(-2).id).toBe("tasks:undated"); expect(rows.at(-1)).toMatchObject({ id: "tasks:want", at: null });
   });
+  it.each(["today", "week", "all"])("paginates %s across areas without losing row metadata", async period => {
+    const areas = ["work", "health", undefined];
+    const records: Row[] = Array.from({ length: 75 }, (_, n) => task(String(n).padStart(3, "0"), {
+      dueAt: period === "week" ? 3000 : 1200, area: areas[n % areas.length],
+    }));
+    const first = await run(page, fixture(records).ctx, { ...args, period });
+    expect(first.rows).toHaveLength(period === "all" ? 50 : 20);
+    expect(first.hasMore).toBe(true);
+    const rows = await inventory(records, { period });
+    expect(rows.map(r => r.id)).toEqual(records.map(r => r._id));
+    expect(rows.map(r => r.area)).toEqual(records.map(r => r.area ?? null));
+  });
   it("resolves recurrence claims before periods/projects and surfaces stale claims", async () => {
     const rows = await inventory([task("far", { dueAt: 50000 }), recurrence("claimed", { currentTaskId: "tasks:far" }),
       recurrence("missing", { currentTaskId: "tasks:missing" }), recurrence("done", { currentTaskId: "tasks:closed" }), task("closed", { status: "done" })], { period: "today" });
     expect(rows.map(r => r.id)).toEqual(["recurrences:done", "recurrences:missing"]);
   });
-  it("keeps distinct same-title events/tasks, ongoing old events, and events under area filters", async () => {
+  it("keeps distinct same-title events/tasks and ongoing old events", async () => {
     const records = [task("task", { title: "Meeting", area: "work" }), event("event", { title: "Meeting" }), event("long", { startAt: -10000, endAt: 3000 }), event("ended", { endAt: 1000 }), event("master", { isMaster: true })];
     expect((await inventory(records)).map(r => r.id)).toEqual(["calendarEvents:long", "calendarEvents:event", "tasks:task"]);
-    expect((await inventory(records, { area: "health" })).map(r => r.kind)).toEqual(["event", "event"]);
+    expect((await inventory(records)).find(r => r.id === "tasks:task")?.area).toBe("work");
   });
   it("preserves completed and paused history, with paused live repeats represented by their task", async () => {
     const records = [task("closed", { status: "done" }), task("live"), recurrence("paused", { status: "paused", currentTaskId: "tasks:live" }), recurrence("retired", { status: "retired" })];
@@ -220,7 +232,6 @@ describe("review inventory", () => {
     const all = await inventory(records);
     expect(all).toHaveLength(11); expect(new Set(all.map(r => r.id)).size).toBe(11);
     expect(await inventory(records, { status: "completed" })).toEqual([]);
-    expect(await inventory(records, { area: "work" })).toEqual([]);
   });
   it("seeks nested dates and equal timestamp/creation ties across page boundaries losslessly", async () => {
     const records = Array.from({ length: 170 }, (_, i) => review("people", String(i).padStart(3, "0"), { name: String(170 - i), attention: { override: "todo", reviewAt: i < 85 ? 0 : 2000, scheduledAt: 0 } }));

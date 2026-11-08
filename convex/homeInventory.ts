@@ -101,7 +101,7 @@ export const page = query({
     period: v.union(v.literal("today"), v.literal("week"), v.literal("all")),
     now: v.number(), start: v.number(), tomorrow: v.number(), weekEnd: v.number(), overdueStart: v.number(),
     horizon: v.number(), utcToday: v.number(), utcTomorrow: v.number(), utcWeekEnd: v.number(),
-    area: v.union(v.string(), v.null()), status: v.union(v.literal("open"), v.literal("completed"), v.literal("paused")),
+    status: v.union(v.literal("open"), v.literal("completed"), v.literal("paused")),
     cursor: v.optional(v.string()),
   },
   returns: v.object({ rows: v.array(rowValidator), cursor: v.union(v.string(), v.null()), hasMore: v.boolean() }),
@@ -207,7 +207,6 @@ export const page = query({
           if (args.period === "week" && record.startAt < eventStart) continue;
         }
       }
-      if (source.kind !== "event" && args.area !== null && (record.area ?? "unsorted") !== args.area) continue;
       rows.push(row(source.kind, record, recurrence, entityKind, args.now));
     }
     for (const stream of streams) {
@@ -218,7 +217,7 @@ export const page = query({
   },
 });
 
-// Direct resolution deliberately bypasses inventory windows, status and area.
+// Direct resolution deliberately bypasses inventory windows and status.
 export const getForViewer = query({
   args: { kind, id: v.string() },
   returns: v.union(v.null(), v.object({ row: rowValidator, description: v.union(v.string(), v.null()), projectId: v.union(v.string(), v.null()),
