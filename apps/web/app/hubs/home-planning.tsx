@@ -1,6 +1,7 @@
 "use client";
 
 import { Component, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { CalendarDays, CalendarRange, Layers } from "lucide-react";
 import { useQuery } from "convex/react";
 import { HomeActionsProvider, HomeItemActions, ItemActionFeedback } from "./home-item-actions";
 import { ItemDetailsModal } from "./item-details-modal";
@@ -151,20 +152,26 @@ function HomePlanningContent() {
         const summary = loading ? null : buildTodaySummary(rows.map(row => ({ ...row, source: row.kind })), {
           now, start: scope.start, partial,
         });
+        // Keep the model's priority and partial-results qualifier intact. Only
+        // the first sentence is promoted; the remaining context stays visible.
+        const [lead, ...context] = summary?.split(/(?<=\.)\s+/) ?? [];
         return <>
-          {summary ? <Section title="Summary"><p aria-label="Today summary" className="text-sm">{summary}</p></Section> : null}
-          <Section title="Today">
-            <p className="text-xs text-muted-foreground">{new Date(periods.start).toLocaleDateString()} · Includes the preceding seven days of overdue work.</p>
+          {summary ? <div aria-label="Today summary" className="my-2 border-l-2 border-gold pl-4 sm:my-3 sm:pl-5">
+            <p className="m-0 text-xl font-semibold leading-tight tracking-tight">{lead}</p>
+            {context.length ? <p className="m-0 mt-2 text-sm text-muted-foreground">{context.join(" ")}</p> : null}
+          </div> : null}
+          <Section title="Today" icon={<CalendarDays size={20} aria-hidden="true" />}
+            subtitle={`${new Date(periods.start).toLocaleDateString()} · Includes the preceding seven days of overdue work.`}>
             {content}
             <Button small variant="ghost" onClick={openAll}>Older overdue items may remain in All</Button>
           </Section>
         </>;
       }}
     </Inventory>
-    <Section title="Upcoming">
+    <Section title="Upcoming" icon={<CalendarRange size={20} aria-hidden="true" />} subtitle="The next seven days.">
       <Inventory key={`week-${key}`} scope={scope} now={now} period="week" renderRow={renderRow} moreInAll={openAll} />
     </Section>
-    <Section title={<button className="min-h-11 text-left" aria-expanded={allOpen} aria-controls="home-all" onClick={() => { setAllOpen(!allOpen); setAllMounted(true); }}>{allOpen ? "▾" : "▸"} All</button>}>
+    <Section icon={<Layers size={20} aria-hidden="true" />} subtitle="All open tasks, events, repeats, and reviews." title={<button className="min-h-11 text-left" aria-expanded={allOpen} aria-controls="home-all" onClick={() => { setAllOpen(!allOpen); setAllMounted(true); }}><span aria-hidden="true">{allOpen ? "▾" : "▸"}</span> All</button>}>
       <div id="home-all" hidden={!allOpen}>
         {allMounted ? <Inventory key={`all-${key}`} scope={scope} now={now} period="all" renderRow={renderRow} moreInAll={openAll} /> : null}
         <Button small onClick={() => setYears(value => value + 1)}>Include another year of calendar events</Button>

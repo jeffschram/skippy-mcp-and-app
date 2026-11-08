@@ -55,7 +55,7 @@ describe("Home planning shell", () => {
     // A full visible batch stops automatic loading and qualifies the summary.
     fixture.page.rows = Array.from({ length: 20 }, (_, id) => ({ ...fixture.page!.rows[0], id: String(id), title: `Private task ${id}` }));
     const html = render();
-    const positions = ["<h2>Summary", "<h2>Today", "<h2>Upcoming", 'aria-controls="home-all"'].map(text => html.indexOf(text));
+    const positions = ['aria-label="Today summary"', "<h2>Today", "<h2>Upcoming", 'aria-controls="home-all"'].map(text => html.indexOf(text));
     expect(positions.every(position => position >= 0)).toBe(true);
     expect(positions).toEqual([...positions].sort((a, b) => a - b));
     expect(html).toContain("In shown items: 20 overdue items.");
@@ -69,7 +69,7 @@ describe("Home planning shell", () => {
   it("preserves both empty sections while hiding an unhelpful summary", () => {
     fixture.page = { rows: [], hasMore: false, cursor: null };
     const html = render();
-    expect(html).not.toContain("<h2>Summary");
+    expect(html).not.toContain('aria-label="Today summary"');
     expect(html.split("Nothing here right now.")).toHaveLength(3);
     expect(html).toContain("<h2>Upcoming");
   });
@@ -79,7 +79,7 @@ describe("Home planning shell", () => {
     const html = render();
     expect(html).toContain("Loading Upcoming");
     expect(html).not.toContain("Nothing here right now.");
-    expect(html).not.toContain("<h2>Summary");
+    expect(html).not.toContain('aria-label="Today summary"');
   });
 
   it("opens All and queries open items without an area filter", () => {

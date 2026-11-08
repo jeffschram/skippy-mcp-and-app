@@ -97,12 +97,16 @@ export function Card({
 
 export function Section({
   title,
+  icon,
+  subtitle,
   action,
   children,
   className,
   pad,
 }: {
   title?: ReactNode;
+  icon?: ReactNode;
+  subtitle?: ReactNode;
   action?: ReactNode;
   children: ReactNode;
   className?: string | undefined;
@@ -112,7 +116,13 @@ export function Section({
     <Card pad={pad ?? true} className={className}>
       {title ? (
         <div className="mb-3.5 flex items-center justify-between gap-3.5">
-          <h2 className="m-0 text-[19px]">{title}</h2>
+          <div className="flex min-w-0 items-center gap-3">
+            {icon ? <span aria-hidden="true" className="grid size-10 shrink-0 place-items-center rounded-lg bg-blue/10 text-blue">{icon}</span> : null}
+            <div className="min-w-0">
+              <h2 className="m-0 text-[19px]">{title}</h2>
+              {subtitle ? <p className="m-0 mt-1 text-xs text-muted-foreground">{subtitle}</p> : null}
+            </div>
+          </div>
           {action}
         </div>
       ) : null}
