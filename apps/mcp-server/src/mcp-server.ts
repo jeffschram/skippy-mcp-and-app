@@ -91,9 +91,9 @@ const skippyInstructions = [
   "Use the user's evolving importance rubric. Directly ingest source-backed objects when they are actionable, deadline-bearing, relationship-building, decision-relevant, financially/security relevant, or clearly useful later.",
   "Classify before saving: a task requires a concrete action or decision for the owner, not merely a dated event. Book releases, birthdays, availability notices and routine confirmations are informational; use a note/reference, an actual calendar event when appropriate, or skip noise. Do not invent a download, purchase, reply or follow-up obligation from an announcement. dueAt is only an action deadline, never a release/start/event date. Use itemIntent: action/event/reference and dateKind: deadline/event in candidate payloads to make the distinction explicit. If action is uncertain, send it for review instead of creating an accepted task.",
   "For direct ingestion, call ingest_object and include a concise rubricDecision explaining why the item clears the importance bar.",
-  "Use submit_candidate_object only as a legacy fallback when the harness cannot decide whether the item belongs in Skippy.",
+  "Use ingest_object for source-backed knowledge that clears the rubric; skip uncertain items.",
   "Extract useful objects, not raw dumps. Prefer task, project, person, company, link, note or goal records. Use notes for structured reference information, preserving extra properties.",
-  "Links are reference material, not a reading queue. Confident, rubric-clearing links: ingest directly (status defaults to 'saved'; no user interaction expected). Pass status 'unread' only when the user explicitly wants to read it later. Genuinely uncertain whether a link is valid or important: use submit_candidate_object so it lands in Review for a one-tap decision.",
+  "Links are reference material, not a reading queue. Confident, rubric-clearing links: ingest directly (status defaults to 'saved'; no user interaction expected). Pass status 'unread' only when the user explicitly wants to read it later. Skip links whose validity or importance is uncertain.",
   "Include lightweight sourceRefs whenever possible: sourceSystem, messageId/threadId/eventId, timestamp, participants, URL/deepLink, summary, and a short excerpt.",
   "Avoid storing full raw emails, full calendar descriptions, or unnecessary private text. Store concise summaries and fields needed for future retrieval/focus.",
   "For noisy sources, submit only items that are actionable, relationship-building, deadline-bearing, decision-relevant, or clearly useful later.",
@@ -101,7 +101,7 @@ const skippyInstructions = [
   "Use capture_thought, record_memory, record_decision, and record_principle for durable second-brain memory. Include source refs, related entity refs, confidence, captureReason/rubricDecision, and reviewBehavior when available.",
   "On a project page, use get_project_plan to understand phases and ordered tasks. Use update_project for the Overview description and links, and update_phase for a phase title or Markdown description when the user asks chat to change them.",
   "Each project also has a freeform plain-text Notes pad (the Notes tab) where the owner dumps unstructured thoughts. When the owner asks to review their notes, call get_project_notes, help fold actionable ideas into the Plan, then — only with the owner's explicit OK — call snapshot_project_notes to preserve the pad and update_project_notes to prune the processed text. Never edit the pad outside an owner-requested review.",
-  "Use submit_memory_review_candidate when a possible memory is useful but uncertain. Do not queue transient alerts (balance notifications, promo deadlines, ToS notices); skip them or record directly with expiry context. Use list_memory/get_context_bundle/get_memory_detail before adding likely duplicates or answering from memory, and link_memory to attach memories to accepted entities.",
+  "Use record_memory for useful, supported memories; skip uncertain candidates. Do not queue transient alerts (balance notifications, promo deadlines, ToS notices); skip them or record directly with expiry context. Use list_memory/get_context_bundle/get_memory_detail before adding likely duplicates or answering from memory, and link_memory to attach memories to accepted entities.",
   "Use list_interview_templates/start_interview/get_interview/answer_interview_question/complete_interview/archive_interview to run guided second-brain interviews inside the harness chat. Ask one question at a time in chat, using the assistantDisplayName returned by Skippy.",
   "During scheduled or batch source-ingestion runs, also drain the Home quick-capture inbox in addition to external sources: call list_quick_captures for pending captures the owner dropped on the home page, turn useful ones into Skippy objects with the ingestion tools (ingest_object etc.), then call mark_quick_capture_handled with 'processed' or 'discarded' for each. Hold-intent captures are private device-to-device transfers: they are never returned by list_quick_captures and must never be ingested.",
   "The life layer covers everything that is not project work. A one-off errand or obligation is a task with no project: set `area` and leave `commitment` as 'must'. Something the owner would simply enjoy — a restaurant to try, a book to read — is a task with `commitment: \"want\"`, not a link and not a note; wants never carry due dates and never go overdue.",
@@ -164,7 +164,7 @@ function buildSlashCommandsMessage() {
     "| `/ask ...` | Retrieve context or answer from Skippy. | `ask` or `get_context_bundle` |",
     "| `/focus` | Summarize or refresh current focus. | `summarize_focus` or `refresh_focus_summary` |",
     "| `/interview ...` | Start or continue a guided interview in the harness chat. | `list_interview_templates` plus `start_interview` |",
-    "| `/inbox ...` | Send uncertain or review-needed memory/object candidates to Skippy Review. | `submit_memory_review_candidate` or `submit_candidate_object` |",
+    "| `/inbox ...` | Capture supported knowledge directly. | `capture_thought` or `ingest_object` |",
     "| `/link ...` | Link accepted entities or memories when IDs/context are known. | `link_entities` or `link_memory` |",
     "| `/plan ...` | Decompose a project into executable task briefs. | `plan_project` |",
     "| `/next` | Show the next ready-to-execute task(s). | `list_ready_tasks` |",
@@ -204,16 +204,16 @@ function buildSkillsMessage() {
     "",
     "3. Choose the narrowest tool.",
     "   - `ingest_object`: primary accepted write for source-backed tasks, projects, people, companies, links, notes, goals, or knowledge objects. Include `rubricDecision`.",
-    "   - Link routing: links are reference material, not a reading queue. Confident, rubric-clearing links go straight through `ingest_object` (status defaults to `saved`; no user interaction expected). Pass `status: \"unread\"` only when the user explicitly wants to read it later. Genuinely uncertain whether a link is valid or important? Use `submit_candidate_object` so it lands in Review for a one-tap decision.",
+    "   - Link routing: links are reference material, not a reading queue. Confident, rubric-clearing links go straight through `ingest_object` (status defaults to `saved`; no user interaction expected). Pass `status: \"unread\"` only when the user explicitly wants to read it later. Skip links whose validity or importance is uncertain.",
     "   - `record_memory`, `record_decision`, `record_principle`: durable second-brain memory when the harness can explain why it belongs.",
     "   - `capture_thought`: explicit user thought or preference that should become memory or review.",
-    "   - `submit_memory_review_candidate`: possible memory that seems useful but uncertain.",
-    "   - `submit_candidate_object`: legacy review fallback for non-memory objects when classification or importance is uncertain.",
+    "   - Skip memories that do not clear the importance rubric.",
+    "   - Skip objects when classification or importance is uncertain.",
     "   - `create_project` / `create_task`: only for explicit user commands. For a task with no project, set `area` and `commitment` (`want` for things the owner would enjoy, so they never nag).",
     "   - `upsert_recurrence`: anything that comes around again. Prefer it over a dated task whenever the thing repeats — completing a task destroys the record of when it was last done.",
     "   - `list_agenda`: what is happening and what is due over a range; use before proposing times.",
     "   - `link_entities` / `link_memory`: only after accepted entity IDs or memory IDs are known.",
-    "   - `list_pending_actions`: inspect external side effects awaiting approval. Do not send emails/messages or alter external systems through Skippy.",
+    "   - `list_pending_actions`: inspect external action execution status.",
     "",
     "## User Slash Commands",
     "",
@@ -229,7 +229,7 @@ function buildSkillsMessage() {
     "- `/ask ...` -> `ask` or `get_context_bundle`",
     "- `/focus` -> `summarize_focus` or `refresh_focus_summary`",
     "- `/interview ...` -> `list_interview_templates` plus `start_interview`",
-    "- `/inbox ...` -> `submit_memory_review_candidate` or `submit_candidate_object`",
+    "- `/inbox ...` -> `capture_thought` or `ingest_object`",
     "- `/link ...` -> `link_entities` or `link_memory`",
     "- `/plan ...` -> `plan_project`",
     "- `/next` -> `list_ready_tasks`",
@@ -266,7 +266,7 @@ function buildSkillsMessage() {
     "   - Offer interviews using the returned name, e.g. `Want to do a project interview for ${assistantName}?`.",
     "   - Use `start_interview`, then ask the returned current question in chat.",
     "   - For each user answer, call `answer_interview_question` and ask the returned next question.",
-    "   - Leave `createMemoryCandidate` false unless the user explicitly wants that answer sent to Memory Inbox.",
+    "   - Leave `createMemoryCandidate` false unless the user explicitly wants that answer saved as accepted memory.",
     "   - At the end, ask whether to `complete_interview` and whether to submit a summary memory candidate. Use `archive_interview` for tests/cancellations.",
     "",
     "7. Close source-sync status when used.",
@@ -325,7 +325,7 @@ function buildHarnessBootstrapMessage({
           "- Use `get_importance_rubric` before nontrivial ingestion.",
           "- Store useful source-derived knowledge with `ingest_object` and a concise `rubricDecision`.",
           "- Use `record_memory`, `record_decision`, `record_principle`, or `capture_thought` for durable second-brain memory.",
-          "- Send uncertain items to review rather than silently storing them.",
+          "- Skip uncertain items; there is no owner review queue.",
           "- Never store secrets, auth codes, full raw private messages, or raw source dumps.",
         ]
       : [];
@@ -423,11 +423,11 @@ const interviewKindSchema = z.enum(interviewKindValues);
 
 const interviewMemoryKindSchema = z
   .enum(interviewMemoryKindValues)
-  .describe("Interview-created memories always go to review.");
+  .describe("Interview-created memories are accepted directly.");
 
 const memoryReviewBehaviorSchema = z
   .enum(memoryReviewBehaviorValues)
-  .describe("accept = direct write, submit_for_review = queue for user review, auto = backend policy.");
+  .describe("All values accept directly. submit_for_review is a deprecated compatibility alias.");
 
 const memoryEvidenceSchema = {
   captureReason: z.string().optional(),
@@ -501,17 +501,15 @@ function candidateConfirmation(input: CandidateObjectInput, result: unknown) {
   const resultRecord = objectResult(result);
   const duplicate = resultRecord.duplicate === true;
   return {
-    status: resultRecord.status ?? (duplicate ? "duplicate_pending" : "submitted_for_review"),
+    status: resultRecord.status ?? "accepted",
     entityType: input.candidateEntityType,
     title: payloadTitle(input.candidateEntityType, input.candidatePayload),
     triageItemId: resultRecord.triageItemId,
     sourceRefIds: resultRecord.sourceRefIds,
     duplicate,
     candidateFingerprint: resultRecord.candidateFingerprint,
-    reviewUrl: reviewUrl("/triage"),
-    nextAction: duplicate
-      ? "This candidate already has a pending review item in Skippy."
-      : "Review, approve, correct, merge, reclassify, or reject this candidate in Skippy.",
+    reviewUrl: reviewUrl("/review/history"),
+    nextAction: "Knowledge saved in Skippy.",
   };
 }
 
@@ -828,10 +826,7 @@ function memoryConfirmation(
     rubricDecision: resultRecord.rubricDecision ?? input.rubricDecision,
     reviewBehavior: input.reviewBehavior,
     reviewUrl: reviewUrl("/memory"),
-    nextAction:
-      status === "submitted_for_review"
-        ? "Review, accept, edit, or reject this memory candidate in Skippy."
-        : "Memory updated in Skippy.",
+    nextAction: "Memory updated in Skippy.",
   };
 }
 
@@ -1368,7 +1363,7 @@ export function createMcpServer(
     {
       title: "Capture thought",
       description:
-        "Capture an explicit user thought as second-brain memory (durable preferences, reflections, decisions-in-progress). reviewBehavior chooses direct write versus review; see the memory-rubric skill.",
+        "Capture an explicit user thought as second-brain memory (durable preferences, reflections, decisions-in-progress). All reviewBehavior values accept directly; see the memory-rubric skill.",
       annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: true },
       inputSchema: z.object({
         text: z.string().describe("Concise thought; never full raw source text."),
@@ -1470,7 +1465,7 @@ export function createMcpServer(
     {
       title: "Submit memory review candidate",
       description:
-        "Queue a possible memory for user review when unsure it should be stored directly; prefer record_memory/record_decision/record_principle when it clearly clears the rubric. Never queue transient alerts — see the memory-rubric skill.",
+        "Deprecated compatibility tool: accepts memory directly. Prefer record_memory/record_decision/record_principle for supported durable knowledge; skip uncertain items.",
       annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: true },
       inputSchema: z.object({
         content: z.string(),
@@ -1645,7 +1640,7 @@ export function createMcpServer(
     {
       title: "Answer interview question",
       description:
-        "Save the user's answer to the current interview question and return the next question to ask in chat. Set createMemoryCandidate only when the user explicitly wants the answer sent to Memory Inbox.",
+        "Save the user's answer to the current interview question and return the next question to ask in chat. Set createMemoryCandidate only when the user explicitly wants the answer saved as accepted memory.",
       annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: false },
       inputSchema: z.object({
         interviewId: z.string(),
@@ -1758,7 +1753,7 @@ export function createMcpServer(
     {
       title: "Ingest accepted object",
       description:
-        "Primary write for source-derived knowledge that clears the importance rubric: creates an accepted Skippy object directly, with sourceRefs and a concise rubricDecision. Links default to status 'saved'; pass 'unread' only for explicit read-later intent, and use submit_candidate_object when genuinely uncertain.",
+        "Primary write for source-derived knowledge that clears the importance rubric: creates an accepted Skippy object directly, with sourceRefs and a concise rubricDecision. Links default to status 'saved'; pass 'unread' only for explicit read-later intent; skip uncertain links.",
       annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: true },
       inputSchema: z.object({
         candidateEntityType: z.enum(entityTypeValues),
@@ -1785,13 +1780,13 @@ export function createMcpServer(
     {
       title: "Submit candidate object",
       description:
-        "Review-queue fallback for source-derived knowledge when unsure it clears the importance rubric. Prefer ingest_object for clearly important items.",
+        "Deprecated compatibility tool: accepts source-derived knowledge directly. Prefer ingest_object for items that clear the importance rubric.",
       annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: true },
       inputSchema: z.object({
         candidateEntityType: z.enum(entityTypeValues),
         candidatePayload: jsonObjectSchema,
         confidence: z.number().min(0).max(1).optional(),
-        reviewReason: z.string().optional().describe("Why the user should review this candidate."),
+        reviewReason: z.string().optional().describe("Context for this source-derived object."),
         sourceRefs: z.array(sourceRefSchema).optional(),
         sourceRefIds: z.array(z.string()).optional(),
       }),
@@ -1919,7 +1914,7 @@ export function createMcpServer(
     {
       title: "Propose a Google Calendar event",
       description:
-        "Stage an event for the owner's Google Calendar. Nothing reaches Google here: it lands in /review → Actions, and the runner creates it within seconds of approval. Agent roles always require approval — autoApprove is honored only for the owner. The result reports `conflicts` with events already on the calendar; relay them instead of claiming the time is free.",
+        "Queue an event for the owner's Google Calendar. The lease-based runner executes it automatically. The result reports `conflicts` with events already on the calendar; relay them instead of claiming the time is free.",
       annotations: {
         readOnlyHint: false,
         // Staging only adds; approval and execution are separate steps.
@@ -1940,7 +1935,7 @@ export function createMcpServer(
           .boolean()
           .optional()
           .describe(
-            "Owner-only: skip the approval queue because the owner asked for this event directly in chat. Ignored for agent roles.",
+            "Deprecated compatibility option; events are always queued for execution.",
           ),
         relatedEntityRefs: z
           .array(z.object({ entityType: z.string(), entityId: z.string() }))
@@ -2706,7 +2701,7 @@ export function createMcpServer(
     {
       title: "List pending actions",
       description:
-        "Read-only list of external side-effect actions (send message, complete external reminder) waiting for approval or execution tracking; separate from accepted knowledge.",
+        "Read-only list of external side-effect actions (send message, complete external reminder) queued for execution or recorded in execution history; separate from accepted knowledge.",
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: z.object({
         status: z.string().optional().describe("e.g. pending, approved, rejected, sent, failed, completed."),
@@ -2786,7 +2781,7 @@ export function createMcpServer(
         taskId: z.string(),
         completedBy: z.string().optional().describe("Chat-context label; not persisted as a Convex user ID."),
         completedByUserId: z.string().optional().describe("Convex user ID to store as completion actor."),
-        externalReminderSourceRefId: z.string().optional().describe("External reminder to sync after approval/execution."),
+        externalReminderSourceRefId: z.string().optional().describe("External reminder to sync through the executor."),
       }),
     },
     async (args) =>
@@ -2914,7 +2909,7 @@ export function createMcpServer(
     {
       title: "Dispatch notifications",
       description:
-        "Build and send approval-gated browser push notifications for urgent tasks and pending actions. Use dryRun first to preview candidates without sending.",
+        "Build and send browser push notifications for urgent tasks. Use dryRun first to preview candidates without sending.",
       annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: true },
       inputSchema: z.object({
         dryRun: z.boolean().optional().describe("Return candidates without sending."),

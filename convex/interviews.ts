@@ -354,7 +354,7 @@ function buildSummaryBody(interview: any, template: InterviewTemplate, responses
   return `${subject}${template.title}\n\n${lines}`.trim();
 }
 
-async function createMemoryReviewCandidate(db: any, args: {
+async function createAcceptedMemory(db: any, args: {
   brainInstanceId: string;
   userId?: string;
   actor?: InterviewActor;
@@ -372,8 +372,10 @@ async function createMemoryReviewCandidate(db: any, args: {
     title: args.title,
     ...(args.summary ? { summary: args.summary } : {}),
     body: args.body,
-    status: "inbox",
-    reviewState: "pending_review",
+    status: "accepted",
+    reviewState: "accepted",
+    acceptedAt: args.now,
+    reviewedAt: args.now,
     confidence: 0.8,
     ...(args.relatedEntityRefs?.length ? { relatedEntityRefs: args.relatedEntityRefs } : {}),
     captureReason: args.captureReason,
@@ -383,16 +385,16 @@ async function createMemoryReviewCandidate(db: any, args: {
   const memoryId = await db.insert("knowledge", {
     ...memoryDocument,
     kind: "memory",
-    processingState: "suggested",
+    processingState: "accepted",
   });
 
   await db.insert("activityEvents", {
     brainInstanceId: args.brainInstanceId,
-    activityType: "memory_review_candidate_submitted",
+    activityType: "memory_recorded",
     actorType: args.actor?.actorType ?? "user",
     actorId: args.actor?.actorId ?? args.userId,
     timestamp: args.now,
-    summary: `Memory review candidate submitted: ${args.title}`,
+    summary: `Memory recorded: ${args.title}`,
     metadata: {
       memoryId,
       memoryType: args.memoryType,
@@ -526,7 +528,7 @@ async function answerCurrentQuestionForBrainCore(db: any, args: {
 
   let memoryCandidateId = existing?.memoryCandidateId;
   if (args.createMemoryCandidate && question.captureMemoryAs) {
-    memoryCandidateId = await createMemoryReviewCandidate(db, {
+    memoryCandidateId = await createAcceptedMemory(db, {
       brainInstanceId: args.brainInstanceId,
       actor: args.actor,
       memoryType: args.memoryType ?? question.captureMemoryAs,
@@ -621,7 +623,7 @@ async function completeInterviewForBrain(db: any, args: {
           : interview.templateKind === "weekly_review"
             ? "insight"
             : "memory";
-      memoryCandidateId = await createMemoryReviewCandidate(db, {
+      memoryCandidateId = await createAcceptedMemory(db, {
         brainInstanceId: args.brainInstanceId,
         actor: args.actor,
         memoryType: args.memoryType ?? defaultMemoryType,
@@ -964,7 +966,7 @@ export const answerCurrentQuestion = mutationGeneric({
 
     let memoryCandidateId = existing?.memoryCandidateId;
     if (args.createMemoryCandidate && question.captureMemoryAs) {
-      memoryCandidateId = await createMemoryReviewCandidate(ctx.db, {
+      memoryCandidateId = await createAcceptedMemory(ctx.db, {
         brainInstanceId: brain._id,
         userId: user._id,
         memoryType: args.memoryType ?? question.captureMemoryAs,
@@ -1049,7 +1051,7 @@ export const complete = mutationGeneric({
             : interview.templateKind === "weekly_review"
               ? "insight"
               : "memory";
-        memoryCandidateId = await createMemoryReviewCandidate(ctx.db, {
+        memoryCandidateId = await createAcceptedMemory(ctx.db, {
           brainInstanceId: brain._id,
           userId: user._id,
           memoryType: args.memoryType ?? defaultMemoryType,

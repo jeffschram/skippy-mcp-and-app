@@ -64,7 +64,7 @@ export function HomeItemActions({ row, details = false }: { row: ActionRow; deta
     {details && row.isWaiting && open ? <Button disabled={pending} onClick={() => void run(async () => {
       const result = await nudge({ taskId: row.id as any });
       if (!result.pendingActionId) throw new Error("No nudge was drafted. Choose who this task is waiting on first.");
-    }, "Nudge drafted — review it in Pending actions.")}>Draft nudge</Button> : null}
+    }, "Follow-up saved. Automatic message delivery is not available.")}>Save follow-up</Button> : null}
   </div>;
 }
 

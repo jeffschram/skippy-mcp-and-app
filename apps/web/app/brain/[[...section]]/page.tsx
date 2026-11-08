@@ -12,7 +12,7 @@ export default async function BrainPage({ params }: { params: Promise<{ section?
   if (section?.[0] === "inbox") {
     // Brain Inbox merged into Review → Finds (owner decision Sep 4); old deep
     // links follow the content.
-    redirect("/review?filter=finds");
+    redirect("/");
   }
   const renamedSections: Record<string, string> = {
     links: "library",

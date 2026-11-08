@@ -50,7 +50,7 @@ Use for URLs the user may want to read, save, or reference later. Links are refe
 - Required: `url`
 - Optional: `title`, `summary`, `whyItMatters`, `status`
 - `status` defaults to `saved` (passive reference; no user interaction expected). Pass `unread` only when the user explicitly wants to read the link later.
-- If genuinely uncertain whether the link is valid or important, use `submit_candidate_object` instead so it lands in Review for a one-tap decision.
+- Skip links whose validity or importance is uncertain.
 - Use `update_link_status` for genuine lifecycle changes on stored links: `read` after actually ingesting the content, `saved` for reference reclassification, `discarded` during cleanup — never to fake user engagement.
 - Prefer harness-provided metadata; Skippy may enrich links later.
 

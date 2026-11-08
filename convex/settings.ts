@@ -533,11 +533,6 @@ export const notificationDispatchContextForBrain = internalQueryGeneric({
       .withIndex("by_brain_state", (q) => q.eq("brainInstanceId", args.brainInstanceId))
       .filter((q) => q.eq(q.field("processingState"), "accepted"))
       .collect();
-    const pendingActions = await db
-      .query("pendingActions")
-      .withIndex("by_brain_status", (q) => q.eq("brainInstanceId", args.brainInstanceId))
-      .filter((q) => q.eq(q.field("status"), "pending_approval"))
-      .collect();
     const since = Date.now() - 24 * 60 * 60 * 1000;
     const recentDeliveries = await db
       .query("notificationDeliveries")
@@ -545,7 +540,7 @@ export const notificationDispatchContextForBrain = internalQueryGeneric({
       .filter((q) => q.gte(q.field("createdAt"), since))
       .collect();
 
-    return { config, pushSubscriptions, tasks, pendingActions, recentDeliveries };
+    return { config, pushSubscriptions, tasks, recentDeliveries };
   },
 });
 

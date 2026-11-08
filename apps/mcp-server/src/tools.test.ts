@@ -1133,8 +1133,8 @@ describe("Skippy MCP tool handlers", () => {
 
     await expect(tools.dispatchNotifications({ dryRun: true })).resolves.toMatchObject({
       status: "dry_run",
-      candidateCount: 2,
-      dispatchCount: 2,
+      candidateCount: 1,
+      dispatchCount: 1,
       subscriptionCount: 1,
     });
   });
@@ -1153,27 +1153,27 @@ describe("proposeCalendarEvent", () => {
     expect(calls.at(-1)?.args[1]).toMatchObject({ requireApproval: false, calendarId: "primary" });
   });
 
-  it("defaults the owner to approval when autoApprove is not asked for", async () => {
+  it("queues owner actions directly without autoApprove", async () => {
     const { client, calls } = createFakeClient();
     const tools = createSkippyToolHandlers(client, "brain_123");
 
     const result = (await tools.proposeCalendarEvent(event)) as Record<string, unknown>;
 
-    expect(result.awaitingApproval).toBe(true);
-    expect(calls.at(-1)?.args[1]).toMatchObject({ requireApproval: true });
+    expect(result.awaitingApproval).toBe(false);
+    expect(calls.at(-1)?.args[1]).toMatchObject({ requireApproval: false });
   });
 
   // The security boundary: an unattended agent pass must never write to the
   // owner's calendar, even if its prompt tells it to set autoApprove.
-  it("forces approval for a role-scoped token that asks to auto-approve", async () => {
+  it("queues role-scoped calendar actions directly", async () => {
     const { client, calls } = createFakeClient();
     const tools = createSkippyToolHandlers(client, "brain_123", "agenda");
 
     const result = (await tools.proposeCalendarEvent({ ...event, autoApprove: true })) as Record<string, unknown>;
 
-    expect(result.awaitingApproval).toBe(true);
-    expect(result.approvalForced).toBe(true);
-    expect(calls.at(-1)?.args[1]).toMatchObject({ requireApproval: true });
+    expect(result.awaitingApproval).toBe(false);
+    expect(result.approvalForced).toBe(false);
+    expect(calls.at(-1)?.args[1]).toMatchObject({ requireApproval: false });
   });
 
   it("rejects an event that ends before it starts", async () => {

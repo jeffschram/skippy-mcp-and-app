@@ -435,7 +435,7 @@ describe("Skippy MCP manifest", () => {
       expect(upsertLink?.description).toContain("Prefer ingest_object");
       expect(upsertNote?.description).not.toContain("status defaults to 'saved'");
       expect(ingestObject?.inputSchema.properties?.rubricDecision).toBeDefined();
-      expect(submitCandidate?.description).toContain("Review-queue fallback");
+      expect(submitCandidate?.description).toContain("Deprecated compatibility tool");
       expect(submitCandidate?.inputSchema.properties?.reviewReason).toBeDefined();
       expect(createTask?.description).toContain("when the user explicitly asks");
       expect(createTask?.inputSchema.properties?.ownerType).toBeDefined();
@@ -531,8 +531,8 @@ describe("Skippy MCP manifest", () => {
       expect(recordMemory?.inputSchema.properties?.rubricDecision).toBeDefined();
       expect(recordDecision?.description).toContain("durable decision memory");
       expect(recordPrinciple?.description).toContain("operating principle");
-      expect(submitMemoryReviewCandidate?.description).toContain("Queue a possible memory");
-      expect(submitMemoryReviewCandidate?.description).toContain("transient alerts");
+      expect(submitMemoryReviewCandidate?.description).toContain("accepts memory directly");
+      expect(submitMemoryReviewCandidate?.description).toContain("skip uncertain items");
       expect(listMemory?.annotations?.readOnlyHint).toBe(true);
       expect(getContextBundle?.description).toContain("context bundle");
       expect(getContextBundle?.inputSchema.properties?.relatedEntityRefs).toBeDefined();
@@ -2282,6 +2282,8 @@ describe("agent role tool scoping", () => {
   it("keeps full access for tokens without a role", async () => {
     const names = await listToolNames();
     expect(names.has("ingest_object")).toBe(true);
+    expect(names.has("submit_candidate_object")).toBe(true);
+    expect(names.has("submit_memory_review_candidate")).toBe(true);
     expect(names.has("record_task_result")).toBe(true);
     expect(names.has("record_financial_transactions")).toBe(true);
   });
@@ -2289,6 +2291,8 @@ describe("agent role tool scoping", () => {
   it("scopes the agenda role to ingestion and memory tools", async () => {
     const names = await listToolNames("agenda");
     expect(names.has("ingest_object")).toBe(true);
+    expect(names.has("submit_candidate_object")).toBe(false);
+    expect(names.has("submit_memory_review_candidate")).toBe(false);
     expect(names.has("list_quick_captures")).toBe(true);
     expect(names.has("record_memory")).toBe(true);
     expect(names.has("refresh_focus_summary")).toBe(true);

@@ -504,7 +504,7 @@ export function MindExplorer({ graph: liveGraph }: { graph: MindGraph }) {
             <MindCardChat
               taskId={attentionCard ? (attentionCard.focus?.kind === "task" || attentionCard.agenda?.source === "task" ? attentionCard.entityId ?? attentionCard.agenda?.id : undefined) : (node ?? (lastRecord.current?.id === selected ? lastRecord.current : undefined))?.kind === "task" ? selected! : undefined}
               onCompletedClose={() => setClosingCard(currentCardId)}
-              itemId={attentionCard ? attentionCard.review?.id ?? attentionCard.entityId ?? attentionCard.agenda?.id ?? attentionCard.key : selected === owner.id ? "owner:self" : selected!}
+              itemId={attentionCard ? attentionCard.entityId ?? attentionCard.agenda?.id ?? attentionCard.key : selected === owner.id ? "owner:self" : selected!}
               label={attentionCard?.title ?? node?.title ?? (selectedKind ? KINDS[selectedKind].label : recordLeftMap ? retainedTitle : owner.title)}
             />
           </aside>}

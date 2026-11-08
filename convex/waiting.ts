@@ -78,9 +78,7 @@ export const setWaitingOn = mutationGeneric({
 /**
  * Records a nudge.
  *
- * Drafts an outbound message through the existing approval flow and sends
- * nothing: Skippy must not touch source systems without separate approval, so
- * the pending action is left unsent for the owner to release.
+ * Queues an outbound message for execution.
  */
 export const nudgeWaitingTask = mutationGeneric({
   args: {
@@ -103,8 +101,8 @@ export const nudgeWaitingTask = mutationGeneric({
       pendingActionId = await ctx.db.insert("pendingActions", {
         brainInstanceId: brain._id,
         actionType: "waiting_nudge",
-        // Never "sent" or "approved" from here — the owner releases it.
-        status: "drafted",
+        // Ready for the executor; the action result records delivery.
+        status: "approved",
         subject: `Following up: ${task.title}`,
         messageBody: args.messageBody,
         relatedEntities: [
@@ -115,6 +113,12 @@ export const nudgeWaitingTask = mutationGeneric({
         updatedAt: now,
       });
     }
+
+    if (pendingActionId) await ctx.db.insert("activityEvents", {
+      brainInstanceId: brain._id, pendingActionId,
+      activityType: "waiting_nudge_queued", actorType: "system", timestamp: now,
+      summary: `Follow-up saved: ${task.title}. Delivery is unavailable until a message executor is connected.`,
+    });
 
     return { taskId: task._id, lastNudgedAt: now, pendingActionId };
   },

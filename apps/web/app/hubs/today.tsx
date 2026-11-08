@@ -4,22 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent } from "react";
 import { useMutation, useQuery } from "convex/react";
-import {
-  ArrowRight,
-  Copy,
-  Download,
-  Eye,
-  File as FileIcon,
-  FileText,
-  Inbox,
-  Link as LinkIcon,
-  Paperclip,
-  PenLine,
-  RefreshCw,
-  ShieldCheck,
-  Sparkles,
-  X,
-} from "lucide-react";
+import { ArrowRight, Copy, Download, Eye, File as FileIcon, FileText, Link as LinkIcon, Paperclip, PenLine, RefreshCw, Sparkles, X } from "lucide-react";
 import { activeSourceSyncStatus, type QuickCaptureIntent } from "@skippy/shared";
 import { api } from "../../lib/skippy-api";
 import { agentRoleDisplayName, agentRoleFromMetadata, formatRelative } from "../../lib/display";
@@ -30,14 +15,7 @@ import { useViewerReady } from "./use-viewer";
 import { formatFileSize } from "./project-library-helpers";
 import { QUICK_CAPTURE_INTENT_STORAGE_KEY, checkQuickCaptureFile, parseStoredIntent } from "./quick-capture-helpers";
 import { cn } from "@/lib/utils";
-import {
-  itemClass,
-  itemIconClass,
-  itemMetaClass,
-  itemTitleClass,
-  mutedClass,
-  projectRowClass,
-} from "../page-classes";
+import { itemMetaClass } from "../page-classes";
 
 type AnyRecord = Record<string, any>;
 
@@ -650,8 +628,6 @@ export function TodayContent() {
     () => activeSourceSyncStatus<AnyRecord>(data?.sourceSyncStatuses, Date.now()),
     [data?.sourceSyncStatuses],
   );
-  const unclear = data?.triageItems?.length ?? 0;
-  const pending = data?.pendingActions?.length ?? 0;
 
   return (
     <LiveGate>
@@ -678,48 +654,6 @@ export function TodayContent() {
           <div className="grid content-start gap-4">
             <QuickCaptureBox captures={data?.quickCaptures} />
 
-            <Section title="Needs your review">
-              {unclear === 0 && pending === 0 ? (
-                <p className={mutedClass} style={{ margin: 0, fontSize: 14 }}>
-                  Inbox zero — nothing waiting for a decision.
-                </p>
-              ) : (
-                <div style={{ display: "grid", gap: 8 }}>
-                  {unclear > 0 ? (
-                    <Link
-                      className={cn(itemClass, projectRowClass)}
-                      href="/review?filter=finds"
-                      style={{ gridTemplateColumns: "auto 1fr auto" }}
-                    >
-                      <span className={itemIconClass}>
-                        <Inbox size={17} aria-hidden />
-                      </span>
-                      <div>
-                        <p className={itemTitleClass}>{unclear} unclear signal{unclear === 1 ? "" : "s"}</p>
-                        <p className={itemMetaClass}>Need a rubric decision.</p>
-                      </div>
-                      <Badge tone="gold">Review</Badge>
-                    </Link>
-                  ) : null}
-                  {pending > 0 ? (
-                    <Link
-                      className={cn(itemClass, projectRowClass)}
-                      href="/review?filter=approvals"
-                      style={{ gridTemplateColumns: "auto 1fr auto" }}
-                    >
-                      <span className={itemIconClass}>
-                        <ShieldCheck size={17} aria-hidden />
-                      </span>
-                      <div>
-                        <p className={itemTitleClass}>{pending} pending action{pending === 1 ? "" : "s"}</p>
-                        <p className={itemMetaClass}>External effects awaiting approval.</p>
-                      </div>
-                      <Badge tone="red">Approve</Badge>
-                    </Link>
-                  ) : null}
-                </div>
-              )}
-            </Section>
 
           </div>
         </div>

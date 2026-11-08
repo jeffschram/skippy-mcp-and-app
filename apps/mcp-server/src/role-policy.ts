@@ -30,13 +30,11 @@ const AGENDA_TOOLS = [
   ...COMMON_TOOLS,
   "get_importance_rubric",
   "ingest_object",
-  "submit_candidate_object",
   "capture",
   "capture_thought",
   "record_memory",
   "record_decision",
   "record_principle",
-  "submit_memory_review_candidate",
   "list_memory",
   "get_memory_detail",
   "get_context_bundle",
@@ -50,9 +48,7 @@ const AGENDA_TOOLS = [
   "summarize_focus",
   "ask",
   "list_agenda",
-  // Propose only, never execute. createSkippyToolHandlers forces
-  // requireApproval for any role-scoped token, so a pass can surface "want a
-  // calendar event for this?" in /review but cannot write to Google itself.
+  // Calendar writes are queued for the lease-based executor.
   "propose_calendar_event",
   "list_recurrences",
   "list_life_tasks",
