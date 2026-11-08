@@ -764,9 +764,9 @@ function ChatSurface({
         {timelineItems.length === 0 ? (card ? null : (
           <div className="mx-auto my-auto max-w-md text-center">
             <MessageCircle className="mx-auto mb-3 text-primary" size={24} aria-hidden />
-            <p className="mb-1 font-bold">{mind ? "What’s on your mind?" : "Talk through this project"}</p>
+            <p className="mb-1 font-bold">{scope.kind === "page" && scope.pageKey.startsWith("mind-item:") ? "Talk through this item" : mind ? "What’s on your mind?" : "Talk through this project"}</p>
             <p className="m-0 text-sm text-muted-foreground">
-              {mind ? "Explore a connection, capture a thought, or decide what to focus on next." : "Ask what comes next, update project details, or discuss work already in progress."}
+              {scope.kind === "page" && scope.pageKey.startsWith("mind-item:") ? "Ask a question or discuss an update to this item." : mind ? "Explore a connection, capture a thought, or decide what to focus on next." : "Ask what comes next, update project details, or discuss work already in progress."}
             </p>
           </div>
         )) : (
@@ -935,6 +935,14 @@ export function ProjectChatWorkspace({
       className={className}
     />
   );
+}
+
+/** Key the entire surface so drafts, async sends and subscriptions stay with their entity. */
+export function ItemDetailsChat({ kind, id, label }: { kind: "task" | "event" | "recurrence"; id: string; label: string }) {
+  // Canonical Convex IDs encode table identity; preserve the Mind transcript key.
+  const pageKey = `mind-item:${id}`;
+  return <ChatSurface key={`${kind}:${id}`} scope={{ kind: "page", pageKey, label }}
+    className="flex h-[420px] min-h-0 max-h-[60dvh] shrink-0 flex-col border-t pb-[env(safe-area-inset-bottom)]" />;
 }
 
 export function MindCardChat({ itemId, label, taskId, onCompletedClose }: { itemId: string; label: string; taskId?: string | undefined; onCompletedClose?: (() => void) | undefined }) {

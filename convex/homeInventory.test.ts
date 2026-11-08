@@ -108,4 +108,24 @@ describe("bounded Home inventory", () => {
     expect(await run(getForViewer, db.ctx, { kind: "task", id: "tasks:foreign" })).toBeNull();
     expect(await run(getForViewer, db.ctx, { kind: "event", id: "tasks:closed" })).toBeNull();
   });
+  it("loads canonical dates, recurrence context and only owned sources, then reflects deletion", async () => {
+    const records: Row[] = [task("a", { description: "Canonical description", completedAt: 1500 }),
+      recurrence("r", { currentTaskId: "tasks:a", rule: { kind: "interval", everyDays: 3 }, anchor: "completion", lastCompletedAt: 800 }),
+      { _id: "entitySourceRefs:own", brainInstanceId: "mine", entityRef: { entityType: "task", entityId: "tasks:a" }, sourceRefId: "sourceRefs:own" },
+      { _id: "entitySourceRefs:foreign", brainInstanceId: "mine", entityRef: { entityType: "task", entityId: "tasks:a" }, sourceRefId: "sourceRefs:foreign" },
+      { _id: "sourceRefs:own", brainInstanceId: "mine", sourceSystem: "email", url: "https://example.com/message" },
+      { _id: "sourceRefs:foreign", brainInstanceId: "other", sourceSystem: "private", url: "https://example.com/private" }];
+    const { ctx } = fixture(records);
+    const input = { kind: "task", id: "tasks:a" };
+    const detail = await run(getForViewer, ctx, input);
+    expect(detail.description).toBe("Canonical description");
+    expect(detail.recurrence).toContain("Every 3 days");
+    expect(detail.dates).toContainEqual({ label: "Last completed", at: 800 });
+    expect(detail.sources).toEqual([{ label: "email", url: "https://example.com/message" }]);
+    records[0]!.description = "Changed";
+    expect((await run(getForViewer, ctx, input)).description).toBe("Changed");
+    records.shift();
+    expect(await run(getForViewer, ctx, input)).toBeNull();
+  });
+
 });

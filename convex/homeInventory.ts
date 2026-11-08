@@ -162,7 +162,10 @@ export const page = query({
 // Direct resolution deliberately bypasses inventory windows, status and area.
 export const getForViewer = query({
   args: { kind, id: v.string() },
-  returns: v.union(v.null(), v.object({ row: rowValidator, description: v.union(v.string(), v.null()), projectId: v.union(v.string(), v.null()) })),
+  returns: v.union(v.null(), v.object({ row: rowValidator, description: v.union(v.string(), v.null()), projectId: v.union(v.string(), v.null()),
+    dates: v.array(v.object({ label: v.string(), at: v.number() })), timeZone: v.union(v.string(), v.null()),
+    recurrence: v.union(v.string(), v.null()), sources: v.array(v.object({ label: v.string(), url: v.string() })),
+  })),
   handler: async (ctx, args) => {
     const { brain } = await requireOwnedBrain(ctx);
     const table = args.kind === "task" ? "tasks" : args.kind === "event" ? "calendarEvents" : "recurrences";
@@ -171,6 +174,28 @@ export const getForViewer = query({
     if (!record || record.brainInstanceId !== brain._id) return null;
     const linked = args.kind === "task" ? await project(ctx, brain._id, record._id) : null;
     const recurrence = args.kind === "task" ? await repeat(ctx, brain._id, record._id) : null;
-    return { row: row(args.kind, record, recurrence), description: record.description ?? null, projectId: linked?.to.entityId ?? null };
+    const data = record as typeof record & Record<string, any>;
+    const repeatRecord = args.kind === "recurrence" ? data : recurrence;
+    const dates = [
+      ["Due", data.dueAt], ["Starts", data.startAt], ["Ends", data.endAt],
+      ["Completed", data.completedAt], ["Next due", repeatRecord?.nextDueAt], ["Last completed", repeatRecord?.lastCompletedAt],
+    ].flatMap(([label, at]) => typeof at === "number" ? [{ label: String(label), at }] : []);
+    const refs = args.kind === "task" ? await ctx.db.query("entitySourceRefs").withIndex("by_brain_entity", q =>
+      q.eq("brainInstanceId", brain._id).eq("entityRef.entityType", "task").eq("entityRef.entityId", String(record._id))).take(20) : [];
+    const sources: { label: string; url: string }[] = [];
+    for (const sourceId of [...new Set([...refs.map(ref => ref.sourceRefId), ...(data.sourceRefIds ?? [])])].slice(0, 20)) {
+      const source = await ctx.db.get(sourceId as import("./_generated/dataModel").Id<"sourceRefs">);
+      if (source && source.brainInstanceId === brain._id && (source.url || source.deepLink)) sources.push({ label: source.sourceSystem, url: (source.url || source.deepLink)! });
+    }
+    if (data.htmlLink) sources.push({ label: "Calendar event", url: data.htmlLink });
+    if (data.conferenceUrl) sources.push({ label: "Join meeting", url: data.conferenceUrl });
+    const rule = repeatRecord?.rule;
+    const repeatDescription = repeatRecord ? [repeatRecord.title, repeatRecord.status,
+      rule?.kind === "interval" ? `Every ${rule.everyDays} days` : rule?.rrule,
+      repeatRecord.anchor ? `From ${repeatRecord.anchor}` : null].filter(Boolean).join(" · ") :
+      data.recurringEventId ? `Instance of calendar series ${data.recurringEventId}` : data.recurrence?.join(" · ") ?? null;
+    return { row: row(args.kind, record, recurrence), description: record.description ?? null, projectId: linked?.to.entityId ?? null,
+      dates, timeZone: data.timeZone ?? repeatRecord?.timeZone ?? null, recurrence: repeatDescription, sources };
+
   },
 });
