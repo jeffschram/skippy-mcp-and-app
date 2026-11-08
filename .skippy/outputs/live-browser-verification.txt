@@ -1,0 +1,142 @@
+Live browser verification: Home, Mind, retired surfaces
+Date: 2026-11-08 (Sunday), America/New_York
+Revision: bf55402
+Disposition: REVIEW — incomplete verification; do not mark done.
+
+Result
+pnpm check PASSED (exit 0). Live acceptance remains BLOCKED, not passed.
+No application code was changed. No push, merge, deployment, calendar write,
+fixture mutation, or task-done operation was performed.
+
+Blocking evidence
+The browser inventory showed Skippy at http://localhost:3000. An attempt to
+open Home in a dedicated Chrome verification tab was rejected before page
+inspection:
+"The user declined permission for this action. Browser use could not acquire
+authority to trigger network egress. The origin approval gate did not grant
+access for http://localhost:3000."
+The tool explicitly prohibited alternate-browser or indirect workarounds.
+No workaround was attempted. No page screenshots or live interaction evidence
+were captured. Desktop and mobile verification both remain outstanding.
+
+Environment qualification
+The process listening on port 3000 serves the primary checkout's apps/web,
+not this dedicated worktree. Its build equivalence was not established.
+The worktree has no local web environment file. A future authorized pass must
+identify the frontend/backend revision and run configuration before claiming
+verification of this revision. Do not deploy as part of that pass.
+
+Checks actually completed
+The first command was pnpm check. It completed all workspace and Convex
+typechecks and these test suites:
+  Root backend/helpers: 16 files, 138 tests
+  imessage-mcp:          2 files,  23 tests
+  shared:              25 files, 405 tests
+  ai:                   1 file,   21 tests
+  gcal-write-mcp:        5 files,  62 tests
+  runner:              14 files, 144 tests
+  mcp-server:            5 files,  89 tests
+  web:                 39 files, 385 tests
+  Total:              107 files, 1267 tests, all passed
+These are automated tests, not browser or provider integration evidence.
+
+Acceptance checklist and supporting source observations
+
+1. Summary above Today, outside list, visible without scrolling on a phone
+   LIVE: NOT VERIFIED.
+   Source: home-planning.tsx renders Summary as a sibling preceding Today.
+   Static-render tests assert ordering. Phone readability/position is unknown.
+
+2. Summary supports task, recurrence, event, review
+   SOURCE/AUTOMATED: CONFIRMED; LIVE: NOT VERIFIED.
+   convex/todayModel.ts accepts all four source kinds and builds overdue,
+   next-item, timed-event/overlap, and reviews-due clauses. Home maps kind to
+   source from its deduplicated visible Today rows. Mixed-row tests passed.
+
+3. Summary, Today, Upcoming, All; All collapsed initially
+   SOURCE/AUTOMATED: CONFIRMED; LIVE: NOT VERIFIED.
+   allOpen defaults false; static-render tests assert hidden All and ordering.
+   Summary is intentionally absent while loading or when it has no clauses.
+
+4. Upcoming nonempty on Sunday, rolling seven days
+   AUTOMATED: Sunday date-window test PASSED; LIVE: NOT VERIFIED.
+   homePeriods uses tomorrow through exclusive day eight, not week end.
+   home-planning-helpers.test.ts checks Nov 8–14, 2026, plus DST arithmetic.
+   No live Sunday fixture was rendered; nonempty UI remains unconfirmed.
+
+5. No Needs Attention / Needs your review sections on Home
+   SOURCE: search found neither retired heading in web source.
+   LIVE: NOT VERIFIED.
+
+6. Past reviewAt Today; future reviewAt Upcoming/All
+   SOURCE: reviewInPeriod uses tomorrow/weekEnd boundaries, with All inclusive
+   of eligible records. A later time today can still belong to Today.
+   LIVE: NOT VERIFIED.
+
+7. Done reviewing clears date/removes row; Later moves section
+   SOURCE: Home actions call attention.setForViewer with reviewAction done or
+   later and the chosen reviewAt. Persistence and reactive row movement were
+   NOT VERIFIED LIVE.
+
+8. Undated immediate override appears
+   SOURCE: immediate reviews are selected for Today; All also includes them.
+   LIVE: NOT VERIFIED.
+
+9. No overdue task duplicated as review
+   SOURCE: review-source task records are skipped; UI deduplicates kind/id.
+   LIVE: NOT VERIFIED.
+
+10. /attention retired, no inbound links; /review Finds/Revisit retired
+    SOURCE: no attention or review root page in the app route tree; route-link
+    search found no literal inbound links to either root. Legacy Finds wording
+    remains in comments, not an observed rendered surface.
+    LIVE HTTP status/redirect and navigation: NOT VERIFIED.
+
+11. /review/history is Activity log
+    SOURCE: page renders ActivityContent, navigation points to /review/history.
+    LIVE loading, history data, and pagination: NOT VERIFIED.
+
+12. Mind browsing/details without agenda/attention feed
+    SOURCE: Mind renders MindContent; detail attention editing remains.
+    LIVE browsing and absence of feeds: NOT VERIFIED.
+
+13. Mind graph event opens ItemDetailsModal; Join meeting / Open calendar event
+    SOURCE: event selection is passed to the shared ItemDetailsModal. The modal
+    renders safe external source links returned by the detail endpoint.
+    LIVE graph click, link presence/destinations, and opening: NOT VERIFIED.
+
+14. Review date editable from Mind details
+    SOURCE: Mind detail card retains AttentionEditor; its form writes reviewAt
+    for non-task entities. LIVE save/reload: NOT VERIFIED.
+
+15. Home task complete, recurrence complete/skip, event actions
+    SOURCE: HomeItemActions invokes task status and versioned recurrence
+    mutations; event links are in details. LIVE action results: NOT VERIFIED.
+
+16. Item chat scope from Mind and Home
+    SOURCE: shared modal renders ItemDetailsChat with row kind/id/title; Mind
+    also uses MindCardChat. LIVE request context and response: NOT VERIFIED.
+
+17. Agent-role MCP create reaches Google Calendar without approval; conflicts
+    NOT RUN. No test event created and no provider receipt captured. Connector
+    presence does not establish the authenticated agent role. Local MCP source
+    says events queue for automatic execution and reports conflicts; this does
+    not establish deployed role policy, outbox execution, or Google delivery.
+    Stale source comments still mention owner-only approval bypass / separate
+    approval, despite the current tool description. Treat those as comment
+    drift, not proof of runtime behavior.
+
+Required follow-up before acceptance
+Authorize browser access through the normal gate and identify the tested build.
+Exercise this checklist in desktop and a mobile browser/explicitly documented
+mobile emulation. Use disposable labeled fixtures for review transitions,
+deduplication, task and recurrence actions. Capture before/after evidence.
+On Sunday, seed an eligible item tomorrow and verify Upcoming actually shows
+it. Verify the day-eight exclusion too. Use an authenticated agent-role MCP
+session for a labeled test event, capture conflicts and pending-action status,
+then independently read its Google Calendar event ID. Record any cleanup.
+
+Task handoff
+Leave in review with the live acceptance checks outstanding. This report does
+not mark the task done or claim the requested end-to-end pass was completed.
+Runner remains responsible for publication and task lifecycle handoff.
