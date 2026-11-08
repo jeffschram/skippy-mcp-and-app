@@ -662,6 +662,7 @@ export function TodayContent() {
         </Card>
       ) : (
         <div className="grid gap-4">
+          <HomePlanning />
           <AttentionFocus />
           {sync ? (
             <div role="status">
@@ -678,10 +679,6 @@ export function TodayContent() {
           {/* Right rail */}
           <div className="grid content-start gap-4">
             <QuickCaptureBox captures={data?.quickCaptures} />
-
-            {/* Calendar events, due tasks, and firing recurrences merged into
-                one list — the answer to "what does my day look like". */}
-            <HomePlanning />
 
             <Section title="Needs your review">
               {unclear === 0 && pending === 0 ? (

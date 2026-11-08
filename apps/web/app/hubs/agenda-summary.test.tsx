@@ -34,8 +34,8 @@ describe("Home agenda summary", () => {
     for (const item of items) expect(html.split(item.title)).toHaveLength(2);
   });
 
-  it("hides the summary on quiet, empty and loading days", () => {
-    for (const items of [[event(10)], [], undefined]) {
+  it("hides the summary on empty and loading days", () => {
+    for (const items of [[], undefined]) {
       expect(render(items)).not.toContain('aria-label="Today summary"');
     }
   });
@@ -44,6 +44,6 @@ describe("Home agenda summary", () => {
     const today = [event(10), event(12), event(14), event(16)];
     expect(render(today)).toContain("schedule has 4 timed events");
     expect(render([event(10), event(12, 8), event(14, 8), event(16, 8)]))
-      .not.toContain('aria-label="Today summary"');
+      .toContain("schedule has 1 timed event.");
   });
 });

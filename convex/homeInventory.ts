@@ -23,6 +23,7 @@ function row(kind: "task" | "event" | "recurrence", record: any, recurrence?: an
     occurrenceVersion: recurrence?.occurrenceVersion ?? (kind === "recurrence" ? record.occurrenceVersion ?? 0 : null),
     kind, id: record._id, title: record.title, status: record.status,
     at: want ? null : (kind === "event" ? record.startAt : kind === "recurrence" ? record.nextDueAt : record.dueAt) ?? null,
+    reviewAt: kind === "task" ? record.attention?.reviewAt ?? null : null,
     endAt: record.endAt ?? null, isAllDay: record.isAllDay ?? false,
     area: record.area ?? null, isWant: want, isWaiting: record.status === "waiting",
     waitingSince: record.waitingSince ?? null, lastNudgedAt: record.lastNudgedAt ?? null,
@@ -33,6 +34,7 @@ function row(kind: "task" | "event" | "recurrence", record: any, recurrence?: an
   };
 }
 const rowValidator = v.object({
+  reviewAt: v.union(v.number(), v.null()),
   occurrenceVersion: v.union(v.number(), v.null()),
   kind, id: v.string(), title: v.string(), status: v.string(), at: v.union(v.number(), v.null()),
   endAt: v.union(v.number(), v.null()), isAllDay: v.boolean(), area: v.union(v.string(), v.null()),

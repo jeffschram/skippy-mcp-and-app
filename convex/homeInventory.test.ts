@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { page, getForViewer } from "./homeInventory";
 import schema from "./schema";
+import { homePeriods } from "../apps/web/app/hubs/home-planning-helpers";
 vi.mock("./auth", () => ({ requireOwnedBrain: async () => ({ brain: { _id: "mine" } }) }));
 type Row = Record<string, any>;
 const field = (row: Row, key: string) => key.split(".").reduce((value, part) => value?.[part], row);
@@ -76,10 +77,41 @@ describe("bounded Home inventory", () => {
     expect((await inventory(records, { status: "completed" })).map(r => r.id)).toEqual(["tasks:closed"]);
     expect((await inventory(records, { status: "paused" })).map(r => r.id)).toEqual(["tasks:live", "recurrences:retired"]);
   });
-  it("uses exclusive boundaries, excludes wants from periods and has an empty Sunday week", async () => {
-    const records = [task("today"), task("tomorrow", { dueAt: 2000 }), task("want", { commitment: "want" }), task("old", { dueAt: 199 })];
-    expect((await inventory(records, { period: "today" })).map(r => r.id)).toEqual(["tasks:today"]);
-    expect(await inventory(records, { period: "week", weekEnd: 2000, utcWeekEnd: 2000 })).toEqual([]);
+  it("keeps rolling Upcoming nonempty on Sunday and disjoint from Today", async () => {
+    const periods = homePeriods(new Date(2026, 10, 8, 12).getTime());
+    const records = [
+      task("today", { dueAt: periods.start }),
+      task("tomorrow", { dueAt: periods.tomorrow }),
+      task("last-day", { dueAt: periods.weekEnd - 1 }),
+      task("outside", { dueAt: periods.weekEnd }),
+      task("want", { commitment: "want" }),
+      task("old", { dueAt: periods.overdueStart - 1 }),
+      recurrence("tomorrow", { nextDueAt: periods.tomorrow }),
+      event("ongoing", { startAt: periods.start - 1, endAt: periods.weekEnd }),
+      event("tomorrow", { startAt: periods.tomorrow, endAt: periods.tomorrow + 1000 }),
+      event("outside", { startAt: periods.weekEnd, endAt: periods.weekEnd + 1000 }),
+      event("all-day", { startAt: periods.utcTomorrow, endAt: periods.utcWeekEnd, isAllDay: true }),
+      event("all-day-outside", { startAt: periods.utcWeekEnd, endAt: periods.utcWeekEnd + 86400000, isAllDay: true }),
+    ];
+    const today = await inventory(records, { ...periods, period: "today" });
+    const upcoming = await inventory(records, { ...periods, period: "week" });
+    expect(today.map(r => r.id).sort()).toEqual(["calendarEvents:ongoing", "tasks:today"]);
+    expect(upcoming.map(r => r.id).sort()).toEqual([
+      "calendarEvents:all-day", "calendarEvents:tomorrow", "recurrences:tomorrow", "tasks:last-day", "tasks:tomorrow",
+    ]);
+    expect(upcoming.some(r => today.some(t => t.id === r.id))).toBe(false);
+    expect(await inventory([], { ...periods, period: "today" })).toEqual([]);
+    expect(await inventory([], { ...periods, period: "week" })).toEqual([]);
+  });
+  it("projects review dates only for included tasks without changing placement", async () => {
+    const rows = await inventory([
+      task("review", { attention: { reviewAt: 0 } }),
+      task("undated-review", { dueAt: undefined, attention: { reviewAt: 0 } }),
+      event("event"), recurrence("repeat"),
+    ], { period: "today" });
+    expect(rows.find(row => row.id === "tasks:review")?.reviewAt).toBe(0);
+    expect(rows.some(row => row.id === "tasks:undated-review")).toBe(false);
+    expect(rows.filter(row => row.kind !== "task").every(row => row.reviewAt === null)).toBe(true);
   });
   it("keeps all-day dates unshifted and extends the calendar horizon without losing earlier events", async () => {
     const records = [event("all-day", { startAt: 800, endAt: 1800, isAllDay: true }),

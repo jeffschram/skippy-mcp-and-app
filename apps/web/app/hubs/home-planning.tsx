@@ -23,9 +23,10 @@ function adapt(row: any, start: number): AgendaRow {
 
 // Each mounted page stays reactive. Parent-owned cursors preserve loaded pages
 // when All collapses or a dialog opens; changed filters start a fresh list.
-function Inventory({ period, scope, now, renderRow, moreInAll }: {
+function Inventory({ period, scope, now, renderRow, moreInAll, children }: {
   period: "today" | "week" | "all"; scope: Scope; now: number;
   renderRow: (row: any) => React.ReactNode; moreInAll: () => void;
+  children?: (content: ReactNode, rows: any[], loading: boolean, partial: boolean) => ReactNode;
 }) {
   const [cursors, setCursors] = useState<(string | undefined)[]>([undefined]);
   const [batchLimit, setBatchLimit] = useState(10);
@@ -39,8 +40,6 @@ function Inventory({ period, scope, now, renderRow, moreInAll }: {
     unique.sort((a, b) => Number(overdue(b)) - Number(overdue(a)));
   }
   const limit = period === "all" ? target : 20;
-  const summary = period === "today" ? buildTodaySummary(unique.slice(0, limit).filter(r => r.at >= scope.start || r.kind === "event")
-    .map(r => ({ source: r.kind, at: r.at, endAt: r.endAt ?? undefined, isAllDay: r.isAllDay }))) : null;
   useEffect(() => {
     // A reactive insertion/deletion can move a page boundary. Rebuild its
     // suffix so stale cursors cannot leave gaps between loaded pages.
@@ -55,8 +54,7 @@ function Inventory({ period, scope, now, renderRow, moreInAll }: {
   useEffect(() => {
     if (last?.cursor && unique.length < target && cursors.length < batchLimit) setCursors(previous => [...previous, last.cursor!]);
   }, [last, unique.length, target, cursors.length, batchLimit]);
-  return <>
-    {summary ? <p aria-label="Today summary" className="text-sm">{summary}</p> : null}
+  const content = <>
     {cursors.map((cursor, index) => <InventoryPage key={index} cursor={cursor} period={period} scope={scope}
       onResult={page => setPages(previous => {
         if (previous[index] === page) return previous;
@@ -71,7 +69,7 @@ function Inventory({ period, scope, now, renderRow, moreInAll }: {
         {renderRow(row)}
       </li>;
     })}</ul>
-    {loading ? <LoadingRow label={`Loading ${period === "week" ? "this week" : period}…`} /> : null}
+    {loading ? <LoadingRow label={`Loading ${period === "week" ? "Upcoming" : period}…`} /> : null}
     {!loading && unique.length === 0 ? <p className="text-sm text-muted-foreground">{last.hasMore ? "No matching items in this batch. Continue to see more." : "Nothing here for these filters."}</p> : null}
     {last?.hasMore || unique.length > limit ? (
       period !== "all" ? <Button small onClick={moreInAll}>More in All</Button> :
@@ -79,6 +77,7 @@ function Inventory({ period, scope, now, renderRow, moreInAll }: {
     ) : null}
     {period === "all" ? <p className="text-xs text-muted-foreground">Includes undated tasks, wants, all overdue work, repeats, and calendar events through {new Date(scope.horizon).toLocaleDateString()}.</p> : null}
   </>;
+  return children ? children(content, unique.slice(0, limit), loading, !!last?.hasMore || unique.length > limit) : content;
 }
 function InventoryPage({ period, scope, cursor, onResult }: {
   period: "today" | "week" | "all"; scope: Scope; cursor?: string | undefined; onResult: (page: Page) => void;
@@ -154,13 +153,22 @@ function HomePlanningContent() {
       </Select>
       <Button onClick={() => setAddOpen(true)}>Add task / repeat</Button>
     </div>
-    <Section title="Today">
-      <p className="text-xs text-muted-foreground">{new Date(periods.start).toLocaleDateString()} · Includes the preceding seven days of overdue work.</p>
-      <Inventory key={`today-${key}`} scope={scope} now={now} period="today" renderRow={renderRow} moreInAll={openAll} />
-      <Button small variant="ghost" onClick={openAll}>Older overdue items may remain in All</Button>
-    </Section>
-    <Section title="This Week">
-      <p className="text-xs text-muted-foreground">{periods.tomorrow === periods.weekEnd ? "The week ends today." : `${new Date(periods.tomorrow).toLocaleDateString()} – ${new Date(periods.weekEnd - 1).toLocaleDateString()}`}</p>
+    <Inventory key={`today-${key}`} scope={scope} now={now} period="today" renderRow={renderRow} moreInAll={openAll}>
+      {(content, rows, loading, partial) => {
+        const summary = loading ? null : buildTodaySummary(rows.map(row => ({ ...row, source: row.kind })), {
+          now, start: scope.start, partial,
+        });
+        return <>
+          {summary ? <Section title="Summary"><p aria-label="Today summary" className="text-sm">{summary}</p></Section> : null}
+          <Section title="Today">
+            <p className="text-xs text-muted-foreground">{new Date(periods.start).toLocaleDateString()} · Includes the preceding seven days of overdue work.</p>
+            {content}
+            <Button small variant="ghost" onClick={openAll}>Older overdue items may remain in All</Button>
+          </Section>
+        </>;
+      }}
+    </Inventory>
+    <Section title="Upcoming">
       <Inventory key={`week-${key}`} scope={scope} now={now} period="week" renderRow={renderRow} moreInAll={openAll} />
     </Section>
     <Section title={<button className="min-h-11 text-left" aria-expanded={allOpen} aria-controls="home-all" onClick={() => { setAllOpen(!allOpen); setAllMounted(true); }}>{allOpen ? "▾" : "▸"} All</button>}>
