@@ -2,6 +2,10 @@
 
 Design decision for Phase 16, Actionable Home & Item Details. Inspected checkout `1d93982`, November 7, 2026. This is a contract for subsequent implementation, not a claim that these behaviors have shipped.
 
+## Follow-on consolidation
+
+The subsequent [consolidated Home surface contract](home-surface-contract.md) reconciles this Phase 16 design against shipped checkout `8e6adf5`. It defines review rows, rolling Upcoming, status Summary, gate retirement, execution outbox, Activity and the acceptance migration. Its explicit changes supersede this document’s Monday–Sunday period, event-only summary and approval-gate assumptions; the remaining item lifecycle and shared-detail requirements continue to apply. Historical “absent” paths and G1–G5 below describe the original design checkout, not current implementation status.
+
 ## Scope and source reconciliation
 
 Home becomes the daily planning surface with Today, This Week, and collapsed-by-default All; one row/action implementation and one detail modal serve all three. Keep task/repeat creation and area filters, preserve `/tasks` links, and reuse Mind item conversations. Calendar reschedule/cancel is deferred; event controls only read or open existing information. No calendar writes are authorized by this design.
