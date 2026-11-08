@@ -46,7 +46,6 @@ const pageClass =
 export const navItems = [
   { href: "/", label: "Home", icon: Home },
   { href: "/projects", label: "Projects", icon: BriefcaseBusiness },
-  { href: "/tasks", label: "Tasks", icon: ListTodo },
   { href: "/goals", label: "Goals", icon: Target },
   { href: "/interviews", label: "Interviews", icon: MessageSquareText },
   { href: "/contacts", label: "Contacts", icon: Contact },

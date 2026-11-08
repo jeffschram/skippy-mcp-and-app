@@ -105,7 +105,7 @@ function entityHref(entityType: string, entityId: string) {
     return "/contacts";
   }
   if (entityType === "task") {
-    return "/tasks";
+    return "/";
   }
   return undefined;
 }
@@ -218,7 +218,7 @@ function ProjectContextCard({ map }: { map: AnyRecord }) {
           {map.tasks?.length ? (
             <div className={itemListClass}>
               {map.tasks.map((task: AnyRecord) => (
-                <Link className={cn(itemClass, projectRowClass)} href="/tasks" key={String(task._id)}>
+                <Link className={cn(itemClass, projectRowClass)} href={`/#task-${task._id}`} key={String(task._id)}>
                   <span className={itemIconClass}>
                     <icons.Check size={17} aria-hidden />
                   </span>

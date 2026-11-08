@@ -21,6 +21,9 @@ export type AgendaRow = {
   kind: AgendaRowKind;
   id: string;
   title: string;
+  status?: string;
+  recurrenceStatus?: string;
+  endAt?: number;
   /** Sort/display date. Undated obligations and wants have none. */
   at?: number | undefined;
   isAllDay?: boolean | undefined;
