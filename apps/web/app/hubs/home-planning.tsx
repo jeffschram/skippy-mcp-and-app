@@ -2,7 +2,7 @@
 
 import { Component, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery } from "convex/react";
-import Link from "next/link";
+import { ItemDetailsModal } from "./item-details-modal";
 import { TASK_AREAS } from "@skippy/shared";
 import { api } from "../../lib/skippy-api";
 import { Button, Dialog, LoadingRow, Section, Select, useToast } from "../components";
@@ -133,7 +133,6 @@ function HomePlanningContent() {
     sync(); window.addEventListener("hashchange", sync); window.addEventListener("popstate", sync);
     return () => { window.removeEventListener("hashchange", sync); window.removeEventListener("popstate", sync); };
   }, []);
-  const detail = useQuery(api.homeInventory.getForViewer, ready && selection ? selection : "skip");
   const periods = useMemo(() => homePeriods(now), [now]);
   // Freeze the paging clock until local day/timezone changes or a return to Home.
   // Minute ticks expire visible events; do not invalidate pagination on each tick.
@@ -160,7 +159,7 @@ function HomePlanningContent() {
   }
   function open(row: AgendaRow) {
     opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    if (window.location.hash !== `#${row.kind}-${row.id}`) window.history.pushState(null, "", `/#${row.kind}-${row.id}`);
+    if (window.location.hash !== `#${row.kind}-${row.id}`) window.history.pushState(null, "", `${window.location.pathname}${window.location.search}#${row.kind}-${row.id}`);
     setSelection({ kind: row.kind, id: row.id });
   }
   const renderRow = (raw: any) => {
@@ -171,7 +170,7 @@ function HomePlanningContent() {
   };
   const key = JSON.stringify(scope);
   if (!ready || !now) return <LoadingRow label="Loading Home…" />;
-  return <div className="grid min-w-0 gap-4">
+  return <div id="home-planning" tabIndex={-1} className="grid min-w-0 gap-4">
     <div className="flex flex-wrap items-center gap-2">
       <Select aria-label="Filter area" value={area ?? ""} onChange={e => setArea(e.target.value || null)}>
         <option value="">All areas</option><option value="unsorted">Unsorted</option>
@@ -198,13 +197,9 @@ function HomePlanningContent() {
       </div>
     </Section>
     <Dialog open={addOpen} onClose={() => setAddOpen(false)} title="Add to Home"><AddRow onAdded={() => { setAddOpen(false); openAll(); }} /></Dialog>
-    <Dialog open={!!selection} onClose={() => { window.history.pushState(null, "", "/"); setSelection(null); requestAnimationFrame(() => opener.current?.isConnected && opener.current.focus()); }} title={detail?.row.title ?? "Item details"}>
-      {detail === undefined ? <LoadingRow label="Loading item…" /> : detail === null ? <p>This item is unavailable.</p> : <div className="grid min-w-0 gap-3 [overflow-wrap:anywhere]">
-        {renderRow(detail.row)}<p className="text-sm">Status: {detail.row.status}</p>
-        {detail.description ? <p className="whitespace-pre-wrap">{detail.description}</p> : null}
-        {detail.projectId ? <Link href={`/projects/${detail.projectId}`}>Open project</Link> : null}
-        {detail.row.href && /^https?:\/\//i.test(detail.row.href) ? <a href={detail.row.href} target="_blank" rel="noreferrer">Open calendar event</a> : null}
-      </div>}
-    </Dialog>
+    <ItemDetailsModal selection={selection} opener={opener} onClose={() => {
+      window.history.pushState(null, "", `${window.location.pathname}${window.location.search}`);
+      setSelection(null);
+    }} />
   </div>;
 }

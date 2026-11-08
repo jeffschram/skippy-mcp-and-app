@@ -10,7 +10,7 @@ function fixture(rows: any[]) {
         matches = matches.filter(row => field.split(".").reduce((v, key) => v?.[key], row) === value);
         return range;
       } };
-      return { withIndex: (_: string, fn: any) => { fn(range); return { take: async (n: number) => matches.slice(0, n) }; } };
+      return { withIndex: (_: string, fn: any) => { fn(range); return { take: async (n: number) => matches.slice(0, n), first: async () => matches[0] ?? null }; } };
     },
   } as any;
 }

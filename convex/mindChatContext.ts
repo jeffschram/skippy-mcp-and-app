@@ -6,7 +6,7 @@ const TABLES = ["tasks", "projects", "goals", "people", "companies", "knowledge"
 const TYPES: Record<string, string> = { tasks: "task", projects: "project", goals: "goal", people: "person", companies: "company" };
 const CATEGORIES = new Set(["event", "goal", "project", "task", "person", "company", "note", "link", "memory"]);
 const PREFIX = "mind-item:";
-const FIELDS = ["title", "name", "subject", "description", "summary", "body", "relationshipContext", "status", "reviewState", "executionState", "url", "dueAt", "startAt", "endAt", "nextDueAt", "actionType", "kind", "memoryType", "messageBody", "location", "timeZone", "lastCompletedAt", "projectId", "phaseId", "candidateEntityType", "candidateEntityId"];
+const FIELDS = ["title", "name", "subject", "description", "summary", "body", "relationshipContext", "status", "reviewState", "executionState", "url", "htmlLink", "conferenceUrl", "isAllDay", "dueAt", "startAt", "endAt", "nextDueAt", "actionType", "kind", "memoryType", "messageBody", "location", "timeZone", "lastCompletedAt", "rule", "anchor", "recurrence", "recurringEventId", "currentTaskId", "projectId", "phaseId", "candidateEntityType", "candidateEntityId"];
 function details(row: Record<string, unknown>) {
   const result = Object.fromEntries(FIELDS.flatMap(key => row[key] === undefined ? [] : [[key, typeof row[key] === "string" ? row[key].slice(0, 4000) : row[key]]]));
   if (row.candidatePayload && typeof row.candidatePayload === "object") result.candidate = detailsWithoutCandidate(row.candidatePayload as Record<string, unknown>);
@@ -50,7 +50,8 @@ export async function mindChatContext(db: DB, brainId: Id<"brainInstances">, pag
   const resolved = await resolve(db, brainId, id);
   if (!resolved) return `${guidance}\nThe selected record is no longer available. Do not infer or modify a replacement record.`;
   const { row, table } = resolved;
-  const aliases = [...new Set([id, row.legacyId].filter((value): value is string => typeof value === "string"))];
+  const canonicalId = String(row._id);
+  const aliases = [...new Set([canonicalId, row.legacyId].filter((value): value is string => typeof value === "string"))];
   const edges = (await Promise.all(aliases.flatMap(alias => [
     db.query("relationships").withIndex("by_brain_from", q => q.eq("brainInstanceId", brainId).eq("from.entityId", alias)).take(20),
     db.query("relationships").withIndex("by_brain_to", q => q.eq("brainInstanceId", brainId).eq("to.entityId", alias)).take(20),
@@ -61,12 +62,14 @@ export async function mindChatContext(db: DB, brainId: Id<"brainInstances">, pag
     const target = await resolve(db, brainId, other.entityId);
     return target ? { type: edge.type, from: edge.from, to: edge.to, related: { id: String(target.row._id), title: target.row.title ?? target.row.name, status: target.row.status, summary: (target.row.summary ?? target.row.description ?? "").slice(0, 600) } } : null;
   }));
+  const recurrence = table === "tasks" ? await db.query("recurrences")
+    .withIndex("by_brain_current_task", q => q.eq("brainInstanceId", brainId).eq("currentTaskId", row._id as Id<"tasks">)).first() : null;
   const kind = (TYPES[table] ?? (table === "knowledge" ? row.kind : undefined)) as Doc<"entitySourceRefs">["entityRef"]["entityType"] | undefined;
-  const refs = kind ? await db.query("entitySourceRefs").withIndex("by_brain_entity", q => q.eq("brainInstanceId", brainId).eq("entityRef.entityType", kind).eq("entityRef.entityId", id)).take(8) : [];
+  const refs = kind ? await db.query("entitySourceRefs").withIndex("by_brain_entity", q => q.eq("brainInstanceId", brainId).eq("entityRef.entityType", kind).eq("entityRef.entityId", canonicalId)).take(8) : [];
   const sourceIds = [...new Set([...refs.map(ref => ref.sourceRefId), ...(row.sourceRefIds ?? [])])].slice(0, 8);
   const sources = await Promise.all(sourceIds.map(async sourceId => {
     const source = await db.get(sourceId as Id<"sourceRefs">);
     return source?.brainInstanceId === brainId ? { sourceSystem: source.sourceSystem, url: source.url ?? source.deepLink, summary: source.summary?.slice(0, 1000) } : null;
   }));
-  return `${guidance}\nRecord data (relationship and source samples may be incomplete):\n${JSON.stringify({ id, table, ...details(row), relationships: relationships.filter(Boolean), sources: sources.filter(Boolean) })}`;
+  return `${guidance}\nRecord data (relationship and source samples may be incomplete):\n${JSON.stringify({ id: canonicalId, table, ...details(row), recurrenceContext: recurrence ? { id: recurrence._id, ...details(recurrence) } : null, relationships: relationships.filter(Boolean), sources: sources.filter(Boolean) })}`;
 }

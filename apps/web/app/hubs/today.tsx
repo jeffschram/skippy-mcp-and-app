@@ -107,7 +107,7 @@ function captureEntityHref(entityType: string, entityId: string): string | undef
       return `/#recurrence-${id}`;
     case "calendarEvent":
     case "calendar_event":
-      return `/`;
+      return `/#event-${id}`;
     default:
       return undefined;
   }
