@@ -15,10 +15,12 @@ import { areaLabel, type LifeTask } from "./life-tasks-helpers";
 /* obligations and wants belong in it too.                             */
 /* ------------------------------------------------------------------ */
 
-export type AgendaRowKind = "task" | "event" | "recurrence";
+export type AgendaRowKind = "task" | "event" | "recurrence" | "review";
 
 export type AgendaRow = {
   kind: AgendaRowKind;
+  entityKind?: import("../../../../convex/attentionModel").AttentionKind | null;
+  attentionResult?: import("../../../../convex/attentionModel").AttentionResult | null;
   id: string;
   title: string;
   occurrenceVersion?: number | null;
@@ -169,9 +171,9 @@ export function buildAgendaRows(
       continue;
     }
 
-    const duplicateIndex = collapsed.findIndex(
+    const duplicateIndex = row.kind === "review" ? -1 : collapsed.findIndex(
       (candidate) =>
-        typeof candidate.at === "number" &&
+        row.kind !== "review" && candidate.kind !== "review" && typeof candidate.at === "number" &&
         agendaItemsAreDuplicates(
           { source: candidate.kind, title: candidate.title, at: candidate.at },
           { source: row.kind, title: row.title, at: row.at! },

@@ -35,7 +35,7 @@ export function resolveAttention(kind: AttentionKind, row: AttentionRecord, now:
   const result = (status: AttentionStatus, reason: string, at?: number): AttentionResult => ({ status, reason, source: "automatic", ...(at === undefined ? {} : { at }) });
   const manual = (): AttentionResult => ({ status: override!, reason: meta?.reason || "Set by you", source: "manual" });
   if (override === "immediate") return manual();
-  if (meta?.reviewAt !== undefined && meta.reviewAt <= now) return result("stale", "Your review date has arrived", meta.reviewAt);
+  if (kind !== "task" && meta?.reviewAt !== undefined && meta.reviewAt <= now) return result("stale", "Your review date has arrived", meta.reviewAt);
   if (override && override !== "scheduled") return manual();
   if (kind === "task" && ["done", "cancelled"].includes(row.status || "")) return result("ok", row.status === "done" ? "Task completed" : "Task cancelled");
   if (kind === "project" && ["completed", "cancelled"].includes(row.status || "")) return result("ok", "Project closed");

@@ -6,7 +6,7 @@ export function homePeriods(now: number) {
   return { now, start: day(0), tomorrow: day(1), overdueStart: day(-7), weekEnd: day(8),
     horizon: day(365), utcToday: utc(0), utcTomorrow: utc(1), utcWeekEnd: utc(8) };
 }
-export function parseHomeHash(hash: string): { kind: "task" | "event" | "recurrence"; id: string } | null {
-  const match = /^#(task|event|recurrence)-(.+)$/.exec(hash);
-  return match ? { kind: match[1] as "task" | "event" | "recurrence", id: match[2]! } : null;
+export function parseHomeHash(hash: string): { kind: "task" | "event" | "recurrence" | "review"; id: string } | null {
+  const match = /^#(task|event|recurrence|review)-(.+)$/.exec(hash);
+  return match ? { kind: match[1] as "task" | "event" | "recurrence" | "review", id: match[2]! } : null;
 }

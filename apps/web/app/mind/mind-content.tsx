@@ -420,7 +420,7 @@ export function MindExplorer({ graph: liveGraph }: { graph: MindGraph }) {
                   <span className="mt-[.5em] size-2.5 shrink-0 rounded-full" role="img" aria-label={ATTENTION[resolveAttention(node.kind === "event" ? "task" : node.kind, node, now).status].label} style={{ background: ATTENTION[resolveAttention(node.kind === "event" ? "task" : node.kind, node, now).status].color }} />
                   <span className="min-w-0">{node.title}</span>
                 </h2>
-                {node.kind === "task" && <AttentionEditor key={node.id} kind="task" id={node.id} actionsOnly onCompleteTask={finishSelectedTask} />}
+                {node.kind !== "event" && <AttentionEditor key={node.id} kind={node.kind} id={node.id} onCompleteTask={finishSelectedTask} />}
                 <p className="mb-[18px] mt-3 whitespace-pre-wrap text-[14px] leading-[1.8] text-[var(--mind-muted)] [overflow-wrap:anywhere]">
                   {node.summary || "No description saved yet."}
                 </p>

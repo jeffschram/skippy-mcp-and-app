@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { page, getForViewer } from "./homeInventory";
+import { page, getForViewer, seek } from "./homeInventory";
 import schema from "./schema";
 import { homePeriods } from "../apps/web/app/hubs/home-planning-helpers";
 vi.mock("./auth", () => ({ requireOwnedBrain: async () => ({ brain: { _id: "mine" } }) }));
@@ -29,7 +29,7 @@ function fixture(records: Row[]) {
           rows.sort((a, b) => { for (const key of fields) { const c = cmp(field(a, key), field(b, key)); if (c) return c; } return 0; });
           return chain;
         },
-        take: async (n: number) => { expect(n).toBeLessThanOrEqual(51); reads += Math.min(n, rows.length); return rows.slice(0, n); },
+        take: async (n: number) => { expect(n).toBeLessThanOrEqual(65); reads += Math.min(n, rows.length); return rows.slice(0, n); },
         first: async () => { reads++; return rows[0] ?? null; },
       }; return chain;
     },
@@ -103,13 +103,13 @@ describe("bounded Home inventory", () => {
     expect(await inventory([], { ...periods, period: "today" })).toEqual([]);
     expect(await inventory([], { ...periods, period: "week" })).toEqual([]);
   });
-  it("projects review dates only for included tasks without changing placement", async () => {
+  it("ignores legacy task review dates without changing placement", async () => {
     const rows = await inventory([
       task("review", { attention: { reviewAt: 0 } }),
       task("undated-review", { dueAt: undefined, attention: { reviewAt: 0 } }),
       event("event"), recurrence("repeat"),
     ], { period: "today" });
-    expect(rows.find(row => row.id === "tasks:review")?.reviewAt).toBe(0);
+    expect(rows.find(row => row.id === "tasks:review")?.reviewAt).toBeNull();
     expect(rows.some(row => row.id === "tasks:undated-review")).toBe(false);
     expect(rows.filter(row => row.kind !== "task").every(row => row.reviewAt === null)).toBe(true);
   });
@@ -182,4 +182,61 @@ describe("bounded Home inventory", () => {
     expect(detail.sources).toContainEqual({ label: "Open in Maps", url: "https://www.google.com/maps/search/?api=1&query=Main%20%26%201st%20%232" });
   });
 
+});
+
+const review = (table: string, id: string, extra: Row = {}) => ({ _id: `${table}:${id}`, _creationTime: 1, brainInstanceId: "mine", processingState: "accepted", attention: { reviewAt: 0 }, ...extra });
+describe("review inventory", () => {
+  it("projects every supported kind, fallback names, and canonical detail identity", async () => {
+    const records = [review("goals", "g", { title: "Goal", status: "achieved" }), review("projects", "p", { title: "Project" }), review("people", "p", { name: "Person" }), review("companies", "c", { name: "Company" }), ...["note", "link", "memory"].map(kind => review("knowledge", kind, { kind }))];
+    const rows = await inventory(records, { period: "today" });
+    expect(rows).toHaveLength(7);
+    expect(rows.every(row => row.kind === "review" && row.at === 0 && !row.isWaiting && !row.recurrenceId && row.attentionResult.status === "stale")).toBe(true);
+    expect(rows.find(row => row.entityKind === "person").title).toBe("Person");
+    for (const row of rows) expect((await run(getForViewer, fixture(records).ctx, { kind: "review", id: row.id })).row.entityKind).toBe(row.entityKind);
+    expect(await run(getForViewer, fixture([task("a")]).ctx, { kind: "review", id: "tasks:a" })).toBeNull();
+    expect(await run(getForViewer, fixture([review("knowledge", "x", { kind: "invalid" })]).ctx, { kind: "review", id: "knowledge:x" })).toBeNull();
+    expect(await run(getForViewer, fixture([review("people", "x", { brainInstanceId: "other" })]).ctx, { kind: "review", id: "people:x" })).toBeNull();
+  });
+  it("applies manual, dated, scheduled-only and automatic placement without duplicates", async () => {
+    const records = [
+      review("people", "old"),
+      review("people", "future-immediate", { attention: { override: "immediate", reviewAt: 99999 } }),
+      review("people", "undated-immediate", { attention: { override: "immediate" } }),
+      ...["todo", "in_progress", "stale"].map(override => review("people", override, { attention: { override } })),
+      review("projects", "active", { status: "in_progress", attention: {} }),
+      review("people", "tomorrow", { attention: { override: "todo", reviewAt: 2000, scheduledAt: 1 } }),
+      review("people", "scheduled", { attention: { scheduledAt: 7999 } }),
+      review("people", "outside", { attention: { override: "todo", reviewAt: 8000 } }),
+      review("people", "ok", { attention: { override: "ok", reviewAt: 2000 } }),
+      review("people", "unassessed", { attention: {} }),
+      review("people", "snoozed", { focusSnoozedUntil: 1001 }),
+      ...["archived", "discarded"].map(status => review("people", status, { status })),
+      review("people", "archived-review", { reviewState: "archived" }),
+      review("people", "candidate", { processingState: "candidate" }),
+      task("normal", { attention: { reviewAt: 0, override: "immediate" } }),
+    ];
+    expect((await inventory(records, { period: "today" })).map(r => r.id).sort()).toEqual(["people:future-immediate", "people:old", "people:undated-immediate", "tasks:normal"]);
+    expect((await inventory(records, { period: "week" })).map(r => r.id).sort()).toEqual(["people:scheduled", "people:tomorrow"]);
+    const all = await inventory(records);
+    expect(all).toHaveLength(11); expect(new Set(all.map(r => r.id)).size).toBe(11);
+    expect(await inventory(records, { status: "completed" })).toEqual([]);
+    expect(await inventory(records, { area: "work" })).toEqual([]);
+  });
+  it("seeks nested dates and equal timestamp/creation ties across page boundaries losslessly", async () => {
+    const records = Array.from({ length: 170 }, (_, i) => review("people", String(i).padStart(3, "0"), { name: String(170 - i), attention: { override: "todo", reviewAt: i < 85 ? 0 : 2000, scheduledAt: 0 } }));
+    records.push(...Array.from({ length: 70 }, (_, i) => review("projects", String(i), { status: "in_progress", attention: { override: "in_progress" } })));
+    const all = await inventory(records);
+    expect(all).toHaveLength(240); expect(new Set(all.map(r => r.id)).size).toBe(240);
+    expect((await inventory(records, { period: "today" }))).toHaveLength(85);
+    expect((await inventory(records, { period: "week" }))).toHaveLength(85);
+  });
+});
+
+it("encodes missing index values explicitly across a seek cursor", async () => {
+  const records = [task("a", { attention: {} }), task("b", { attention: {} }), task("c", { attention: { reviewAt: 0 } })];
+  const source = { table: "tasks", index: "by_brain_review", prefix: [["brainInstanceId", "mine"], ["processingState", "accepted"]], fields: ["attention.reviewAt", "_creationTime", "_id"] };
+  const db = fixture(records).ctx.db;
+  expect((await seek(db, source, null, 1))[0]._id).toBe("tasks:a");
+  const cursor = JSON.parse(JSON.stringify([{ undefined: true }, 1, "tasks:a"]));
+  expect((await seek(db, source, cursor, 2)).map(row => row._id)).toEqual(["tasks:b", "tasks:c"]);
 });

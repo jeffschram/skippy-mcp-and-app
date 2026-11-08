@@ -6,7 +6,7 @@ describe("shared attention rules", () => {
     for (const kind of ["project", "task"] as const) {
       expect(resolveAttention(kind, { status: "in_progress" }, now).status).toBe("in_progress");
       expect(resolveAttention(kind, { status: "in_progress", attention: { override: "ok" } }, now).status).toBe("ok");
-      expect(resolveAttention(kind, { status: "in_progress", attention: { reviewAt: now } }, now).status).toBe("stale");
+      expect(resolveAttention(kind, { status: "in_progress", attention: { reviewAt: now } }, now).status).toBe(kind === "task" ? "in_progress" : "stale");
       expect(resolveAttention(kind, { status: "in_progress", attention: { scheduledAt: now + 1 } }, now).status).toBe("scheduled");
     }
     expect(resolveAttention("task", { status: "in_progress", dueAt: now }, now).status).toBe("immediate");

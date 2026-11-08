@@ -18,7 +18,7 @@ type Scope = ReturnType<typeof homePeriods> & { area: string | null; status: "op
 type Page = { rows: any[]; hasMore: boolean; cursor: string | null };
 function adapt(row: any, start: number): AgendaRow {
   return { ...row, at: row.at ?? undefined, area: row.area ?? undefined, areaLabel: row.area ? areaLabel(row.area) : undefined,
-    isOverdue: row.kind !== "event" && !row.isWant && row.at !== null && row.at < start };
+    isOverdue: (row.kind === "task" || row.kind === "recurrence") && !row.isWant && row.at !== null && row.at < start };
 }
 
 // Each mounted page stays reactive. Parent-owned cursors preserve loaded pages
@@ -36,7 +36,7 @@ function Inventory({ period, scope, now, renderRow, moreInAll, children }: {
     (row.endAt ?? row.at) > (row.isAllDay ? scope.utcToday : now));
   const unique = [...new Map(rows.map(row => [`${row.kind}:${row.id}`, row])).values()];
   if (period === "today") {
-    const overdue = (row: any) => row.kind !== "event" && row.at !== null && row.at < scope.start;
+    const overdue = (row: any) => (row.kind === "task" || row.kind === "recurrence") && row.at !== null && row.at < scope.start;
     unique.sort((a, b) => Number(overdue(b)) - Number(overdue(a)));
   }
   const limit = period === "all" ? target : 20;
@@ -61,9 +61,9 @@ function Inventory({ period, scope, now, renderRow, moreInAll, children }: {
         return { ...previous, [index]: page };
       })} />)}
     <ul className="m-0 list-none p-0">{unique.slice(0, limit).map((row, index) => {
-      const overdue = row.kind !== "event" && row.at !== null && row.at < scope.start;
+      const overdue = (row.kind === "task" || row.kind === "recurrence") && row.at !== null && row.at < scope.start;
       const previous = unique[index - 1];
-      const previousOverdue = previous && previous.kind !== "event" && previous.at !== null && previous.at < scope.start;
+      const previousOverdue = previous && (previous.kind === "task" || previous.kind === "recurrence") && previous.at !== null && previous.at < scope.start;
       return <li key={`${row.kind}:${row.id}`}>
         {period === "today" && (index === 0 || overdue !== previousOverdue) ? <h3 className="mb-1 mt-3 text-xs text-muted-foreground">{overdue ? "Overdue" : "Today"}</h3> : null}
         {renderRow(row)}

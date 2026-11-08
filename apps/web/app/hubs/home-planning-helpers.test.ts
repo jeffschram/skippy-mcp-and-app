@@ -3,7 +3,7 @@ import { homePeriods, parseHomeHash } from "./home-planning-helpers";
 
 describe("Home links and civil periods", () => {
   it("resolves all canonical legacy hashes and rejects unrelated hashes", () => {
-    for (const kind of ["task", "recurrence", "event"]) expect(parseHomeHash(`#${kind}-abc`)).toEqual({ kind, id: "abc" });
+    for (const kind of ["task", "recurrence", "event", "review"]) expect(parseHomeHash(`#${kind}-abc`)).toEqual({ kind, id: "abc" });
     expect(parseHomeHash("#task-")).toBeNull(); expect(parseHomeHash("#settings")).toBeNull();
   });
   it("includes seven upcoming dates on every weekday, including Sunday", () => {

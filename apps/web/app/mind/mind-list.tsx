@@ -2,14 +2,13 @@
 
 import { useState } from "react";
 import { ChevronRight } from "lucide-react";
-import { AttentionBoundary, useAttentionClock } from "../components/attention";
+import { useAttentionClock } from "../components/attention";
 import { ATTENTION, resolveAttention } from "../../../../convex/attentionModel";
 import type { MindGraph, MindKind } from "../../../../convex/mindGraphHelpers";
 import { KINDS } from "./graph-layout";
 import { MindCategoryIcon } from "./mind-category-icon";
 import { mindControlClass } from "./mind-classes";
 import type { FeedRow } from "./mind-attention-model";
-import { MindAttention } from "./mind-attention";
 import { cn } from "@/lib/utils";
 
 type Props = { graph: MindGraph; records: MindGraph["nodes"]; selected: string | null; query: string; onSelect: (id: string) => void; attentionSelected: boolean; onOpenAttention: (row: FeedRow) => void };
@@ -19,7 +18,6 @@ export function MindList(props: Props) {
   const now = useAttentionClock();
   return <div className="mind-list-scroll h-full overflow-y-auto pb-8" data-selected={Boolean(props.selected) || props.attentionSelected}>
     <div className="mind-list-column">
-      <AttentionBoundary><MindAttention {...props} /></AttentionBoundary>
       <nav aria-label="Record categories" className="mt-4">
         {(Object.keys(KINDS) as MindKind[]).map(kind => {
           const records = props.records.filter(node => node.kind === kind);

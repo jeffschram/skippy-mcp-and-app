@@ -1,4 +1,5 @@
 "use client";
+import { AttentionBadge } from "../components/attention";
 
 import { useState, type ReactNode, type FormEvent } from "react";
 import { useMutation } from "convex/react";
@@ -72,7 +73,7 @@ export function HomeItemRow({
     >
       {/* Events are attended, not completed, so they get no check control —
           a checkbox that does nothing is worse than no checkbox. */}
-      {actions ?? (row.kind === "event" ? (
+      {row.kind === "review" ? null : actions ?? (row.kind === "event" ? (
         <span
           className="mt-px grid size-6 flex-none place-items-center text-muted-foreground"
           aria-hidden
@@ -95,6 +96,8 @@ export function HomeItemRow({
       <div className="grid min-w-0 flex-auto gap-[3px]">
         <button type="button" className="min-h-11 text-left text-[15px] [overflow-wrap:anywhere] focus-visible:outline-2" onClick={() => onOpen(row)}>{row.title}</button>
         <span className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+          {row.attentionResult ? <AttentionBadge result={row.attentionResult} /> : null}
+          {row.kind === "review" ? <Badge tone="neutral">Review · {row.entityKind}</Badge> : null}
           {row.kind === "event" ? <Badge tone="blue">Event</Badge> : null}
           {row.kind === "recurrence" || row.fromRecurrence ? (
             <Badge tone="gold">{row.recurrenceStatus === "paused" ? "Repeat paused" : "Recurring"}</Badge>
@@ -122,6 +125,7 @@ export function HomeItemRow({
             </span>
           ) : null}
         </span>
+        {row.kind === "review" ? actions : null}
       </div>
 
       <div className="flex flex-none items-start gap-1">
