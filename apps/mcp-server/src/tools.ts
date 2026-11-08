@@ -50,6 +50,7 @@ export type ProposeCalendarEventInput = {
 /** Args for creating or updating a repeating life obligation. */
 export type UpsertRecurrenceInput = {
   recurrenceId?: string;
+  expectedOccurrenceVersion?: number;
   title: string;
   description?: string;
   area?: TaskArea;
@@ -380,7 +381,7 @@ export type SkippyClient = {
   upsertRecurrence(brainInstanceId: string, input: UpsertRecurrenceInput): Promise<unknown>;
   completeRecurrence(
     brainInstanceId: string,
-    input: { recurrenceId: string; completedAt?: number; note?: string },
+    input: { recurrenceId: string; expectedOccurrenceVersion?: number; requestId?: string; completedAt?: number; note?: string },
   ): Promise<unknown>;
   listRecurrences(brainInstanceId: string, input: { dueOnly?: boolean }): Promise<unknown>;
   listAgenda(
@@ -1281,6 +1282,8 @@ export function createSkippyToolHandlers(
 
     async completeRecurrence(input: {
       recurrenceId: string;
+      expectedOccurrenceVersion?: number;
+      requestId?: string;
       completedAt?: number;
       note?: string;
     }) {

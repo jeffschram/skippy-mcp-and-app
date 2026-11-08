@@ -4,6 +4,8 @@ import { describe, expect, it, vi } from "vitest";
 import { useQuery } from "convex/react";
 import { ItemDetailsModal } from "./item-details-modal";
 
+vi.mock("./home-item-actions", () => ({ HomeItemActions: () => null, ItemActionFeedback: () => null }));
+vi.mock("./item-editors", () => ({ TaskEditor: () => null, ScheduleEditor: () => null }));
 vi.mock("convex/react", () => ({ useQuery: vi.fn() }));
 vi.mock("../components", () => ({ Button: () => null, LoadingRow: () => <p>Loading item…</p> }));
 vi.mock("../components/ui/dialog", () => ({

@@ -128,4 +128,26 @@ describe("bounded Home inventory", () => {
     expect(await run(getForViewer, ctx, input)).toBeNull();
   });
 
+  it("reflects deadline clearing and waiting/completion across every period", async () => {
+    const records: Row[] = [task("changing")];
+    expect(await inventory(records, { period: "today" })).toHaveLength(1);
+    records[0]!.dueAt = 3000;
+    records[0]!.status = "waiting";
+    expect(await inventory(records, { period: "today" })).toHaveLength(0);
+    expect((await inventory(records, { period: "week" }))[0]).toMatchObject({ status: "waiting", isWaiting: true });
+    records[0]!.dueAt = undefined;
+    expect(await inventory(records, { period: "week" })).toHaveLength(0);
+    expect((await inventory(records))[0]).toMatchObject({ at: null });
+    records[0]!.status = "done";
+    expect(await inventory(records)).toHaveLength(0);
+    expect(await inventory(records, { status: "completed" })).toHaveLength(1);
+  });
+  it("uses stored event links and encodes locations as a Maps query", async () => {
+    const { ctx } = fixture([event("links", { htmlLink: "https://calendar.google.com/event?id=1", conferenceUrl: "https://meet.google.com/abc", location: "Main & 1st #2" })]);
+    const detail = await run(getForViewer, ctx, { kind: "event", id: "calendarEvents:links" });
+    expect(detail.sources).toContainEqual({ label: "Calendar event", url: "https://calendar.google.com/event?id=1" });
+    expect(detail.sources).toContainEqual({ label: "Join meeting", url: "https://meet.google.com/abc" });
+    expect(detail.sources).toContainEqual({ label: "Open in Maps", url: "https://www.google.com/maps/search/?api=1&query=Main%20%26%201st%20%232" });
+  });
+
 });

@@ -1,12 +1,11 @@
+import { mutation } from "./_generated/server";
+import { transitionOccurrence, patchSchedule, validDate, validRule } from "./occurrenceLifecycle";
 import { internalMutationGeneric, internalQueryGeneric } from "convex/server";
 import { mutationGeneric, queryGeneric } from "convex/server";
 import { v } from "convex/values";
 import {
-  appendCompletion,
-  computeNextDue,
   isDueNow,
   nextCalendarOccurrence,
-  parseRRule,
   surfacesAt,
   DEFAULT_RECURRENCE_TIME_ZONE,
   type RecurrenceLike,
@@ -52,17 +51,6 @@ function schedulingView(recurrence: any): RecurrenceLike {
   };
 }
 
-function validateRule(rule: any) {
-  if (rule.kind === "interval") {
-    if (!Number.isInteger(rule.everyDays) || rule.everyDays < 1) {
-      throw new Error("interval recurrences need a whole everyDays of at least 1");
-    }
-    return;
-  }
-  // Throws with a specific message for anything outside the supported subset.
-  parseRRule(rule.rrule);
-}
-
 /* ------------------------------------------------------------------ */
 /* Writes                                                              */
 /* ------------------------------------------------------------------ */
@@ -71,6 +59,7 @@ export const upsertRecurrence = internalMutationGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
     recurrenceId: v.optional(v.id("recurrences")),
+    expectedOccurrenceVersion: v.optional(v.number()),
     title: v.string(),
     description: v.optional(v.string()),
     area: v.optional(taskArea),
@@ -84,9 +73,11 @@ export const upsertRecurrence = internalMutationGeneric({
   },
   handler: async ({ db }, args) => {
     const now = Date.now();
-    validateRule(args.rule);
+    validRule(args.rule);
+    if (!args.title.trim()) throw new Error("Title is required");
+    if (args.startAt !== undefined) validDate(args.startAt);
+    if (args.timeZone) new Intl.DateTimeFormat("en", { timeZone: args.timeZone }).format(0);
 
-    const timeZone = args.timeZone ?? DEFAULT_RECURRENCE_TIME_ZONE;
     const existing = args.recurrenceId ? await db.get(args.recurrenceId) : null;
     if (args.recurrenceId && (!existing || existing.brainInstanceId !== args.brainInstanceId)) {
       throw new Error("recurrence not found for brain instance");
@@ -94,6 +85,7 @@ export const upsertRecurrence = internalMutationGeneric({
 
     // A rule change has to re-seed the schedule, or the stored nextDueAt would
     // no longer sit on the new cadence.
+    const timeZone = args.timeZone ?? existing?.timeZone ?? DEFAULT_RECURRENCE_TIME_ZONE;
     const seed = args.startAt ?? existing?.nextDueAt ?? now;
     const nextDueAt =
       args.rule.kind === "calendar"
@@ -101,14 +93,16 @@ export const upsertRecurrence = internalMutationGeneric({
         : seed;
 
     if (existing) {
+      if (args.expectedOccurrenceVersion === undefined) throw new Error("Refresh the recurrence before editing");
+      await patchSchedule(db, args.brainInstanceId, { recurrenceId: existing._id, expectedOccurrenceVersion: args.expectedOccurrenceVersion, rule: args.rule, anchor: args.anchor, timeZone: args.timeZone, nextDueAt });
       await db.patch(existing._id, {
-        title: args.title,
-        description: args.description,
-        area: args.area,
+        title: args.title.trim(),
+        description: args.description ?? existing.description,
+        area: args.area ?? existing.area,
         rule: args.rule,
         anchor: args.anchor,
         nextDueAt,
-        leadTimeDays: args.leadTimeDays,
+        leadTimeDays: args.leadTimeDays ?? existing.leadTimeDays,
         status: args.status ?? existing.status,
         spawnTask: args.spawnTask ?? existing.spawnTask,
         timeZone,
@@ -119,7 +113,7 @@ export const upsertRecurrence = internalMutationGeneric({
 
     const recurrenceId = await db.insert("recurrences", {
       brainInstanceId: args.brainInstanceId,
-      title: args.title,
+      title: args.title.trim(),
       description: args.description,
       area: args.area,
       rule: args.rule,
@@ -169,13 +163,15 @@ export const fireDueRecurrences = internalMutationGeneric({
       // task releases the slot even if completeRecurrence never ran.
       if (recurrence.currentTaskId) {
         const openTask = await db.get(recurrence.currentTaskId);
-        if (openTask && openTask.status !== "done" && openTask.status !== "cancelled") {
+        if (openTask?.brainInstanceId === args.brainInstanceId && openTask.status !== "done" && openTask.status !== "cancelled") {
+          if (!openTask.recurrenceId) await db.patch(openTask._id, { recurrenceId: recurrence._id, occurrenceVersion: recurrence.occurrenceVersion ?? 0 });
           continue;
         }
       }
 
       const taskId = await db.insert("tasks", {
         brainInstanceId: args.brainInstanceId,
+        recurrenceId: recurrence._id, occurrenceVersion: recurrence.occurrenceVersion ?? 0,
         title: recurrence.title,
         description: recurrence.description,
         processingState: "accepted",
@@ -224,42 +220,13 @@ export const completeRecurrence = internalMutationGeneric({
     recurrenceId: v.id("recurrences"),
     completedAt: v.optional(v.number()),
     note: v.optional(v.string()),
+    expectedOccurrenceVersion: v.optional(v.number()),
+    requestId: v.optional(v.string()),
   },
-  handler: async ({ db }, args) => {
-    const now = Date.now();
-    const recurrence = await db.get(args.recurrenceId);
-    if (!recurrence || recurrence.brainInstanceId !== args.brainInstanceId) {
-      throw new Error("recurrence not found for brain instance");
-    }
-
-    const completedAt = args.completedAt ?? now;
-    const nextDueAt = computeNextDue(schedulingView(recurrence), completedAt, now);
-
-    if (recurrence.currentTaskId) {
-      const task = await db.get(recurrence.currentTaskId);
-      if (task && task.status !== "done" && task.status !== "cancelled") {
-        await db.patch(task._id, { status: "done", completedAt, updatedAt: now });
-      }
-    }
-
-    await db.patch(recurrence._id, {
-      lastCompletedAt: completedAt,
-      nextDueAt,
-      currentTaskId: undefined,
-      history: appendCompletion(recurrence.history, { completedAt, note: args.note }),
-      updatedAt: now,
-    });
-
-    await db.insert("activityEvents", {
-      brainInstanceId: args.brainInstanceId,
-      activityType: "recurrence_completed",
-      actorType: "user",
-      timestamp: now,
-      summary: `Completed "${recurrence.title}".`,
-      metadata: { recurrenceId: recurrence._id, completedAt, nextDueAt },
-    });
-
-    return { recurrenceId: recurrence._id, completedAt, nextDueAt };
+  handler: async (ctx, args) => {
+    const brainId = args.brainInstanceId;
+    if (args.expectedOccurrenceVersion === undefined || !args.requestId) throw new Error("Refresh the recurrence and supply occurrence version and request ID");
+    return transitionOccurrence(ctx.db, brainId, { ...args, expectedOccurrenceVersion: args.expectedOccurrenceVersion, requestId: args.requestId, action: "complete" });
   },
 });
 
@@ -307,6 +274,7 @@ export const recurrencesForBrain = internalQueryGeneric({
       .filter((row: any) => (args.dueOnly ? isDueNow(schedulingView(row), now) : true))
       .map((row: any) => ({
         _id: row._id,
+        occurrenceVersion: row.occurrenceVersion ?? 0,
         title: row.title,
         area: row.area,
         rule: row.rule,
@@ -333,6 +301,7 @@ export const recurrencesForBrain = internalQueryGeneric({
 export const upsertRecurrenceForViewer = mutationGeneric({
   args: {
     recurrenceId: v.optional(v.id("recurrences")),
+    expectedOccurrenceVersion: v.optional(v.number()),
     title: v.string(),
     description: v.optional(v.string()),
     area: v.optional(taskArea),
@@ -347,19 +316,22 @@ export const upsertRecurrenceForViewer = mutationGeneric({
   handler: async (ctx, args) => {
     const { brain } = await requireOwnedBrain(ctx);
     const now = Date.now();
-    validateRule(args.rule);
+    validRule(args.rule);
+    if (!args.title.trim()) throw new Error("Title is required");
+    if (args.startAt !== undefined) validDate(args.startAt);
+    if (args.timeZone) new Intl.DateTimeFormat("en", { timeZone: args.timeZone }).format(0);
 
     const title = args.title.trim();
     if (!title) {
       throw new Error("title is required");
     }
 
-    const timeZone = args.timeZone ?? DEFAULT_RECURRENCE_TIME_ZONE;
     const existing = args.recurrenceId ? await ctx.db.get(args.recurrenceId) : null;
     if (args.recurrenceId && (!existing || existing.brainInstanceId !== brain._id)) {
       throw new Error("recurrence not found for brain instance");
     }
 
+    const timeZone = args.timeZone ?? existing?.timeZone ?? DEFAULT_RECURRENCE_TIME_ZONE;
     const seed = args.startAt ?? existing?.nextDueAt ?? now;
     const nextDueAt =
       args.rule.kind === "calendar"
@@ -367,14 +339,16 @@ export const upsertRecurrenceForViewer = mutationGeneric({
         : seed;
 
     if (existing) {
+      if (args.expectedOccurrenceVersion === undefined) throw new Error("Refresh the recurrence before editing");
+      await patchSchedule(ctx.db, brain._id, { recurrenceId: existing._id, expectedOccurrenceVersion: args.expectedOccurrenceVersion, rule: args.rule, anchor: args.anchor, timeZone: args.timeZone, nextDueAt });
       await ctx.db.patch(existing._id, {
         title,
-        description: args.description,
-        area: args.area,
+        description: args.description ?? existing.description,
+        area: args.area ?? existing.area,
         rule: args.rule,
         anchor: args.anchor,
         nextDueAt,
-        leadTimeDays: args.leadTimeDays,
+        leadTimeDays: args.leadTimeDays ?? existing.leadTimeDays,
         status: args.status ?? existing.status,
         spawnTask: args.spawnTask ?? existing.spawnTask,
         timeZone,
@@ -408,39 +382,18 @@ export const completeRecurrenceForViewer = mutationGeneric({
     recurrenceId: v.id("recurrences"),
     completedAt: v.optional(v.number()),
     note: v.optional(v.string()),
+    expectedOccurrenceVersion: v.optional(v.number()),
+    requestId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const { brain } = await requireOwnedBrain(ctx);
-    const now = Date.now();
-    const recurrence = await ctx.db.get(args.recurrenceId);
-    if (!recurrence || recurrence.brainInstanceId !== brain._id) {
-      throw new Error("recurrence not found for brain instance");
-    }
-
-    const completedAt = args.completedAt ?? now;
-    const nextDueAt = computeNextDue(schedulingView(recurrence), completedAt, now);
-
-    if (recurrence.currentTaskId) {
-      const task = await ctx.db.get(recurrence.currentTaskId);
-      if (task && task.status !== "done" && task.status !== "cancelled") {
-        await ctx.db.patch(task._id, { status: "done", completedAt, updatedAt: now });
-      }
-    }
-
-    await ctx.db.patch(recurrence._id, {
-      lastCompletedAt: completedAt,
-      nextDueAt,
-      currentTaskId: undefined,
-      history: appendCompletion(recurrence.history, { completedAt, note: args.note }),
-      updatedAt: now,
-    });
-
-    return { recurrenceId: recurrence._id, completedAt, nextDueAt };
+    const brainId = (await requireOwnedBrain(ctx)).brain._id;
+    if (args.expectedOccurrenceVersion === undefined || !args.requestId) throw new Error("Refresh the recurrence and supply occurrence version and request ID");
+    return transitionOccurrence(ctx.db, brainId, { ...args, expectedOccurrenceVersion: args.expectedOccurrenceVersion, requestId: args.requestId, action: "complete" });
   },
 });
 
 export const setRecurrenceStatusForViewer = mutationGeneric({
-  args: { recurrenceId: v.id("recurrences"), status: recurrenceStatus },
+  args: { recurrenceId: v.id("recurrences"), status: recurrenceStatus, expectedOccurrenceVersion: v.number() },
   handler: async (ctx, args) => {
     const { brain } = await requireOwnedBrain(ctx);
     const recurrence = await ctx.db.get(args.recurrenceId);
@@ -448,7 +401,26 @@ export const setRecurrenceStatusForViewer = mutationGeneric({
       throw new Error("recurrence not found for brain instance");
     }
 
-    await ctx.db.patch(recurrence._id, { status: args.status, updatedAt: Date.now() });
+    if (args.expectedOccurrenceVersion !== undefined && args.expectedOccurrenceVersion !== (recurrence.occurrenceVersion ?? 0)) throw new Error("This occurrence changed. Refresh and try again.");
+    if (recurrence.status === args.status) return { recurrenceId: recurrence._id, status: args.status };
+    const occurrenceVersion = (recurrence.occurrenceVersion ?? 0) + 1;
+    const task = recurrence.currentTaskId ? await ctx.db.get(recurrence.currentTaskId) : null;
+    if (task && task.brainInstanceId !== brain._id) throw new Error("Linked task unavailable");
+    if (task && task.status !== "done" && task.status !== "cancelled") await ctx.db.patch(task._id, { recurrenceId: recurrence._id, occurrenceVersion });
+    await ctx.db.patch(recurrence._id, { status: args.status, occurrenceVersion, updatedAt: Date.now() });
     return { recurrenceId: recurrence._id, status: args.status };
   },
+});
+
+export const actOnOccurrenceForViewer = mutation({
+  args: { recurrenceId: v.id("recurrences"), expectedOccurrenceVersion: v.number(), requestId: v.string(),
+    action: v.union(v.literal("complete"), v.literal("skip")), completedAt: v.optional(v.number()), note: v.optional(v.string()) },
+  returns: v.object({ recurrenceId: v.id("recurrences"), nextDueAt: v.number(), completedAt: v.union(v.number(), v.null()) }),
+  handler: async (ctx, args) => transitionOccurrence(ctx.db, (await requireOwnedBrain(ctx)).brain._id, args),
+});
+export const patchScheduleForViewer = mutation({
+  args: { recurrenceId: v.id("recurrences"), expectedOccurrenceVersion: v.number(), rule: v.optional(recurrenceRule),
+    anchor: v.optional(recurrenceAnchor), timeZone: v.optional(v.string()), nextDueAt: v.optional(v.number()) },
+  returns: v.object({ recurrenceId: v.id("recurrences"), nextDueAt: v.number() }),
+  handler: async (ctx, args) => patchSchedule(ctx.db, (await requireOwnedBrain(ctx)).brain._id, args),
 });

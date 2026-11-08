@@ -6,6 +6,9 @@ import Link from "next/link";
 import { api } from "../../lib/skippy-api";
 import { Button, LoadingRow } from "../components";
 import { Dialog, DialogContent, DialogTitle } from "../components/ui/dialog";
+import { HomeItemActions, ItemActionFeedback } from "./home-item-actions";
+import { safeExternalUrl } from "./item-action-helpers";
+import { TaskEditor, ScheduleEditor } from "./item-editors";
 import { ItemDetailsChat } from "../components/chat-panel";
 
 export type ItemSelection = { kind: "task" | "event" | "recurrence"; id: string };
@@ -49,6 +52,8 @@ function ItemDetails({ selection }: { selection: ItemSelection }) {
   return <>
     <div className="grid min-w-0 gap-3 px-5 pb-5">
       <h3 className="text-lg font-semibold">{row.title}</h3>
+      <HomeItemActions row={row} details />
+      <ItemActionFeedback row={row} />
       <p className="text-sm">Status: {row.status}{row.area ? ` · ${row.area}` : ""}</p>
       <p className="whitespace-pre-wrap">{detail.description || "No description."}</p>
       <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 text-sm">
@@ -62,8 +67,16 @@ function ItemDetails({ selection }: { selection: ItemSelection }) {
       {row.location ? <p>Location: {row.location}</p> : null}
       {detail.recurrence ? <p>Recurrence: {detail.recurrence}</p> : null}
       {detail.projectId ? <Link className="underline" href={`/projects/${detail.projectId}`}>Open project</Link> : null}
-      {detail.sources.filter(source => /^https?:\/\//i.test(source.url)).map((source, index) =>
+      {detail.sources.filter(source => safeExternalUrl(source.url)).map((source, index) =>
         <a key={`${source.url}:${index}`} className="underline" href={source.url} target="_blank" rel="noopener noreferrer">{source.label}</a>)}
+      {row.kind === "task" && row.status !== "done" && row.status !== "cancelled" ? <TaskEditor key={`task:${row.id}:${detail.updatedAt}`} detail={detail} /> : null}
+      {detail.schedule && row.recurrenceId && row.recurrenceStatus !== "retired" ? <ScheduleEditor key={`repeat:${row.recurrenceId}:${row.occurrenceVersion}`} detail={detail} /> : null}
+      {detail.schedule ? <section aria-label="Recent history"><h4 className="font-semibold">Recent history (up to 24 occurrences)</h4>
+        {detail.schedule.history.length ? <ol className="list-disc pl-5">{[...detail.schedule.history].reverse().map((entry, index) => <li key={index}>
+          {entry.outcome === "skipped" ? "Skipped" : "Completed"} · {new Date(entry.at).toLocaleString()}
+          {entry.scheduledFor !== null ? ` · scheduled for ${new Date(entry.scheduledFor).toLocaleString()}` : ""}{entry.note ? ` — ${entry.note}` : ""}
+        </li>)}</ol> : <p>No recorded history yet.</p>}
+      </section> : null}
     </div>
     <ItemDetailsChat kind={row.kind} id={row.id} label={row.title} />
   </>;

@@ -1,3 +1,4 @@
+import { transitionTask, taskRecurrence, isTerminal } from "./occurrenceLifecycle";
 import { internalMutationGeneric, internalQueryGeneric } from "convex/server";
 import { mutationGeneric, queryGeneric } from "convex/server";
 import { v } from "convex/values";
@@ -494,6 +495,7 @@ export async function applyTaskResult(
     updatedAt: now,
   };
   let promoted: string[] = [];
+  if (args.markDone && await taskRecurrence(db, brainInstanceId, task)) await transitionTask(db, brainInstanceId, task, "complete");
   if (args.markDone) {
     patch.status = "done";
     patch.completedAt = now;
@@ -632,9 +634,12 @@ export const recordTaskResultForViewer = mutationGeneric({
 });
 
 export const moveTaskToProjectForViewer = mutationGeneric({
-  args: { taskId: v.id("tasks"), toProjectId: v.id("projects") },
+  args: { taskId: v.id("tasks"), toProjectId: v.id("projects"), expectedUpdatedAt: v.optional(v.number()) },
   handler: async (ctx, args) => {
     const { user, brain } = await requireOwnedBrain(ctx);
+    const task = await ctx.db.get(args.taskId);
+    if (!task || task.brainInstanceId !== brain._id) throw new Error("Task unavailable");
+    if (args.expectedUpdatedAt !== undefined && args.expectedUpdatedAt !== task.updatedAt) throw new Error("Task changed. Reopen details before linking.");
     return moveTaskToProject(ctx.db, brain._id, args.taskId, args.toProjectId, Date.now(), {
       actorType: "user",
       actorId: user._id,
@@ -698,6 +703,7 @@ async function cancelTask(
     updatedAt: now,
   };
   if (task.agentRequestStatus !== undefined) patch.agentRequestStatus = undefined;
+  await transitionTask(db, brainInstanceId, task, "skip");
   await db.patch(taskId, patch);
   await db.insert("activityEvents", {
     brainInstanceId,
@@ -725,6 +731,7 @@ async function restoreTask(
   if (executionStateFor(task) !== "cancelled") {
     throw new Error("only abandoned tasks can be restored");
   }
+  if (task.recurrenceId) throw new Error("Past occurrences cannot be restored; use the repeat schedule");
   const now = Date.now();
   await db.patch(taskId, { executionState: "proposed", status: "todo", updatedAt: now });
   await db.insert("activityEvents", {
@@ -1218,6 +1225,10 @@ async function applyExecutionStateChange(
   executionState: string,
   now: number,
 ) {
+  if (task.recurrenceId && isTerminal(task) && executionState !== task.executionState) throw new Error("Past occurrences cannot be reopened");
+  if ((executionState === "done" || executionState === "cancelled") && await taskRecurrence(ctx.db, brain._id, task)) {
+    await transitionTask(ctx.db, brain._id, task, executionState === "done" ? "complete" : "skip");
+  }
   const patch: Record<string, unknown> = { executionState, updatedAt: now };
   // Keep the user-facing status roughly in sync with the lifecycle.
   if (executionState === "in_progress") {

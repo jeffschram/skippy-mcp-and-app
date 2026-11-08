@@ -1,11 +1,12 @@
 "use client";
 
 import { Component, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { useMutation, useQuery } from "convex/react";
+import { useQuery } from "convex/react";
+import { HomeActionsProvider, HomeItemActions, ItemActionFeedback } from "./home-item-actions";
 import { ItemDetailsModal } from "./item-details-modal";
 import { TASK_AREAS } from "@skippy/shared";
 import { api } from "../../lib/skippy-api";
-import { Button, Dialog, LoadingRow, Section, Select, useToast } from "../components";
+import { Button, Dialog, LoadingRow, Section, Select } from "../components";
 import { useViewerReady } from "./use-viewer";
 import { AddRow, HomeItemRow } from "./life-tasks";
 import { areaLabel } from "./life-tasks-helpers";
@@ -98,7 +99,7 @@ class HomePlanningBoundary extends Component<{ children: ReactNode }, { failed: 
   }
 }
 export function HomePlanning() {
-  return <HomePlanningBoundary><HomePlanningContent /></HomePlanningBoundary>;
+  return <HomePlanningBoundary><HomeActionsProvider><HomePlanningContent /></HomeActionsProvider></HomePlanningBoundary>;
 }
 function HomePlanningContent() {
   const ready = useViewerReady();
@@ -120,13 +121,6 @@ function HomePlanningContent() {
   const [addOpen, setAddOpen] = useState(false);
   const [selection, setSelection] = useState<ReturnType<typeof parseHomeHash>>(null);
   const opener = useRef<HTMLElement | null>(null);
-  const pending = useRef(new Set<string>());
-  const [, redraw] = useState(0);
-  const toast = useToast();
-  const complete = useMutation(api.lifeTasks.setLifeTaskStatus);
-  const completeRepeat = useMutation(api.recurrences.completeRecurrenceForViewer);
-  const setRepeatStatus = useMutation(api.recurrences.setRecurrenceStatusForViewer);
-  const nudge = useMutation(api.waiting.nudgeWaitingTask);
   const openAll = () => { setAllOpen(true); setAllMounted(true); };
   useEffect(() => {
     const sync = () => { const value = parseHomeHash(window.location.hash); setSelection(value); if (value) { setAllOpen(true); setAllMounted(true); } };
@@ -139,24 +133,6 @@ function HomePlanningContent() {
   const [snapshot, setSnapshot] = useState(periods);
   if (snapshot.start !== periods.start || snapshot.tomorrow !== periods.tomorrow) setSnapshot(periods);
   const scope: Scope = { ...snapshot, area, status: "open", horizon: new Date(new Date(snapshot.start).getFullYear(), new Date(snapshot.start).getMonth(), new Date(snapshot.start).getDate() + 365 * years).getTime() };
-  async function act(row: AgendaRow, action: "complete" | "pause" | "nudge") {
-    const key = `${row.kind}:${row.id}`;
-    if (pending.current.has(key)) return;
-    pending.current.add(key); redraw(n => n + 1);
-    try {
-      if (action === "complete") {
-        if (row.recurrenceId) await completeRepeat({ recurrenceId: row.recurrenceId as any });
-        else await complete({ taskId: row.id as any, status: "done" });
-        toast("Completed.", "success");
-      } else if (action === "pause") {
-        await setRepeatStatus({ recurrenceId: row.id as any, status: row.recurrenceStatus === "active" ? "paused" : "active" });
-      } else {
-        const result = await nudge({ taskId: row.id as any });
-        toast(result.pendingActionId ? "Nudge drafted — review it in Pending actions." : "No nudge was drafted.", "success");
-      }
-    } catch (error) { toast(error instanceof Error ? error.message : "Could not update this item.", "error"); }
-    finally { pending.current.delete(key); redraw(n => n + 1); }
-  }
   function open(row: AgendaRow) {
     opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     if (window.location.hash !== `#${row.kind}-${row.id}`) window.history.pushState(null, "", `${window.location.pathname}${window.location.search}#${row.kind}-${row.id}`);
@@ -165,8 +141,8 @@ function HomePlanningContent() {
   const renderRow = (raw: any) => {
     const row = adapt(raw, periods.start);
     if (row.kind === "event" && (raw.endAt ?? row.at) <= (row.isAllDay ? periods.utcToday : now)) return null;
-    return <HomeItemRow row={row} now={now} onOpen={open} onComplete={r => void act(r, "complete")}
-      onPause={r => void act(r, "pause")} onNudge={r => void act(r, "nudge")} pending={pending.current.has(`${row.kind}:${row.id}`)} />;
+    return <><HomeItemRow row={row} now={now} onOpen={open} actions={<HomeItemActions row={row} />} />
+      <ItemActionFeedback row={row} /></>;
   };
   const key = JSON.stringify(scope);
   if (!ready || !now) return <LoadingRow label="Loading Home…" />;

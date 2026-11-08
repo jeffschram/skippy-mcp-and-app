@@ -20,6 +20,7 @@ async function liveTask(ctx: any, brain: any, recurrence: any) {
 function row(kind: "task" | "event" | "recurrence", record: any, recurrence?: any) {
   const want = kind === "task" && record.commitment === "want";
   return {
+    occurrenceVersion: recurrence?.occurrenceVersion ?? (kind === "recurrence" ? record.occurrenceVersion ?? 0 : null),
     kind, id: record._id, title: record.title, status: record.status,
     at: want ? null : (kind === "event" ? record.startAt : kind === "recurrence" ? record.nextDueAt : record.dueAt) ?? null,
     endAt: record.endAt ?? null, isAllDay: record.isAllDay ?? false,
@@ -32,6 +33,7 @@ function row(kind: "task" | "event" | "recurrence", record: any, recurrence?: an
   };
 }
 const rowValidator = v.object({
+  occurrenceVersion: v.union(v.number(), v.null()),
   kind, id: v.string(), title: v.string(), status: v.string(), at: v.union(v.number(), v.null()),
   endAt: v.union(v.number(), v.null()), isAllDay: v.boolean(), area: v.union(v.string(), v.null()),
   isWant: v.boolean(), isWaiting: v.boolean(), waitingSince: v.union(v.number(), v.null()),
@@ -164,6 +166,9 @@ export const getForViewer = query({
   args: { kind, id: v.string() },
   returns: v.union(v.null(), v.object({ row: rowValidator, description: v.union(v.string(), v.null()), projectId: v.union(v.string(), v.null()),
     dates: v.array(v.object({ label: v.string(), at: v.number() })), timeZone: v.union(v.string(), v.null()),
+    updatedAt: v.number(), waitingOn: v.union(v.object({ entityType: v.string(), entityId: v.string() }), v.null()),
+    schedule: v.union(v.null(), v.object({ rule: v.union(v.object({ kind: v.literal("interval"), everyDays: v.number() }), v.object({ kind: v.literal("calendar"), rrule: v.string() })), anchor: v.union(v.literal("completion"), v.literal("schedule")), nextDueAt: v.number(),
+      history: v.array(v.object({ outcome: v.string(), at: v.number(), scheduledFor: v.union(v.number(), v.null()), note: v.union(v.string(), v.null()) })) })),
     recurrence: v.union(v.string(), v.null()), sources: v.array(v.object({ label: v.string(), url: v.string() })),
   })),
   handler: async (ctx, args) => {
@@ -175,7 +180,8 @@ export const getForViewer = query({
     const linked = args.kind === "task" ? await project(ctx, brain._id, record._id) : null;
     const recurrence = args.kind === "task" ? await repeat(ctx, brain._id, record._id) : null;
     const data = record as typeof record & Record<string, any>;
-    const repeatRecord = args.kind === "recurrence" ? data : recurrence;
+    const previousRepeat = args.kind === "task" && data.recurrenceId ? await ctx.db.get(data.recurrenceId as import("./_generated/dataModel").Id<"recurrences">) : null;
+    const repeatRecord = args.kind === "recurrence" ? data : recurrence ?? (previousRepeat?.brainInstanceId === brain._id ? previousRepeat : null);
     const dates = [
       ["Due", data.dueAt], ["Starts", data.startAt], ["Ends", data.endAt],
       ["Completed", data.completedAt], ["Next due", repeatRecord?.nextDueAt], ["Last completed", repeatRecord?.lastCompletedAt],
@@ -188,6 +194,7 @@ export const getForViewer = query({
       if (source && source.brainInstanceId === brain._id && (source.url || source.deepLink)) sources.push({ label: source.sourceSystem, url: (source.url || source.deepLink)! });
     }
     if (data.htmlLink) sources.push({ label: "Calendar event", url: data.htmlLink });
+    if (args.kind === "event" && data.location?.trim()) sources.push({ label: "Open in Maps", url: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(data.location)}` });
     if (data.conferenceUrl) sources.push({ label: "Join meeting", url: data.conferenceUrl });
     const rule = repeatRecord?.rule;
     const repeatDescription = repeatRecord ? [repeatRecord.title, repeatRecord.status,
@@ -195,6 +202,9 @@ export const getForViewer = query({
       repeatRecord.anchor ? `From ${repeatRecord.anchor}` : null].filter(Boolean).join(" · ") :
       data.recurringEventId ? `Instance of calendar series ${data.recurringEventId}` : data.recurrence?.join(" · ") ?? null;
     return { row: row(args.kind, record, recurrence), description: record.description ?? null, projectId: linked?.to.entityId ?? null,
+      updatedAt: data.updatedAt ?? 0, waitingOn: data.waitingOn ?? null,
+      schedule: repeatRecord?.rule ? { rule: repeatRecord.rule, anchor: repeatRecord.anchor, nextDueAt: repeatRecord.nextDueAt,
+        history: (repeatRecord.history ?? []).map((entry: any) => ({ outcome: entry.outcome ?? "completed", at: entry.occurredAt ?? entry.completedAt, scheduledFor: entry.scheduledFor ?? null, note: entry.note ?? null })) } : null,
       dates, timeZone: data.timeZone ?? repeatRecord?.timeZone ?? null, recurrence: repeatDescription, sources };
 
   },

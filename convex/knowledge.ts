@@ -1,3 +1,4 @@
+import { transitionTask } from "./occurrenceLifecycle";
 import { internalQueryGeneric } from "convex/server";
 import { entityReferenceType } from "./entityReferenceType";
 import { completedTaskAttention } from "./attentionModel";
@@ -2524,15 +2525,11 @@ export const contactsForViewer = queryGeneric({
     const { brain } = await requireOwnedBrain(ctx);
     const people = await ctx.db
       .query("people")
-      .filter((q) =>
-        q.and(q.eq(q.field("brainInstanceId"), brain._id), q.eq(q.field("processingState"), "accepted")),
-      )
+      .withIndex("by_brain_state", (q: any) => q.eq("brainInstanceId", brain._id).eq("processingState", "accepted"))
       .collect();
     const companies = await ctx.db
       .query("companies")
-      .filter((q) =>
-        q.and(q.eq(q.field("brainInstanceId"), brain._id), q.eq(q.field("processingState"), "accepted")),
-      )
+      .withIndex("by_brain_state", (q: any) => q.eq("brainInstanceId", brain._id).eq("processingState", "accepted"))
       .collect();
 
     return { brain, people, companies };
@@ -4045,14 +4042,10 @@ export const markTaskDone = internalMutationGeneric({
       throw new Error("only accepted tasks can be marked done from the web app");
     }
 
+    if (task.status === "cancelled") throw new Error("Task is cancelled");
+    if (task.status === "done") return { taskId: args.taskId, pendingActionId: undefined };
     const now = Date.now();
-    await db.patch(args.taskId, {
-      status: "done",
-      completedAt: now,
-      executionState: "done",
-      updatedAt: now,
-    });
-    await advanceDependentsAfterDone(db, args.brainInstanceId, args.taskId, now);
+    await transitionTask(db, args.brainInstanceId, task, "complete");
 
     let pendingActionId = undefined;
     if (args.externalReminderSourceRefId) {
@@ -4490,15 +4483,10 @@ export const markTaskDoneForViewer = mutationGeneric({
       throw new Error("only accepted tasks can be marked done from the web app");
     }
 
+    if (task.status === "cancelled") throw new Error("Task is cancelled");
+    if (task.status === "done") return { taskId: args.taskId, pendingActionId: undefined };
     const now = Date.now();
-    await ctx.db.patch(args.taskId, {
-      status: "done",
-      attention: completedTaskAttention(task.attention, now),
-      completedAt: now,
-      executionState: "done",
-      updatedAt: now,
-    });
-    await advanceDependentsAfterDone(ctx.db, brain._id, args.taskId, now);
+    await transitionTask(ctx.db, brain._id, task, "complete");
 
     let pendingActionId = undefined;
     if (args.externalReminderSourceRefId) {

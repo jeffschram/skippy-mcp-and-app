@@ -21,6 +21,7 @@ export type AgendaRow = {
   kind: AgendaRowKind;
   id: string;
   title: string;
+  occurrenceVersion?: number | null;
   status?: string;
   recurrenceStatus?: string;
   endAt?: number;
