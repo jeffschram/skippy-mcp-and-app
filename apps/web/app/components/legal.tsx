@@ -24,10 +24,10 @@ import { cardClass, eyebrowClass, mutedClass } from "../page-classes";
  * is a verification rejection, so this is kept as a single constant rather than
  * inlined into both documents.
  */
-export const LEGAL_CONTACT_EMAIL = "privacy@jeffschram.com";
+export const LEGAL_CONTACT_EMAIL = "schramindustries@gmail.com";
 
 /** The jurisdiction whose law governs the terms. */
-export const LEGAL_GOVERNING_LAW = "the State of New York, United States";
+export const LEGAL_GOVERNING_LAW = "the State of Connecticut, United States";
 
 export const LEGAL_LAST_UPDATED = "November 9, 2026";
 
