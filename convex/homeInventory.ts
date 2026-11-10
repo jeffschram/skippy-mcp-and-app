@@ -5,12 +5,36 @@ import { eligible, resultValidator } from "./attention";
 import { attentionKind, attentionMetadata } from "./attentionValidators";
 import { attentionHref, resolveAttention, taskSourceLinks, type AttentionKind } from "./attentionModel";
 import { requireOwnedBrain } from "./auth";
+import { isCodeProject } from "./projectTaskScope";
 
 const kind = v.union(v.literal("task"), v.literal("event"), v.literal("recurrence"), v.literal("review"));
 const terminal = (row: any) => row.status === "done" || row.status === "cancelled";
 async function project(ctx: any, brain: any, id: string) {
   return ctx.db.query("relationships").withIndex("home_project", (q: any) =>
     q.eq("brainInstanceId", brain).eq("from.entityId", id).eq("type", "belongs_to").eq("to.entityType", "project")).first();
+}
+/**
+ * Home's project exclusion is scoped to *code* projects. It used to drop every
+ * project-linked task, which silently hid real obligations: a general project
+ * (a trip, a move, Thanksgiving) holds exactly the dated commitments Home
+ * exists to surface. Reported 2026-11-10 — a task due today sat in a personal
+ * project and appeared nowhere the owner looks. See projectTaskScope.ts.
+ *
+ * Resolution is cached per page because the same project recurs across tasks
+ * and the page already budgets reads tightly (see the scan budget below).
+ */
+async function inCodeProject(ctx: any, brain: any, id: string, cache: Map<string, boolean>) {
+  const link = await project(ctx, brain, id);
+  if (!link) return false;
+  const projectId = link.to.entityId as string;
+  if (!cache.has(projectId)) {
+    const parent = ctx.db.normalizeId("projects", projectId);
+    const record = parent ? await ctx.db.get(parent) : null;
+    // A dangling link (project deleted) must not hide the task: unknown scope
+    // falls back to visible.
+    cache.set(projectId, record?.brainInstanceId === brain ? isCodeProject(record) : false);
+  }
+  return cache.get(projectId)!;
 }
 async function repeat(ctx: any, brain: any, id: string) {
   return ctx.db.query("recurrences").withIndex("by_brain_current_task", (q: any) =>
@@ -156,6 +180,7 @@ export const page = query({
     const streams = await Promise.all(sources.map(async (source) => ({ source, index: 0,
       records: positions[source.key] === false ? [] : await seek(ctx.db, source, positions[source.key] ?? null, size + 1) })));
     const rows: any[] = [];
+    const codeProjects = new Map<string, boolean>();
     let scanned = 0;
     // Eligibility may read up to 65 relationship links per task. Keep the
     // total page budget below Convex read limits even for rejected candidates.
@@ -186,7 +211,7 @@ export const page = query({
       if (source.kind === "review") {
         if (!["goal", "project", "person", "company", "note", "link", "memory"].includes(entityKind!) || !await eligible(ctx, record, entityKind!, brain._id) || !reviewInPeriod(record, entityKind!, args)) continue;
       } else if (source.kind === "task") {
-        if (await project(ctx, brain._id, record._id)) continue;
+        if (await inCodeProject(ctx, brain._id, record._id, codeProjects)) continue;
         if (!await eligible(ctx, record, "task", brain._id)) continue;
         recurrence = await repeat(ctx, brain._id, record._id);
         if (args.status === "completed" ? !terminal(record) : terminal(record)) continue;

@@ -141,9 +141,25 @@ describe("bounded Home inventory", () => {
   });
   it("never revives a repeat whose live task moved to a project outside the period", async () => {
     const records = [task("project", { dueAt: 50000 }), recurrence("repeat", { currentTaskId: "tasks:project" }),
+      { _id: "projects:p", brainInstanceId: "mine", kind: "code" },
       { _id: "relationships:project", brainInstanceId: "mine", from: { entityId: "tasks:project" }, to: { entityType: "project", entityId: "projects:p" }, type: "belongs_to" }];
     expect(await inventory(records)).toEqual([]);
     expect(await inventory(records, { period: "today" })).toEqual([]);
+  });
+  // 2026-11-10: a task due today inside a personal project reached no surface at
+  // all. Only code-project roadmap churn may be hidden from Home.
+  it("shows tasks in general projects but hides code-project roadmap tasks", async () => {
+    const link = (task: string, project: string) => ({ _id: `relationships:${task}`, brainInstanceId: "mine",
+      from: { entityId: `tasks:${task}` }, to: { entityType: "project", entityId: `projects:${project}` }, type: "belongs_to" });
+    const records = [task("thanksgiving"), task("ship"), task("legacy"), task("orphan"),
+      { _id: "projects:general", brainInstanceId: "mine", kind: "general" },
+      { _id: "projects:code", brainInstanceId: "mine", kind: "code" },
+      { _id: "projects:untyped", brainInstanceId: "mine" },
+      link("thanksgiving", "general"), link("ship", "code"), link("legacy", "untyped"), link("orphan", "deleted")];
+    for (const period of ["today", "all"]) {
+      const rows = await inventory(records, { period });
+      expect(rows.map(r => r.id).sort()).toEqual(["tasks:legacy", "tasks:orphan", "tasks:thanksgiving"]);
+    }
   });
   it("resolves exact archived/project records and rejects foreign or wrong-kind IDs", async () => {
     const db = fixture([task("closed", { status: "done" }), task("foreign", { brainInstanceId: "other" }),
