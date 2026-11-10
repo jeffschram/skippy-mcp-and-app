@@ -3,6 +3,7 @@ import { queryGeneric } from "convex/server";
 import { v } from "convex/values";
 import { buildAgenda, effectiveCommitment } from "@skippy/shared";
 import { requireOwnedBrain } from "./auth";
+import { codeProjectTaskIds } from "./projectTaskScope";
 
 /* ------------------------------------------------------------------ */
 /* Agenda                                                              */
@@ -10,22 +11,6 @@ import { requireOwnedBrain } from "./auth";
 /* Reads the three time-bearing streams and hands them to the shared    */
 /* merge, which owns the ordering and the de-duplication rules.        */
 /* ------------------------------------------------------------------ */
-
-/** Ids of tasks that belong to a project, so the agenda can stay life-focused. */
-async function projectLinkedTaskIds(db: any, brainInstanceId: any): Promise<Set<string>> {
-  const relationships = await db
-    .query("relationships")
-    .withIndex("by_brain_type", (q: any) => q.eq("brainInstanceId", brainInstanceId).eq("type", "belongs_to"))
-    .collect();
-
-  const ids = new Set<string>();
-  for (const relationship of relationships) {
-    if (relationship.from?.entityType === "task" && relationship.to?.entityType === "project") {
-      ids.add(relationship.from.entityId as string);
-    }
-  }
-  return ids;
-}
 
 async function buildAgendaForBrain(
   ctx: any,
@@ -70,9 +55,11 @@ async function buildAgendaForBrain(
       [...recurrenceByTaskId.keys()].map((taskId) => ctx.db.get(taskId as any)),
     );
 
-    const linkedToProject = args.includeProjectTasks
+    // Only code-project roadmap churn is hidden; general (personal) project
+    // tasks always reach the agenda. See projectTaskScope.ts.
+    const hiddenTaskIds = args.includeProjectTasks
       ? new Set<string>()
-      : await projectLinkedTaskIds(ctx.db, brain._id);
+      : await codeProjectTaskIds(ctx.db, brain._id);
 
     const seenTaskIds = new Set<string>();
     const tasks: any[] = [];
@@ -82,7 +69,7 @@ async function buildAgendaForBrain(
       const id = task._id as string;
       if (seenTaskIds.has(id)) continue;
       seenTaskIds.add(id);
-      if (linkedToProject.has(id)) continue;
+      if (hiddenTaskIds.has(id)) continue;
 
       tasks.push({
         _id: id,
