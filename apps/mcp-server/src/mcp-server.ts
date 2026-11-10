@@ -1987,7 +1987,7 @@ export function createMcpServer(
       inputSchema: z.object({
         from: z.number().describe("Range start, epoch ms."),
         to: z.number().describe("Range end, epoch ms."),
-        includeProjectTasks: z.boolean().optional().describe("Off by default: the agenda is about the day, not the roadmap."),
+        includeProjectTasks: z.boolean().optional().describe("Adds code-project roadmap tasks, off by default. Tasks in non-code (personal) projects are always included and this flag does not affect them."),
       }),
     },
     async (args) => toolResult(await tools.listAgenda(stripUndefined(args) as any)),
@@ -1996,9 +1996,9 @@ export function createMcpServer(
   server.registerTool(
     "list_life_tasks",
     {
-      title: "List tasks that belong to no project",
+      title: "List tasks outside code projects",
       description:
-        "Read-only. Open life tasks — errands, obligations, and wants — optionally filtered by commitment or area.",
+        "Read-only. Open life tasks — errands, obligations, and wants — optionally filtered by commitment or area. Includes tasks inside non-code (personal) projects; only code-project roadmap tasks are excluded.",
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: z.object({
         commitment: z.enum(["must", "want"]).optional(),

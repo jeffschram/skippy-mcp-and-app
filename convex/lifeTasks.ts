@@ -4,13 +4,19 @@ import { mutationGeneric, queryGeneric } from "convex/server";
 import { v } from "convex/values";
 import { effectiveCommitment, repairStaleDueDate } from "@skippy/shared";
 import { requireOwnedBrain } from "./auth";
+import { codeProjectTaskIds } from "./projectTaskScope";
 
 /* ------------------------------------------------------------------ */
 /* Life tasks                                                          */
 /*                                                                     */
-/* Tasks with no project. These were always legal — project linkage is  */
-/* a belongs_to row in `relationships`, not a column — but until now    */
-/* they had nowhere to live and no way to be classified.               */
+/* Tasks that are not code-project work. Project linkage is a          */
+/* belongs_to row in `relationships`, not a column — these were always  */
+/* legal, but until now they had nowhere to live and no way to be       */
+/* classified.                                                         */
+/*                                                                     */
+/* Scope widened 2026-11-09: this used to mean "no project at all",     */
+/* which wrongly hid the obligations inside non-code personal projects. */
+/* Only code projects are excluded now (see projectTaskScope.ts).      */
 /* ------------------------------------------------------------------ */
 
 const taskArea = v.union(
@@ -24,22 +30,6 @@ const taskArea = v.union(
 );
 
 const taskCommitment = v.union(v.literal("must"), v.literal("want"));
-
-/** Ids of every task that belongs to a project, so they can be excluded. */
-async function projectLinkedTaskIds(db: any, brainInstanceId: any): Promise<Set<string>> {
-  const relationships = await db
-    .query("relationships")
-    .withIndex("by_brain_type", (q: any) => q.eq("brainInstanceId", brainInstanceId).eq("type", "belongs_to"))
-    .collect();
-
-  const ids = new Set<string>();
-  for (const relationship of relationships) {
-    if (relationship.from?.entityType === "task" && relationship.to?.entityType === "project") {
-      ids.add(relationship.from.entityId as string);
-    }
-  }
-  return ids;
-}
 
 /**
  * Every open life task, plus the recurrence linkage the agenda needs to avoid
@@ -61,7 +51,7 @@ export const lifeTasksForViewer = queryGeneric({
       .filter((q: any) => q.eq(q.field("processingState"), "accepted"))
       .collect();
 
-    const linked = await projectLinkedTaskIds(ctx.db, brain._id);
+    const linked = await codeProjectTaskIds(ctx.db, brain._id);
 
     // Tasks spawned by a recurrence are tagged so the agenda can show the
     // obligation once rather than as both a task and a firing recurrence.
@@ -117,7 +107,7 @@ export const lifeTasksForBrain = internalQueryGeneric({
       .filter((q: any) => q.eq(q.field("processingState"), "accepted"))
       .collect();
 
-    const linked = await projectLinkedTaskIds(ctx.db, args.brainInstanceId);
+    const linked = await codeProjectTaskIds(ctx.db, args.brainInstanceId);
 
     return tasks
       .filter((task: any) => !linked.has(task._id as string))
