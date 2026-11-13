@@ -60,6 +60,7 @@ export const OAUTH_TOOL_SCOPES: Record<string, readonly string[]> = {
   "record_pending_action_result": ["skippy:read", "skippy:write"],
   "record_principle": ["skippy:read", "skippy:write"],
   "record_task_result": ["skippy:read", "skippy:write"],
+  "derive_message_identities": ["skippy:read"],
   "refresh_focus_summary": ["skippy:read", "skippy:write"],
   "register_project_file": ["skippy:read", "skippy:write"],
   "set_task_phase": ["skippy:read", "skippy:write"],

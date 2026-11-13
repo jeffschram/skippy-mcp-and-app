@@ -39,3 +39,11 @@ Stop or roll back on missing IDs, incomplete pages, uncertain source availabilit
 ## Current acceptance
 
 No cutover, credential removal, host process inspection or post-cutover scheduled reads/writes occurred in task 9. Replacement acceptance remains unmet. Documentation publication does not complete task 9 or authorize cleanup. Resume from qualification with the evidence above, then execute the staged handoff on the qualified deployment.
+
+## Messages incremental identity (owner-approved November 13, 2026)
+
+The owner approved timestamp/content fingerprints because the native Messages connector reads bodies but omits permanent message IDs. Agenda v8 uses the read-only `derive_message_identities` tool to compute `imessage-fingerprint-v1` SHA-256 external IDs in memory from approved source scope, chat GUID, resolved sender handle (or self), lossless UTC timestamp, exact body and sorted attachment IDs. Local response references, unread state, names, summaries and ingestion time are excluded. Fingerprints are explicitly derived, never stored as provider `messageId`. Accepted provenance stores epoch-ms `sourceTimestamp` and chat `threadId`.
+
+Existing Convex claims freeze the current server time, retain failed bounds, and advance `coveredThrough` only after successful exhaustive reads and required writes. The next window includes a 15-minute overlap. Atomic object receipts reuse the fingerprint plus semantic output discriminator to preserve existing entities on replay. Ignored messages contribute counts but do not create raw archives.
+
+Qualification must test the deployed scheduled Codex path, overlap and failed-window recovery. Unknown senders, missing necessary content, capped chat enumeration and indistinguishable repeated records remain coverage failures. This approach does not distinguish two identical messages at the exact same instant; edits create another fingerprint and require semantic reconciliation. Late sync and edits outside the overlap, and deletions, are not covered. Calendar mirror parity remains a separate cutover requirement. This section changes the accepted identity strategy, not the requirement for live acceptance evidence.

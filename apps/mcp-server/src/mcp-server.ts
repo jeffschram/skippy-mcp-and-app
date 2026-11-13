@@ -1,3 +1,4 @@
+import { messageIdentities, messageIdentitySchema } from "./message-identity-helpers.js";
 import { OAUTH_TOOL_SCOPES } from "./oauth-tool-policy.js";
 import { authChallenge } from "./oauth.js";
 import type { McpPrincipal } from "@skippy/shared";
@@ -1731,6 +1732,17 @@ export function createMcpServer(
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     async () => toolResult(await tools.getImportanceRubric()),
+  );
+
+  server.registerTool(
+    "derive_message_identities",
+    {
+      title: "Derive Messages fingerprints",
+      description: "Compute versioned derived externalIds from one native Messages page in memory, without storing raw content. Supply resolved chat GUID, exact dates/body/attachment IDs and the page's sender mappings. Never put these fingerprints in messageId. Check inWindow and ambiguity, including duplicate fingerprints across pages, before ingestion.",
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: messageIdentitySchema,
+    },
+    async (args) => toolResult(messageIdentities(args)),
   );
 
   server.registerTool(
