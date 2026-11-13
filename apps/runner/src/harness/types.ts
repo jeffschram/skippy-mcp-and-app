@@ -55,6 +55,8 @@ export interface HarnessTurnRequest {
    * sandbox. Only ever set for chat turns, by explicit runner config.
    */
   bypassPermissions?: boolean | undefined;
+  /** Codex automatic approval review with its sandbox retained; never blanket approval. */
+  automaticApprovalReview?: boolean | undefined;
   signal: AbortSignal;
   /** Adapter emits translated events here as the turn streams. */
   onEvent: (event: HarnessEvent) => void;
