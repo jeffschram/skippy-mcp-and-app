@@ -855,6 +855,7 @@ export type CandidateObjectInput<T extends EntityType = EntityType> = {
   sourceRefs?: SourceRefInput[];
   sourceRefIds?: string[];
   ingestionRunId?: string;
+  ingestion?: { source: string; token: string; objectKey: string };
 };
 
 export type RelationshipInput = {

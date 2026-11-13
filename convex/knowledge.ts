@@ -1,3 +1,4 @@
+import { updateProgress, checkRunCoverage, recordProgressRun, prepareReceipt, saveReceipt } from "./ingestionProgress";
 import { query, internalMutation } from "./_generated/server";
 import { paginationOptsValidator } from "convex/server";
 import { transitionTask } from "./occurrenceLifecycle";
@@ -1475,6 +1476,7 @@ export const ingestObject = internalMutationGeneric({
     confidence: v.optional(v.number()),
     reviewReason: v.optional(v.string()),
     rubricDecision: v.string(),
+    ingestion: v.optional(v.object({ source: v.string(), token: v.string(), objectKey: v.string() })),
     sourceRefIds: v.optional(v.array(v.id("sourceRefs"))),
     sourceRefs: v.optional(v.array(sourceRefInput)),
   },
@@ -1485,6 +1487,8 @@ export const ingestObject = internalMutationGeneric({
         properties: args.candidatePayload.properties ?? args.candidatePayload } };
     }
     const now = Date.now();
+    const prepared = await prepareReceipt(db, args.brainInstanceId, args.ingestion, args.candidateEntityType, now);
+    if (prepared?.receipt) return { ...prepared.receipt.result, status: "duplicate_existing", duplicate: true };
     const entityTypeName = args.candidateEntityType as keyof typeof entityTableByType;
     const normalizedPayload = normalizeAcceptedEntityPayload(entityTypeName, args.candidatePayload);
     const displayPayload = normalizedPayload as Record<string, any>;
@@ -1518,7 +1522,7 @@ export const ingestObject = internalMutationGeneric({
         },
       );
 
-      return {
+      const result = {
         status: "duplicate_existing",
         duplicate: true,
         entityType: entityTypeName,
@@ -1527,6 +1531,8 @@ export const ingestObject = internalMutationGeneric({
         sourceRefIds,
         rubricDecision: args.rubricDecision,
       };
+      await saveReceipt(db, args.brainInstanceId, prepared, result, now);
+      return result;
     }
 
     const entityId = await insertEntity(
@@ -1556,7 +1562,7 @@ export const ingestObject = internalMutationGeneric({
       sourceRefIds,
     });
 
-    return {
+    const result = {
       status: "accepted",
       entityType: entityTypeName,
       entityId,
@@ -1564,6 +1570,8 @@ export const ingestObject = internalMutationGeneric({
       sourceRefIds,
       rubricDecision: args.rubricDecision,
     };
+    await saveReceipt(db, args.brainInstanceId, prepared, result, now);
+    return result;
   },
 });
 
@@ -1644,7 +1652,10 @@ export const dashboardForViewer = queryGeneric({
         .query("sourceSyncStatuses")
         .withIndex("by_brain_key", (q) => q.eq("brainInstanceId", brain._id))
         .collect()
-    ).filter((row) => row.status !== "running" || isSourceSyncActive(row, nowForSync));
+    ).filter((row) => row.metadata?.progress || row.metadata?.mirrorClaim || row.status !== "running" || isSourceSyncActive(row, nowForSync))
+      .map((row) => (row.metadata?.progress || row.metadata?.mirrorClaim) && row.status === "running" &&
+        (row.metadata.progress?.leaseUntil ?? row.metadata.mirrorLeaseUntil) <= nowForSync
+        ? { ...row, status: "failed" as const, errors: ["Worker lease expired; frozen window awaits replay"] } : row);
     // Home quick-capture inbox: recent captures, newest first, so the capture
     // box can show submit feedback, status/hold chips, and per-item actions.
     // Hold items past their 7-day transfer window vanish at read time (the
@@ -2781,6 +2792,7 @@ export const recordMemoryForBrain = internalMutationGeneric({
     summary: v.optional(v.string()),
     captureReason: v.optional(v.string()),
     rubricDecision: v.string(),
+    ingestion: v.optional(v.object({ source: v.string(), token: v.string(), objectKey: v.string() })),
     confidence: v.optional(v.number()),
     reviewBehavior: v.optional(memoryReviewBehavior),
     sourceRefIds: v.optional(v.array(v.id("sourceRefs"))),
@@ -2800,6 +2812,8 @@ export const recordMemoryForBrain = internalMutationGeneric({
     }
 
     const now = Date.now();
+    const prepared = await prepareReceipt(db, args.brainInstanceId, args.ingestion, "memory", now);
+    if (prepared?.receipt) return prepared.receipt.result;
     const memoryTypeName = args.kind ?? "memory";
     const reviewBehavior = args.reviewBehavior ?? "accept";
     const sourceRefIds = await memorySourceRefIdsFromArgs(db, args.brainInstanceId, args.sourceRefIds, args.sourceRefs, now);
@@ -2844,7 +2858,7 @@ export const recordMemoryForBrain = internalMutationGeneric({
       sourceRefIds,
     });
 
-    return {
+    const result = {
       status: "recorded",
       memoryId,
       kind: memoryTypeName,
@@ -2854,6 +2868,8 @@ export const recordMemoryForBrain = internalMutationGeneric({
       confidence: args.confidence,
       rubricDecision,
     };
+    await saveReceipt(db, args.brainInstanceId, prepared, result, now);
+    return result;
   },
 });
 
@@ -4062,6 +4078,7 @@ export const recordIngestionRun = internalMutationGeneric({
     metadata: v.optional(v.any()),
   },
   handler: async ({ db }, args) => {
+    if (args.metadata?.role === "agenda" || args.metadata?.ingestion) return recordProgressRun(db, args, Date.now());
     return await db.insert("ingestionRuns", {
       ...args,
       startedAt: args.startedAt ?? Date.now(),
@@ -4085,6 +4102,10 @@ export const updateSourceSyncStatus = internalMutationGeneric({
   },
   handler: async ({ db }, args) => {
     const now = Date.now();
+    if (args.metadata?.ingestion) return await updateProgress(db, args, now);
+    if (args.statusKey?.startsWith("google_calendar:")) throw new Error("Calendar mirror status is owned by the calendar sync protocol");
+    if (args.statusKey?.startsWith("ingestion:")) throw new Error("Use the durable ingestion protocol for this key");
+    if (args.status === "completed" && args.metadata?.role === "agenda") await checkRunCoverage(db, args);
     const statusKey = args.statusKey ?? "source-sync";
     const existing = await db
       .query("sourceSyncStatuses")

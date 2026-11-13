@@ -86,6 +86,8 @@ export async function runCalendarMirrorSyncOnce(
   // Declared before `fail` because `fail` reads it: reporting a failure must
   // not clobber a still-valid token.
   let storedToken: string | null = null;
+  let claimToken: string | undefined;
+  let windowAnchor = now;
 
   const fail = async (error: string): Promise<MirrorSyncResult> => {
     result.status = "failed";
@@ -95,7 +97,9 @@ export async function runCalendarMirrorSyncOnce(
     // next run, which matters when the failure was transient (a 5xx, a flaky
     // network) rather than a token problem.
     try {
-      await plane.recordCalendarSyncToken(calendarId, storedToken, {
+      if (claimToken) await plane.recordCalendarSyncToken(calendarId, storedToken, {
+        claimToken,
+        report: { ...result, windowAnchor },
         status: "failed",
         message: error,
         errors: [error],
@@ -108,7 +112,10 @@ export async function runCalendarMirrorSyncOnce(
   };
 
   try {
-    storedToken = (await plane.getCalendarSyncToken(calendarId)).syncToken;
+    const claim = await plane.getCalendarSyncToken(calendarId);
+    storedToken = claim.syncToken;
+    claimToken = claim.claimToken;
+    windowAnchor = claim.windowAnchor;
   } catch (error) {
     return fail(`could not read sync token: ${error instanceof Error ? error.message : String(error)}`);
   }
@@ -123,7 +130,7 @@ export async function runCalendarMirrorSyncOnce(
   }
 
   const fetchImpl = deps.fetchImpl ?? fetch;
-  let request: SyncRequest = buildInitialRequest({ now, syncToken: storedToken });
+  let request: SyncRequest = buildInitialRequest({ now: windowAnchor, syncToken: storedToken });
 
   while (true) {
     let outcome;
@@ -138,7 +145,7 @@ export async function runCalendarMirrorSyncOnce(
       result.events += outcome.events.length;
       for (const batch of chunkEvents(outcome.events)) {
         try {
-          const counts = await plane.upsertCalendarEvents(calendarId, batch);
+          const counts = await plane.upsertCalendarEvents(calendarId, batch, claimToken!);
           result.inserted += counts.inserted;
           result.updated += counts.updated;
           result.cancelled += counts.cancelled;
@@ -152,6 +159,8 @@ export async function runCalendarMirrorSyncOnce(
         }
       }
     }
+
+    if (result.skipped > 0) return fail("Calendar events could not be normalized; coverage incomplete");
 
     const decision = decidePage(outcome, {
       pagesFetched: result.pages,
@@ -168,17 +177,18 @@ export async function runCalendarMirrorSyncOnce(
       // event is a no-op rather than a duplicate.
       log("calendar sync token expired, falling back to a full resync", { calendarId });
       result.fullResync = true;
-      request = buildInitialRequest({ now, syncToken: null });
+      request = buildInitialRequest({ now: windowAnchor, syncToken: null });
       continue;
     }
     if (decision.kind === "fail") {
       return fail(decision.error);
     }
 
-    // Done. A run that stopped early (page cap) reports no token, which leaves
-    // the next run to redo the window instead of skipping past it.
+    // Only a complete page walk reaches this point; capped walks fail above.
     try {
       await plane.recordCalendarSyncToken(calendarId, decision.syncToken ?? null, {
+        claimToken: claimToken!,
+        report: { ...result, windowAnchor },
         status: "completed",
         message: `mirrored ${result.events} event(s) across ${result.pages} page(s)`,
       });
