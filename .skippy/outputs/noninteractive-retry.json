@@ -1,0 +1,7 @@
+{
+  "startedAt": "2026-11-13T15:36:26.626247+00:00",
+  "elapsedSeconds": 0.028,
+  "exitCode": 1,
+  "stderr": "WARNING: proceeding, even though we could not create PATH aliases: Operation not permitted (os error 1)\nError: failed to initialize in-process app-server client: Operation not permitted (os error 1)\n",
+  "stdout": ""
+}
