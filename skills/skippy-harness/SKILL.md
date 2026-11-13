@@ -7,6 +7,8 @@ description: Use when an AI harness connected to Skippy MCP needs to decide what
 
 Use Skippy as the user's canonical second-brain store. The harness supplies context and connector access; Skippy stores accepted knowledge, provenance, tasks, relationships, focus summaries, operating rules, and pending action state.
 
+For scheduled or batch ingestion from Gmail, Calendar, Messages or Home captures, call `get_skill` with slug `agenda-ingestion` and follow that canonical workflow. It owns connector arguments, calendar routing, provenance, capture acknowledgement and coverage reporting; the general capture guidance below does not override it.
+
 Before capture or retrieval work that may create durable memory, read `references/capture-protocol.md`. For structured payload fields, read `references/entity-mapping.md`.
 
 ## Decision Loop

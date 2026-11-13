@@ -69,9 +69,9 @@ describe("buildIngestionCursorBlock", () => {
     const sinceIso = new Date(lastCompletedAt - INGESTION_OVERLAP_BUFFER_MS).toISOString();
     expect(block).toContain(`Last successful pass completed ${new Date(lastCompletedAt).toISOString()}`);
     expect(block).toContain(`newer than ${sinceIso}`);
-    expect(block).toContain(`since "${sinceIso}" on iMessage tools`);
+    expect(block).toContain(`from "${sinceIso}" on native Messages read_messages/find_chats`);
     expect(block).toContain(`after:${epochSeconds(lastCompletedAt - INGESTION_OVERLAP_BUFFER_MS)}`);
-    expect(block).toContain(`time_min "${sinceIso}" on calendar list_events`);
+    expect(block).toContain(`time_min "${sinceIso}" on Google Calendar search_events`);
     expect(block).toContain("Do not improvise a wider window.");
   });
 
