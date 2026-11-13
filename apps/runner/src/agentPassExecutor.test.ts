@@ -175,26 +175,14 @@ describe("executeAgentPass", () => {
     expect(decision).toBe("declined");
   });
 
-  it("injects the completed-run cursor into the prompt for connector passes", async () => {
-    const completedAt = Date.now() - 60 * 60_000;
-    const plane = fakePlane({ completedAt, startedAt: completedAt - 5 * 60_000 });
+  it("uses durable source claims for Agenda regardless of a legacy role cursor", async () => {
+    const plane = fakePlane({ completedAt: Date.now(), startedAt: Date.now() });
     const { adapter, requests } = fakeAdapter({ outcome: "completed" });
     await executeAgentPass(config, plane, pass, adapter);
-    expect(plane.lastCompletedIngestionRun).toHaveBeenCalledWith("agenda");
-    expect(requests[0]?.prompt).toContain(
-      `Last successful pass completed ${new Date(completedAt).toISOString()}`,
-    );
-    expect(requests[0]?.prompt).toContain("Do not improvise a wider window.");
-  });
-
-  it("falls back to the 48h window when the cursor fetch throws", async () => {
-    // The cursor is an optimization; a Convex hiccup must not fail the pass.
-    const plane = fakePlane();
-    plane.lastCompletedIngestionRun.mockRejectedValue(new Error("network down"));
-    const { adapter, requests } = fakeAdapter({ outcome: "completed" });
-    await executeAgentPass(config, plane, pass, adapter);
-    expect(requests[0]?.prompt).toContain("read the last 48 hours only");
-    expect(plane.completeAgentPass).toHaveBeenCalledWith("cfg1", "tok1", { status: "completed" });
+    expect(plane.lastCompletedIngestionRun).not.toHaveBeenCalled();
+    expect(requests[0]?.prompt).toContain("durable source claims");
+    expect(requests[0]?.prompt).toContain("google");
+    expect(requests[0]?.prompt).not.toContain("Last successful pass completed");
   });
 
   it("skips the cursor fetch entirely for passes without connectors", async () => {

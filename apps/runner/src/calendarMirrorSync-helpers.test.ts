@@ -91,14 +91,14 @@ describe("decidePage", () => {
     });
   });
 
-  it("stops WITHOUT a token at the page cap", () => {
+  it("fails without advancing the token at the page cap", () => {
     // Persisting a token here would claim we saw the whole calendar; leaving
     // it unset makes the next run redo the window instead of skipping it.
     const decision = decidePage(ok({ nextPageToken: "p2", nextSyncToken: "s2" }), {
       pagesFetched: MAX_PAGES_PER_RUN,
       alreadyRestarted: false,
     });
-    expect(decision).toEqual({ kind: "done", syncToken: undefined });
+    expect(decision).toEqual({ kind: "fail", error: "Calendar pagination budget exhausted; coverage incomplete" });
   });
 
   it("propagates a hard failure", () => {

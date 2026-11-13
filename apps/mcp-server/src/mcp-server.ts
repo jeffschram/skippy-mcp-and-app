@@ -1398,6 +1398,7 @@ export function createMcpServer(
         "Write a durable second-brain memory (stable preferences, personal facts, recurring context) when you can explain why it belongs — see the memory-rubric skill. Use record_decision/record_principle for those kinds.",
       annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: true },
       inputSchema: z.object({
+        ingestion: z.object({ source: z.string(), token: z.string(), objectKey: z.string() }).optional(),
         content: z.string(),
         kind: memoryKindSchema.optional(),
         title: z.string().optional(),
@@ -1767,6 +1768,8 @@ export function createMcpServer(
         reviewReason: z.string().optional(),
         sourceRefs: z.array(sourceRefSchema).optional(),
         sourceRefIds: z.array(z.string()).optional(),
+        ingestion: z.object({ source: z.string(), token: z.string(), objectKey: z.string() }).optional()
+          .describe("Durable ingestion claim and immutable provider-item + semantic output key; reuse across retries, never use a title or run ID."),
       }),
     },
     async (args) => {
@@ -2831,7 +2834,7 @@ export function createMcpServer(
     {
       title: "Update source sync status",
       description:
-        "Update the live source-ingestion status on the Skippy Home NOW area: status=running before reading sources, heartbeat during long work, completed or failed before ending the run.",
+        "Update source status. Durable ingestion: metadata {role: agenda, ingestion: {operation: inspect|claim|heartbeat|finish, source, runId, token?, paginationComplete?, persistenceComplete?, counts?: {read,ignored,accepted}}}. Claim returns fenced token and frozen window; finish advances only complete persisted coverage. Load agenda-ingestion skill for protocol.",
       annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: true },
       inputSchema: z.object({
         statusKey: z.string().optional().describe("Stable status-row key. Defaults to source-sync."),

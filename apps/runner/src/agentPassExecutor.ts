@@ -85,7 +85,9 @@ export async function executeAgentPass(
       );
     }
     let ingestionCursorBlock: string | undefined;
-    if (pass.connectorSlugs.length > 0) {
+    if (pass.roleKey === "agenda") {
+      ingestionCursorBlock = "Use agenda-ingestion durable source claims via update_source_sync_status. Use each returned frozen window, never the legacy role completion time. Claim independent sources, replay failed windows, and record failed aggregate while any source is missing or catching up.";
+    } else if (pass.connectorSlugs.length > 0) {
       // Only source-ingesting passes (those with pinned connectors) get a read
       // cursor. A fetch failure degrades to the capped 48h window instead of
       // failing the pass — conservative and bounded beats skipping the run.

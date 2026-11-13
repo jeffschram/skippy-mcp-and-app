@@ -1,3 +1,4 @@
+import { mutation } from "./_generated/server";
 import { internalQueryGeneric } from "convex/server";
 import { internalMutationGeneric } from "convex/server";
 import { mutationGeneric, queryGeneric } from "convex/server";
@@ -43,7 +44,10 @@ async function findByExternalId(
   brainInstanceId: any,
   sourceSystem: string,
   externalId: string,
+  calendarId?: string,
 ) {
+  if (calendarId) return db.query("calendarEvents").withIndex("by_brain_calendar_external", (q: any) =>
+    q.eq("brainInstanceId", brainInstanceId).eq("sourceSystem", sourceSystem).eq("calendarId", calendarId).eq("externalId", externalId)).first();
   return db
     .query("calendarEvents")
     .withIndex("by_brain_external", (q: any) =>
@@ -97,7 +101,13 @@ async function upsertCalendarEventsInternal(
       continue;
     }
 
-    const existing = await findByExternalId(db, args.brainInstanceId, sourceSystem, incoming.externalId);
+    const existing = await findByExternalId(db, args.brainInstanceId, sourceSystem, incoming.externalId, args.calendarId);
+    if (existing && incoming.status === "cancelled") {
+      await db.patch(existing._id, { status: "cancelled", etag: incoming.etag ?? existing.etag, lastSyncedAt: now, updatedAt: now });
+      cancelled += 1;
+      updated += 1;
+      continue;
+    }
     const plan = planCalendarEventWrite(existing, incoming, now);
 
     if (plan.action === "insert") {
@@ -163,6 +173,7 @@ async function recordCalendarSyncTokenInternal(
     status?: "completed" | "failed" | undefined;
     message?: string | undefined;
     errors?: string[] | undefined;
+    report?: any;
   },
 ) {
   const now = Date.now();
@@ -177,7 +188,12 @@ async function recordCalendarSyncTokenInternal(
     errors: args.errors,
     completedAt: now,
     lastHeartbeatAt: now,
-    metadata: { ...(existing?.metadata ?? {}), syncToken: args.syncToken ?? undefined },
+    metadata: { ...(existing?.metadata ?? {}),
+      // Failure reporting cannot erase a token or masquerade as last success.
+      syncToken: args.status === "failed" ? existing?.metadata?.syncToken : args.syncToken ?? undefined,
+      lastSuccessAt: args.status === "failed" ? existing?.metadata?.lastSuccessAt : now,
+      ...(args.report ? { report: args.report } : {}),
+      ...(args.status === "failed" ? { lastFailureAt: now, lastErrors: args.errors ?? [] } : {}) },
     updatedAt: now,
   };
 
@@ -240,7 +256,7 @@ async function mirrorSyncState(
   if (!row || (!hasToken && row.status !== "completed")) {
     return { mirrorStatus: "never_synced" };
   }
-  const lastSyncedAt = row.completedAt ?? row.updatedAt;
+  const lastSyncedAt = row.metadata?.lastSuccessAt ?? (row.status === "completed" ? row.completedAt : undefined);
   return typeof lastSyncedAt === "number"
     ? { mirrorStatus: "synced", lastSyncedAt }
     : { mirrorStatus: "synced" };
@@ -256,15 +272,47 @@ export const hostCalendarSyncToken = queryGeneric({
   },
 });
 
+/** Atomically claim a mirror pass; failed full reads retain their exact baseline. */
+export const hostClaimCalendarSync = mutation({
+  args: { hostToken: v.string(), calendarId: v.string() },
+  returns: v.object({ syncToken: v.union(v.string(), v.null()), claimToken: v.string(), windowAnchor: v.number() }),
+  handler: async (ctx, args) => {
+    const host = await requireHost(ctx, args.hostToken);
+    const now = Date.now();
+    const row = await findSyncStatusRow(ctx.db, host.brainInstanceId, args.calendarId);
+    if (row?.metadata?.mirrorLeaseUntil > now) throw new Error("Calendar mirror already claimed");
+    const claimToken = makeToken("mirror");
+    const windowAnchor = row?.metadata?.windowAnchor ?? now;
+    const metadata = { ...row?.metadata, mirrorClaim: claimToken, mirrorLeaseUntil: now + 10 * 60_000, windowAnchor };
+    const patch = { harness: "calendar-mirror", status: "running" as const, startedAt: now, lastHeartbeatAt: now,
+      sourceSystemsChecked: ["calendar"], metadata, updatedAt: now };
+    if (row) await ctx.db.patch(row._id, patch);
+    else await ctx.db.insert("sourceSyncStatuses", { ...patch, brainInstanceId: host.brainInstanceId,
+      statusKey: syncStatusKey(args.calendarId), createdAt: now });
+    return { syncToken: row?.metadata?.syncToken ?? null, claimToken, windowAnchor };
+  },
+});
+
+async function requireMirrorClaim(db: any, brain: any, calendarId: string, claimToken: string) {
+  const row = await findSyncStatusRow(db, brain, calendarId);
+  if (row?.metadata?.mirrorClaim !== claimToken || row.metadata.mirrorLeaseUntil <= Date.now()) {
+    throw new Error("Stale calendar mirror claim");
+  }
+  return row;
+}
+
 /** Host-token batch push from the runner's mirror sync. */
 export const hostUpsertCalendarEvents = mutationGeneric({
   args: {
     hostToken: v.string(),
     calendarId: v.string(),
+    claimToken: v.string(),
     events: v.array(v.any()),
   },
   handler: async (ctx, args) => {
     const host = await requireHost(ctx, args.hostToken);
+    const row = await requireMirrorClaim(ctx.db, host.brainInstanceId, args.calendarId, args.claimToken);
+    await ctx.db.patch(row._id, { lastHeartbeatAt: Date.now(), metadata: { ...row.metadata, mirrorLeaseUntil: Date.now() + 10 * 60_000 } });
     return upsertCalendarEventsInternal(ctx.db, {
       brainInstanceId: host.brainInstanceId,
       calendarId: args.calendarId,
@@ -278,13 +326,18 @@ export const hostRecordCalendarSyncToken = mutationGeneric({
   args: {
     hostToken: v.string(),
     calendarId: v.string(),
+    claimToken: v.string(),
     syncToken: v.union(v.string(), v.null()),
     status: v.optional(v.union(v.literal("completed"), v.literal("failed"))),
     message: v.optional(v.string()),
     errors: v.optional(v.array(v.string())),
+    report: v.optional(v.any()),
   },
   handler: async (ctx, args) => {
     const host = await requireHost(ctx, args.hostToken);
+    const row = await requireMirrorClaim(ctx.db, host.brainInstanceId, args.calendarId, args.claimToken);
+    await ctx.db.patch(row._id, { metadata: { ...row.metadata, mirrorLeaseUntil: 0,
+      ...(args.status === "completed" ? { windowAnchor: undefined } : {}) } });
     return recordCalendarSyncTokenInternal(ctx.db, {
       brainInstanceId: host.brainInstanceId,
       calendarId: args.calendarId,
@@ -292,6 +345,7 @@ export const hostRecordCalendarSyncToken = mutationGeneric({
       status: args.status,
       message: args.message,
       errors: args.errors,
+      report: args.report,
     });
   },
 });
@@ -437,6 +491,7 @@ export const draftCalendarEvent = internalMutationGeneric({
       args.brainInstanceId,
       GOOGLE_CALENDAR_SOURCE_SYSTEM,
       externalId,
+      args.calendarId,
     );
     if (duplicate) {
       return { status: "already_staged", calendarEventId: duplicate._id, externalId };

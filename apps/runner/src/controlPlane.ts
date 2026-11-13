@@ -344,8 +344,8 @@ export class ControlPlane {
 
   /* ---- Calendar mirror sync (Google -> Convex, read-only) ---- */
 
-  getCalendarSyncToken(calendarId: string): Promise<{ syncToken: string | null }> {
-    return this.client.query(calendarFns.hostCalendarSyncToken, {
+  getCalendarSyncToken(calendarId: string): Promise<{ syncToken: string | null; claimToken: string; windowAnchor: number }> {
+    return this.client.mutation(calendarFns.hostClaimCalendarSync, {
       hostToken: this.hostToken,
       calendarId,
     });
@@ -354,22 +354,25 @@ export class ControlPlane {
   upsertCalendarEvents(
     calendarId: string,
     events: unknown[],
+    claimToken: string,
   ): Promise<{ inserted: number; updated: number; echoes: number; cancelled: number; skipped: number }> {
     return this.client.mutation(calendarFns.hostUpsertCalendarEvents, {
       hostToken: this.hostToken,
       calendarId,
       events,
+      claimToken,
     });
   }
 
   recordCalendarSyncToken(
     calendarId: string,
     syncToken: string | null,
-    meta?: { status?: "completed" | "failed"; message?: string; errors?: string[] },
+    meta: { claimToken: string; status?: "completed" | "failed"; message?: string; errors?: string[]; report?: Record<string, unknown> },
   ): Promise<{ statusKey: string; updated: boolean }> {
     const payload: Record<string, unknown> = {
       hostToken: this.hostToken,
       calendarId,
+      claimToken: meta.claimToken,
       // null is meaningful here (it clears an expired token), so unlike the
       // optional fields below it is always sent.
       syncToken,
@@ -377,6 +380,7 @@ export class ControlPlane {
     if (meta?.status !== undefined) payload.status = meta.status;
     if (meta?.message !== undefined) payload.message = meta.message;
     if (meta?.errors !== undefined) payload.errors = meta.errors;
+    if (meta.report !== undefined) payload.report = meta.report;
     return this.client.mutation(calendarFns.hostRecordCalendarSyncToken, payload);
   }
 

@@ -10,7 +10,7 @@ function fakePlane(overrides: Partial<MirrorSyncPlane> = {}) {
   const plane: MirrorSyncPlane & { upserts: typeof upserts; recorded: typeof recorded } = {
     upserts,
     recorded,
-    getCalendarSyncToken: async () => ({ syncToken: null }),
+    getCalendarSyncToken: async () => ({ syncToken: null, claimToken: "claim", windowAnchor: 1000000000000 }),
     upsertCalendarEvents: async (calendarId: string, events: unknown[]) => {
       upserts.push({ calendarId, events });
       return { inserted: events.length, updated: 0, echoes: 0, cancelled: 0, skipped: 0 };
@@ -55,8 +55,26 @@ describe("runCalendarMirrorSyncOnce", () => {
     expect(calls[1]).toContain("pageToken=p2");
   });
 
+  it("reports skipped events as failed and preserves the stored token", async () => {
+    const plane = fakePlane({
+      getCalendarSyncToken: async () => ({ syncToken: "good", claimToken: "claim", windowAnchor: 1000000000000 }),
+      upsertCalendarEvents: async () => ({ inserted: 0, updated: 0, echoes: 0, cancelled: 0, skipped: 1 }),
+    });
+    const { impl } = fakeFetch([{ status: 200, body: { items: [{}], nextSyncToken: "unsafe" } }]);
+    const result = await runCalendarMirrorSyncOnce(plane, { tokens: TOKENS, fetchImpl: impl });
+    expect(result.status).toBe("failed");
+    expect(plane.recorded[0]).toMatchObject({ syncToken: "good", meta: { status: "failed" } });
+  });
+
+  it("does not overwrite another worker's status when claiming fails", async () => {
+    const plane = fakePlane({ getCalendarSyncToken: async () => { throw new Error("already claimed"); } });
+    const result = await runCalendarMirrorSyncOnce(plane, { tokens: TOKENS });
+    expect(result.status).toBe("failed");
+    expect(plane.recorded).toHaveLength(0);
+  });
+
   it("uses the stored token and sends no window", async () => {
-    const plane = fakePlane({ getCalendarSyncToken: async () => ({ syncToken: "stored" }) });
+    const plane = fakePlane({ getCalendarSyncToken: async () => ({ syncToken: "stored", claimToken: "claim", windowAnchor: 1000000000000 }) });
     const { impl, calls } = fakeFetch([{ status: 200, body: { items: [], nextSyncToken: "s2" } }]);
 
     await runCalendarMirrorSyncOnce(plane, { tokens: TOKENS, fetchImpl: impl });
@@ -71,7 +89,7 @@ describe("runCalendarMirrorSyncOnce", () => {
     // Retrying with an expired token loops forever, so the token has to be
     // dropped and the window walked again. Upserts are keyed on externalId, so
     // re-seeing every event is a no-op.
-    const plane = fakePlane({ getCalendarSyncToken: async () => ({ syncToken: "expired" }) });
+    const plane = fakePlane({ getCalendarSyncToken: async () => ({ syncToken: "expired", claimToken: "claim", windowAnchor: 1000000000000 }) });
     const { impl, calls } = fakeFetch([
       { status: 410, body: {} },
       { status: 200, body: { items: [{ id: "a" }], nextSyncToken: "fresh" } },
@@ -88,7 +106,7 @@ describe("runCalendarMirrorSyncOnce", () => {
   it("records a failure without discarding a still-valid token", async () => {
     // A 5xx is transient; throwing away the token would demote every later run
     // to a full resync for no reason.
-    const plane = fakePlane({ getCalendarSyncToken: async () => ({ syncToken: "keep-me" }) });
+    const plane = fakePlane({ getCalendarSyncToken: async () => ({ syncToken: "keep-me", claimToken: "claim", windowAnchor: 1000000000000 }) });
     const { impl } = fakeFetch([{ status: 500, body: { error: { message: "boom" } } }]);
 
     const result = await runCalendarMirrorSyncOnce(plane, { tokens: TOKENS, fetchImpl: impl });

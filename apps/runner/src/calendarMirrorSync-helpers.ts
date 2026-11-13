@@ -113,9 +113,9 @@ export function decidePage(
   }
   if (outcome.nextPageToken) {
     if (context.pagesFetched >= MAX_PAGES_PER_RUN) {
-      // Stop without a syncToken: persisting one now would claim we saw the
-      // whole calendar. The next run redoes the window instead of skipping it.
-      return { kind: "done", syncToken: undefined };
+      // Fail without advancing the syncToken: the next run replays the
+      // frozen window rather than claiming incomplete coverage.
+      return { kind: "fail", error: "Calendar pagination budget exhausted; coverage incomplete" };
     }
     return { kind: "continue", pageToken: outcome.nextPageToken };
   }

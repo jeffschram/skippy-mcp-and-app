@@ -1011,6 +1011,7 @@ export default defineSchema({
     .index("by_brain_created", ["brainInstanceId", "createdAt"]),
 
   ingestionRuns: defineTable({
+    runKey: v.optional(v.string()),
     brainInstanceId: v.id("brainInstances"),
     harness: v.string(),
     startedAt: v.number(),
@@ -1023,7 +1024,15 @@ export default defineSchema({
     focusSummaryId: v.optional(v.id("focusSummaries")),
     errors: v.optional(v.array(v.string())),
     metadata: v.optional(v.any()),
-  }).index("by_brain_started", ["brainInstanceId", "startedAt"]),
+  }).index("by_brain_started", ["brainInstanceId", "startedAt"])
+    .index("by_brain_run", ["brainInstanceId", "runKey"]),
+
+  ingestionReceipts: defineTable({
+    brainInstanceId: v.id("brainInstances"),
+    key: v.string(),
+    result: v.any(),
+    createdAt: v.number(),
+  }).index("by_brain_key", ["brainInstanceId", "key"]),
 
   // Sync bookkeeping for ingestion harnesses.
   //
@@ -1119,6 +1128,7 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_brain_external", ["brainInstanceId", "sourceSystem", "externalId"])
+    .index("by_brain_calendar_external", ["brainInstanceId", "sourceSystem", "calendarId", "externalId"])
     .index("by_brain_start", ["brainInstanceId", "startAt"])
     .index("home_start", ["brainInstanceId", "startAt", "title"])
     .index("by_brain_series", ["brainInstanceId", "recurringEventId", "originalStartAt"]),

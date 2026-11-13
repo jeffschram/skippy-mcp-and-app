@@ -1,0 +1,4 @@
+
+> skippy-mcp-and-app@0.0.0 convex:typecheck /Users/skippy/src/.skippy-worktrees/agent-task-sn8j2mzx-skippy-mcp-and-app
+> tsc -p convex/tsconfig.json --noEmit
+

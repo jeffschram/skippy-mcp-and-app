@@ -536,6 +536,7 @@ export type CaptureThoughtInput = Omit<MemoryReviewCandidateInput, "content"> & 
 };
 
 export type RecordMemoryInput = {
+  ingestion?: { source: string; token: string; objectKey: string };
   content: string;
   kind?: MemoryKind;
   title?: string;
