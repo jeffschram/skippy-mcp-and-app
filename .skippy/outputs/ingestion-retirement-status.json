@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "taskId": "mn7b0vvm9w41ay3b7qxxy090f18j3xrd",
+  "assessedAt": "2026-11-13",
+  "status": "blocked_by_replacement_validation",
+  "acceptanceMet": false,
+  "cutoverPerformed": false,
+  "productionConfigurationChanged": false,
+  "retiredComponents": [],
+  "removedCredentials": [],
+  "postCutoverScheduledPasses": 0,
+  "legacyProcessAbsenceVerified": false,
+  "evidence": {
+    "taskId": "mn78t56tqhs5mhkas2p5kyb2qs8j3zjm",
+    "administrativeStatus": "done",
+    "resultSummary": "PARTIAL LIVE EVIDENCE \u2014 ACCEPTANCE NOT MET. Recovered original five artifacts and six synthetic tests (1,289 tests and Convex typecheck passed) in draft PR #222. Follow-up ran two actual scheduler-claimed Agenda-role Codex diagnostics with existing scoped Agenda credentials and a temporary read-only skill. Owner-approved scope: schramindustries@gmail.com all mail (in:anywhere), primary calendar and Messages. First pass: Google tools unavailable; Messages/Skippy readable. Second: all sources readable; Gmail 60 IDs/one body, Calendar nine events/one full read, Messages two bodies. Both Messages passes lacked stable provider message IDs. Root cause of Google availability change unknown. Same frozen windows, deliberately sampled reads; not canonical ingestion or persistence/replay/recovery qualification. Runner completion was green despite first-pass source failures. Original Agenda settings verified restored (disabled, Claude, original schedule/skills/connectors), two claims only, no active claim. No source changes or ingestion writes. Sanitized scheduled evidence attached. Task remains incomplete pending scheduler controls, reliable connector access/identity, exhaustive comparisons, persisted recovery and cutover/rollback testing; do not close on PR merge."
+  },
+  "nextAction": "Complete replacement qualification and obtain passing evidence before executing docs/ingestion-cutover.md. Do not mark task 9 complete on documentation publication.",
+  "verification": {
+    "command": "pnpm check",
+    "exitCode": 0,
+    "testsPassed": 1289,
+    "diffCheck": "passed",
+    "artifactValidation": "passed"
+  }
+}

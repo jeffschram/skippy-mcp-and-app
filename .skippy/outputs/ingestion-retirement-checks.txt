@@ -1,0 +1,120 @@
+
+> skippy-mcp-and-app@0.0.0 check /Users/skippy/src/.skippy-worktrees/agent-task-f18j3xrd-skippy-mcp-and-app
+> pnpm typecheck && pnpm test
+
+
+> skippy-mcp-and-app@0.0.0 typecheck /Users/skippy/src/.skippy-worktrees/agent-task-f18j3xrd-skippy-mcp-and-app
+> pnpm --filter @skippy/shared build && pnpm --filter @skippy/ai build && pnpm --filter @skippy/mcp-server build && pnpm --filter @skippy/gcal-write-mcp build && pnpm -r --sort typecheck && pnpm convex:typecheck
+
+
+> @skippy/shared@0.0.0 build /Users/skippy/src/.skippy-worktrees/agent-task-f18j3xrd-skippy-mcp-and-app/packages/shared
+> tsc -p tsconfig.build.json
+
+
+> @skippy/ai@0.0.0 build /Users/skippy/src/.skippy-worktrees/agent-task-f18j3xrd-skippy-mcp-and-app/packages/ai
+> tsc -p tsconfig.build.json
+
+
+> @skippy/mcp-server@0.0.0 build /Users/skippy/src/.skippy-worktrees/agent-task-f18j3xrd-skippy-mcp-and-app/apps/mcp-server
+> tsc -p tsconfig.build.json
+
+
+> @skippy/gcal-write-mcp@0.0.0 build /Users/skippy/src/.skippy-worktrees/agent-task-f18j3xrd-skippy-mcp-and-app/apps/gcal-write-mcp
+> tsc -p tsconfig.build.json
+
+Scope: 7 of 8 workspace projects
+apps/imessage-mcp typecheck$ tsc -p tsconfig.json --noEmit
+packages/shared typecheck$ tsc -p tsconfig.json --noEmit
+apps/imessage-mcp typecheck: Done
+packages/shared typecheck: Done
+packages/ai typecheck$ tsc -p tsconfig.json --noEmit
+apps/gcal-write-mcp typecheck$ tsc -p tsconfig.json --noEmit
+packages/ai typecheck: Done
+apps/gcal-write-mcp typecheck: Done
+apps/mcp-server typecheck$ tsc -p tsconfig.json --noEmit
+apps/runner typecheck$ tsc -p tsconfig.json --noEmit
+apps/runner typecheck: Done
+apps/mcp-server typecheck: Done
+apps/web typecheck$ tsc -p tsconfig.json --noEmit
+apps/web typecheck: Done
+
+> skippy-mcp-and-app@0.0.0 convex:typecheck /Users/skippy/src/.skippy-worktrees/agent-task-f18j3xrd-skippy-mcp-and-app
+> tsc -p convex/tsconfig.json --noEmit
+
+
+> skippy-mcp-and-app@0.0.0 test /Users/skippy/src/.skippy-worktrees/agent-task-f18j3xrd-skippy-mcp-and-app
+> pnpm --filter @skippy/shared build && pnpm --filter @skippy/ai build && pnpm --filter @skippy/gcal-write-mcp build && vitest run convex/ingestionProgress.test.ts convex/calendarOutbox.test.ts convex/occurrenceLifecycle.test.ts convex/itemDetailsContext.test.ts convex/homeInventory.test.ts convex/todayModel.test.ts convex/mcpOwnership.test.ts convex/mcpGateway.test.ts convex/noteConsolidationHelpers.test.ts convex/knowledgeMigrationHelpers.test.ts convex/knowledgeVerification.test.ts convex/attentionModel.test.ts convex/attention.test.ts convex/chatHistoryHelpers.test.ts convex/chatLeaseHelpers.test.ts convex/calendarDedupeHelpers.test.ts scripts/connectors-helpers.test.mjs && pnpm -r --sort test
+
+
+> @skippy/shared@0.0.0 build /Users/skippy/src/.skippy-worktrees/agent-task-f18j3xrd-skippy-mcp-and-app/packages/shared
+> tsc -p tsconfig.build.json
+
+
+> @skippy/ai@0.0.0 build /Users/skippy/src/.skippy-worktrees/agent-task-f18j3xrd-skippy-mcp-and-app/packages/ai
+> tsc -p tsconfig.build.json
+
+
+> @skippy/gcal-write-mcp@0.0.0 build /Users/skippy/src/.skippy-worktrees/agent-task-f18j3xrd-skippy-mcp-and-app/apps/gcal-write-mcp
+> tsc -p tsconfig.build.json
+
+
+ RUN  v4.1.8 /Users/skippy/src/.skippy-worktrees/agent-task-f18j3xrd-skippy-mcp-and-app
+
+
+ Test Files  17 passed (17)
+      Tests  158 passed (158)
+   Start at  15:46:25
+   Duration  2.15s (transform 4.10s, setup 0ms, import 5.98s, tests 889ms, environment 1ms)
+
+Scope: 7 of 8 workspace projects
+apps/imessage-mcp test$ vitest run --passWithNoTests
+packages/shared test$ vitest run --passWithNoTests
+apps/imessage-mcp test:  RUN  v4.1.8 /Users/skippy/src/.skippy-worktrees/agent-task-f18j3xrd-skippy-mcp-and-app/apps/imessage-mcp
+packages/shared test:  RUN  v4.1.8 /Users/skippy/src/.skippy-worktrees/agent-task-f18j3xrd-skippy-mcp-and-app/packages/shared
+apps/imessage-mcp test: (node:1151) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+apps/imessage-mcp test: (Use `node --trace-warnings ...` to show where the warning was created)
+apps/imessage-mcp test:  Test Files  2 passed (2)
+apps/imessage-mcp test:       Tests  23 passed (23)
+apps/imessage-mcp test:    Start at  15:46:29
+apps/imessage-mcp test:    Duration  905ms (transform 444ms, setup 0ms, import 592ms, tests 43ms, environment 0ms)
+apps/imessage-mcp test: Done
+packages/shared test:  Test Files  25 passed (25)
+packages/shared test:       Tests  405 passed (405)
+packages/shared test:    Start at  15:46:29
+packages/shared test:    Duration  2.38s (transform 2.58s, setup 0ms, import 4.37s, tests 574ms, environment 5ms)
+packages/shared test: Done
+packages/ai test$ vitest run --passWithNoTests
+apps/gcal-write-mcp test$ vitest run --passWithNoTests
+apps/gcal-write-mcp test:  RUN  v4.1.8 /Users/skippy/src/.skippy-worktrees/agent-task-f18j3xrd-skippy-mcp-and-app/apps/gcal-write-mcp
+packages/ai test:  RUN  v4.1.8 /Users/skippy/src/.skippy-worktrees/agent-task-f18j3xrd-skippy-mcp-and-app/packages/ai
+packages/ai test:  Test Files  1 passed (1)
+packages/ai test:       Tests  21 passed (21)
+packages/ai test:    Start at  15:46:31
+packages/ai test:    Duration  908ms (transform 220ms, setup 0ms, import 270ms, tests 121ms, environment 0ms)
+packages/ai test: Done
+apps/gcal-write-mcp test:  Test Files  5 passed (5)
+apps/gcal-write-mcp test:       Tests  62 passed (62)
+apps/gcal-write-mcp test:    Start at  15:46:31
+apps/gcal-write-mcp test:    Duration  1.09s (transform 1.17s, setup 0ms, import 2.01s, tests 121ms, environment 1ms)
+apps/gcal-write-mcp test: Done
+apps/runner test$ vitest run --passWithNoTests
+apps/mcp-server test$ vitest run --passWithNoTests
+apps/mcp-server test:  RUN  v4.1.8 /Users/skippy/src/.skippy-worktrees/agent-task-f18j3xrd-skippy-mcp-and-app/apps/mcp-server
+apps/runner test:  RUN  v4.1.8 /Users/skippy/src/.skippy-worktrees/agent-task-f18j3xrd-skippy-mcp-and-app/apps/runner
+apps/runner test:  Test Files  14 passed (14)
+apps/runner test:       Tests  145 passed (145)
+apps/runner test:    Start at  15:46:33
+apps/runner test:    Duration  4.98s (transform 6.74s, setup 0ms, import 10.93s, tests 6.58s, environment 2ms)
+apps/runner test: Done
+apps/mcp-server test:  Test Files  5 passed (5)
+apps/mcp-server test:       Tests  89 passed (89)
+apps/mcp-server test:    Start at  15:46:33
+apps/mcp-server test:    Duration  5.38s (transform 4.03s, setup 0ms, import 9.19s, tests 5.30s, environment 1ms)
+apps/mcp-server test: Done
+apps/web test$ vitest run --passWithNoTests
+apps/web test:  RUN  v4.1.8 /Users/skippy/src/.skippy-worktrees/agent-task-f18j3xrd-skippy-mcp-and-app/apps/web
+apps/web test:  Test Files  39 passed (39)
+apps/web test:       Tests  386 passed (386)
+apps/web test:    Start at  15:46:39
+apps/web test:    Duration  5.34s (transform 4.56s, setup 0ms, import 9.24s, tests 3.18s, environment 6ms)
+apps/web test: Done

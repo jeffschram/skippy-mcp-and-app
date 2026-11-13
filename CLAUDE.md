@@ -11,6 +11,10 @@ Personal second-brain + agent system. One owner, one Convex deployment, one Mac 
 - `packages/shared`, `packages/ai` — build these before dependents (root scripts already do).
 - `docs/` — design docs are the source of truth; read the doc named in a file header before changing that area.
 
+## Ingestion migration
+
+Native harness connectors are the intended source-read architecture, with one Skippy-owned ingestion schedule and durable Convex progress. Cutover is blocked until replacement validation passes; merged PRs and task status alone are not acceptance evidence. Follow `docs/ingestion-cutover.md` before removing local connectors, schedules, or credentials. Preserve the Calendar mirror and external-write chain, shared runner, and unrelated chat/project/Plaid consumers until their specific replacement and consumer checks pass.
+
 ## Commands
 
 - Verify everything: `pnpm check` (= `pnpm typecheck && pnpm test`; root scripts build shared/ai first — do not hand-roll per-package builds).

@@ -2,6 +2,8 @@
 
 ## Overall goal
 
+Ingestion migration status (2026-11-13): native harness connectors are the intended read path, but replacement validation has not passed. Local connector setup remains a compatibility dependency pending the staged procedure in [Ingestion cutover](docs/ingestion-cutover.md). Do not interpret the architectural target or completed project task statuses as authorization to remove active readers, Calendar writes, or shared credentials.
+
 'Skippy' is an MCP that can be used by AI harnesses like ChatGPT, Claude, HERMES, Claude Code, Codex etc. The idea is to use the connectors and skills of the harness to connect to things like gmail, imessages, calendars etc and then the MCP is the bridge that sends that information (and maybe even processed/triaged info) to a Convex database.
 
 Skippy is a general second-brain knowledge system for personal and work life. It can take in conversations, incoming messages/emails, calendar events, reminders, links, ideas, and other context, then help organize it all into connected knowledge objects such as goals, projects, tasks, notes, people, companies, and links.
