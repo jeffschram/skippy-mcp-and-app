@@ -1,0 +1,38 @@
+{
+  "date": "2026-11-13",
+  "acceptance": "not_met",
+  "consecutiveScheduledPassesDemonstrated": 0,
+  "liveRecoveryDemonstrated": false,
+  "baselineContext": "existing task harness; not a fresh scheduled pass",
+  "sources": [
+    {
+      "source": "gmail",
+      "transportStatus": "fulfilled",
+      "toolError": false,
+      "count": 1
+    },
+    {
+      "source": "calendar",
+      "transportStatus": "fulfilled",
+      "toolError": false,
+      "count": 0
+    },
+    {
+      "source": "messages",
+      "transportStatus": "fulfilled",
+      "toolError": false,
+      "count": 1
+    },
+    {
+      "source": "skippy",
+      "transportStatus": "fulfilled",
+      "toolError": false
+    }
+  ],
+  "tests": {
+    "passed": 50,
+    "failed": 0,
+    "scope": "existing mocked executor and pure schedule/cursor tests"
+  },
+  "productionChanges": false
+}
