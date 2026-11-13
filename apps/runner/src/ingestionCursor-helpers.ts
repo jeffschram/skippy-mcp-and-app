@@ -69,10 +69,8 @@ export function epochSeconds(ms: number): number {
 /**
  * Renders the cursor as prompt text for a source-ingesting agent pass.
  *
- * Names the exact per-connector parameters (iMessage `since` takes ISO 8601,
- * Gmail search takes `after:` epoch seconds, calendar list_events takes
- * RFC3339 `time_min`) so the pass applies the window mechanically instead of
- * improvising one.
+ * Names native connector parameters while deferring to the exposed schemas.
+ * The skill supplies coverage semantics; this legacy cutoff is only a budget.
  */
 export function buildIngestionCursorBlock(cursor: IngestionCursor): string {
   const sinceIso = new Date(cursor.since).toISOString();
@@ -83,7 +81,9 @@ export function buildIngestionCursorBlock(cursor: IngestionCursor): string {
     : `Last successful pass completed ${new Date(cursor.lastCompletedAt as number).toISOString()}; a 15-minute overlap buffer is already included below.`;
   return (
     `${header} Only read source content newer than ${sinceIso}: ` +
-    `use since "${sinceIso}" on iMessage tools, "after:${epochSeconds(cursor.since)}" in Gmail search queries, ` +
-    `and time_min "${sinceIso}" on calendar list_events. Do not improvise a wider window.`
+    `use from "${sinceIso}" on native Messages read_messages/find_chats, "after:${epochSeconds(cursor.since)}" in Gmail search queries, ` +
+    `and time_min "${sinceIso}" on Google Calendar search_events. Freeze the upper bound at pass start and apply the connector schema (to, before:, time_max). ` +
+    `Legacy connectors may use different parameter names; inspect their schemas. Do not improvise a wider window. ` +
+    `A capped stale interval is an outstanding coverage gap, not a successful catch-up; follow the ingestion skill reporting rules.`
   );
 }

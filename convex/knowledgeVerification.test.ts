@@ -314,3 +314,64 @@ it("paginates owned Activity and action history without exposing another brain",
   expect(actions.page.map((row: Row) => row._id)).toEqual([ownAction]);
   await expect(run(knowledge.activityForViewer, { ...ctx, auth: { getUserIdentity: async () => null } }, args)).rejects.toThrow("authentication required");
 });
+
+// Synthetic source-backed payloads from the Agenda v4 workflow. These exercise
+// existing persistence handlers, not an LLM or live connector qualification.
+describe("Agenda ingestion representative source routing", () => {
+  it("persists a Gmail obligation, Calendar reference and Messages memory with exact provenance", async () => {
+    const ctx = fixture();
+    const sources = Object.freeze({
+      gmail: Object.freeze({ sourceSystem: "gmail", externalId: "owner/mail/m1", messageId: "m1", threadId: "t1", summary: "Owner agreed to send the draft by Friday." }),
+      calendar: Object.freeze({ sourceSystem: "calendar", externalId: "owner/primary/e1", eventId: "e1", summary: "Project workshop at 10:00 UTC." }),
+      imessage: Object.freeze({ sourceSystem: "imessage", externalId: "owner/chat/9007199254740993", messageId: "9007199254740993", threadId: "chat", summary: "Owner prefers morning workshops." }),
+    });
+    const before = JSON.stringify(sources);
+    const deadline = Date.parse("2026-11-20T17:00:00Z");
+    const task = await run(knowledge.ingestObject, ctx, {
+      brainInstanceId, candidateEntityType: "task",
+      candidatePayload: { title: "Send the draft", itemIntent: "action", dateKind: "deadline", dueAt: deadline },
+      rubricDecision: "Explicit owner commitment and deadline.", sourceRefs: [sources.gmail],
+    });
+    expect(await ctx.db.get(task.entityId)).toMatchObject({ dueAt: deadline, processingState: "accepted" });
+    expect(task.entityId).toMatch(/^tasks:/);
+    const note = await run(knowledge.ingestObject, ctx, {
+      brainInstanceId, candidateEntityType: "note",
+      candidatePayload: { title: "Workshop context", body: "Project workshop November 21 at 10:00 UTC.", itemIntent: "event" },
+      rubricDecision: "Useful project context, no new obligation.", sourceRefs: [sources.calendar],
+    });
+    expect(await ctx.db.get(note.entityId)).toMatchObject({ kind: "note" });
+    expect((await ctx.db.get(note.entityId)).dueAt).toBeUndefined();
+    const memory = await run(knowledge.recordMemoryForBrain, ctx, {
+      brainInstanceId, content: "Owner prefers morning workshops.",
+      rubricDecision: "Explicit durable scheduling preference.", sourceRefs: [sources.imessage],
+    });
+    expect(await ctx.db.get(memory.memoryId)).toMatchObject({ kind: "memory" });
+    const refs = ctx.rows.filter(r => r._id.startsWith("sourceRefs:"));
+    expect(refs.map(r => r.externalId)).toEqual(Object.values(sources).map(s => s.externalId));
+    expect(refs[2]?.messageId).toBe("9007199254740993");
+    expect(JSON.stringify(sources)).toBe(before);
+    expect(ctx.rows.filter(r => r._id.startsWith("tasks:"))).toHaveLength(1);
+    expect(ctx.rows.some(r => /^(calendarEvents|pendingActions|triageItems):/.test(r._id))).toBe(false);
+  });
+
+  it("processes remember captures only after durable writes and leaves hold transfers untouched", async () => {
+    const ctx = fixture();
+    const hold = await ctx.db.insert("quickCaptures", { brainInstanceId, status: "pending", intent: "hold", text: "Private transfer", createdAt: 1 });
+    const remember = await ctx.db.insert("quickCaptures", { brainInstanceId, status: "pending", text: "Keep the workshop checklist", createdAt: 2 });
+    const before = JSON.stringify(await ctx.db.get(hold));
+    const captures = await run(knowledge.listQuickCapturesForBrain, ctx, { brainInstanceId, status: "pending" });
+    expect(captures.map((r: Row) => r._id)).toEqual([remember]);
+    const result = await run(knowledge.ingestObject, ctx, {
+      brainInstanceId, candidateEntityType: "note",
+      candidatePayload: { title: "Workshop checklist", body: "Keep the workshop checklist." },
+      rubricDecision: "Explicit useful reference capture.",
+      sourceRefs: [{ sourceSystem: "quick_capture", externalId: remember }],
+    });
+    expect((await ctx.db.get(remember)).status).toBe("pending");
+    const relatedEntityRefs = [{ entityType: "note", entityId: result.entityId }];
+    await run(knowledge.markQuickCaptureHandledForBrain, ctx, { brainInstanceId, captureId: remember, outcome: "processed", relatedEntityRefs });
+    expect(await ctx.db.get(remember)).toMatchObject({ status: "processed", relatedEntityRefs });
+    expect(JSON.stringify(await ctx.db.get(hold))).toBe(before);
+    expect((await run(knowledge.listQuickCapturesForBrain, ctx, { brainInstanceId })).length).toBe(0);
+  });
+});
