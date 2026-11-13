@@ -375,3 +375,43 @@ describe("Agenda ingestion representative source routing", () => {
     expect((await run(knowledge.listQuickCapturesForBrain, ctx, { brainInstanceId })).length).toBe(0);
   });
 });
+
+
+describe("exact source identity context without AI", () => {
+  it("finds legacy native IDs and linked records without title matches; isolates brains", async () => {
+    const ctx = fixture();
+    const saved = await run(knowledge.ingestObject, ctx, {
+      brainInstanceId, candidateEntityType: "note",
+      candidatePayload: { title: "Old wording", body: "Existing work" }, rubricDecision: "Useful",
+      sourceRefs: [{ sourceSystem: "gmail", messageId: "provider-123", externalId: "account/provider-123" }],
+    });
+    ctx.rows.push({ _id: "sourceRefs:foreign", brainInstanceId: "brainInstances:other", sourceSystem: "gmail", messageId: "provider-123" });
+    for (const [field, value] of [["messageId", "provider-123"], ["externalId", "account/provider-123"]]) {
+      const result = await run(knowledge.getContextBundleForBrain, ctx, {
+        brainInstanceId, sourceIdentity: { sourceSystem: "gmail", field, value },
+      });
+      expect(result.sourceLookup.complete).toBe(true);
+      expect(result.sourceLookup.matches).toHaveLength(1);
+      expect(result.sourceLookup.matches[0].entities[0].ref.entityId).toBe(saved.entityId);
+      expect(result.sourceLookup.matches[0].unresolvedLinks).toBe(false);
+    }
+    const absent = await run(knowledge.getContextBundleForBrain, ctx, {
+      brainInstanceId, sourceIdentity: { sourceSystem: "calendar", field: "eventId", value: "provider-123" },
+    });
+    expect(absent.sourceLookup.matches).toEqual([]);
+    expect(absent.sourceLookup.scopeNote).toContain("not proof");
+  });
+  it("exposes caps and orphaned references instead of silently declaring completeness", async () => {
+    const ctx = fixture();
+    for (let i = 0; i < 3; i++) ctx.rows.push({ _id: `sourceRefs:${i}`, brainInstanceId, sourceSystem: "gmail", messageId: "same" });
+    const result = await run(knowledge.getContextBundleForBrain, ctx, {
+      brainInstanceId, sourceLimit: 2, sourceIdentity: { sourceSystem: "gmail", field: "messageId", value: "same" },
+    });
+    expect(result.sourceLookup).toMatchObject({ complete: false, truncated: true });
+    expect(result.sourceLookup.matches).toHaveLength(2);
+    expect(result.sourceLookup.matches[0].unresolvedLinks).toBe(true);
+    await expect(run(knowledge.getContextBundleForBrain, ctx, {
+      brainInstanceId, sourceIdentity: { sourceSystem: "gmail", field: "messageId", value: " " },
+    })).rejects.toThrow("nonempty");
+  });
+});

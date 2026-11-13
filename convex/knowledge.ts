@@ -1146,10 +1146,39 @@ async function queryMatchedEntityContext(
     .slice(0, limit);
 }
 
+// Exact provider identity lookup is independent of embeddings, synthesis and titles.
+const sourceIdentityValidator = v.object({
+  sourceSystem: v.string(),
+  field: v.union(v.literal("externalId"), v.literal("messageId"), v.literal("eventId")),
+  value: v.string(),
+});
+type SourceIdentity = { sourceSystem: string; field: "externalId" | "messageId" | "eventId"; value: string };
+async function exactSourceContext(db: any, brainInstanceId: any, identity: SourceIdentity, limit: number) {
+  if (!identity.sourceSystem.trim() || !identity.value.trim() || identity.value.length > 1000) {
+    throw new Error("A nonempty source system and bounded exact identity are required");
+  }
+  const index = { externalId: "by_external", messageId: "by_message", eventId: "by_event" }[identity.field];
+  const found = await db.query("sourceRefs").withIndex(index, (q: any) =>
+    q.eq("brainInstanceId", brainInstanceId).eq("sourceSystem", identity.sourceSystem).eq(identity.field, identity.value)).take(limit + 1);
+  let complete = found.length <= limit;
+  const matches = [];
+  for (const sourceRef of found.slice(0, limit)) {
+    const links = await db.query("entitySourceRefs").withIndex("by_source", (q: any) => q.eq("sourceRefId", sourceRef._id)).take(41);
+    if (links.length > 40) complete = false;
+    const ownedLinks = links.slice(0, 40).filter((link: any) => link.brainInstanceId === brainInstanceId);
+    const entities = await entityContextForRefs(db, brainInstanceId, ownedLinks.map((link: any) => link.entityRef));
+    matches.push({ sourceRef, entities, unresolvedLinks: ownedLinks.length === 0 || ownedLinks.length > entities.length });
+  }
+  return { identity, matches, complete, truncated: !complete,
+    // Native IDs can span account scopes in legacy data. Return evidence, never authorize an automatic merge.
+    scopeNote: "Compare account-qualified provenance and object meaning before reusing an entity. No match is not proof of semantic uniqueness." };
+}
+
 async function contextBundleForBrainId(
   db: any,
   brainInstanceId: any,
   args: {
+    sourceIdentity?: SourceIdentity;
     query?: string;
     memoryType?: string;
     kinds?: string[];
@@ -1163,6 +1192,10 @@ async function contextBundleForBrainId(
   const memoryLimit = clampSearchLimit(args.memoryLimit, 8, 25);
   const entityLimit = clampSearchLimit(args.entityLimit, 12, 40);
   const sourceLimit = clampSearchLimit(args.sourceLimit, 12, 40);
+  if (args.sourceIdentity) {
+    return { sourceLookup: await exactSourceContext(db, brainInstanceId, args.sourceIdentity, sourceLimit),
+      memories: [], entities: [], sourceRefs: [], limits: { memoryLimit, entityLimit, sourceLimit } };
+  }
   const memorySearchArgs: {
     query?: string;
     memoryType?: string;
@@ -2393,6 +2426,7 @@ export const searchMemoriesForViewer = queryGeneric({
 
 export const getContextBundleForViewer = queryGeneric({
   args: {
+    sourceIdentity: v.optional(sourceIdentityValidator),
     query: v.optional(v.string()),
     memoryType: v.optional(memoryType),
     kinds: v.optional(v.array(memoryType)),
@@ -2982,6 +3016,7 @@ export const memoryLibraryForBrain = internalQueryGeneric({
 export const getContextBundleForBrain = internalQueryGeneric({
   args: {
     brainInstanceId: v.id("brainInstances"),
+    sourceIdentity: v.optional(sourceIdentityValidator),
     query: v.optional(v.string()),
     memoryType: v.optional(memoryType),
     kinds: v.optional(v.array(memoryType)),

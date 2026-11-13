@@ -1531,17 +1531,22 @@ export function createMcpServer(
     {
       title: "Get context bundle",
       description:
-        "Read-only context bundle: scored memories, source refs, and related entity context for a query and/or entity refs.",
+        "Read-only context bundle: scored memories, source refs, and related entity context for a query and/or entity refs. sourceIdentity performs indexed exact provider-ID lookup without AI/API credits; inspect completeness and provenance before deduplication.",
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: z.object({
+        sourceIdentity: z.object({
+          sourceSystem: z.string().min(1),
+          field: z.enum(["externalId", "messageId", "eventId"]),
+          value: z.string().min(1).max(1000),
+        }).optional(),
         query: z.string().optional(),
         memoryType: memoryKindSchema.optional(),
         kinds: z.array(memoryKindSchema).optional(),
         relatedEntityRefs: z.array(entityRefSchema).optional(),
         includeArchived: z.boolean().optional(),
         memoryLimit: z.number().min(1).max(25).optional().describe("Default 8."),
-        entityLimit: z.number().min(1).max(40).optional().describe("Default 12."),
-        sourceLimit: z.number().min(1).max(40).optional().describe("Default 12."),
+        entityLimit: z.number().min(1).max(40).optional().describe("Default 12; maximum 40."),
+        sourceLimit: z.number().min(1).max(40).optional().describe("Default 12; maximum 40."),
       }),
     },
     async (args) => toolResult(await tools.getContextBundle(stripUndefined(args) as ContextBundleInput)),

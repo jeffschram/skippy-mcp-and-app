@@ -866,6 +866,7 @@ describe("Skippy MCP manifest", () => {
         name: "get_context_bundle",
         arguments: {
           query: " rollout preferences ",
+          sourceIdentity: { sourceSystem: "gmail", field: "messageId", value: "exact-id" },
           relatedEntityRefs: [{ entityType: "project", entityId: "project_123" }],
           memoryLimit: 5,
         },
@@ -876,6 +877,7 @@ describe("Skippy MCP manifest", () => {
           brainInstanceId: "brain_123",
           input: {
             query: "rollout preferences",
+            sourceIdentity: { sourceSystem: "gmail", field: "messageId", value: "exact-id" },
             relatedEntityRefs: [{ entityType: "project", entityId: "project_123" }],
             memoryLimit: 5,
             entityLimit: 12,

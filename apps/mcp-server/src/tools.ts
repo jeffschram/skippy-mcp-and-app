@@ -562,6 +562,7 @@ export type MemoryListInput = {
 };
 
 export type ContextBundleInput = Omit<MemoryListInput, "limit"> & {
+  sourceIdentity?: { sourceSystem: string; field: "externalId" | "messageId" | "eventId"; value: string };
   memoryLimit?: number;
   entityLimit?: number;
   sourceLimit?: number;

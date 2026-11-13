@@ -738,7 +738,9 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_brain_source", ["brainInstanceId", "sourceSystem"])
-    .index("by_external", ["brainInstanceId", "sourceSystem", "externalId"]),
+    .index("by_external", ["brainInstanceId", "sourceSystem", "externalId"])
+    .index("by_message", ["brainInstanceId", "sourceSystem", "messageId"])
+    .index("by_event", ["brainInstanceId", "sourceSystem", "eventId"]),
 
   entitySourceRefs: defineTable({
     brainInstanceId: v.id("brainInstances"),
