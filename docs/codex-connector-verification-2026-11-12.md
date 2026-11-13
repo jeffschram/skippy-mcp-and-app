@@ -4,7 +4,7 @@ Task: `mn76vjrwqrbws7nrq52s2tg6jh8j2gz1`, Phase 19 task 1.
 
 ## Outcome
 
-Gmail, Google Calendar, and Skippy MCP passed real reads in a fresh, noninteractive Codex session matching the task runner's CLI invocation and launchd account/environment. The initial Skippy chat Messages content read was denied. A later owner-authorized probe using the existing **scheduled-agent settings** successfully called Messages discovery and reading, reporting one message with text and no approval required. However, a fresh **launchd-triggered** repetition failed during chat discovery. **Messages content access is possible in one tested session, but reliable scheduled access remains unverified. Do not pass the migration feasibility gate or retire connectors based on this report.**
+Gmail, Google Calendar, and Skippy MCP passed real reads in a fresh, noninteractive Codex session matching the task runner's CLI invocation and launchd account/environment. **On November 13, an actual Skippy-scheduled Codex agent pass also found a Messages chat and read one message with text, without human intervention.** Basic connector-access verification has a positive result. Earlier chat permission denial and standalone launchd discovery failure remain historical observations, not proof that scheduled reads are impossible. Repeated unattended reliability, source coverage and recovery remain Phase 19 tasks 2–4; do not retire connectors or pass the migration feasibility gate on one successful scheduled pass.
 
 No email, calendar event, or message was modified. No source credentials or permissions were changed. This report stores counts and capability evidence, not source content or third-party identifiers.
 
@@ -44,7 +44,30 @@ The owner explicitly requested the proposed unattended test. Both probes used ma
 
 The temporary launchd job used a one-shot guard, was unloaded after the result, and its removal was verified. Production Agenda schedules were untouched. Probe B used the macOS scheduler, **not Skippy's control-plane claim/heartbeat path**; successful Skippy scheduled ingestion still needs its own test. No source content was exported into this report or the diagnostic artifacts; Codex's own session logging remains governed by the harness.
 
-This establishes a launch-path-dependent discrepancy, not its cause. The initial chat denial, successful manual unattended read, and scheduled discovery failure are three distinct observations. The scheduled diagnostic exposed only a generic error; it does not identify a permission, transport, or desktop-bridge root cause. Next verification should capture a sanitized underlying discovery error in the actual Skippy-scheduled Codex path and resolve it before testing unattended content reads again. Changing approval settings is not yet justified as the fix.
+These runs showed differing outcomes, not a proven causal dependency on launch method. The initial chat denial, successful manual unattended read, and scheduled discovery failure are three distinct observations. The scheduled diagnostic exposed only a generic error; it does not identify a permission, transport, or desktop-bridge root cause. The actual Skippy-scheduled test below did not reproduce it. Changing approval settings is not justified as the fix.
+
+## November 13: actual Skippy scheduler passed
+
+PR #216 remained unmerged. No application code, deployment, runner restart or permission change was needed.
+
+An isolated config (`s579n8nhpsc3hz8d5362sjqcwx8j511g`, display name `Temporary Messages scheduler diagnostic`) used the previously unused generic `pm` role slot, explicitly selected Codex, and referenced only the private stored skill `messages-scheduler-diagnostic-20261113`. The existing scheduler accepts a fixed set of role names; this diagnostic did not run project-manager behavior or modify project-specific PM configs. Its daily schedule became due at `2026-11-13T15:06:00Z`.
+
+The running daemon's normal `claimNextAgentPass` poll claimed the config at `15:06:03.695Z`, dispatched `executeAgentPass`, loaded the diagnostic skill through Skippy MCP, and launched a fresh Codex session (`01a1d571-c2d6-7382-89ea-1a1a0974e7c8`). The diagnostic called native `mcp__messages__find_chats` and `mcp__messages__read_messages`, reporting:
+
+| Check | Result |
+| --- | --- |
+| Chat discovery | Success |
+| Message-content read | Success; one message, nonempty body |
+| Error details/category | None |
+| Human intervention | None during the run |
+| Connector's approval-required field | Unknown (`null`); do not infer a universal permission rule |
+| Runner completion | Agent pass finished at `15:06:53.785Z` |
+
+The diagnostic emitted only sanitized JSON at `/Users/skippy/src/.skippy-diagnostics/messages-scheduler-20261113.json`. Its lower date bound followed the runner's injected 48-hour lookback (`2026-11-11T15:06:03.696Z`); the upper bound was `2026-11-14T00:00:00-05:00`. Source contents and chat identifiers were not exported into the report.
+
+The diagnostic configuration was disabled and its schedule cleared immediately after its single claim, preventing another scheduled execution. It is retained disabled as run evidence, with the private diagnostic skill. The existing Agenda configuration was already disabled at the start of this test and was left unchanged, as were Finance, task-executor and project-specific PM configurations.
+
+**Scope limit:** this run exercised the real Skippy scheduler, daemon and Codex agent-pass adapter, but its isolated generic PM role used the runner's existing default Skippy MCP token because no PM-scoped token was configured. It did not use the Agenda-scoped Skippy token or full ingestion skill. Native Messages access worked on this path; Phase 19 task 3 should test the final Agenda configuration/token/skill, consecutive scheduled runs, desktop/runtime prerequisites and recovery. The earlier generic launchd failure's cause remains unknown because it did not recur. The successful pass establishes capability, not reliability across restarts or all operating conditions.
 
 ## Why the earlier run used Claude
 
