@@ -166,7 +166,7 @@ const AGENDA_INGESTION_BODY = [
   "",
   "## Finish honestly",
   "",
-  "Call `refresh_focus_summary` after accepted writes; use existing entities, never invented obligations. Record `record_ingestion_run` with actual harness, timestamps, confirmed created/updated counts (not attempted calls), `candidatesSubmitted: 0`, short sanitized errors and `metadata.role: \"agenda\"`. In small metadata record frozen bounds, baseline/gaps and separate outcomes for Gmail, Messages, Calendar semantic reads, mirror reconciliation (existing owner, not performed), and quick captures. Do not store raw source payloads in diagnostics.",
+  "After accepted writes, call `refresh_focus_summary` with mode harness to obtain grounded context and recent dismissals without an AI API call. Use your own harness reasoning to write actionable Now bullets from those existing entities, respecting dismissals and avoiding reference-only notes, then call `generate_focus_summary` with summaryText, topItems, generatedAt and a short validUntil. Do not pass sourceRunId (the storage endpoint does not accept it). Never call internal-mode refresh or require a separate AI API balance during ingestion. Preserve the current summary if grounded context is unavailable and report the limitation. Record `record_ingestion_run` with actual harness, timestamps, confirmed created/updated counts (not attempted calls), `candidatesSubmitted: 0`, short sanitized errors and `metadata.role: \"agenda\"`. In small metadata record frozen bounds, baseline/gaps and separate outcomes for Gmail, Messages, Calendar semantic reads, mirror reconciliation (existing owner, not performed), and quick captures. Do not store raw source payloads in diagnostics.",
   "",
   "Heartbeat each claimed source with status running and metadata {role: \"agenda\", ingestion: {operation: \"heartbeat\", source, runId, token}} at least every five minutes. Finish each source using operation finish, its token and runId, paginationComplete and persistenceComplete booleans, and counts {read, ignored, accepted}; read counts classified outputs, including ignored items, and equals ignored + accepted. Only set status completed after all pages and required persistence succeed; otherwise failed with errors. The response exposes lastSuccessAt, baseline, coveredThrough, counts, writes, replays and caughtUp; operation inspect with source reads this report without acquiring a lease. A completed bounded chunk may still have caughtUp false; claim the next chunk within budget, or record aggregate failed. Record all expected source keys in sourceSystemsChecked, including denied/skipped ones, and metadata {role: \"agenda\", ingestion: {runId}} on record_ingestion_run. Completed aggregate requires every expected source to have completed and caught up in this run; never omit failures. Reporting failures must be surfaced to the caller.",
 ].join("\n");
@@ -497,7 +497,7 @@ const DEFAULT_SKILLS = [
     schedulerInstructions: AGENDA_INGESTION_SCHEDULER_INSTRUCTIONS,
     visibility: "public" as const,
     // v5: correlate scheduled ingestion reports with the claimed attempt.
-    version: 6,
+    version: 7,
   },
   {
     slug: "finance-sync",

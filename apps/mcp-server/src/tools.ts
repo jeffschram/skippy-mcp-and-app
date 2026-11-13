@@ -486,6 +486,7 @@ export type RecordFinancialBalancesInput = {
 export type SkippyToolHandlers = ReturnType<typeof createSkippyToolHandlers>;
 
 type FocusSummaryRefreshInput = {
+  mode?: "internal" | "harness";
   generatedAt?: number;
   validUntil?: number;
   policyVersion?: string;
@@ -1070,6 +1071,13 @@ export function createSkippyToolHandlers(
         .map((dismissal) => (typeof dismissal?.itemText === "string" ? dismissal.itemText.trim() : ""))
         .filter(Boolean);
       let contextItems = synthesisItems(context);
+      // Harness mode returns only grounded context, never config, keys or embedding vectors.
+      // Codex generates the summary and persists it through generate_focus_summary.
+      if (input.mode === "harness") {
+        return { status: "harness_context", contextItems, recentlyDismissedItems,
+          generatedAt: input.generatedAt ?? Date.now(),
+          instruction: "Use only actionable existing entities; respect dismissals. Persist with generate_focus_summary. Do not turn reference notes into obligations." };
+      }
       let embeddingRanking: Awaited<ReturnType<typeof rankContextItemsWithEmbeddings>>["embeddingRanking"];
       let embeddingError: string | undefined;
 

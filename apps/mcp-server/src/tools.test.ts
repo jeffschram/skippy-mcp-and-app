@@ -312,6 +312,21 @@ describe("Skippy MCP tool handlers", () => {
     });
   });
 
+  it("returns harness focus context without AI calls, writes, credentials or embeddings", async () => {
+    const { client, calls } = createFakeClient();
+    const tools = createSkippyToolHandlers({ ...client, getAiContext: async () => ({
+      config: { llmProviderMode: "openai", openaiApiKey: "secret-sentinel" },
+      tasks: [{ _id: "task_1", title: "Existing action", status: "todo" }],
+      recentFocusDismissals: [{ itemText: "Already dismissed" }],
+      get embeddings(): never { throw new Error("Harness mode must not rank embeddings"); },
+    }) }, "brain_123");
+    const result = await tools.refreshFocusSummary({ mode: "harness", generatedAt: 123 });
+    expect(result).toMatchObject({ status: "harness_context", generatedAt: 123,
+      recentlyDismissedItems: ["Already dismissed"], contextItems: [expect.objectContaining({ title: "Existing action" })] });
+    expect(JSON.stringify(result)).not.toContain("secret-sentinel");
+    expect(calls).toEqual([]);
+  });
+
   it("does not generate focus summaries when internal AI is disabled", async () => {
     const { client } = createFakeClient();
     const tools = createSkippyToolHandlers(client, "brain_123");

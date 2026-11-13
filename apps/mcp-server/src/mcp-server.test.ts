@@ -522,7 +522,8 @@ describe("Skippy MCP manifest", () => {
       expect(markQuickCaptureHandled?.inputSchema.properties?.sourceRunId).toBeDefined();
       expect(capture?.description).toContain("accepted note directly");
       expect(ask?.annotations?.readOnlyHint).toBe(false);
-      expect(refreshFocusSummary?.description).toContain("Generate and store");
+      expect(refreshFocusSummary?.description).toContain("without AI/API calls");
+      expect(refreshFocusSummary?.inputSchema.properties?.mode).toBeDefined();
       expect(recordEntityReview?.description).toContain("Record a review of an accepted entity");
       expect(markTaskInProgress?.description).toContain("before doing meaningful work");
       expect(dispatchNotifications?.description).toContain("Use dryRun first");

@@ -1738,9 +1738,10 @@ export function createMcpServer(
     {
       title: "Refresh focus summary",
       description:
-        "Generate and store a fresh focus summary from accepted entities using the internal AI provider. The Now list holds actionable next moves only — standing context stays in memory.",
+        "Use mode harness to return grounded focus context and dismissals without AI/API calls; then persist harness-written output with generate_focus_summary. Default mode internal generates and stores with the configured AI provider. The Now list holds actionable next moves only — standing context stays in memory.",
       annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: false },
       inputSchema: z.object({
+        mode: z.enum(["internal", "harness"]).optional(),
         generatedAt: z.number().optional().describe("Epoch ms; defaults to now."),
         validUntil: z.number().optional().describe("Epoch ms after which the summary is stale."),
         policyVersion: z.string().optional(),
