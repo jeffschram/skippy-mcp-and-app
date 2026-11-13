@@ -124,7 +124,7 @@ const AGENDA_INGESTION_BODY = [
   "",
   "Use the host's explicit account/calendar/source scope and frozen read window. Resolve Gmail identity with `gmail_get_profile` and Calendar scope with `google_calendar_list_calendars`; an inaccessible or changed scope is a source failure, not an empty result. Never expand to every accessible calendar. If scope is missing, report it and continue only independent, authorized work such as Home captures.",
   "",
-  "Use durable per-source claims instead of the legacy role cutoff. Pick one unique runId for the pass. Before claims, register record_ingestion_run with status running, ALL expected account-qualified source keys in sourceSystemsChecked (including currently denied sources), and metadata {role: agenda, ingestion: {runId}}. This manifest is immutable; terminal reports cannot omit a source. For each authorized account-qualified source, call update_source_sync_status with status running, sourceSystemsChecked [source], and metadata {role: \"agenda\", ingestion: {operation: \"claim\", source, runId}}. The returned token fences writes; the returned windowStart/windowEnd are mandatory frozen bounds. A first claim declares a 48-hour baseline, not earlier coverage. Later claims catch up oldest-first in bounded 48-hour windows with 15-minute overlap; failures replay exactly the same bounds. Never start a competing schedule. A busy source is a failed/skipped source for this run; continue independent sources.",
+  "Use durable per-source claims instead of the legacy role cutoff. Use the scheduler-assigned runId when supplied; otherwise pick one unique runId for this explicitly invoked pass. Before claims, register record_ingestion_run with status running, ALL expected account-qualified source keys in sourceSystemsChecked (including currently denied sources), and metadata {role: agenda, ingestion: {runId}}. This manifest is immutable; terminal reports cannot omit a source. For each authorized account-qualified source, call update_source_sync_status with status running, sourceSystemsChecked [source], and metadata {role: \"agenda\", ingestion: {operation: \"claim\", source, runId}}. The returned token fences writes; the returned windowStart/windowEnd are mandatory frozen bounds. A first claim declares a 48-hour baseline, not earlier coverage. Later claims catch up oldest-first in bounded 48-hour windows with 15-minute overlap; failures replay exactly the same bounds. Never start a competing schedule. A busy source is a failed/skipped source for this run; continue independent sources.",
   "",
   "Call `get_importance_rubric`, read its full `renderedText`, and load `get_skill(slug: \"memory-rubric\")` before writes. Use the owner's current rules and live projects/goals/contacts, not a hardcoded ranking. Use the per-source claim/heartbeat/finish protocol below with the actual harness and role agenda. Do not overwrite `google_calendar:<calendarId>` mirror tokens or metadata.",
   "",
@@ -496,8 +496,8 @@ const DEFAULT_SKILLS = [
     usageLeadIn: "In your harness scheduler paste the following:",
     schedulerInstructions: AGENDA_INGESTION_SCHEDULER_INSTRUCTIONS,
     visibility: "public" as const,
-    // v4: native connector reads, explicit routing, hold exclusion and honest coverage.
-    version: 4,
+    // v5: correlate scheduled ingestion reports with the claimed attempt.
+    version: 5,
   },
   {
     slug: "finance-sync",

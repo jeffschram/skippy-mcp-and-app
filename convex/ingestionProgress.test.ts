@@ -1,8 +1,10 @@
+import { completeAgentPass } from "./agentConfigs";
+import { agentPassRunId, agendaRetry } from "./agentPassOutcome";
 import { describe, expect, it, vi, afterEach } from "vitest";
 import { ingestObject, recordMemoryForBrain, recordIngestionRun, updateSourceSyncStatus, markQuickCaptureHandledForBrain, listQuickCapturesForBrain } from "./knowledge";
 vi.mock("./agentWorkbench", async (importOriginal) => ({
   ...await importOriginal<typeof import("./agentWorkbench")>(),
-  requireHost: async () => ({ brainInstanceId: "brain:b" }),
+  requireHost: async () => ({ _id: "host:test", brainInstanceId: "brain:b" }),
 }));
 import { upsertCalendarEvents, hostClaimCalendarSync, hostUpsertCalendarEvents, hostRecordCalendarSyncToken } from "./calendar";
 import { LEASE_MS, OVERLAP_MS, WINDOW_MS } from "./ingestionProgress";
@@ -249,5 +251,41 @@ describe("durable source ingestion", () => {
     expect(events).toHaveLength(3);
     expect(events.find(r => r.calendarId === "a" && r.externalId === "instance-1")).toMatchObject({ title: "Renamed", status: "cancelled", recurringEventId: "series", originalStartAt: Date.parse("2026-11-01T12:00:00Z") });
     expect(events.find(r => r.calendarId === "b")?.status).toBe("confirmed");
+  });
+});
+
+
+describe("Agenda scheduler completion", () => {
+  it.each(["missing", "failed", "running", "completed", "older-attempt"])("checks persisted %s report before recording success", async state => {
+    const f = setup();
+    const id = await f.db.insert("agentConfigs", { brainInstanceId: "brain:b", roleKey: "agenda", displayName: "Agenda",
+      claimToken: "claim", claimedByHostId: "host:test", claimVersion: 2, leaseExpiresAt: now + 1000,
+      lastRunStartedAt: now - 100, enabled: true, schedule: { kind: "interval", everyMinutes: 60 } });
+    if (state !== "missing") await f.db.insert("ingestionRuns", { brainInstanceId: "brain:b",
+      runKey: agentPassRunId(id, state === "older-attempt" ? 1 : 2), status: state === "older-attempt" ? "completed" : state,
+      startedAt: now - 50, completedAt: state === "running" ? undefined : now, metadata: { role: "agenda" } });
+    await f.run(completeAgentPass, { hostToken: "host", configId: id, claimToken: "claim", status: "completed" });
+    const config = await f.db.get(id);
+    expect(config.lastRunStatus).toBe(state === "completed" ? "completed" : "failed");
+    expect(config.nextDueAt).toBe(now + (state === "completed" ? 60 : 1) * 60_000);
+    expect(f.rows().find(r => r._id.startsWith("activityEvents:"))?.metadata.runId).toBe(agentPassRunId(id, 2));
+  });
+  it("rejects expired workers without clearing a claim or recording success", async () => {
+    const f = setup();
+    const id = await f.db.insert("agentConfigs", { brainInstanceId: "brain:b", roleKey: "agenda",
+      claimToken: "claim", claimedByHostId: "host:test", claimVersion: 1, leaseExpiresAt: now });
+    expect(await f.run(completeAgentPass, { hostToken: "host", configId: id, claimToken: "claim", status: "completed" }))
+      .toEqual({ status: "stale" });
+    expect((await f.db.get(id)).claimToken).toBe("claim");
+    expect(f.rows()).toHaveLength(1);
+  });
+  it("bounds retries and honors disable and quiet hours", () => {
+    const schedule = { kind: "interval" as const, everyMinutes: 60 };
+    expect([0, 1, 2, 3].map(n => agendaRetry(schedule, true, "failed", n, now).nextDueAt))
+      .toEqual([1, 5, 15, 60].map(n => now + n * 60_000));
+    expect(agendaRetry(schedule, false, "failed", 0, now).nextDueAt).toBeUndefined();
+    const late = Date.parse("2026-11-13T21:59:30Z");
+    expect(agendaRetry({ ...schedule, timeZone: "UTC", window: { start: "07:00", end: "22:00" } }, true, "failed", 0, late).nextDueAt)
+      .toBe(Date.parse("2026-11-14T07:00:00Z"));
   });
 });

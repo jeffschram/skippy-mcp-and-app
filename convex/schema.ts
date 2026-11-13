@@ -1462,6 +1462,8 @@ export default defineSchema({
     ),
     enabled: v.boolean(),
     nextDueAt: v.optional(v.number()),
+    retryCount: v.optional(v.number()),
+    lastRunSummary: v.optional(v.string()),
     lastRunStartedAt: v.optional(v.number()),
     lastRunStatus: v.optional(v.union(v.literal("completed"), v.literal("failed"))),
     claimedByHostId: v.optional(v.id("agentHosts")),

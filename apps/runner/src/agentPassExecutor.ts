@@ -77,6 +77,12 @@ export async function executeAgentPass(
   const timeout = setTimeout(() => abort.abort(), AGENT_PASS_TIMEOUT_MS);
   try {
     const scopedToken = resolveAgentRoleToken(config.agentRoleTokens, pass.roleKey);
+    if (pass.roleKey === "agenda" && !scopedToken) {
+      throw new Error("Agenda scoped MCP token is missing; configure SKIPPY_MCP_AGENDA_TOKEN before retrying.");
+    }
+    if (pass.roleKey === "agenda" && !pass.runId) {
+      throw new Error("Agenda scheduler runId missing; deploy the compatible control plane before retrying.");
+    }
     if (!scopedToken) {
       // Compatibility fallback, same as task runs before SKIPPY_MCP_TASK_TOKEN:
       // the pass still runs, on the full-access token, and we say so.
@@ -106,7 +112,9 @@ export async function executeAgentPass(
       ingestionCursorBlock = buildIngestionCursorBlock(resolveIngestionCursor(lastCompletedAt, now));
     }
     const result = await adapter.runTurn({
-      prompt: buildAgentPassPrompt(pass, ingestionCursorBlock),
+      prompt: buildAgentPassPrompt(pass, ingestionCursorBlock) + (pass.roleKey === "agenda"
+        ? `\nUse scheduler-assigned runId ${pass.runId} on all source claims and record_ingestion_run metadata.ingestion.runId. Persist a terminal aggregate even on failure; process exit alone never means success. Discover connector tools in this session and use exact exposed names and schemas. If a listed tool is unavailable to the model, refresh discovery once, then report failure; do not bypass authorization or retry endlessly.`
+        : ""),
       worktreePath: config.allowedRoot,
       // Budget knobs (docs/token-efficiency.md §4): the agent's configured
       // model and role-scoped token; absent model = harness default.
