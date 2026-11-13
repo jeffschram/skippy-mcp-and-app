@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
-import { ingestObject, recordMemoryForBrain, recordIngestionRun, updateSourceSyncStatus } from "./knowledge";
+import { ingestObject, recordMemoryForBrain, recordIngestionRun, updateSourceSyncStatus, markQuickCaptureHandledForBrain, listQuickCapturesForBrain } from "./knowledge";
 vi.mock("./agentWorkbench", async (importOriginal) => ({
   ...await importOriginal<typeof import("./agentWorkbench")>(),
   requireHost: async () => ({ brainInstanceId: "brain:b" }),
@@ -31,6 +31,7 @@ function fixture() {
             eq: (field: any, value: any) => (r: Row) => field(r) === value };
           found = found.filter(fn(expression)); return chain;
         },
+        order: (direction: string) => { if (direction === "desc") found.reverse(); return chain; },
         first: async () => found[0] ?? null, take: async (n: number) => found.slice(0, n), collect: async () => found };
       return chain;
     },
@@ -59,6 +60,73 @@ const object = (source: string, token: string, key = "message-1/action-a") => ({
 });
 
 describe("durable source ingestion", () => {
+  // Synthetic provider identities: these validate persistence, not connector discovery.
+  it.each(["gmail:fixture", "messages:fixture", "calendar:fixture", "quick_capture:fixture"])(
+    "%s reconciles exact item identities across cycles, interruption and replay", async source => {
+      const f = setup();
+      const persisted = new Map<string, string>();
+      const write = async (token: string, id: string) => {
+        const result = await f.run(ingestObject, {
+          ...object(source, token, `${id}/reference`),
+          candidatePayload: { title: `Reference ${id}`, body: `Evidence ${id}` },
+          sourceRefs: [{ sourceSystem: source, externalId: id, messageId: id, threadId: "existing-thread" }],
+        });
+        if (persisted.has(id)) expect(result.entityId).toBe(persisted.get(id));
+        persisted.set(id, result.entityId);
+      };
+      const first = await f.run(updateSourceSyncStatus, statusArgs(source, "cycle-1", "claim"));
+      await write(first.token, "item-1");
+      await f.run(updateSourceSyncStatus, statusArgs(source, "cycle-1", "finish", finish(first.token, 1)));
+      vi.mocked(Date.now).mockReturnValue(now + 60 * 60_000);
+      const second = await f.run(updateSourceSyncStatus, statusArgs(source, "cycle-2", "claim"));
+      expect(second.windowStart).toBe(now - OVERLAP_MS);
+      await write(second.token, "item-1");
+      await write(second.token, "item-2"); // New message, same existing thread.
+      const failed = await f.run(updateSourceSyncStatus, statusArgs(source, "cycle-2", "finish", {
+        ...finish(second.token, 2), persistenceComplete: false,
+      }));
+      expect(failed.coveredThrough).toBe(now);
+      vi.mocked(Date.now).mockReturnValue(now + 2 * 60 * 60_000);
+      const recovery = await f.run(updateSourceSyncStatus, statusArgs(source, "cycle-3", "claim"));
+      expect([recovery.windowStart, recovery.windowEnd]).toEqual([second.windowStart, second.windowEnd]);
+      await write(recovery.token, "item-1");
+      await write(recovery.token, "item-2");
+      const recovered = await f.run(updateSourceSyncStatus, statusArgs(source, "cycle-3", "finish", finish(recovery.token, 2)));
+      expect(recovered.coveredThrough).toBe(second.windowEnd);
+      expect(recovered.caughtUp).toBe(false);
+      const catchup = await f.run(updateSourceSyncStatus, statusArgs(source, "cycle-3", "claim"));
+      await write(catchup.token, "item-2");
+      const done = await f.run(updateSourceSyncStatus, statusArgs(source, "cycle-3", "finish", finish(catchup.token, 1)));
+      expect(done.caughtUp).toBe(true);
+      const refs = f.rows().filter(r => r._id.startsWith("sourceRefs:"));
+      expect(refs.map(r => r.externalId).sort()).toEqual(["item-1", "item-2"]);
+      expect(refs.every(r => r.threadId === "existing-thread")).toBe(true);
+      expect(f.rows().filter(r => r._id.startsWith("knowledge:")).map(r => r._id).sort())
+        .toEqual([...persisted.values()].sort());
+      expect(f.rows().filter(r => r._id.startsWith("ingestionReceipts:"))).toHaveLength(2);
+    });
+
+  it("recovers a capture write before acknowledgement without duplicating or touching hold", async () => {
+    const f = setup();
+    const hold = await f.db.insert("quickCaptures", { brainInstanceId: "brain:b", status: "pending", intent: "hold", text: "Transfer", createdAt: now });
+    const capture = await f.db.insert("quickCaptures", { brainInstanceId: "brain:b", status: "pending", intent: "remember", text: "Reference", createdAt: now });
+    const source = "quick_capture:fixture";
+    const first = await f.run(updateSourceSyncStatus, statusArgs(source, "before-crash", "claim"));
+    const args = object(source, first.token, `${capture}/reference`);
+    args.sourceRefs = [{ sourceSystem: source, messageId: capture }];
+    const saved = await f.run(ingestObject, args);
+    expect((await f.db.get(capture)).status).toBe("pending");
+    vi.mocked(Date.now).mockReturnValue(now + LEASE_MS + 1);
+    const retry = await f.run(updateSourceSyncStatus, statusArgs(source, "after-crash", "claim"));
+    const replay = await f.run(ingestObject, { ...args, ingestion: { ...args.ingestion, token: retry.token } });
+    expect(replay.entityId).toBe(saved.entityId);
+    await f.run(markQuickCaptureHandledForBrain, { captureId: capture, outcome: "processed", relatedEntityRefs: [{ entityType: "note", entityId: saved.entityId }] });
+    expect((await f.db.get(capture)).status).toBe("processed");
+    expect((await f.db.get(hold)).status).toBe("pending");
+    expect(await f.run(listQuickCapturesForBrain, { status: "pending" })).toEqual([]);
+    expect(f.rows().filter(r => r._id.startsWith("knowledge:"))).toHaveLength(1);
+  });
+
   it("replays unknown write responses without duplicate entities or provenance, preserving edits", async () => {
     const f = setup();
     const claim = await f.run(updateSourceSyncStatus, statusArgs("gmail:a", "run1", "claim"));
