@@ -4,7 +4,7 @@ Task: `mn76vjrwqrbws7nrq52s2tg6jh8j2gz1`, Phase 19 task 1.
 
 ## Outcome
 
-Gmail, Google Calendar, and Skippy MCP passed real reads in a fresh, noninteractive Codex session matching the task runner's CLI invocation and launchd account/environment. Apple Messages tools were exposed in that session. In the separate Skippy Codex chat, chat discovery succeeded, but a message-content read was denied by the approval mechanism. **All-source content access is therefore not yet verified. Do not pass the migration feasibility gate or retire connectors based on this report.**
+Gmail, Google Calendar, and Skippy MCP passed real reads in a fresh, noninteractive Codex session matching the task runner's CLI invocation and launchd account/environment. The initial Skippy chat Messages content read was denied. A later owner-authorized probe using the existing **scheduled-agent settings** successfully called Messages discovery and reading, reporting one message with text and no approval required. However, a fresh **launchd-triggered** repetition failed during chat discovery. **Messages content access is possible in one tested session, but reliable scheduled access remains unverified. Do not pass the migration feasibility gate or retire connectors based on this report.**
 
 No email, calendar event, or message was modified. No source credentials or permissions were changed. This report stores counts and capability evidence, not source content or third-party identifiers.
 
@@ -27,11 +27,24 @@ No email, calendar event, or message was modified. No source credentials or perm
 
 Gmail used November 11–13 as its bounded search window, capped at one message. The primary Calendar search for November 12–19 returned no events; the explicit October 1–December 1 window returned one event, capped at one. These samples establish content access, not complete coverage or incremental correctness. Task 2 owns pagination, late arrivals, stable identifiers, edits and cancellations.
 
-## Messages prerequisite and remaining check
+## Initial Messages denial
 
 [OpenAI's Messages documentation](https://learn.chatgpt.com/docs/plugins#use-apple-messages-from-codex) describes an Apple Silicon macOS desktop integration and says it is not directly available in CLI. Actual runtime evidence here shows Messages tools exposed to a fresh `codex exec` process, and discovery working in the Codex chat. Tool exposure does not prove content permission, and the underlying desktop transport has not been established.
 
-The parent task disables interactive approval prompts. The Messages tool explicitly reported that these settings may prevent its read confirmation and advised switching to **Ask for approval** or **Approve for me** before retrying. Do not bypass the denial with database reads, computer use, or another session. After the owner changes the appropriate task approval setting, repeat one bounded `find_chats` → `read_messages` check, record only count/body-present and runtime details, and confirm the same supported path in a fresh production-equivalent session. Apple ID identity is not exposed by the tested chat-discovery tool; only the local Messages store/account context is established.
+The parent task disables interactive approval prompts. The Messages tool explicitly reported that these settings may prevent its read confirmation and suggested **Ask for approval** or **Approve for me**. This was a hypothesis, not a confirmed cause or a required configuration change. The later owner-authorized test below used the existing agent settings without changing permissions and succeeded once. Apple ID identity is not exposed by the tested chat-discovery tool; only the local Messages store/account context is established.
+
+## Follow-up: actual read and scheduled repetition (11:02–11:04 p.m. EST)
+
+The owner explicitly requested the proposed unattended test. Both probes used macOS account `skippy`, working directory `/Users/skippy/src`, the installed runner LaunchAgent environment, the Agenda-scoped Skippy token, no model override, and a fresh Codex session. They reproduced the current agent-pass adapter settings, including the already-enabled host bypass setting. No configuration or permissions were changed. Each prompt requested one recent chat and at most one message in a two-day window, with metadata-only reporting and no alternative access paths.
+
+| Probe | Launch and evidence | Result |
+| --- | --- | --- |
+| A | Manually launched noninteractive subprocess; thread `01a1d312-6c4a-7e11-b867-7615cedf4af4`, started `2026-11-13T04:02:41Z` | `messages.find_chats` and `messages.read_messages` both completed; final diagnostic reported one message, body present, no approval required. Process exited 0. |
+| B | Temporary launchd scheduled job; parent PID 1; thread `01a1d313-d46e-7e10-94e1-8184cc4f4c47`, started `2026-11-13T04:04:13Z` | `messages.find_chats` failed with the diagnostic reporting `tool_error`. No content read was attempted. Model/process exited normally, which does not make the connector test a pass. |
+
+The temporary launchd job used a one-shot guard, was unloaded after the result, and its removal was verified. Production Agenda schedules were untouched. Probe B used the macOS scheduler, **not Skippy's control-plane claim/heartbeat path**; successful Skippy scheduled ingestion still needs its own test. No source content was exported into this report or the diagnostic artifacts; Codex's own session logging remains governed by the harness.
+
+This establishes a launch-path-dependent discrepancy, not its cause. The initial chat denial, successful manual unattended read, and scheduled discovery failure are three distinct observations. The scheduled diagnostic exposed only a generic error; it does not identify a permission, transport, or desktop-bridge root cause. Next verification should capture a sanitized underlying discovery error in the actual Skippy-scheduled Codex path and resolve it before testing unattended content reads again. Changing approval settings is not yet justified as the fix.
 
 ## Why the earlier run used Claude
 
@@ -52,7 +65,7 @@ The current project execution configuration is enabled and prefers `codex`; its 
 1. Read the project execution preference, task override and queued run's harness separately. Record account, Codex version and worktree without dumping environment secrets.
 2. Launch a **fresh** Codex process with the adapter arguments above and the installed runner environment/task token. Use a bounded read-only prompt and an outer timeout. Do not expand permissions or substitute local source readers.
 3. Ask for exact connector tool names; Gmail profile + one bounded search + one full read; Calendar list + one bounded event search; and this Skippy task brief. Store only success/error, counts, owner account match and content-present booleans. Confirm actual tool-completed events and process exit, not merely the model's claim.
-4. For Messages, resolve the denied confirmation first, then read at most one message in a resolved chat and bounded date window. Do not treat listing chats as a content-read pass.
+4. For Messages, test the intended launch path using existing authorized settings and read at most one message in a resolved chat and bounded date window. Stop on denial; do not use alternative readers. Do not treat listing chats as a content-read pass, or a successful manually launched process as proof of scheduler reliability.
 5. Keep raw transient tool traces private; publish only this sanitized evidence. Continue to Phase 19 coverage and unattended-operation tasks only with the remaining limitation explicit.
 
 The probe observed completed Gmail, Calendar and Skippy tool calls, a final metadata-only JSON report, and a successful process exit. An unrelated Notion authentication startup error did not prevent these checks. No application code changed, so repository tests were not required; the document diff was checked for whitespace errors.
