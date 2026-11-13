@@ -84,6 +84,15 @@ describe("bounded Home inventory", () => {
     expect((await inventory(records)).map(r => r.id)).toEqual(["calendarEvents:long", "calendarEvents:event", "tasks:task"]);
     expect((await inventory(records)).find(r => r.id === "tasks:task")?.area).toBe("work");
   });
+  it("moves an updated mirrored event between periods and hides its cancellation", async () => {
+    const mirrored = event("stable-id");
+    expect((await inventory([mirrored], { period: "today" })).map(r => r.id)).toEqual([mirrored._id]);
+    Object.assign(mirrored, { title: "Rescheduled", startAt: 3000, endAt: 4000 });
+    expect(await inventory([mirrored], { period: "today" })).toEqual([]);
+    expect((await inventory([mirrored], { period: "week" })).map(r => r.id)).toEqual([mirrored._id]);
+    mirrored.status = "cancelled";
+    for (const period of ["today", "week", "all"]) expect(await inventory([mirrored], { period })).toEqual([]);
+  });
   it("preserves completed and paused history, with paused live repeats represented by their task", async () => {
     const records = [task("closed", { status: "done" }), task("live"), recurrence("paused", { status: "paused", currentTaskId: "tasks:live" }), recurrence("retired", { status: "retired" })];
     expect((await inventory(records, { status: "completed" })).map(r => r.id)).toEqual(["tasks:closed"]);
