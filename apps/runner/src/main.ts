@@ -260,15 +260,18 @@ async function main() {
       });
     activeAgentPasses.set(pass.configId, promise);
   };
+  let agentPassClaiming = false;
   const agentPassTimer = setInterval(() => {
     if (stopping || draining) return;
-    if (activeAgentPasses.size >= 1) return;
+    if (agentPassClaiming || activeAgentPasses.size >= 1) return;
+    agentPassClaiming = true;
     void plane
       .claimNextAgentPass()
       .then((pass) => {
         if (pass) startAgentPass(pass);
       })
-      .catch((error) => log("agent pass claim failed", { error: String(error) }));
+      .catch((error) => log("agent pass claim failed", { error: String(error) }))
+      .finally(() => { agentPassClaiming = false; });
   }, config.claimPollIntervalMs);
 
   /*

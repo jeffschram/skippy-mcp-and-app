@@ -10,6 +10,7 @@ import type { HarnessAdapter, HarnessTurnRequest, HarnessTurnResult } from "./ha
 
 const pass: ClaimedAgentPass = {
   configId: "cfg1",
+  runId: "agent-pass:cfg1:1",
   claimToken: "tok1",
   roleKey: "agenda",
   displayName: "Agenda Agent",
@@ -107,6 +108,19 @@ describe("buildAgentPassPrompt", () => {
 });
 
 describe("executeAgentPass", () => {
+  it("refuses Agenda without scoped credentials or a correlated run id", async () => {
+    const { runId: _runId, ...uncorrelated } = pass;
+    for (const [settings, claimed] of [
+      [{ ...config, agentRoleTokens: {} }, pass],
+      [config, uncorrelated],
+    ] as const) {
+      const plane = fakePlane();
+      const { adapter, requests } = fakeAdapter({ outcome: "completed" });
+      await executeAgentPass(settings, plane, claimed, adapter);
+      expect(requests).toHaveLength(0);
+      expect(plane.completeAgentPass).toHaveBeenCalledWith("cfg1", "tok1", expect.objectContaining({ status: "failed" }));
+    }
+  });
   it("runs the turn with the agent's model and scoped token, then completes", async () => {
     const plane = fakePlane();
     const { adapter, requests } = fakeAdapter({ outcome: "completed", resultText: "triage done" });

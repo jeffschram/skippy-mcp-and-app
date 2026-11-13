@@ -1,3 +1,4 @@
+import { agentPassRunId, agendaOutcome, agendaRetry } from "./agentPassOutcome";
 import { mutationGeneric, queryGeneric } from "convex/server";
 import { v } from "convex/values";
 import { nextAgentDueAt, validateAgentSchedule, type AgentSchedule } from "@skippy/shared";
@@ -112,6 +113,8 @@ export const listForViewer = queryGeneric({
           nextDueAt: config.nextDueAt,
           lastRunStartedAt: config.lastRunStartedAt,
           lastRunStatus: config.lastRunStatus,
+          lastRunSummary: config.lastRunSummary,
+          retryCount: config.retryCount ?? 0,
           token: token
             ? {
                 _id: token._id,
@@ -368,6 +371,7 @@ export const claimNextAgentPass = mutationGeneric({
       // the pass loads itself via get_skill (docs/connectors.md).
       return {
         configId: config._id,
+        runId: agentPassRunId(config._id, config.claimVersion + 1),
         claimToken,
         roleKey: config.roleKey,
         displayName: config.displayName,
@@ -424,6 +428,7 @@ export const hostLastCompletedIngestionRun = queryGeneric({
 /** Release the lease and record the outcome. Stale claims (lease lapsed) are
  * dropped silently — completion must be idempotent, never a duplicate. */
 export const completeAgentPass = mutationGeneric({
+  returns: v.object({ status: v.union(v.literal("ok"), v.literal("stale")) }),
   args: {
     hostToken: v.string(),
     configId: v.id("agentConfigs"),
@@ -437,12 +442,26 @@ export const completeAgentPass = mutationGeneric({
     if (!config || config.brainInstanceId !== host.brainInstanceId) {
       throw new Error("agent config not found");
     }
-    if (config.claimToken !== args.claimToken || config.claimedByHostId !== host._id) {
-      return { status: "stale" };
+    if (config.claimToken !== args.claimToken || config.claimedByHostId !== host._id ||
+        !config.leaseExpiresAt || config.leaseExpiresAt <= Date.now()) {
+      return { status: "stale" as const };
     }
     const now = Date.now();
+    const runId = agentPassRunId(config._id, config.claimVersion);
+    let outcome = { status: args.status, summary: args.summary };
+    if (config.roleKey === "agenda" && args.status === "completed") {
+      const report = await ctx.db.query("ingestionRuns")
+        .withIndex("by_brain_run", (q: any) => q.eq("brainInstanceId", host.brainInstanceId).eq("runKey", runId))
+        .first();
+      outcome = agendaOutcome(report, runId, config.lastRunStartedAt ?? now);
+    }
+    const retry: { retryCount?: number; nextDueAt?: number | undefined } = config.roleKey === "agenda"
+      ? agendaRetry(config.schedule as AgentSchedule | undefined, config.enabled, outcome.status, config.retryCount ?? 0, now)
+      : {};
     await ctx.db.patch(config._id, {
-      lastRunStatus: args.status,
+      ...retry,
+      lastRunStatus: outcome.status,
+      lastRunSummary: outcome.summary?.slice(0, 300),
       claimedByHostId: undefined,
       claimToken: undefined,
       leaseExpiresAt: undefined,
@@ -450,14 +469,15 @@ export const completeAgentPass = mutationGeneric({
     });
     await ctx.db.insert("activityEvents", {
       brainInstanceId: host.brainInstanceId,
-      activityType: args.status === "completed" ? "agent_pass_completed" : "agent_pass_failed",
+      activityType: outcome.status === "completed" ? "agent_pass_completed" : "agent_pass_failed",
       actorType: "harness",
       timestamp: now,
-      summary: `Agent pass ${args.status}: ${config.displayName} (${config.roleKey})${
-        args.summary ? ` — ${args.summary.slice(0, 200)}` : ""
+      summary: `Agent pass ${outcome.status}: ${config.displayName} (${config.roleKey})${
+        outcome.summary ? ` — ${outcome.summary.slice(0, 200)}` : ""
       }`,
-      metadata: { configId: config._id, role: config.roleKey, status: args.status },
+      metadata: { configId: config._id, role: config.roleKey, status: outcome.status, runId,
+        retryCount: config.roleKey === "agenda" ? retry.retryCount : null, nextRetryOrDueAt: retry.nextDueAt ?? null },
     });
-    return { status: "ok" };
+    return { status: "ok" as const };
   },
 });

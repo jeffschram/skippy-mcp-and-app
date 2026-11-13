@@ -117,6 +117,8 @@ const calendarFns = (anyApi as any).calendar as Record<string, any>;
  * live in versioned skills the pass fetches itself via get_skill.
  */
 export interface ClaimedAgentPass {
+  /** Correlates the authoritative ingestion report with this scheduler attempt. */
+  runId?: string;
   configId: string;
   claimToken: string;
   roleKey: string;

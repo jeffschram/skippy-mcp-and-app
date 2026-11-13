@@ -52,6 +52,23 @@ if [ ! -f "$RUNNER_MAIN" ]; then
   exit 1
 fi
 
+# Preserve role credentials when reinstalling; an omitted variable must not
+# silently erase the Agenda token and force a broader fallback.
+ROLE_TOKEN_FRAGMENT=$(python3 - "$PLIST" <<'ROLE_TOKEN_PY'
+import os, plistlib, sys
+from xml.sax.saxutils import escape
+try:
+    with open(sys.argv[1], "rb") as f:
+        previous = plistlib.load(f).get("EnvironmentVariables", {})
+except FileNotFoundError:
+    previous = {}
+for key in ["SKIPPY_MCP_AGENDA_TOKEN", "SKIPPY_MCP_FINANCE_TOKEN", "SKIPPY_MCP_PM_TOKEN", "SKIPPY_MCP_TASK_TOKEN"]:
+    value = os.environ.get(key, previous.get(key, ""))
+    if value:
+        print(f"    <key>{key}</key><string>{escape(value)}</string>")
+ROLE_TOKEN_PY
+)
+
 mkdir -p "$HOME/Library/LaunchAgents" "$LOG_DIR"
 
 cat > "$PLIST" <<PLIST_EOF
@@ -79,6 +96,7 @@ cat > "$PLIST" <<PLIST_EOF
     <key>SKIPPY_MCP_TOKEN</key><string>$SKIPPY_MCP_TOKEN</string>
 $APPROVAL_TIMEOUT_FRAGMENT
 $BYPASS_FRAGMENT
+$ROLE_TOKEN_FRAGMENT
   </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
