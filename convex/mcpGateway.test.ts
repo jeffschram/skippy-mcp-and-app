@@ -47,6 +47,6 @@ it("keeps every gateway target internal so direct Convex calls cannot bypass aut
   for (const operation of Object.keys(MCP_OPERATIONS)) {
     const [module, name] = operation.split(":");
     const source = readFileSync(new URL(`./${module}.ts`, import.meta.url), "utf8");
-    expect(source).toMatch(new RegExp(`export const ${name} = internal(?:Query|Mutation|Action)Generic`));
+    expect(source).toMatch(new RegExp(`export const ${name} = internal(?:Query|Mutation|Action)(?:Generic)?\\(`));
   }
 });

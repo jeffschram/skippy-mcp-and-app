@@ -79,6 +79,7 @@ function createFakeClient(): { client: SkippyClient; calls: Array<{ name: string
       completeInterview: (brainInstanceId, input) => record("completeInterview", brainInstanceId, input),
       archiveInterview: (brainInstanceId, input) => record("archiveInterview", brainInstanceId, input),
       recordIngestionRun: (brainInstanceId, run) => record("recordIngestionRun", brainInstanceId, run),
+      getIngestionProgress: async () => ({ history: [], isDone: true }),
       updateSourceSyncStatus: (brainInstanceId, status) => record("updateSourceSyncStatus", brainInstanceId, status),
       getOperatingRules: (brainInstanceId, scope) => record("getOperatingRules", brainInstanceId, scope),
       getEffectiveRubric: (brainInstanceId) => record("getEffectiveRubric", brainInstanceId),

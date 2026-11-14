@@ -128,6 +128,12 @@ const AGENDA_INGESTION_BODY = [
   "",
   "Call `get_importance_rubric`, read its full `renderedText`, and load `get_skill(slug: \"memory-rubric\")` before writes. Use the owner's current rules and live projects/goals/contacts, not a hardcoded ranking. Use the per-source claim/heartbeat/finish protocol below with the actual harness and role agenda. Do not overwrite `google_calendar:<calendarId>` mirror tokens or metadata.",
   "",
+  "Before a claim, call read-only get_ingestion_progress with the exact source. It returns currentWindow.requiresReplay separately from paginated history. Follow continueCursor while relevant evidence is missing; a partial page is not complete history. Each failed history row retains its original runId, frozen bounds, errors and completion evidence; recoveryState/recovery identify a recorded later successful completion of the exact same window. Legacy report imports preserve unknown attestations as null. Unattributed legacy summaries are retained but never establish a current replay requirement on their own. Never infer recovery solely from a timestamp, another source, another window or absent history.",
+  "",
+  "For v10 claims include protocolVersion: 10 inside metadata.ingestion. Replay the mandatory frozen window whenever required. Before successful finish, call get_ingestion_progress with completion {runKey: runId, windowStart, windowEnd, paginationComplete, persistenceComplete, counts: {read, ignored, accepted}, errors: []}. Supply the actual observed pagination and persistence results; empty windows still require exhaustive reads. The preview changes nothing and is not permission to bypass review. Check activeLease, reportedBoundsMatch, checksSatisfied and receiptReconciliation. Then submit those same bounds, flags and counts in metadata.ingestion on update_source_sync_status operation finish, with the claim token, runId and protocolVersion: 10. Include current errors in top-level errors when failing. The finish transaction rechecks lease, bounds, counts and receipts and saves an immutable window outcome. Only a successful finish resolves that window; previews and classification alone do not advance or recover it.",
+  "",
+  "If safety review rejects a finish, preserve its sanitized reason, close the claim failed and report the rejection. Do not relabel a rejection as a success, suppress old failures, force progress or retry the same rejected completion through another route. History ambiguity is a possible explanation, not a proven cause; the reviewer must assess the newly available evidence.",
+  "",
   "## Read existing connectors",
   "",
   "Discover the available schemas; tool namespace prefixes vary by harness. These native Codex read tools were verified (availability in a prior session does not prove access now):",
@@ -507,7 +513,7 @@ const DEFAULT_SKILLS = [
     schedulerInstructions: AGENDA_INGESTION_SCHEDULER_INSTRUCTIONS,
     visibility: "public" as const,
     // v5: correlate scheduled ingestion reports with the claimed attempt.
-    version: 9,
+    version: 10,
   },
   {
     slug: "finance-sync",

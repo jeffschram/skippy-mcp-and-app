@@ -19,6 +19,7 @@ const COMMON_TOOLS = [
   "get_skill",
   "get_current_context",
   "update_source_sync_status",
+  "get_ingestion_progress",
   "record_ingestion_run",
 ] as const;
 

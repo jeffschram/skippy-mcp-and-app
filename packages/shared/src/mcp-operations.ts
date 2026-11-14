@@ -49,6 +49,7 @@ export const MCP_OPERATIONS = {
   "interviews:archiveForBrain": "mutation",
   "knowledge:recordIngestionRun": "mutation",
   "knowledge:updateSourceSyncStatus": "mutation",
+  "ingestionEvidence:getProgress": "query",
   "settings:operatingRulesForBrain": "query",
   "settings:getEffectiveRubricForBrain": "query",
   "settings:notificationDispatchContextForBrain": "query",

@@ -2848,6 +2848,24 @@ export function createMcpServer(
   );
 
   server.registerTool(
+    "get_ingestion_progress",
+    {
+      title: "Inspect ingestion recovery",
+      description: "Read source progress and paginated window recovery history; optionally check current completion evidence without writes or approval. Load agenda-ingestion.",
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: z.object({
+        source: z.string(), cursor: z.string().optional(),
+        completion: z.object({ runKey: z.string(), windowStart: z.number(), windowEnd: z.number(),
+          paginationComplete: z.boolean(), persistenceComplete: z.boolean(),
+          counts: z.object({ read: z.number(), ignored: z.number(), accepted: z.number() }),
+          errors: z.array(z.string()).optional(),
+        }).optional(),
+      }),
+    },
+    async args => toolResult(await tools.getIngestionProgress(stripUndefined(args) as Parameters<typeof tools.getIngestionProgress>[0])),
+  );
+
+  server.registerTool(
     "update_source_sync_status",
     {
       title: "Update source sync status",

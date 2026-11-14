@@ -1029,6 +1029,15 @@ export default defineSchema({
   }).index("by_brain_started", ["brainInstanceId", "startedAt"])
     .index("by_brain_run", ["brainInstanceId", "runKey"]),
 
+  ingestionWindowHistory: defineTable({
+    brainInstanceId: v.id("brainInstances"), key: v.string(), source: v.string(), runId: v.string(),
+    windowStart: v.number(), windowEnd: v.number(),
+    status: v.union(v.literal("failed"), v.literal("completed")),
+    finishedAt: v.number(), errors: v.array(v.string()), evidence: v.any(),
+  }).index("by_brain_key", ["brainInstanceId", "key"])
+    .index("by_brain_source", ["brainInstanceId", "source"])
+    .index("by_window_status_time", ["brainInstanceId", "source", "windowStart", "windowEnd", "status", "finishedAt"]),
+
   ingestionReceipts: defineTable({
     lastReplayToken: v.optional(v.string()),
     brainInstanceId: v.id("brainInstances"),
