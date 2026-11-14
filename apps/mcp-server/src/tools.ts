@@ -314,7 +314,7 @@ export type SkippyClient = {
       metadata?: unknown;
     },
   ): Promise<unknown>;
-  getIngestionProgress(brainInstanceId: string, input: { source: string; cursor?: string; completion?: { runId: string; windowStart: number; windowEnd: number; paginationComplete: boolean; persistenceComplete: boolean; counts: { read: number; ignored: number; accepted: number }; errors?: string[] } }): Promise<unknown>;
+  getIngestionProgress(brainInstanceId: string, input: { source: string; cursor?: string; completion?: { runKey: string; windowStart: number; windowEnd: number; paginationComplete: boolean; persistenceComplete: boolean; counts: { read: number; ignored: number; accepted: number }; errors?: string[] } }): Promise<unknown>;
   updateSourceSyncStatus(
     brainInstanceId: string,
     status: {

@@ -9,6 +9,9 @@ describe("MCP account isolation", () => {
       await expect(assertMcpReferences(db, args, "brain")).rejects.toThrow();
     }
   });
+  it("accepts an opaque ingestion run key without treating it as a database record ID", async () => {
+    await expect(assertMcpReferences(db, { source: "gmail:fixture", completion: { runKey: "desktop-run-2026" } }, "brain")).resolves.toBeUndefined();
+  });
   it("does not interpret source-system metadata as account identity", async () => {
     await expect(assertMcpReferences(db, { metadata: { projectId: "external-id" } }, "brain")).resolves.toBeUndefined();
   });

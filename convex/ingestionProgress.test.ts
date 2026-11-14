@@ -76,7 +76,7 @@ describe("durable source ingestion", () => {
     expect(retry.requiresReplay).toBe(true);
     const retryEvidence = { ...finish(retry.token), windowStart: retry.windowStart, windowEnd: retry.windowEnd };
     const beforePreview = structuredClone(f.rows());
-    const preview = await f.run(getProgress, { source, completion: { ...retryEvidence, runId: "recovery-run" } });
+    const preview = await f.run(getProgress, { source, completion: { ...retryEvidence, runKey: "recovery-run" } });
     expect(f.rows()).toEqual(beforePreview);
     expect(preview.completionPreview.checksSatisfied).toBe(true);
     expect(preview.currentWindow.requiresReplay).toBe(true);

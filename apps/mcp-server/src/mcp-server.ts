@@ -2855,7 +2855,7 @@ export function createMcpServer(
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: z.object({
         source: z.string(), cursor: z.string().optional(),
-        completion: z.object({ runId: z.string(), windowStart: z.number(), windowEnd: z.number(),
+        completion: z.object({ runKey: z.string(), windowStart: z.number(), windowEnd: z.number(),
           paginationComplete: z.boolean(), persistenceComplete: z.boolean(),
           counts: z.object({ read: z.number(), ignored: z.number(), accepted: z.number() }),
           errors: z.array(z.string()).optional(),

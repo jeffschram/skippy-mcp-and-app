@@ -57,7 +57,7 @@ export async function inspectProgress(db: any, brain: any, source: string, pagin
   const requiresReplay = !!p && (status === "failed" || (status === "running" && p.replayOfFailedWindow === true));
   let preview = null;
   if (completion) {
-    if (!p || completion.runId !== p.runId) throw new Error("Completion evidence must reference the current run");
+    if (!p || completion.runKey !== p.runId) throw new Error("Completion evidence must reference the current run");
     preview = { ...completionEvidence(p, completion, completion.errors ?? []),
       activeLease: status === "running", checkpointWillAdvance: false };
   }
@@ -78,7 +78,7 @@ export async function inspectProgress(db: any, brain: any, source: string, pagin
 const counts = v.object({ read: v.number(), ignored: v.number(), accepted: v.number() });
 export const getProgress = internalQuery({
   args: { brainInstanceId: v.id("brainInstances"), source: v.string(), cursor: v.optional(v.string()),
-    completion: v.optional(v.object({ runId: v.string(), windowStart: v.number(), windowEnd: v.number(),
+    completion: v.optional(v.object({ runKey: v.string(), windowStart: v.number(), windowEnd: v.number(),
       paginationComplete: v.boolean(), persistenceComplete: v.boolean(), counts, errors: v.optional(v.array(v.string())) })) },
   returns: v.any(),
   handler: async ({ db }, args) => inspectProgress(db, args.brainInstanceId, args.source,
