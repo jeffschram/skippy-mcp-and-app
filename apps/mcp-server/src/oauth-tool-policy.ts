@@ -73,6 +73,7 @@ export const OAUTH_TOOL_SCOPES: Record<string, readonly string[]> = {
   "update_phase": ["skippy:read", "skippy:write"],
   "update_project": ["skippy:read", "skippy:write"],
   "update_project_notes": ["skippy:read", "skippy:write"],
+  "get_ingestion_progress": ["skippy:read"],
   "update_source_sync_status": ["skippy:read", "skippy:write"],
   "upsert_company": ["skippy:read", "skippy:write"],
   "upsert_financial_account": ["skippy:read", "skippy:write"],

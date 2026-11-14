@@ -7,6 +7,7 @@ vi.mock("./agentWorkbench", async (importOriginal) => ({
   requireHost: async () => ({ _id: "host:test", brainInstanceId: "brain:b" }),
 }));
 import { upsertCalendarEvents, hostClaimCalendarSync, hostUpsertCalendarEvents, hostRecordCalendarSyncToken } from "./calendar";
+import { getProgress, importLegacy } from "./ingestionEvidence";
 import { LEASE_MS, OVERLAP_MS, WINDOW_MS } from "./ingestionProgress";
 
 type Row = Record<string, any>;
@@ -26,7 +27,7 @@ function fixture() {
     patch: async (id: string, value: Row) => Object.assign(rows.find(r => r._id === id)!, structuredClone(value)),
     query: (table: string) => {
       let found = rows.filter(r => r._id.startsWith(table + ":"));
-      const range: any = { eq: (key: string, value: any) => { found = found.filter(r => r[key] === value); return range; } };
+      const range: any = { eq: (key: string, value: any) => { found = found.filter(r => r[key] === value); return range; }, gt: (key: string, value: any) => { found = found.filter(r => r[key] > value); return range; } };
       const chain: any = { withIndex: (_: string, fn: any) => { fn(range); return chain; },
         filter: (fn: any) => {
           const expression = { field: (key: string) => (r: Row) => key.split(".").reduce((value, part) => value?.[part], r),
@@ -34,6 +35,10 @@ function fixture() {
           found = found.filter(fn(expression)); return chain;
         },
         order: (direction: string) => { if (direction === "desc") found.reverse(); return chain; },
+        paginate: async ({ numItems, cursor }: any) => {
+          const offset = Number(cursor ?? 0), end = offset + numItems;
+          return { page: found.slice(offset, end), continueCursor: String(end), isDone: end >= found.length };
+        },
         first: async () => found[0] ?? null, take: async (n: number) => found.slice(0, n), collect: async () => found };
       return chain;
     },
@@ -62,6 +67,65 @@ const object = (source: string, token: string, key = "message-1/action-a") => ({
 });
 
 describe("durable source ingestion", () => {
+  it("preserves recovered failure history while a later empty window completes", async () => {
+    const f = setup(), source = "gmail:fixture";
+    const first = await f.run(updateSourceSyncStatus, statusArgs(source, "failed-run", "claim", { protocolVersion: 10 }));
+    await f.run(updateSourceSyncStatus, { ...statusArgs(source, "failed-run", "finish", finish(first.token)), status: "failed", errors: ["old failure"] });
+    vi.mocked(Date.now).mockReturnValue(now + 1000);
+    const retry = await f.run(updateSourceSyncStatus, statusArgs(source, "recovery-run", "claim", { protocolVersion: 10 }));
+    expect(retry.requiresReplay).toBe(true);
+    const retryEvidence = { ...finish(retry.token), windowStart: retry.windowStart, windowEnd: retry.windowEnd };
+    const beforePreview = structuredClone(f.rows());
+    const preview = await f.run(getProgress, { source, completion: { ...retryEvidence, runId: "recovery-run" } });
+    expect(f.rows()).toEqual(beforePreview);
+    expect(preview.completionPreview.checksSatisfied).toBe(true);
+    expect(preview.currentWindow.requiresReplay).toBe(true);
+    const recovered = await f.run(updateSourceSyncStatus, statusArgs(source, "recovery-run", "finish", retryEvidence));
+    expect(recovered.historicalFailure.recoveredByRunId).toBe("recovery-run");
+    vi.mocked(Date.now).mockReturnValue(now + 2000);
+    const later = await f.run(updateSourceSyncStatus, statusArgs(source, "empty-run", "claim", { protocolVersion: 10 }));
+    expect(later.requiresReplay).toBe(false);
+    const evidence = { ...finish(later.token), windowStart: later.windowStart, windowEnd: later.windowEnd };
+    const done = await f.run(updateSourceSyncStatus, statusArgs(source, "empty-run", "finish", evidence));
+    expect(done.status).toBe("completed");
+    expect(done.currentErrors).toEqual([]);
+    expect(done.completionEvidence.receiptReconciliation).toMatchObject({ accepted: 0, writes: 0, replays: 0, satisfied: true });
+    const history = await f.run(getProgress, { source });
+    expect(history.currentWindow.requiresReplay).toBe(false);
+    const failure = history.history.find((r: any) => r.runId === "failed-run");
+    expect(failure.errors).toContain("old failure");
+    expect(failure.recovery).toMatchObject({ runId: "recovery-run", at: now + 1000 });
+    expect(history.history).toHaveLength(3);
+    await f.run(updateSourceSyncStatus, statusArgs(source, "empty-run", "finish", evidence));
+    expect((await f.run(getProgress, { source })).history).toHaveLength(3);
+    expect((await f.run(getProgress, { brainInstanceId: "brain:other", source })).history).toEqual([]);
+    const next = await f.run(updateSourceSyncStatus, statusArgs(source, "new-failure", "claim", { protocolVersion: 10 }));
+    const bad = await f.run(updateSourceSyncStatus, statusArgs(source, "new-failure", "finish", { ...finish(next.token), windowStart: next.windowStart - 1, windowEnd: next.windowEnd }));
+    expect(bad.status).toBe("failed");
+    expect(bad.coveredThrough).toBe(done.coveredThrough);
+    expect((await f.run(getProgress, { source })).history[0].recoveryState).toBe("not_recorded");
+  });
+
+  it("imports attributable legacy failures and recovery without rewriting reports or progress", async () => {
+    const f = setup(), source = "messages:fixture";
+    const legacy = (runId: string, status: string, at: number) => ({ runKey: runId, status, startedAt: at - 1,
+      metadata: { sourceReports: [{ source, status, errors: status === "failed" ? ["credential exclusion"] : [],
+        progress: { runId, windowStart: 100, windowEnd: 200, lastSuccessAt: status === "completed" ? at : undefined,
+          historicalFailure: { at: 1000, errors: ["credential exclusion"] } } }] } });
+    await f.db.insert("ingestionRuns", { brainInstanceId: "brain:b", ...legacy("old", "failed", 1000) });
+    await f.db.insert("ingestionRuns", { brainInstanceId: "brain:b", ...legacy("recovered", "completed", 2000) });
+    const original = structuredClone(f.rows());
+    await f.run(importLegacy, { paginationOpts: { numItems: 1, cursor: null } });
+    await f.run(importLegacy, { paginationOpts: { numItems: 1, cursor: "1" } });
+    await f.run(importLegacy, { paginationOpts: { numItems: 50, cursor: null } });
+    expect(f.rows().filter(r => r._id.startsWith("ingestionRuns:"))).toEqual(original);
+    expect(f.rows().filter(r => r._id.startsWith("sourceSyncStatuses:"))).toEqual([]);
+    const result = await f.run(getProgress, { source });
+    expect(result.history).toHaveLength(2);
+    expect(result.history.find((r: any) => r.status === "failed").recovery.runId).toBe("recovered");
+    expect(result.history[0].evidence.paginationComplete).toBeNull();
+  });
+
   it("separates historical failures from a fresh claim and successful recovery", async () => {
     const f = setup();
     const c = await f.run(updateSourceSyncStatus, statusArgs("gmail:a", "old", "claim"));

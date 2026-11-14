@@ -198,6 +198,7 @@ function createFakeClient(overrides: Partial<SkippyClient> = {}): SkippyClient {
       reviewUrl: "/interviews",
     }),
     recordIngestionRun: async () => ({ ok: true }),
+    getIngestionProgress: async () => ({ history: [], isDone: true }),
     updateSourceSyncStatus: async () => ({ ok: true }),
     getOperatingRules: async () => [],
     getEffectiveRubric: async () => ({
@@ -365,6 +366,21 @@ function textResult(result: Awaited<ReturnType<Client["callTool"]>>) {
 }
 
 describe("Skippy MCP manifest", () => {
+  it("exposes recovery inspection as a read-only tool with read-only OAuth scope", async () => {
+    const server = createMcpServer(createFakeClient(), "brain_123");
+    const client = new Client({ name: "recovery-test", version: "0.1.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    try {
+      await server.connect(serverTransport); await client.connect(clientTransport);
+      const tool = (await client.listTools()).tools.find(t => t.name === "get_ingestion_progress")!;
+      expect(tool.annotations?.readOnlyHint).toBe(true);
+      expect(JSON.stringify(tool)).not.toContain("skippy:write");
+      const result = await client.callTool({ name: "get_ingestion_progress", arguments: { source: "gmail:fixture" } });
+      expect(result.isError).not.toBe(true);
+      expect(textResult(result).history).toEqual([]);
+    } finally { await client.close(); await server.close(); }
+  });
+
   it("derives Messages IDs through the MCP transport without a backend write", async () => {
     const server = createMcpServer(createFakeClient(), "brain_123");
     const client = new Client({ name: "identity-test", version: "0.1.0" });

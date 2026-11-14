@@ -1,3 +1,4 @@
+import { completionEvidence, saveAttempt } from "./ingestionEvidence";
 import { makeToken } from "./agentWorkbench";
 /** Durable ingestion protocol over the existing status tool. All calls execute
  * inside a Convex mutation: lease checks, receipts and entity writes are atomic. */
@@ -79,11 +80,16 @@ export async function updateProgress(db: any, args: any, now: number) {
       if (old.runId === runId) return { statusKey, ...progressReport(old), status: "running" };
       throw new Error("Source already claimed by another run");
     }
+    if (row?.status === "running" && old?.leaseUntil <= now) {
+      await saveAttempt(db, args.brainInstanceId, source, old, "failed", ["Lease expired before finish"], old.leaseUntil,
+        { origin: "lease_expiry", paginationComplete: false, persistenceComplete: false });
+    }
     const baseline = old?.baseline ?? now - WINDOW_MS;
     const replay = old && row.status !== "completed";
     const windowStart = replay ? old.windowStart : Math.max(baseline, (old?.coveredThrough ?? baseline) - OVERLAP_MS);
     const windowEnd = replay ? old.windowEnd : Math.min(now, windowStart + WINDOW_MS);
-    progress = { ...progressReport(old), counts: { read: 0, ignored: 0, accepted: 0 }, caughtUp: false, baseline, windowStart, windowEnd, targetEnd: now, runId,
+    progress = { ...progressReport(old), protocolVersion: Math.max(input.protocolVersion ?? 9, old?.protocolVersion ?? 9),
+      requiresReplay: !!replay, replayOfFailedWindow: !!replay, replayOfRunId: replay ? old.runId : null, completionEvidence: null, counts: { read: 0, ignored: 0, accepted: 0 }, caughtUp: false, baseline, windowStart, windowEnd, targetEnd: now, runId,
       token: makeToken("ingestion"), leaseUntil: now + LEASE_MS, writes: 0, replays: 0 };
   } else {
     if (operation === "finish" && row?.status !== "running" && old?.runId === runId && old?.token === input.token) {
@@ -99,17 +105,20 @@ export async function updateProgress(db: any, args: any, now: number) {
       if (!counts || ![counts.read, counts.ignored, counts.accepted].every(n => Number.isSafeInteger(n) && n >= 0)) {
         throw new Error("Report nonnegative integer read, ignored and accepted counts");
       }
-      const complete = args.status === "completed" && input.paginationComplete === true &&
-        input.persistenceComplete === true && counts.read === counts.ignored + counts.accepted &&
-        counts.accepted <= progress.writes + progress.replays && !(args.errors?.length);
+      const evidence = completionEvidence(progress, input, args.errors ?? []);
+      const complete = args.status === "completed" && evidence.checksSatisfied;
       status = complete ? "completed" : "failed";
       errors = complete ? [] : [...(args.errors ?? []), "Incomplete source coverage or persistence; replay required"];
-      progress = { ...progress, counts, leaseUntil: 0,
-        ...(!complete ? { historicalFailure: { at: now, errors } } : {}) };
+      progress = { ...progress, counts, leaseUntil: 0, requiresReplay: !complete, completionEvidence: evidence,
+        ...(!complete ? { historicalFailure: { at: now, errors, runId, windowStart: progress.windowStart, windowEnd: progress.windowEnd } } : {}) };
       if (complete) {
+        if (progress.historicalFailure?.windowStart === progress.windowStart && progress.historicalFailure?.windowEnd === progress.windowEnd) {
+          progress.historicalFailure = { ...progress.historicalFailure, recoveredAt: now, recoveredByRunId: runId };
+        }
         progress.coveredThrough = progress.windowEnd;
         progress.lastSuccessAt = now;
       }
+      await saveAttempt(db, args.brainInstanceId, source, progress, status, errors, now, evidence);
       progress.caughtUp = complete && progress.coveredThrough >= progress.targetEnd;
     } else throw new Error("Unknown ingestion operation");
   }

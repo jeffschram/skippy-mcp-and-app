@@ -314,6 +314,7 @@ export type SkippyClient = {
       metadata?: unknown;
     },
   ): Promise<unknown>;
+  getIngestionProgress(brainInstanceId: string, input: { source: string; cursor?: string; completion?: { runId: string; windowStart: number; windowEnd: number; paginationComplete: boolean; persistenceComplete: boolean; counts: { read: number; ignored: number; accepted: number }; errors?: string[] } }): Promise<unknown>;
   updateSourceSyncStatus(
     brainInstanceId: string,
     status: {
@@ -1666,6 +1667,10 @@ export function createSkippyToolHandlers(
 
     async recordIngestionRun(input: Parameters<SkippyClient["recordIngestionRun"]>[1]) {
       return await client.recordIngestionRun(brainInstanceId, input);
+    },
+
+    async getIngestionProgress(input: Parameters<SkippyClient["getIngestionProgress"]>[1]) {
+      return client.getIngestionProgress(brainInstanceId, input);
     },
 
     async updateSourceSyncStatus(input: Parameters<SkippyClient["updateSourceSyncStatus"]>[1]) {
