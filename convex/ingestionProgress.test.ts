@@ -62,6 +62,52 @@ const object = (source: string, token: string, key = "message-1/action-a") => ({
 });
 
 describe("durable source ingestion", () => {
+  it("separates historical failures from a fresh claim and successful recovery", async () => {
+    const f = setup();
+    const c = await f.run(updateSourceSyncStatus, statusArgs("gmail:a", "old", "claim"));
+    await f.run(updateSourceSyncStatus, { ...statusArgs("gmail:a", "old", "finish", finish(c.token)), status: "failed", errors: ["old attachment failure"] });
+    const retry = await f.run(updateSourceSyncStatus, statusArgs("gmail:a", "new", "claim"));
+    expect(retry.currentErrors).toEqual([]);
+    expect(retry.historicalFailure.errors).toContain("old attachment failure");
+    expect(retry.caughtUp).toBe(false);
+    expect([retry.windowStart, retry.windowEnd]).toEqual([c.windowStart, c.windowEnd]);
+    const done = await f.run(updateSourceSyncStatus, statusArgs("gmail:a", "new", "finish", finish(retry.token)));
+    expect(done.status).toBe("completed");
+    expect(done.currentErrors).toEqual([]);
+    expect(done.historicalFailure.errors).toContain("old attachment failure");
+    expect(done.lastErrors).toBeUndefined();
+  });
+
+  it("looks up and replays exact receipts without changing existing entities or advancing checkpoints", async () => {
+    const f = setup();
+    const source = "imessage:local:all";
+    const c = await f.run(updateSourceSyncStatus, statusArgs(source, "first", "claim"));
+    const saved = await f.run(ingestObject, object(source, c.token, "fingerprint:reference"));
+    await f.run(updateSourceSyncStatus, { ...statusArgs(source, "first", "finish", finish(c.token, 1)), status: "failed" });
+    await f.db.patch(saved.entityId, { title: "Owner edit", processingState: "archived" });
+    const before = structuredClone(f.rows());
+    const identity = { objectKey: "fingerprint:reference", entityType: "note" };
+    const lookup = await f.run(updateSourceSyncStatus, statusArgs(source, "", "inspect_receipt", identity));
+    expect(lookup.result.entityId).toBe(saved.entityId);
+    expect(f.rows()).toEqual(before);
+    expect((await f.run(updateSourceSyncStatus, statusArgs("imessage:other", "", "inspect_receipt", identity))).found).toBe(false);
+    const retry = await f.run(updateSourceSyncStatus, statusArgs(source, "retry", "claim"));
+    const replay = { ...identity, token: retry.token, expectedEntityId: saved.entityId };
+    await expect(f.run(updateSourceSyncStatus, statusArgs(source, "other-run", "replay_receipt", replay))).rejects.toThrow("Run does not own");
+    await expect(f.run(updateSourceSyncStatus, statusArgs(source, "retry", "replay_receipt", { ...replay, expectedEntityId: "wrong" }))).rejects.toThrow("does not match");
+    await f.run(updateSourceSyncStatus, statusArgs(source, "retry", "replay_receipt", replay));
+    await f.run(updateSourceSyncStatus, statusArgs(source, "retry", "replay_receipt", replay));
+    const report = await f.run(updateSourceSyncStatus, statusArgs(source, "retry", "inspect"));
+    expect(report.replays).toBe(1);
+    expect(report.coveredThrough).toBeUndefined();
+    expect(await f.db.get(saved.entityId)).toEqual(before.find(r => r._id === saved.entityId));
+    await f.db.patch(saved.entityId, { brainInstanceId: "brain:other" });
+    await expect(f.run(updateSourceSyncStatus, statusArgs(source, "retry", "inspect_receipt", identity))).rejects.toThrow("outside this brain");
+    await f.db.patch(saved.entityId, { brainInstanceId: "brain:b" });
+    const done = await f.run(updateSourceSyncStatus, statusArgs(source, "retry", "finish", finish(retry.token, 1)));
+    expect(done.status).toBe("completed");
+  });
+
   // Synthetic provider identities: these validate persistence, not connector discovery.
   it.each(["gmail:fixture", "messages:fixture", "calendar:fixture", "quick_capture:fixture"])(
     "%s reconciles exact item identities across cycles, interruption and replay", async source => {

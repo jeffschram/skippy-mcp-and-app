@@ -1030,6 +1030,7 @@ export default defineSchema({
     .index("by_brain_run", ["brainInstanceId", "runKey"]),
 
   ingestionReceipts: defineTable({
+    lastReplayToken: v.optional(v.string()),
     brainInstanceId: v.id("brainInstances"),
     key: v.string(),
     result: v.any(),

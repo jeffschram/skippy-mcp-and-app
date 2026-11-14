@@ -19,6 +19,27 @@ export function requireLease(row: any, token: string, now: number) {
   return row.metadata.progress;
 }
 
+// Old lastErrors remain historical even when a later window succeeds.
+function progressReport(progress: any, errors: string[] = []) {
+  const { lastErrors, lastFailureAt, ...rest } = progress ?? {};
+  return { ...rest, errors, currentErrors: errors,
+    historicalFailure: rest.historicalFailure ?? (lastFailureAt ? { at: lastFailureAt, errors: lastErrors ?? [] } : null) };
+}
+
+async function lookupReceipt(db: any, brain: any, source: string, objectKey: string, entityType: string) {
+  if (typeof objectKey !== "string" || !objectKey.trim() || objectKey.length > 500) throw new Error("Stable source objectKey required");
+  if (!["task", "project", "person", "company", "link", "note", "goal", "memory"].includes(entityType)) throw new Error("Invalid receipt entityType");
+  const key = JSON.stringify([source, objectKey, entityType]);
+  const receipt = await db.query("ingestionReceipts").withIndex("by_brain_key", (q: any) =>
+    q.eq("brainInstanceId", brain).eq("key", key)).first();
+  if (receipt) {
+    const entityId = receipt.result.entityId ?? receipt.result.memoryId;
+    const entity = entityId ? await db.get(entityId) : null;
+    if (!entity || entity.brainInstanceId !== brain) throw new Error("Previously ingested object is missing or outside this brain; reconcile before completion");
+  }
+  return { key, receipt };
+}
+
 export async function updateProgress(db: any, args: any, now: number) {
   const input = args.metadata.ingestion;
   const { source, runId, operation } = input;
@@ -28,7 +49,25 @@ export async function updateProgress(db: any, args: any, now: number) {
   const row = await sourceRow(db, args.brainInstanceId, source);
   const old = row?.metadata?.progress;
   if (operation === "inspect") return { statusKey, status: row?.status === "running" && old?.leaseUntil <= now
-    ? "failed" : row?.status ?? "idle", errors: row?.errors ?? [], ...(old ?? {}) };
+    ? "failed" : row?.status ?? "idle", ...progressReport(old, row?.errors ?? []) };
+  if (operation === "inspect_receipt") {
+    const { receipt } = await lookupReceipt(db, args.brainInstanceId, source, input.objectKey, input.entityType);
+    return { statusKey, found: !!receipt, result: receipt?.result ?? null };
+  }
+  if (operation === "replay_receipt") {
+    const lease = requireLease(row, input.token, now);
+    if (lease.runId !== runId) throw new Error("Run does not own source");
+    const { receipt } = await lookupReceipt(db, args.brainInstanceId, source, input.objectKey, input.entityType);
+    if (!receipt) throw new Error("No receipt for this exact source/objectKey/entityType; reconcile before completion");
+    const entityId = receipt.result.entityId ?? receipt.result.memoryId;
+    if (!input.expectedEntityId || input.expectedEntityId !== entityId) throw new Error("Receipt entity does not match expectedEntityId");
+    // Same receipt replay is idempotent within this claim, including a lost response.
+    if (receipt.lastReplayToken !== input.token) {
+      await db.patch(receipt._id, { lastReplayToken: input.token });
+      await db.patch(row._id, { metadata: { ...row.metadata, progress: { ...lease, replays: lease.replays + 1 } } });
+    }
+    return { statusKey, status: "duplicate_existing", result: receipt.result };
+  }
   if (typeof runId !== "string" || !runId.trim()) throw new Error("runId required");
   let progress: any;
   let status: "running" | "completed" | "failed" = "running";
@@ -37,18 +76,18 @@ export async function updateProgress(db: any, args: any, now: number) {
     if (args.status !== "running") throw new Error("Claim must be running");
     if (row?.status === "running" && old?.leaseUntil > now) {
       // Repeating a lost claim response is safe; other runs cannot steal it.
-      if (old.runId === runId) return { statusKey, ...old, status: "running" };
+      if (old.runId === runId) return { statusKey, ...progressReport(old), status: "running" };
       throw new Error("Source already claimed by another run");
     }
     const baseline = old?.baseline ?? now - WINDOW_MS;
     const replay = old && row.status !== "completed";
     const windowStart = replay ? old.windowStart : Math.max(baseline, (old?.coveredThrough ?? baseline) - OVERLAP_MS);
     const windowEnd = replay ? old.windowEnd : Math.min(now, windowStart + WINDOW_MS);
-    progress = { ...old, baseline, windowStart, windowEnd, targetEnd: now, runId,
+    progress = { ...progressReport(old), counts: { read: 0, ignored: 0, accepted: 0 }, caughtUp: false, baseline, windowStart, windowEnd, targetEnd: now, runId,
       token: makeToken("ingestion"), leaseUntil: now + LEASE_MS, writes: 0, replays: 0 };
   } else {
     if (operation === "finish" && row?.status !== "running" && old?.runId === runId && old?.token === input.token) {
-      return { statusKey, status: row.status, ...old };
+      return { statusKey, status: row.status, ...progressReport(old, row.errors ?? []) };
     }
     progress = { ...requireLease(row, input.token, now) };
     if (progress.runId !== runId) throw new Error("Run does not own source");
@@ -66,7 +105,7 @@ export async function updateProgress(db: any, args: any, now: number) {
       status = complete ? "completed" : "failed";
       errors = complete ? [] : [...(args.errors ?? []), "Incomplete source coverage or persistence; replay required"];
       progress = { ...progress, counts, leaseUntil: 0,
-        ...(!complete ? { lastFailureAt: now, lastErrors: errors } : {}) };
+        ...(!complete ? { historicalFailure: { at: now, errors } } : {}) };
       if (complete) {
         progress.coveredThrough = progress.windowEnd;
         progress.lastSuccessAt = now;
@@ -74,6 +113,8 @@ export async function updateProgress(db: any, args: any, now: number) {
       progress.caughtUp = complete && progress.coveredThrough >= progress.targetEnd;
     } else throw new Error("Unknown ingestion operation");
   }
+  delete progress.errors;
+  delete progress.currentErrors;
   const patch = { statusKey, harness: args.harness, status, sourceSystemsChecked: [source],
     startedAt: operation === "claim" ? now : row.startedAt, lastHeartbeatAt: now,
     ...(status !== "running" ? { completedAt: now } : {}), errors,
@@ -81,7 +122,7 @@ export async function updateProgress(db: any, args: any, now: number) {
     metadata: { role: args.metadata.role ?? "agenda", progress }, updatedAt: now };
   if (row) await db.patch(row._id, patch);
   else await db.insert("sourceSyncStatuses", { ...patch, brainInstanceId: args.brainInstanceId, createdAt: now });
-  return { statusKey, status, ...progress };
+  return { statusKey, status, ...progressReport(progress, errors) };
 }
 
 export async function checkRunCoverage(db: any, args: any, requireComplete = true) {
@@ -92,7 +133,7 @@ export async function checkRunCoverage(db: any, args: any, requireComplete = tru
   for (const source of sources) {
     const row = await sourceRow(db, args.brainInstanceId, source);
     const p = row?.metadata?.progress;
-    reports.push({ source, status: row?.status ?? "skipped", progress: p ?? null, errors: row?.errors ?? [] });
+    reports.push({ source, status: row?.status ?? "skipped", progress: p ? progressReport(p, row?.errors ?? []) : null, errors: row?.errors ?? [] });
     if (requireComplete && (row?.status !== "completed" || p?.runId !== runId || !p?.caughtUp)) {
       throw new Error(`Source ${source} is skipped, failed, busy or still catching up; record aggregate failed`);
     }
