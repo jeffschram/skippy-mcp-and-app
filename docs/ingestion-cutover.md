@@ -39,3 +39,19 @@ Stop or roll back on missing IDs, incomplete pages, uncertain source availabilit
 ## Current acceptance
 
 No cutover, credential removal, host process inspection or post-cutover scheduled reads/writes occurred in task 9. Replacement acceptance remains unmet. Documentation publication does not complete task 9 or authorize cleanup. Resume from qualification with the evidence above, then execute the staged handoff on the qualified deployment.
+
+## Messages incremental identity (owner-approved November 13, 2026)
+
+The owner approved timestamp/content fingerprints because the native Messages connector reads bodies but omits permanent message IDs. Agenda v8 uses the read-only `derive_message_identities` tool to compute `imessage-fingerprint-v1` SHA-256 external IDs in memory from approved source scope, chat GUID, resolved sender handle (or self), lossless UTC timestamp, exact body and sorted attachment IDs. Local response references, unread state, names, summaries and ingestion time are excluded. Fingerprints are explicitly derived, never stored as provider `messageId`. Accepted provenance stores epoch-ms `sourceTimestamp` and chat `threadId`.
+
+Existing Convex claims freeze the current server time, retain failed bounds, and advance `coveredThrough` only after successful exhaustive reads and required writes. The next window includes a 15-minute overlap. Atomic object receipts reuse the fingerprint plus semantic output discriminator to preserve existing entities on replay. Ignored messages contribute counts but do not create raw archives.
+
+Qualification must test the deployed scheduled Codex path, overlap and failed-window recovery. Unknown senders, missing necessary content, capped chat enumeration and indistinguishable repeated records remain coverage failures. This approach does not distinguish two identical messages at the exact same instant; edits create another fingerprint and require semantic reconciliation. Late sync and edits outside the overlap, and deletions, are not covered. Calendar mirror parity remains a separate cutover requirement. This section changes the accepted identity strategy, not the requirement for live acceptance evidence.
+
+## Desktop pilot protocol repair (2026-11-14)
+
+The owner reports that a fresh ChatGPT desktop worker discovered v8 and read all approved sources, including the two chats denied in CLI. Its first write pass saved a Gmail task and harness focus, preserved an existing Messages note and recorded an unsupported-audio gap. Gmail and Messages claims closed failed without checkpoint advancement. This is owner-supplied pilot evidence, not scheduled qualification. The desktop worker reported a Gmail safety-review rejection; historical source errors alone do not explain or resolve that rejection.
+
+Agenda v9 excludes credential-bearing items before fingerprinting, retaining only an aggregate exclusion count. The approved unsupported-audio exception is explicit and reported separately from noise. Source reports distinguish current errors from timestamped historical failures and reset current counts/caughtUp on a new claim. Existing atomic receipts can be inspected by exact source/objectKey/entityType and replayed with an active lease and expected entity ID through update_source_sync_status. Receipt-only replay preserves the entity and provenance, rejects missing/mismatched/cross-brain targets, and counts once per receipt per claim. It does not adopt legacy records without receipts.
+
+Replay the frozen failed windows in a fresh desktop worker after loading v9. Do not force checkpoints, bypass safety review, or start a second schedule. Confirm the original receipt key and entity before reuse; unavailable keys remain unresolved. Keep CLI Agenda paused. Full coverage, scheduled reliability and Calendar mirror parity remain unqualified.

@@ -2,6 +2,16 @@ import { describe, expect, it } from "vitest";
 import { buildCodexArgs, buildCodexSpawnEnv } from "./codex.js";
 
 describe("buildCodexArgs", () => {
+  it("uses automatic review without blanket bypass, before resume", () => {
+    const args = buildCodexArgs({ worktreePath: "/tmp/task", threadId: "thread", automaticApprovalReview: true });
+    expect(args).toContain("--approve-for-me");
+    expect(args).not.toContain("--dangerously-bypass-approvals-and-sandbox");
+    expect(args.indexOf("--approve-for-me")).toBeLessThan(args.indexOf("resume"));
+  });
+  it("rejects conflicting automatic review and bypass policies", () => {
+    expect(() => buildCodexArgs({ worktreePath: "/tmp/task", automaticApprovalReview: true, bypassPermissions: true })).toThrow("cannot be combined");
+  });
+
   it("builds fresh-session arguments", () => {
     expect(buildCodexArgs({ worktreePath: "/tmp/skippy-task" })).toEqual([
       "exec",

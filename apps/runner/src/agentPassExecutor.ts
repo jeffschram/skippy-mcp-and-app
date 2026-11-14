@@ -120,10 +120,11 @@ export async function executeAgentPass(
       // model and role-scoped token; absent model = harness default.
       model: pass.model,
       mcpToken: scopedToken,
-      // The host's existing chat opt-in governs unattended passes too; without
-      // it, actions outside the harness auto-allow are declined below and the
-      // pass degrades to MCP-only work rather than stranding on a card.
-      bypassPermissions: config.chatBypassPermissions,
+      // Owner-authorized native Agenda reads need Codex's approval reviewer.
+      // Do not inherit chat's blanket bypass: denials must remain effective.
+      automaticApprovalReview: pass.roleKey === "agenda" && adapter.harness === "codex",
+      bypassPermissions: pass.roleKey === "agenda" && adapter.harness === "codex"
+        ? false : config.chatBypassPermissions,
       signal: abort.signal,
       onEvent: () => {},
       requestApproval: async (request) => {

@@ -136,6 +136,17 @@ describe("executeAgentPass", () => {
     });
   });
 
+  it("uses sandboxed automatic review only for Codex Agenda, even when chat bypass is on", async () => {
+    for (const roleKey of ["agenda", "finance"]) {
+      const plane = fakePlane();
+      const { adapter, requests } = fakeAdapter({ outcome: "completed" });
+      const codex = { ...adapter, harness: "codex" as const };
+      await executeAgentPass(config, plane, { ...pass, roleKey, harness: "codex" }, codex);
+      expect(requests[0]?.automaticApprovalReview).toBe(roleKey === "agenda");
+      expect(requests[0]?.bypassPermissions).toBe(roleKey !== "agenda");
+    }
+  });
+
   it("reports a failed pass with the harness error", async () => {
     const plane = fakePlane();
     const { adapter } = fakeAdapter({ outcome: "failed", errorMessage: "boom" });

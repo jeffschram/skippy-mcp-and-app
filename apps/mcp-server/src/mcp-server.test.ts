@@ -365,6 +365,23 @@ function textResult(result: Awaited<ReturnType<Client["callTool"]>>) {
 }
 
 describe("Skippy MCP manifest", () => {
+  it("derives Messages IDs through the MCP transport without a backend write", async () => {
+    const server = createMcpServer(createFakeClient(), "brain_123");
+    const client = new Client({ name: "identity-test", version: "0.1.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    try {
+      await server.connect(serverTransport);
+      await client.connect(clientTransport);
+      const result = await client.callTool({ name: "derive_message_identities", arguments: {
+        source: "imessage:local:all", chatGuid: "chat-test", windowStart: 0, windowEnd: 2000,
+        senders: [], messages: [{ sender: "me", date: "1970-01-01T00:00:01Z", body: "Test" }],
+      } });
+      expect(result.isError).not.toBe(true);
+      expect(JSON.stringify(result)).toContain("imessage-fingerprint-v1:");
+      expect(JSON.stringify(result)).not.toContain('"body"');
+    } finally { await client.close(); await server.close(); }
+  });
+
   it("teaches harnesses the Skippy rubric-first workflow", async () => {
     const server = createMcpServer(createFakeClient(), "brain_123");
     const client = new Client({ name: "manifest-test", version: "0.1.0" });
@@ -522,7 +539,8 @@ describe("Skippy MCP manifest", () => {
       expect(markQuickCaptureHandled?.inputSchema.properties?.sourceRunId).toBeDefined();
       expect(capture?.description).toContain("accepted note directly");
       expect(ask?.annotations?.readOnlyHint).toBe(false);
-      expect(refreshFocusSummary?.description).toContain("Generate and store");
+      expect(refreshFocusSummary?.description).toContain("without AI/API calls");
+      expect(refreshFocusSummary?.inputSchema.properties?.mode).toBeDefined();
       expect(recordEntityReview?.description).toContain("Record a review of an accepted entity");
       expect(markTaskInProgress?.description).toContain("before doing meaningful work");
       expect(dispatchNotifications?.description).toContain("Use dryRun first");
@@ -866,6 +884,7 @@ describe("Skippy MCP manifest", () => {
         name: "get_context_bundle",
         arguments: {
           query: " rollout preferences ",
+          sourceIdentity: { sourceSystem: "gmail", field: "messageId", value: "exact-id" },
           relatedEntityRefs: [{ entityType: "project", entityId: "project_123" }],
           memoryLimit: 5,
         },
@@ -876,6 +895,7 @@ describe("Skippy MCP manifest", () => {
           brainInstanceId: "brain_123",
           input: {
             query: "rollout preferences",
+            sourceIdentity: { sourceSystem: "gmail", field: "messageId", value: "exact-id" },
             relatedEntityRefs: [{ entityType: "project", entityId: "project_123" }],
             memoryLimit: 5,
             entityLimit: 12,

@@ -738,7 +738,9 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_brain_source", ["brainInstanceId", "sourceSystem"])
-    .index("by_external", ["brainInstanceId", "sourceSystem", "externalId"]),
+    .index("by_external", ["brainInstanceId", "sourceSystem", "externalId"])
+    .index("by_message", ["brainInstanceId", "sourceSystem", "messageId"])
+    .index("by_event", ["brainInstanceId", "sourceSystem", "eventId"]),
 
   entitySourceRefs: defineTable({
     brainInstanceId: v.id("brainInstances"),
@@ -1028,6 +1030,7 @@ export default defineSchema({
     .index("by_brain_run", ["brainInstanceId", "runKey"]),
 
   ingestionReceipts: defineTable({
+    lastReplayToken: v.optional(v.string()),
     brainInstanceId: v.id("brainInstances"),
     key: v.string(),
     result: v.any(),

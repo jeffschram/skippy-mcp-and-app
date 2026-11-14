@@ -19,3 +19,13 @@ Codex app metadata alone does not establish runtime callability; official contex
 ## Verification for this change
 
 `pnpm check` passed all workspace and Convex typechecks and 1,297 tests. Focused scheduler/ingestion tests passed 37 cases. The LaunchAgent fragment was separately exercised against a temporary plist for preservation, explicit replacement, XML escaping and explicit empty removal; the installer itself was not run against the live host. `bash -n` and `git diff --check` passed.
+
+## Codex Agenda approval review
+
+The owner-authorized Messages qualification1151 exposed a separate approval failure: native reads succeeded for three chats but were denied for two while `codex exec` ran without an approval reviewer. The installed CLI0.154 supports `--approve-for-me`, which routes requests through Codex's automatic reviewer and retains its workspace-write sandbox.
+
+Codex Agenda turns now set `automaticApprovalReview` on the adapter request and explicitly disable inherited chat permission bypass. The adapter rejects review+bypass combinations. Other roles and interactive chat keep their current configuration. The reviewer can still deny requests; neither the adapter nor the unattended callback overrides that decision. Source scope, read-only instructions, scoped Skippy credentials and truthful durable completion remain required. Missing CLI support must fail the pass, never fall back to bypass. This mode does not add audio-reading capability or qualify Calendar mirror parity.
+
+Runner typecheck, build and149 tests pass, including role isolation, conflicting modes and flag placement. A bounded read-only adapter probe checks live connector access before rollout; final scheduler recovery/overlap acceptance remains a separate test.
+
+Live probe result (November13, thread01a1d752-06c4-7af0-be6b-6588d433d7c9): the updated adapter started with approval_policy on-request, approvals_reviewer auto_review and workspace-write sandbox (network disabled). It enumerated five chats and attempted one native message page per chat: three succeeded, two returned `read approval was canceled`. No retries, alternate readers or source/Skippy writes occurred. Native audio reading was still unavailable. Automatic review therefore does NOT establish access to every chat. This runner change remains uninstalled pending a supported connector-access resolution; the live daemon and paused Agenda configuration were left unchanged. This was an adapter access probe, not a scheduler ingestion/recovery qualification.

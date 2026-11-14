@@ -29,6 +29,7 @@ const COMMON_TOOLS = [
 const AGENDA_TOOLS = [
   ...COMMON_TOOLS,
   "get_importance_rubric",
+  "derive_message_identities",
   "ingest_object",
   "capture",
   "capture_thought",

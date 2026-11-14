@@ -15,8 +15,9 @@
  * default. Out-of-policy actions fail inside the sandbox rather than
  * escalating to the user. The publish gate stays in the runner (harness-
  * agnostic), so pushes/PRs still require explicit approval in the web app.
- * Interactive escalation via the Codex App Server protocol is a later
- * refinement.
+ * Scheduled Agenda passes opt into CLI 0.154 automatic approval review instead
+ * of silently denying connector confirmations; interactive callbacks still
+ * require a future App Server integration.
  */
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
@@ -30,12 +31,14 @@ export function buildCodexArgs({
   worktreePath,
   threadId,
   bypassPermissions,
+  automaticApprovalReview,
   skippyMcpUrl,
   model,
 }: {
   worktreePath: string;
   threadId?: string | undefined;
   bypassPermissions?: boolean | undefined;
+  automaticApprovalReview?: boolean | undefined;
   skippyMcpUrl?: string | undefined;
   /** Model tiering: `codex exec --model <name>`; absent = codex default. */
   model?: string | undefined;
@@ -59,7 +62,12 @@ export function buildCodexArgs({
     args.push("-c", `mcp_servers.skippy.bearer_token_env_var="SKIPPY_MCP_TOKEN"`);
   }
 
-  if (bypassPermissions) {
+  if (automaticApprovalReview && bypassPermissions) {
+    throw new Error("Automatic approval review cannot be combined with permission bypass");
+  }
+  if (automaticApprovalReview) {
+    args.push("--approve-for-me");
+  } else if (bypassPermissions) {
     // Codex's equivalent of --dangerously-skip-permissions. Chat-only, opt-in.
     args.push("--dangerously-bypass-approvals-and-sandbox");
   } else {
@@ -156,6 +164,7 @@ export class CodexAdapter implements HarnessAdapter {
       worktreePath,
       threadId,
       bypassPermissions: request.bypassPermissions,
+      automaticApprovalReview: request.automaticApprovalReview,
       skippyMcpUrl: this.options.skippyMcpUrl,
       model: request.model,
     });

@@ -1,3 +1,4 @@
+import { messageIdentities, messageIdentitySchema } from "./message-identity-helpers.js";
 import { OAUTH_TOOL_SCOPES } from "./oauth-tool-policy.js";
 import { authChallenge } from "./oauth.js";
 import type { McpPrincipal } from "@skippy/shared";
@@ -1531,17 +1532,22 @@ export function createMcpServer(
     {
       title: "Get context bundle",
       description:
-        "Read-only context bundle: scored memories, source refs, and related entity context for a query and/or entity refs.",
+        "Read-only context bundle: scored memories, source refs, and related entity context for a query and/or entity refs. sourceIdentity performs indexed exact provider-ID lookup without AI/API credits; inspect completeness and provenance before deduplication.",
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: z.object({
+        sourceIdentity: z.object({
+          sourceSystem: z.string().min(1),
+          field: z.enum(["externalId", "messageId", "eventId"]),
+          value: z.string().min(1).max(1000),
+        }).optional(),
         query: z.string().optional(),
         memoryType: memoryKindSchema.optional(),
         kinds: z.array(memoryKindSchema).optional(),
         relatedEntityRefs: z.array(entityRefSchema).optional(),
         includeArchived: z.boolean().optional(),
         memoryLimit: z.number().min(1).max(25).optional().describe("Default 8."),
-        entityLimit: z.number().min(1).max(40).optional().describe("Default 12."),
-        sourceLimit: z.number().min(1).max(40).optional().describe("Default 12."),
+        entityLimit: z.number().min(1).max(40).optional().describe("Default 12; maximum 40."),
+        sourceLimit: z.number().min(1).max(40).optional().describe("Default 12; maximum 40."),
       }),
     },
     async (args) => toolResult(await tools.getContextBundle(stripUndefined(args) as ContextBundleInput)),
@@ -1729,13 +1735,25 @@ export function createMcpServer(
   );
 
   server.registerTool(
+    "derive_message_identities",
+    {
+      title: "Derive Messages fingerprints",
+      description: "Compute versioned derived externalIds from one native Messages page in memory, without storing raw content. Supply resolved chat GUID, exact dates/body/attachment IDs and the page's sender mappings. Never put these fingerprints in messageId. Check inWindow and ambiguity, including duplicate fingerprints across pages, before ingestion.",
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: messageIdentitySchema,
+    },
+    async (args) => toolResult(messageIdentities(args)),
+  );
+
+  server.registerTool(
     "refresh_focus_summary",
     {
       title: "Refresh focus summary",
       description:
-        "Generate and store a fresh focus summary from accepted entities using the internal AI provider. The Now list holds actionable next moves only — standing context stays in memory.",
+        "Use mode harness to return grounded focus context and dismissals without AI/API calls; then persist harness-written output with generate_focus_summary. Default mode internal generates and stores with the configured AI provider. The Now list holds actionable next moves only — standing context stays in memory.",
       annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: false },
       inputSchema: z.object({
+        mode: z.enum(["internal", "harness"]).optional(),
         generatedAt: z.number().optional().describe("Epoch ms; defaults to now."),
         validUntil: z.number().optional().describe("Epoch ms after which the summary is stale."),
         policyVersion: z.string().optional(),
@@ -2834,7 +2852,7 @@ export function createMcpServer(
     {
       title: "Update source sync status",
       description:
-        "Update source status. Durable ingestion: metadata {role: agenda, ingestion: {operation: inspect|claim|heartbeat|finish, source, runId, token?, paginationComplete?, persistenceComplete?, counts?: {read,ignored,accepted}}}. Claim returns fenced token and frozen window; finish advances only complete persisted coverage. Load agenda-ingestion skill for protocol.",
+        "Update source status. Durable ingestion: metadata {role: agenda, ingestion: {operation: inspect|inspect_receipt|replay_receipt|claim|heartbeat|finish, source, runId, token?, objectKey?, entityType?, expectedEntityId?, paginationComplete?, persistenceComplete?, counts?: {read,ignored,accepted}}}. Claim freezes bounds; finish requires full coverage. Load agenda-ingestion for receipt and lease rules.",
       annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: true },
       inputSchema: z.object({
         statusKey: z.string().optional().describe("Stable status-row key. Defaults to source-sync."),
