@@ -1938,7 +1938,7 @@ export function createMcpServer(
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: z.object({
         calendarId: z.string().min(1).max(500),
-        event: z.record(z.string(), z.unknown()).describe("Google event fields per agenda-ingestion; exact id and updated required."),
+        event: z.record(z.string(), z.unknown()).describe("Google event fields per agenda-ingestion; exact id required; include updated when returned."),
         ingestion: z.object({ source: z.string().min(1), token: z.string().min(1) }),
       }),
     },
