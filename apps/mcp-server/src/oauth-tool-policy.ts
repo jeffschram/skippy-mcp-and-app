@@ -50,6 +50,7 @@ export const OAUTH_TOOL_SCOPES: Record<string, readonly string[]> = {
   "mark_task_done": ["skippy:read", "skippy:write"],
   "mark_task_in_progress": ["skippy:read", "skippy:write"],
   "plan_project": ["skippy:read", "skippy:write"],
+  "ingest_calendar_event": ["skippy:read", "skippy:write"],
   "propose_calendar_event": ["skippy:read", "skippy:write"],
   "record_decision": ["skippy:read", "skippy:write"],
   "record_entity_review": ["skippy:read", "skippy:write"],

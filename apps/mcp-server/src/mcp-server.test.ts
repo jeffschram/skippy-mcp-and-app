@@ -198,6 +198,7 @@ function createFakeClient(overrides: Partial<SkippyClient> = {}): SkippyClient {
       reviewUrl: "/interviews",
     }),
     recordIngestionRun: async () => ({ ok: true }),
+    ingestCalendarEvent: async () => ({ status: "created", googleWritten: false }),
     getIngestionProgress: async () => ({ history: [], isDone: true }),
     updateSourceSyncStatus: async () => ({ ok: true }),
     getOperatingRules: async () => [],
@@ -378,6 +379,23 @@ describe("Skippy MCP manifest", () => {
       const result = await client.callTool({ name: "get_ingestion_progress", arguments: { source: "gmail:fixture" } });
       expect(result.isError).not.toBe(true);
       expect(textResult(result).history).toEqual([]);
+    } finally { await client.close(); await server.close(); }
+  });
+
+  it("passes native calendar imports through the agenda MCP transport", async () => {
+    let received: unknown;
+    const server = createMcpServer(createFakeClient({ ingestCalendarEvent: async (brain, input) => {
+      received = { brain, input }; return { status: "created", googleWritten: false };
+    } }), "brain_123", { role: "agenda" });
+    const client = new Client({ name: "calendar-test", version: "0.1.0" });
+    const [ct, st] = InMemoryTransport.createLinkedPair();
+    try {
+      await server.connect(st); await client.connect(ct);
+      const args = { calendarId: "primary", event: { id: "event-1", updated: "2026-11-15T12:00:00Z", status: "cancelled" }, ingestion: { source: "calendar:fixture", token: "lease" } };
+      const result = await client.callTool({ name: "ingest_calendar_event", arguments: args });
+      expect(result.isError).not.toBe(true);
+      expect(received).toEqual({ brain: "brain_123", input: args });
+      expect(textResult(result).googleWritten).toBe(false);
     } finally { await client.close(); await server.close(); }
   });
 
@@ -2318,6 +2336,7 @@ describe("agent role tool scoping", () => {
   it("keeps full access for tokens without a role", async () => {
     const names = await listToolNames();
     expect(names.has("ingest_object")).toBe(true);
+    expect(names.has("ingest_calendar_event")).toBe(true);
     expect(names.has("submit_candidate_object")).toBe(true);
     expect(names.has("submit_memory_review_candidate")).toBe(true);
     expect(names.has("record_task_result")).toBe(true);

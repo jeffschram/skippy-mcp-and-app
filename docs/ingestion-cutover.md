@@ -1,3 +1,15 @@
+# Calendar ownership amendment — November 15, 2026
+
+This amendment supersedes older instructions below to preserve external Calendar writes. Skippy owns the agenda; Google is an inbound-only source. `ingest_calendar_event` imports exact provider revisions using source claim receipts. `propose_calendar_event` is a compatibility name for local creation only. New calendar action claims are disabled; old queued action records remain as audit history. No automatic replay to Google is permitted.
+
+Native ingestion re-reads the configured event-date horizon across each approved calendar and records that bounded coverage explicitly. An event-date search is not an exhaustive change feed. Missing provider revision fields, pagination or tools fail Calendar only, not independent Gmail/Messages. Explicit cancellations apply; absence never implies deletion. Preserve the legacy read-only importer until updates/cancellations/recurrence parity is verified. Do not delete credentials still used by that reader. The standalone historical gcal-write package must not be exposed to ingestion; retire its runtime registration during cutover.
+
+Calendar imports preserve Skippy-origin events, local links and snooze state. Imported Google-origin content follows newer provider timestamps. Field-level local override editing is separate, unfinished work, not a capability of this release.
+
+Deployment: publish backend and MCP together; verify agenda-ingestion v11 and ingest_calendar_event in the desktop connection before the next scheduled pass. Refresh stale tool discovery. Do not run a second schedule. Verify no in-flight calendar write lease before deployment; stop the legacy write timer and restart the runner with the new code. Do not force ingestion checkpoints.
+
+---
+
 # Ingestion cutover and retirement
 
 As of 2026-11-13, cutover is **blocked by replacement validation**. This document records a future operational procedure, not a completed migration or a tested rollback. Preserve the actual enabled/disabled state until qualification passes.

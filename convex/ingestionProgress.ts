@@ -29,7 +29,7 @@ function progressReport(progress: any, errors: string[] = []) {
 
 async function lookupReceipt(db: any, brain: any, source: string, objectKey: string, entityType: string) {
   if (typeof objectKey !== "string" || !objectKey.trim() || objectKey.length > 500) throw new Error("Stable source objectKey required");
-  if (!["task", "project", "person", "company", "link", "note", "goal", "memory"].includes(entityType)) throw new Error("Invalid receipt entityType");
+  if (!["task", "project", "person", "company", "link", "note", "goal", "memory", "calendar_event"].includes(entityType)) throw new Error("Invalid receipt entityType");
   const key = JSON.stringify([source, objectKey, entityType]);
   const receipt = await db.query("ingestionReceipts").withIndex("by_brain_key", (q: any) =>
     q.eq("brainInstanceId", brain).eq("key", key)).first();

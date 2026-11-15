@@ -224,6 +224,7 @@ export function createConvexSkippyClient(convexUrl: string, bridge: BridgeConnec
       client.mutation(archiveInterviewForBrainRef, { brainInstanceId, ...input }),
     recordIngestionRun: (brainInstanceId, run) =>
       client.mutation(recordIngestionRunRef, { brainInstanceId, ...run }),
+    ingestCalendarEvent: (brainInstanceId, input) => client.mutation(makeFunctionReference<"mutation">("calendar:ingestCalendarEvent"), { brainInstanceId, ...input }),
     getIngestionProgress: (brainInstanceId, input) => client.query(makeFunctionReference<"query">("ingestionEvidence:getProgress"), { brainInstanceId, ...input }),
     updateSourceSyncStatus: (brainInstanceId, status) =>
       client.mutation(updateSourceSyncStatusRef, { brainInstanceId, ...status }),

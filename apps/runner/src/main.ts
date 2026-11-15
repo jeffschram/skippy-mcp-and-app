@@ -287,26 +287,11 @@ async function main() {
    * having just tapped Approve, so this is the one loop where a five-second
    * wait reads as "did that work?".
    */
-  let calendarActionsBusy = false;
-  // Built on first use and then reused, so one in-memory access token serves
-  // every action instead of re-reading credentials from disk each poll.
+  // Retain the credential source for the read-only legacy importer until native
+  // coverage is validated. Calendar write execution is retired independently.
   let calendarTokenSource: ReturnType<typeof createCalendarTokenSource> | undefined;
   const calendarTokens = () => (calendarTokenSource ??= createCalendarTokenSource(os.homedir()));
-  const calendarTimer = config.connectors.includes("google_write")
-    ? setInterval(() => {
-        if (stopping || draining) return;
-        if (calendarActionsBusy) return;
-        calendarActionsBusy = true;
-        void runCalendarActionOnce(plane, { tokens: calendarTokens(), log })
-          .catch((error) => log("calendar action failed", { error: String(error) }))
-          .finally(() => {
-            calendarActionsBusy = false;
-          });
-      }, 2_000)
-    : undefined;
-  if (!calendarTimer) {
-    log("calendar action execution disabled", { reason: "google_write not in SKIPPY_RUNNER_CONNECTORS" });
-  }
+  log("calendar action execution disabled", { reason: "Google Calendar is read-only" });
 
   /*
    * Calendar mirror sync: Google -> Convex, read-only.
@@ -357,7 +342,6 @@ async function main() {
     clearInterval(chatClaimTimer);
     clearInterval(maintenanceClaimTimer);
     clearInterval(agentPassTimer);
-    if (calendarTimer) clearInterval(calendarTimer);
     if (calendarMirrorTimer) clearInterval(calendarMirrorTimer);
     await Promise.allSettled([...activeRuns.values(), ...activeChatTurns.values(), ...activeMaintenanceJobs.values(), ...activeAgentPasses.values()]);
     clearInterval(heartbeatTimer);

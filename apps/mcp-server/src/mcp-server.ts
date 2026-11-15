@@ -1931,11 +1931,26 @@ export function createMcpServer(
   );
 
   server.registerTool(
+    "ingest_calendar_event",
+    {
+      title: "Import a Google event into Skippy",
+      description: "Import into Skippy only with a source claim and receipt. Load agenda-ingestion.",
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: z.object({
+        calendarId: z.string().min(1).max(500),
+        event: z.record(z.string(), z.unknown()).describe("Google event fields per agenda-ingestion; exact id and updated required."),
+        ingestion: z.object({ source: z.string().min(1), token: z.string().min(1) }),
+      }),
+    },
+    async args => toolResult(await tools.ingestCalendarEvent(stripUndefined(args))),
+  );
+
+  server.registerTool(
     "propose_calendar_event",
     {
-      title: "Propose a Google Calendar event",
+      title: "Create a Skippy calendar event",
       description:
-        "Queue an event for the owner's Google Calendar. The lease-based runner executes it automatically. The result reports `conflicts` with events already on the calendar; relay them instead of claiming the time is free.",
+        "Save in Skippy only. Never writes Google. Relay returned conflicts.",
       annotations: {
         readOnlyHint: false,
         // Staging only adds; approval and execution are separate steps.
@@ -1944,6 +1959,7 @@ export function createMcpServer(
         openWorldHint: false,
       },
       inputSchema: z.object({
+        eventId: z.string().min(1).max(500).optional().describe("Local retry identity."),
         summary: z.string().min(1).describe("Event title"),
         start: z.number().describe("Start time, epoch milliseconds"),
         end: z.number().describe("End time, epoch milliseconds; must be after start"),
@@ -1951,17 +1967,17 @@ export function createMcpServer(
         location: z.string().optional(),
         isAllDay: z.boolean().optional().describe("All-day event; end is exclusive."),
         timeZone: z.string().optional().describe("IANA zone, e.g. America/New_York."),
-        calendarId: z.string().optional().describe("Defaults to the owner's primary calendar."),
+        calendarId: z.string().optional(),
         autoApprove: z
           .boolean()
           .optional()
           .describe(
-            "Deprecated compatibility option; events are always queued for execution.",
+            "Deprecated; local save only.",
           ),
         relatedEntityRefs: z
           .array(z.object({ entityType: z.string(), entityId: z.string() }))
           .optional()
-          .describe("Accepted entities this event came from, e.g. the task or person it serves."),
+          ,
       }),
     },
     async (args) =>
