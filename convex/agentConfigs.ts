@@ -40,7 +40,6 @@ function isValidRoleKey(roleKey: string) {
   );
 }
 
-const OWNER_TIME_ZONE = "America/New_York";
 
 const SEED_CONFIGS: Array<{
   roleKey: string;
@@ -55,16 +54,7 @@ const SEED_CONFIGS: Array<{
     displayName: "Agenda Agent",
     skillSlugs: ["harness-bootstrap", "agenda-ingestion"],
     connectorSlugs: ["google", "imessage"],
-    // Settled budget (docs/token-efficiency.md §2.7, owner decision
-    // 2026-08-29): hourly inside waking hours, and Agenda is the ONLY
-    // scheduled agent — every other role runs on demand. Seeds only apply on
-    // first insert; bump any live config in the Agents hub to match.
-    schedule: {
-      kind: "interval",
-      everyMinutes: 60,
-      window: { start: "09:00", end: "21:00" },
-      timeZone: OWNER_TIME_ZONE,
-    },
+    // Desktop ChatGPT owns the ingestion schedule. Retain role/token history.
     // Background triage doesn't need Opus-class reasoning (token tiering,
     // docs/token-efficiency.md §4). Interactive chat is never tiered down.
     model: "sonnet",
@@ -153,6 +143,9 @@ export const upsertForViewer = mutationGeneric({
       throw new Error(
         `invalid roleKey '${roleKey}': expected agenda, finance, task-executor, pm, or pm:{projectId}`,
       );
+    }
+    if (roleKey === "agenda" && (args.schedule || args.enabled === true)) {
+      throw new Error("Agenda ingestion is managed by the desktop ChatGPT schedule");
     }
     if (args.schedule) {
       validateAgentSchedule(args.schedule as AgentSchedule);
@@ -348,6 +341,8 @@ export const claimNextAgentPass = mutationGeneric({
     due.sort((a: any, b: any) => (a.nextDueAt ?? 0) - (b.nextDueAt ?? 0));
 
     for (const config of due) {
+      // Fence persisted old schedules, including callers running older runner code.
+      if (config.roleKey === "agenda") continue;
       // The lte range also matches configs with no nextDueAt at all
       // (enabled but unscheduled): never claimable.
       if (!config.nextDueAt || !config.schedule) continue;

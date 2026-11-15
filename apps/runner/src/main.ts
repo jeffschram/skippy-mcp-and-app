@@ -17,8 +17,6 @@ import {
   type ClaimedRun,
 } from "./controlPlane.js";
 import { executeAgentPass } from "./agentPassExecutor.js";
-import { createCalendarTokenSource, runCalendarActionOnce } from "./calendarActionExecutor.js";
-import { runCalendarMirrorSyncOnce } from "./calendarMirrorSync.js";
 import { executeCloseoutJob } from "./closeoutExecutor.js";
 import { ClaudeAdapter } from "./harness/claude.js";
 import { CodexAdapter } from "./harness/codex.js";
@@ -274,63 +272,7 @@ async function main() {
       .finally(() => { agentPassClaiming = false; });
   }, config.claimPollIntervalMs);
 
-  /*
-   * Calendar actions the owner approved in /review.
-   *
-   * Gated on the google_write connector rather than merely on credentials
-   * existing: a host that offers Google *reads* must not silently start
-   * writing to the calendar because a token file happens to be on disk
-   * (docs/connectors.md). Absent the slug, this loop never starts and approved
-   * actions simply wait.
-   *
-   * Polled at chat speed, not claim speed. The owner is standing in the app
-   * having just tapped Approve, so this is the one loop where a five-second
-   * wait reads as "did that work?".
-   */
-  // Retain the credential source for the read-only legacy importer until native
-  // coverage is validated. Calendar write execution is retired independently.
-  let calendarTokenSource: ReturnType<typeof createCalendarTokenSource> | undefined;
-  const calendarTokens = () => (calendarTokenSource ??= createCalendarTokenSource(os.homedir()));
-  log("calendar action execution disabled", { reason: "Google Calendar is read-only" });
-
-  /*
-   * Calendar mirror sync: Google -> Convex, read-only.
-   *
-   * Without it `calendarEvents` holds nothing but Skippy's own writes, so a
-   * proposal cannot warn "you already have this" — which is how Jury duty and a
-   * JetBlue flight both got booked twice (2026-09). Same google_write gate as
-   * the executor above: the mirror uses that connector's token, and a host not
-   * trusted with the calendar should not be reading it either.
-   *
-   * Ten minutes, not two seconds. This is background context, not a user
-   * waiting on a tap, and the incremental syncToken makes each pass cheap.
-   * The staleness is real and documented: an event added on the phone in the
-   * last ten minutes may not be in the mirror yet.
-   */
-  const CALENDAR_MIRROR_INTERVAL_MS = 10 * 60 * 1000;
-  let calendarMirrorBusy = false;
-  const syncCalendarMirror = () => {
-    if (stopping || draining) return;
-    if (calendarMirrorBusy) return;
-    calendarMirrorBusy = true;
-    void runCalendarMirrorSyncOnce(plane, { tokens: calendarTokens(), log })
-      .catch((error) => log("calendar mirror sync failed", { error: String(error) }))
-      .finally(() => {
-        calendarMirrorBusy = false;
-      });
-  };
-  const calendarMirrorTimer = config.connectors.includes("google_write")
-    ? setInterval(syncCalendarMirror, CALENDAR_MIRROR_INTERVAL_MS)
-    : undefined;
-  if (calendarMirrorTimer) {
-    // Once shortly after startup so a freshly restarted runner does not leave
-    // the mirror ten minutes stale; delayed a little so it does not compete
-    // with host registration and the first claim polls.
-    const firstMirrorSync = setTimeout(syncCalendarMirror, 15_000);
-    firstMirrorSync.unref?.();
-  } else {
-    log("calendar mirror sync disabled", { reason: "google_write not in SKIPPY_RUNNER_CONNECTORS" });
-  }
+  // Source ingestion belongs to the desktop ChatGPT schedule.
 
   const shutdown = async (signalName: string) => {
     if (stopping) return;
@@ -342,7 +284,6 @@ async function main() {
     clearInterval(chatClaimTimer);
     clearInterval(maintenanceClaimTimer);
     clearInterval(agentPassTimer);
-    if (calendarMirrorTimer) clearInterval(calendarMirrorTimer);
     await Promise.allSettled([...activeRuns.values(), ...activeChatTurns.values(), ...activeMaintenanceJobs.values(), ...activeAgentPasses.values()]);
     clearInterval(heartbeatTimer);
     process.exit(0);

@@ -6,7 +6,7 @@ vi.mock("./agentWorkbench", async (importOriginal) => ({
   ...await importOriginal<typeof import("./agentWorkbench")>(),
   requireHost: async () => ({ _id: "host:test", brainInstanceId: "brain:b" }),
 }));
-import { ingestCalendarEvent, upsertCalendarEvents, hostClaimCalendarSync, hostUpsertCalendarEvents, hostRecordCalendarSyncToken } from "./calendar";
+import { ingestCalendarEvent, upsertCalendarEvents } from "./calendar";
 import { getProgress, importLegacy } from "./ingestionEvidence";
 import { LEASE_MS, OVERLAP_MS, WINDOW_MS } from "./ingestionProgress";
 
@@ -325,28 +325,6 @@ describe("durable source ingestion", () => {
     const again = await f.run(updateSourceSyncStatus, statusArgs("gmail:a", "r2", "claim"));
     expect(again.windowStart).toBe(done.coveredThrough - OVERLAP_MS);
     expect(again.lastSuccessAt).toBe(now + 5 * WINDOW_MS);
-  });
-
-  it("fences concurrent mirror passes and retains the frozen full-sync window after failure", async () => {
-    const f = setup();
-    const args = { hostToken: "host", calendarId: "a" };
-    const c = await f.run(hostClaimCalendarSync, args);
-    await expect(f.run(hostClaimCalendarSync, args)).rejects.toThrow("already claimed");
-    vi.mocked(Date.now).mockReturnValue(now + LEASE_MS + 1);
-    const retry = await f.run(hostClaimCalendarSync, args);
-    expect(retry.windowAnchor).toBe(c.windowAnchor);
-    await expect(f.run(hostUpsertCalendarEvents, { ...args, claimToken: c.claimToken, events: [] })).rejects.toThrow("Stale calendar");
-    await expect(f.run(hostRecordCalendarSyncToken, { ...args, claimToken: c.claimToken, syncToken: "bad", status: "completed" })).rejects.toThrow("Stale calendar");
-    await f.run(hostRecordCalendarSyncToken, { ...args, claimToken: retry.claimToken, syncToken: null, status: "failed", errors: ["page two failed"] });
-    const third = await f.run(hostClaimCalendarSync, args);
-    expect(third.windowAnchor).toBe(c.windowAnchor);
-    await f.run(hostRecordCalendarSyncToken, { ...args, claimToken: third.claimToken, syncToken: "good", status: "completed" });
-    const fourth = await f.run(hostClaimCalendarSync, args);
-    expect(fourth.syncToken).toBe("good");
-    await f.run(hostRecordCalendarSyncToken, { ...args, claimToken: fourth.claimToken, syncToken: null, status: "failed" });
-    const row = f.rows().find(r => r.statusKey === "google_calendar:a")!;
-    expect(row.metadata.syncToken).toBe("good");
-    expect(row.metadata.lastSuccessAt).toBe(now + LEASE_MS + 1);
   });
 
   it("keeps calendar edits, instances, cancellation tombstones and separate calendars stable", async () => {

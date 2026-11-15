@@ -15,7 +15,7 @@ import {
   planCalendarEventWrite,
 } from "@skippy/shared";
 import { requireOwnedBrain } from "./auth";
-import { makeToken, requireHost } from "./agentWorkbench";
+import { requireHost } from "./agentWorkbench";
 import {
   groupDuplicatePendingCalendarActions,
   type PendingCalendarProposal,
@@ -359,29 +359,10 @@ export const hostClaimCalendarSync = mutation({
   args: { hostToken: v.string(), calendarId: v.string() },
   returns: v.object({ syncToken: v.union(v.string(), v.null()), claimToken: v.string(), windowAnchor: v.number() }),
   handler: async (ctx, args) => {
-    const host = await requireHost(ctx, args.hostToken);
-    const now = Date.now();
-    const row = await findSyncStatusRow(ctx.db, host.brainInstanceId, args.calendarId);
-    if (row?.metadata?.mirrorLeaseUntil > now) throw new Error("Calendar mirror already claimed");
-    const claimToken = makeToken("mirror");
-    const windowAnchor = row?.metadata?.windowAnchor ?? now;
-    const metadata = { ...row?.metadata, mirrorClaim: claimToken, mirrorLeaseUntil: now + 10 * 60_000, windowAnchor };
-    const patch = { harness: "calendar-mirror", status: "running" as const, startedAt: now, lastHeartbeatAt: now,
-      sourceSystemsChecked: ["calendar"], metadata, updatedAt: now };
-    if (row) await ctx.db.patch(row._id, patch);
-    else await ctx.db.insert("sourceSyncStatuses", { ...patch, brainInstanceId: host.brainInstanceId,
-      statusKey: syncStatusKey(args.calendarId), createdAt: now });
-    return { syncToken: row?.metadata?.syncToken ?? null, claimToken, windowAnchor };
+    await requireHost(ctx, args.hostToken);
+    throw new Error("Legacy calendar ingestion is retired; use ingest_calendar_event with a source claim");
   },
 });
-
-async function requireMirrorClaim(db: any, brain: any, calendarId: string, claimToken: string) {
-  const row = await findSyncStatusRow(db, brain, calendarId);
-  if (row?.metadata?.mirrorClaim !== claimToken || row.metadata.mirrorLeaseUntil <= Date.now()) {
-    throw new Error("Stale calendar mirror claim");
-  }
-  return row;
-}
 
 /** Host-token batch push from the runner's mirror sync. */
 export const hostUpsertCalendarEvents = mutationGeneric({
@@ -392,14 +373,8 @@ export const hostUpsertCalendarEvents = mutationGeneric({
     events: v.array(v.any()),
   },
   handler: async (ctx, args) => {
-    const host = await requireHost(ctx, args.hostToken);
-    const row = await requireMirrorClaim(ctx.db, host.brainInstanceId, args.calendarId, args.claimToken);
-    await ctx.db.patch(row._id, { lastHeartbeatAt: Date.now(), metadata: { ...row.metadata, mirrorLeaseUntil: Date.now() + 10 * 60_000 } });
-    return upsertCalendarEventsInternal(ctx.db, {
-      brainInstanceId: host.brainInstanceId,
-      calendarId: args.calendarId,
-      events: args.events,
-    });
+    await requireHost(ctx, args.hostToken);
+    throw new Error("Legacy calendar ingestion is retired; use ingest_calendar_event with a source claim");
   },
 });
 
@@ -416,19 +391,8 @@ export const hostRecordCalendarSyncToken = mutationGeneric({
     report: v.optional(v.any()),
   },
   handler: async (ctx, args) => {
-    const host = await requireHost(ctx, args.hostToken);
-    const row = await requireMirrorClaim(ctx.db, host.brainInstanceId, args.calendarId, args.claimToken);
-    await ctx.db.patch(row._id, { metadata: { ...row.metadata, mirrorLeaseUntil: 0,
-      ...(args.status === "completed" ? { windowAnchor: undefined } : {}) } });
-    return recordCalendarSyncTokenInternal(ctx.db, {
-      brainInstanceId: host.brainInstanceId,
-      calendarId: args.calendarId,
-      syncToken: args.syncToken,
-      status: args.status,
-      message: args.message,
-      errors: args.errors,
-      report: args.report,
-    });
+    await requireHost(ctx, args.hostToken);
+    throw new Error("Legacy calendar ingestion is retired; use ingest_calendar_event with a source claim");
   },
 });
 
