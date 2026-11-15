@@ -15,13 +15,10 @@
  * drift between them.
  */
 import {
-  buildEventResource,
   configDir,
   createCredentialLoader,
   createDiskStore,
   createTokenSource,
-  EventValidationError,
-  insertEvent,
   resolveCalendarId,
   type CreateEventInput,
   type TokenSource,
@@ -73,49 +70,9 @@ export async function executeCalendarAction(
   action: ClaimedCalendarAction,
   deps: { tokens: TokenSource; fetchImpl?: typeof fetch },
 ): Promise<CalendarActionOutcome> {
-  const input = toCreateEventInput(action);
-
-  // insertEvent builds the resource itself; doing it here first turns a
-  // malformed event into a clear local error before we spend a token refresh
-  // and a round trip on an insert Google will always refuse.
-  try {
-    buildEventResource(input);
-  } catch (error) {
-    const reason = error instanceof EventValidationError ? error.message : String(error);
-    return { outcome: "failed", error: `invalid event: ${reason}` };
-  }
-
-  let accessToken: string;
-  try {
-    accessToken = await deps.tokens.getAccessToken();
-  } catch (error) {
-    return {
-      outcome: "failed",
-      error: `Google credentials unavailable: ${error instanceof Error ? error.message : String(error)}`,
-    };
-  }
-
-  try {
-    const result = await insertEvent(input, accessToken, deps.fetchImpl ?? fetch);
-
-    if (result.status === "created") {
-      return {
-        outcome: "created",
-        etag: result.etag,
-        htmlLink: result.htmlLink,
-      };
-    }
-    if (result.status === "conflict") {
-      // 409 means this id already exists — the success case for a retry.
-      return { outcome: "conflict" };
-    }
-    return { outcome: "failed", error: result.error };
-  } catch (error) {
-    return {
-      outcome: "failed",
-      error: error instanceof Error ? error.message : String(error),
-    };
-  }
+  // Defense in depth for an action claimed by an older server before cutover.
+  // Do not even load credentials when external writes are disabled.
+  return { outcome: "failed", error: "Google Calendar is read-only; save events in Skippy." };
 }
 
 /**

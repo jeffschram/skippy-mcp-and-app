@@ -1,4 +1,5 @@
-import { mutation } from "./_generated/server";
+import { mutation, internalMutation } from "./_generated/server";
+import { prepareReceipt, saveReceipt } from "./ingestionProgress";
 import { internalQueryGeneric } from "convex/server";
 import { internalMutationGeneric } from "convex/server";
 import { mutationGeneric, queryGeneric } from "convex/server";
@@ -8,7 +9,6 @@ import {
   findOverlappingEvents,
   formatCalendarConflictWarning,
   formatStagedProposalWarning,
-  isValidGoogleEventId,
   mintGoogleEventId,
   normalizeGoogleEvent,
   partitionCalendarOverlaps,
@@ -17,7 +17,6 @@ import {
 import { requireOwnedBrain } from "./auth";
 import { makeToken, requireHost } from "./agentWorkbench";
 import {
-  findDuplicatePendingProposal,
   groupDuplicatePendingCalendarActions,
   type PendingCalendarProposal,
 } from "./calendarDedupeHelpers";
@@ -25,9 +24,9 @@ import {
 /* ------------------------------------------------------------------ */
 /* Calendar mirror                                                     */
 /*                                                                     */
-/* Google is the source of truth. This module keeps a local mirror so   */
-/* Skippy has a persisted sense of time, and owns the echo-safe write   */
-/* path for events Skippy itself creates.                              */
+/* Skippy owns the agenda; Google is an inbound-only source.           */
+/* Legacy mirror readers share the same identity/revision merge rules. */
+/* No calendar event creation queues a Google write.                    */
 /*                                                                     */
 /* Calendar deliberately bypasses ingestObject/triageItems: that path   */
 /* is for noisy prose sources and dedupes on fuzzy title similarity,    */
@@ -102,13 +101,25 @@ async function upsertCalendarEventsInternal(
     }
 
     const existing = await findByExternalId(db, args.brainInstanceId, sourceSystem, incoming.externalId, args.calendarId);
+    const sourceUpdatedAt = typeof (raw as any)?.updated === "string" ? Date.parse((raw as any).updated) : NaN;
+    if (existing?.origin !== "skippy" && existing?.sourceUpdatedAt !== undefined && !Number.isFinite(sourceUpdatedAt)) {
+      throw new Error("Provider updated timestamp required to reconcile a previously versioned calendar event");
+    }
+    if (existing?.origin === "skippy" || (existing?.sourceUpdatedAt !== undefined && sourceUpdatedAt <= existing.sourceUpdatedAt)) {
+      skipped += 1;
+      continue;
+    }
     if (existing && incoming.status === "cancelled") {
-      await db.patch(existing._id, { status: "cancelled", etag: incoming.etag ?? existing.etag, lastSyncedAt: now, updatedAt: now });
+      await db.patch(existing._id, { status: "cancelled", etag: incoming.etag ?? existing.etag, ...(Number.isFinite(sourceUpdatedAt) ? { sourceUpdatedAt } : {}), lastSyncedAt: now, updatedAt: now });
       cancelled += 1;
       updated += 1;
       continue;
     }
     const plan = planCalendarEventWrite(existing, incoming, now);
+    if (Number.isFinite(sourceUpdatedAt)) {
+      if (plan.action === "insert") plan.doc.sourceUpdatedAt = sourceUpdatedAt;
+      else plan.patch.sourceUpdatedAt = sourceUpdatedAt;
+    }
 
     if (plan.action === "insert") {
       await db.insert("calendarEvents", { ...plan.doc, brainInstanceId: args.brainInstanceId });
@@ -138,6 +149,40 @@ export const upsertCalendarEvents = internalMutationGeneric({
     now: v.optional(v.number()),
   },
   handler: async ({ db }, args) => upsertCalendarEventsInternal(db, args),
+});
+
+/** Native connector import: writes only Skippy, atomically with its source receipt. */
+export const ingestCalendarEvent = internalMutation({
+  args: {
+    brainInstanceId: v.id("brainInstances"), calendarId: v.string(),
+    event: v.any(), ingestion: v.object({ source: v.string(), token: v.string() }),
+  },
+  returns: v.any(),
+  handler: async ({ db }, args) => {
+    if (!args.calendarId.trim() || args.calendarId.length > 500) throw new Error("Exact calendarId required");
+    const raw = args.event;
+    if (JSON.stringify(raw).length > 16000 || (typeof raw?.description === "string" && raw.description.length > 500)) throw new Error("Send concise event fields; description maximum 500 characters");
+    const incoming = normalizeGoogleEvent(raw, args.calendarId);
+    const revision = typeof raw?.updated === "string" ? Date.parse(raw.updated) : NaN;
+    if (!incoming || !Number.isFinite(revision)) throw new Error("Exact provider event ID, updated timestamp and event times (unless cancelled) required");
+    if (incoming.status !== "cancelled" && (!raw.end || incoming.endAt <= incoming.startAt)) throw new Error("Complete event start/end required");
+    if (incoming.isMaster) throw new Error("Import expanded recurring instances, not series masters");
+    const now = Date.now();
+    const objectKey = JSON.stringify([args.calendarId, incoming.externalId, revision, incoming.etag ?? null]);
+    const prepared = await prepareReceipt(db, args.brainInstanceId, { ...args.ingestion, objectKey }, "calendar_event", now);
+    if (prepared?.receipt) return { ...prepared.receipt.result, status: "duplicate_existing", receiptReplayed: true };
+    const before = await findByExternalId(db, args.brainInstanceId, GOOGLE_CALENDAR_SOURCE_SYSTEM, incoming.externalId, args.calendarId);
+    const preserved = before?.origin === "skippy" || (before?.sourceUpdatedAt !== undefined && revision <= before.sourceUpdatedAt);
+    await upsertCalendarEventsInternal(db, { brainInstanceId: args.brainInstanceId, calendarId: args.calendarId, events: [raw], now });
+    const after = await findByExternalId(db, args.brainInstanceId, GOOGLE_CALENDAR_SOURCE_SYSTEM, incoming.externalId, args.calendarId);
+    if (!after) throw new Error("Calendar persistence failed");
+    const result = { entityType: "calendar_event", entityId: after._id,
+      status: preserved ? "preserved_existing" : before ? "updated" : "created",
+      externalId: incoming.externalId, calendarId: args.calendarId, objectKey,
+      sourceUpdatedAt: after.sourceUpdatedAt ?? null, googleWritten: false };
+    await saveReceipt(db, args.brainInstanceId, prepared, result, now);
+    return result;
+  },
 });
 
 async function findSyncStatusRow(db: any, brainInstanceId: any, calendarId: string) {
@@ -480,46 +525,17 @@ export const draftCalendarEvent = internalMutationGeneric({
     }
 
     const externalId = args.eventId ?? mintGoogleEventId();
-    if (!isValidGoogleEventId(externalId)) {
-      // Google rejects anything outside base32hex at insert time; failing here
-      // turns a confusing remote error into a clear local one.
-      throw new Error(`invalid Google event id: ${externalId}`);
-    }
+    if (!externalId.trim() || externalId.length > 500) throw new Error("Stable local eventId must be 1–500 characters");
 
     const duplicate = await findByExternalId(
       db,
       args.brainInstanceId,
-      GOOGLE_CALENDAR_SOURCE_SYSTEM,
+      "skippy_calendar",
       externalId,
       args.calendarId,
     );
     if (duplicate) {
-      return { status: "already_staged", calendarEventId: duplicate._id, externalId };
-    }
-
-    // 2026-09-03: the guard above only catches a re-staged id — a fresh
-    // proposal for the same real-world event mints a NEW id every time, which
-    // is how the hourly agenda pass stacked 24 duplicate proposals (one event
-    // proposed 15 times). Compare content against unsettled proposals BEFORE
-    // writing anything, including on the autoApprove path: an owner-requested
-    // event that duplicates a staged one should point at the original, not
-    // race it to Google.
-    const pendingProposals = await loadPendingCalendarProposals(db, args.brainInstanceId);
-    const duplicatePending = findDuplicatePendingProposal(
-      { calendarId: args.calendarId, summary: args.title, start: args.startAt, end: args.endAt },
-      pendingProposals.map((entry) => entry.proposal),
-    );
-    if (duplicatePending) {
-      const existingAction = pendingProposals.find(
-        (entry) => entry.proposal.id === duplicatePending.id,
-      )?.action;
-      return {
-        status: "duplicate_pending",
-        pendingActionId: duplicatePending.id,
-        externalId: existingAction?.externalMessageId,
-        subject: duplicatePending.summary,
-        pendingStatus: existingAction?.status,
-      };
+      return { status: "already_saved", calendarEventId: duplicate._id, externalId };
     }
 
     // Does the owner already have something here? The 409/eventId guard above
@@ -558,11 +574,11 @@ export const draftCalendarEvent = internalMutationGeneric({
 
     const calendarEventId = await db.insert("calendarEvents", {
       brainInstanceId: args.brainInstanceId,
-      sourceSystem: GOOGLE_CALENDAR_SOURCE_SYSTEM,
+      sourceSystem: "skippy_calendar",
       calendarId: args.calendarId,
       externalId,
       origin: "skippy",
-      remoteState: "pending_remote",
+
       title: args.title,
       description: args.description,
       location: args.location,
@@ -577,41 +593,16 @@ export const draftCalendarEvent = internalMutationGeneric({
       updatedAt: now,
     });
 
-    const pendingActionId = await db.insert("pendingActions", {
-      brainInstanceId: args.brainInstanceId,
-      actionType: "calendar_event_create",
-      status: "approved",
-      subject: args.title,
-      body: JSON.stringify({
-        calendarId: args.calendarId,
-        eventId: externalId,
-        summary: args.title,
-        description: args.description,
-        location: args.location,
-        start: args.startAt,
-        end: args.endAt,
-        isAllDay: args.isAllDay ?? false,
-        timeZone: args.timeZone,
-      }),
-      executionProvider: "google_calendar",
-      reviewWarning,
-      // The minted id travels with the action so the executor inserts with it
-      // rather than letting Google allocate one.
-      externalMessageId: externalId,
-      createdAt: now,
-      updatedAt: now,
-    });
-
     await db.insert("activityEvents", {
-      brainInstanceId: args.brainInstanceId, pendingActionId,
-      activityType: "calendar_action_queued", actorType: "harness", timestamp: now,
-      summary: `Calendar event queued: ${args.title}`, metadata: { reviewWarning, externalId },
+      brainInstanceId: args.brainInstanceId, activityType: "calendar_event_created",
+      actorType: "harness", timestamp: now, summary: `Calendar event saved in Skippy: ${args.title}`,
+      metadata: { reviewWarning, externalId, calendarEventId },
     });
 
     return {
-      status: "staged",
+      status: "saved",
+      googleWritten: false,
       calendarEventId,
-      pendingActionId,
       externalId,
       // Real Google-side overlaps only; staged proposals travel separately.
       conflicts,
@@ -690,74 +681,11 @@ const CALENDAR_ACTION_LEASE_MS = 150_000;
  */
 export const claimNextCalendarAction = mutationGeneric({
   args: { hostToken: v.string() },
+  returns: v.null(),
   handler: async (ctx, { hostToken }) => {
-    const host = await requireHost(ctx, hostToken);
-    if (host.draining) return null;
-    const now = Date.now();
-
-    const approved = await ctx.db
-      .query("pendingActions")
-      .withIndex("by_brain_status", (q: any) =>
-        q.eq("brainInstanceId", host.brainInstanceId).eq("status", "approved"),
-      )
-      .collect();
-
-    approved.sort((a: any, b: any) => a.createdAt - b.createdAt);
-
-    for (const action of approved) {
-      if (action.actionType !== "calendar_event_create") continue;
-      // Someone else holds a live lease on this one.
-      if (action.leaseExpiresAt && action.leaseExpiresAt > now) continue;
-
-      let payload: any;
-      try {
-        payload = JSON.parse(action.body ?? "{}");
-      } catch {
-        // A body we cannot parse will never execute; fail it now with a clear
-        // reason rather than silently skipping it on every poll forever.
-        await ctx.db.patch(action._id, {
-          status: "failed",
-          error: "calendar action body is not valid JSON",
-          updatedAt: now,
-        });
-        continue;
-      }
-
-      const externalId = action.externalMessageId ?? payload.eventId;
-      if (!externalId) {
-        await ctx.db.patch(action._id, {
-          status: "failed",
-          error: "calendar action is missing its minted event id",
-          updatedAt: now,
-        });
-        continue;
-      }
-
-      const claimToken = makeToken("skippyclaim");
-      await ctx.db.patch(action._id, {
-        hostId: host._id,
-        claimToken,
-        claimedAt: now,
-        leaseExpiresAt: now + CALENDAR_ACTION_LEASE_MS,
-        updatedAt: now,
-      });
-      await ctx.db.patch(host._id, { lastClaimAt: now, updatedAt: now });
-
-      return {
-        pendingActionId: action._id,
-        claimToken,
-        externalId,
-        calendarId: payload.calendarId ?? "primary",
-        summary: payload.summary ?? action.subject ?? "(untitled)",
-        description: payload.description,
-        location: payload.location,
-        start: payload.start,
-        end: payload.end,
-        isAllDay: payload.isAllDay ?? false,
-        timeZone: payload.timeZone,
-      };
-    }
-
+    await requireHost(ctx, hostToken);
+    // Owner decision 2026-11-15: Google is read-only, including queued legacy work.
+    // Preserve historical actions; never issue a new external-write lease.
     return null;
   },
 });

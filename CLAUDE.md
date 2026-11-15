@@ -13,7 +13,7 @@ Personal second-brain + agent system. One owner, one Convex deployment, one Mac 
 
 ## Ingestion migration
 
-Native harness connectors are the intended source-read architecture, with one Skippy-owned ingestion schedule and durable Convex progress. Cutover is blocked until replacement validation passes; merged PRs and task status alone are not acceptance evidence. Follow `docs/ingestion-cutover.md` before removing local connectors, schedules, or credentials. Preserve the Calendar mirror and external-write chain, shared runner, and unrelated chat/project/Plaid consumers until their specific replacement and consumer checks pass.
+Native harness connectors are the intended source-read architecture, with one Skippy-owned ingestion schedule and durable Convex progress. Cutover is blocked until replacement validation passes; merged PRs and task status alone are not acceptance evidence. Follow `docs/ingestion-cutover.md` before removing local connectors, schedules, or credentials. Google Calendar is inbound-only (owner decision 2026-11-15). Never execute outbound calendar actions; Skippy event creation is local. Preserve the legacy read-only calendar importer until native update/cancellation coverage passes, and preserve shared runner and unrelated chat/project/Plaid consumers.
 
 ## Commands
 

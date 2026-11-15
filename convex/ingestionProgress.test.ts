@@ -6,7 +6,7 @@ vi.mock("./agentWorkbench", async (importOriginal) => ({
   ...await importOriginal<typeof import("./agentWorkbench")>(),
   requireHost: async () => ({ _id: "host:test", brainInstanceId: "brain:b" }),
 }));
-import { upsertCalendarEvents, hostClaimCalendarSync, hostUpsertCalendarEvents, hostRecordCalendarSyncToken } from "./calendar";
+import { ingestCalendarEvent, upsertCalendarEvents, hostClaimCalendarSync, hostUpsertCalendarEvents, hostRecordCalendarSyncToken } from "./calendar";
 import { getProgress, importLegacy } from "./ingestionEvidence";
 import { LEASE_MS, OVERLAP_MS, WINDOW_MS } from "./ingestionProgress";
 
@@ -397,5 +397,58 @@ describe("Agenda scheduler completion", () => {
     const late = Date.parse("2026-11-13T21:59:30Z");
     expect(agendaRetry({ ...schedule, timeZone: "UTC", window: { start: "07:00", end: "22:00" } }, true, "failed", 0, late).nextDueAt)
       .toBe(Date.parse("2026-11-14T07:00:00Z"));
+  });
+});
+
+
+describe("native inbound calendar ingestion", () => {
+  const source = "calendar:fixture:primary";
+  const event = { id: "provider-event", updated: "2026-11-15T10:00:00Z", summary: "Lunch",
+    start: { dateTime: "2026-11-16T12:00:00-05:00", timeZone: "America/New_York" },
+    end: { dateTime: "2026-11-16T13:00:00-05:00" } };
+  it("imports, replays, updates and cancels one identity with reconciled receipts", async () => {
+    const f = setup();
+    const claim = await f.run(updateSourceSyncStatus, statusArgs(source, "calendar-run", "claim"));
+    const args = { calendarId: "primary", event, ingestion: { source, token: claim.token } };
+    const first = await f.run(ingestCalendarEvent, args);
+    expect(first).toMatchObject({ status: "created", googleWritten: false });
+    expect(await f.run(ingestCalendarEvent, args)).toMatchObject({ status: "duplicate_existing", entityId: first.entityId });
+    await f.db.patch(first.entityId, { focusSnoozedUntil: 123, relatedEntityRefs: [] });
+    const newer = { ...event, updated: "2026-11-15T11:00:00Z", summary: "Updated lunch" };
+    expect(await f.run(ingestCalendarEvent, { ...args, event: newer })).toMatchObject({ status: "updated", entityId: first.entityId });
+    const stale = { ...event, updated: "2026-11-15T09:00:00Z" };
+    expect(await f.run(ingestCalendarEvent, { ...args, event: stale })).toMatchObject({ status: "preserved_existing" });
+    expect(await f.db.get(first.entityId)).toMatchObject({ title: "Updated lunch", focusSnoozedUntil: 123 });
+    await f.run(ingestCalendarEvent, { ...args, event: { id: event.id, updated: "2026-11-15T12:00:00Z", status: "cancelled" } });
+    expect(await f.db.get(first.entityId)).toMatchObject({ status: "cancelled", startAt: Date.parse(event.start.dateTime) });
+    expect(f.rows().filter(r => r._id.startsWith("calendarEvents:"))).toHaveLength(1);
+    expect(f.rows().filter(r => r._id.startsWith("pendingActions:"))).toHaveLength(0);
+    const done = await f.run(updateSourceSyncStatus, statusArgs(source, "calendar-run", "finish", finish(claim.token, 5)));
+    expect(done.status).toBe("completed");
+    expect(done.completionEvidence.receiptReconciliation.satisfied).toBe(true);
+  });
+  it("keeps calendars separate, protects Skippy events and refuses invalid source revisions", async () => {
+    const f = setup();
+    const claim = await f.run(updateSourceSyncStatus, statusArgs(source, "calendar-run", "claim"));
+    const args = { calendarId: "primary", event, ingestion: { source, token: claim.token } };
+    const first = await f.run(ingestCalendarEvent, args);
+    const other = await f.run(ingestCalendarEvent, { ...args, calendarId: "other" });
+    expect(other.entityId).not.toBe(first.entityId);
+    await f.db.patch(first.entityId, { origin: "skippy", title: "Owner edited" });
+    await f.run(ingestCalendarEvent, { ...args, event: { ...event, updated: "2026-11-15T14:00:00Z" } });
+    expect(await f.db.get(first.entityId)).toMatchObject({ title: "Owner edited" });
+    const before = structuredClone(f.rows());
+    await expect(f.run(ingestCalendarEvent, { ...args, event: { ...event, updated: undefined } })).rejects.toThrow("updated timestamp");
+    await expect(f.run(ingestCalendarEvent, { ...args, ingestion: { source, token: "wrong" } })).rejects.toThrow();
+    expect(f.rows()).toEqual(before);
+    await expect(f.run(upsertCalendarEvents, { calendarId: "other", events: [{ id: event.id, status: "cancelled" }] })).rejects.toThrow("Provider updated timestamp required");
+    expect(await f.db.get(other.entityId)).toMatchObject({ status: "confirmed" });
+  });
+  it("rolls back the event when its receipt fails to persist", async () => {
+    const f = setup();
+    const claim = await f.run(updateSourceSyncStatus, statusArgs(source, "calendar-run", "claim"));
+    f.fail("ingestionReceipts");
+    await expect(f.run(ingestCalendarEvent, { calendarId: "primary", event, ingestion: { source, token: claim.token } })).rejects.toThrow("injected");
+    expect(f.rows().filter(r => r._id.startsWith("calendarEvents:"))).toHaveLength(0);
   });
 });

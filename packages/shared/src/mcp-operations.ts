@@ -67,6 +67,7 @@ export const MCP_OPERATIONS = {
   "projectFiles:abortUploadForBrain": "mutation",
   "knowledge:listQuickCapturesForBrain": "query",
   "calendar:draftCalendarEvent": "mutation",
+  "calendar:ingestCalendarEvent": "mutation",
   "recurrences:upsertRecurrence": "mutation",
   "recurrences:completeRecurrence": "mutation",
   "recurrences:recurrencesForBrain": "query",

@@ -502,3 +502,10 @@ describe("formatStagedProposalWarning", () => {
     );
   });
 });
+
+
+it("counts local-only Skippy events as real overlap conflicts", () => {
+  const result = partitionCalendarOverlaps([{ externalId: "local", title: "Local meeting", startAt: 100, endAt: 200, isAllDay: false, origin: "skippy" }]);
+  expect(result.real).toHaveLength(1);
+  expect(result.stagedProposals).toHaveLength(0);
+});

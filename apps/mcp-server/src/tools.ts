@@ -35,6 +35,7 @@ import {
 
 /** Args for staging a Google Calendar event Skippy wants to create. */
 export type ProposeCalendarEventInput = {
+  eventId?: string;
   summary: string;
   start: number;
   end: number;
@@ -314,6 +315,7 @@ export type SkippyClient = {
       metadata?: unknown;
     },
   ): Promise<unknown>;
+  ingestCalendarEvent(brainInstanceId: string, input: { calendarId: string; event: unknown; ingestion: { source: string; token: string } }): Promise<unknown>;
   getIngestionProgress(brainInstanceId: string, input: { source: string; cursor?: string; completion?: { runKey: string; windowStart: number; windowEnd: number; paginationComplete: boolean; persistenceComplete: boolean; counts: { read: number; ignored: number; accepted: number }; errors?: string[] } }): Promise<unknown>;
   updateSourceSyncStatus(
     brainInstanceId: string,
@@ -367,6 +369,7 @@ export type SkippyClient = {
   draftCalendarEvent(
     brainInstanceId: string,
     input: {
+      eventId?: string | undefined;
       calendarId: string;
       title: string;
       description?: string | undefined;
@@ -1178,8 +1181,7 @@ export function createSkippyToolHandlers(
     },
 
     /**
-     * Stages a calendar event. Nothing reaches Google here — Convex writes the
-     * mirror row and a pending action; the runner executes it.
+     * Saves a local Skippy event. The compatibility name never implies a Google write.
      *
      * `autoApprove` remains a compatibility argument; all actions are ready.
      */
@@ -1207,6 +1209,7 @@ export function createSkippyToolHandlers(
         isAllDay: input.isAllDay,
         timeZone: input.timeZone,
         requireApproval,
+        eventId: input.eventId,
         relatedEntityRefs: input.relatedEntityRefs,
       })) as Record<string, unknown>;
 
@@ -1252,7 +1255,7 @@ export function createSkippyToolHandlers(
         awaitingApproval: requireApproval,
         approvalForced: false,
         note:
-          "Queued for execution. The runner creates it in Google." +
+          "Saved in Skippy only. Google Calendar was not changed." +
           conflictNote +
           stagedNote,
       };
@@ -1669,6 +1672,9 @@ export function createSkippyToolHandlers(
       return await client.recordIngestionRun(brainInstanceId, input);
     },
 
+    async ingestCalendarEvent(input: Parameters<SkippyClient["ingestCalendarEvent"]>[1]) {
+      return client.ingestCalendarEvent(brainInstanceId, input);
+    },
     async getIngestionProgress(input: Parameters<SkippyClient["getIngestionProgress"]>[1]) {
       return client.getIngestionProgress(brainInstanceId, input);
     },

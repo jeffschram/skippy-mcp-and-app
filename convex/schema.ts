@@ -1069,9 +1069,9 @@ export default defineSchema({
     .index("by_brain_key", ["brainInstanceId", "statusKey"])
     .index("by_brain_status", ["brainInstanceId", "status"]),
 
-  // Read-mostly mirror of the owner's external calendars. Google stays the
-  // source of truth; this table exists so Skippy has a persisted sense of time
-  // (agenda, focus summaries, free/busy) without a live API call per read.
+  // Skippy owns the agenda. Google is an inbound-only source; no row implies
+  // authorization to write to Google. Imported provider revisions update only
+  // Google-origin rows; Skippy-origin events and local annotations are preserved.
   //
   // Calendar deliberately does NOT flow through ingestObject/triageItems. That
   // path is built for noisy prose sources and dedupes tasks on fuzzy *title*
@@ -1093,6 +1093,7 @@ export default defineSchema({
     sourceSystem: v.string(),
     calendarId: v.string(),
     externalId: v.string(),
+    sourceUpdatedAt: v.optional(v.number()),
     iCalUID: v.optional(v.string()),
     etag: v.optional(v.string()),
     origin: v.union(v.literal("google"), v.literal("skippy")),

@@ -379,7 +379,7 @@ export function partitionCalendarOverlaps(overlaps: readonly CalendarOverlap[]):
   const real: CalendarOverlap[] = [];
   const stagedProposals: CalendarOverlap[] = [];
   for (const overlap of overlaps) {
-    (isMirroredFromGoogle(overlap) ? real : stagedProposals).push(overlap);
+    ((isMirroredFromGoogle(overlap) || (overlap.origin === "skippy" && !overlap.remoteState)) ? real : stagedProposals).push(overlap);
   }
   return { real, stagedProposals };
 }
