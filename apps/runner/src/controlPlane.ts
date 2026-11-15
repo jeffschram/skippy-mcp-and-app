@@ -66,26 +66,6 @@ export interface ClaimedMaintenanceJob {
   project: { _id: string; title?: string; localPath: string };
 }
 
-/**
- * An approved calendar event waiting to be inserted into Google.
- *
- * The event id was minted when the action was staged and travels with it, so a
- * retried insert collides (409) instead of creating a second event.
- */
-export interface ClaimedCalendarAction {
-  pendingActionId: string;
-  claimToken: string;
-  externalId: string;
-  calendarId: string;
-  summary: string;
-  description?: string;
-  location?: string;
-  start: number;
-  end: number;
-  isAllDay: boolean;
-  timeZone?: string;
-}
-
 export type ReportableStatus =
   | "preparing"
   | "running"
@@ -109,7 +89,6 @@ const fileFns = (anyApi as any).projectFiles as Record<string, any>;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const agentFns = (anyApi as any).agentConfigs as Record<string, any>;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const calendarFns = (anyApi as any).calendar as Record<string, any>;
 
 /**
  * Claim payload for one scheduled agent pass (convex/agentConfigs.ts →
@@ -313,77 +292,6 @@ export class ControlPlane {
 
   claimNextMaintenanceJob(): Promise<ClaimedMaintenanceJob | null> {
     return this.client.mutation(fns.claimNextMaintenanceJob, { hostToken: this.hostToken });
-  }
-
-  /* ---- Calendar actions (approved in /review, executed here) ---- */
-
-  claimNextCalendarAction(): Promise<ClaimedCalendarAction | null> {
-    return this.client.mutation(calendarFns.claimNextCalendarAction, { hostToken: this.hostToken });
-  }
-
-  recordCalendarActionResult(
-    pendingActionId: string,
-    claimToken: string,
-    result: {
-      outcome: "created" | "conflict" | "failed";
-      etag?: string | undefined;
-      htmlLink?: string | undefined;
-      error?: string | undefined;
-    },
-  ): Promise<{ status: string; htmlLink?: string }> {
-    const payload: Record<string, unknown> = {
-      hostToken: this.hostToken,
-      pendingActionId,
-      claimToken,
-      outcome: result.outcome,
-    };
-    // Convex rejects explicit `undefined`, so only send what we actually have.
-    if (result.etag !== undefined) payload.etag = result.etag;
-    if (result.htmlLink !== undefined) payload.htmlLink = result.htmlLink;
-    if (result.error !== undefined) payload.error = result.error;
-    return this.client.mutation(calendarFns.recordCalendarActionResult, payload);
-  }
-
-  /* ---- Calendar mirror sync (Google -> Convex, read-only) ---- */
-
-  getCalendarSyncToken(calendarId: string): Promise<{ syncToken: string | null; claimToken: string; windowAnchor: number }> {
-    return this.client.mutation(calendarFns.hostClaimCalendarSync, {
-      hostToken: this.hostToken,
-      calendarId,
-    });
-  }
-
-  upsertCalendarEvents(
-    calendarId: string,
-    events: unknown[],
-    claimToken: string,
-  ): Promise<{ inserted: number; updated: number; echoes: number; cancelled: number; skipped: number }> {
-    return this.client.mutation(calendarFns.hostUpsertCalendarEvents, {
-      hostToken: this.hostToken,
-      calendarId,
-      events,
-      claimToken,
-    });
-  }
-
-  recordCalendarSyncToken(
-    calendarId: string,
-    syncToken: string | null,
-    meta: { claimToken: string; status?: "completed" | "failed"; message?: string; errors?: string[]; report?: Record<string, unknown> },
-  ): Promise<{ statusKey: string; updated: boolean }> {
-    const payload: Record<string, unknown> = {
-      hostToken: this.hostToken,
-      calendarId,
-      claimToken: meta.claimToken,
-      // null is meaningful here (it clears an expired token), so unlike the
-      // optional fields below it is always sent.
-      syncToken,
-    };
-    if (meta?.status !== undefined) payload.status = meta.status;
-    if (meta?.message !== undefined) payload.message = meta.message;
-    if (meta?.errors !== undefined) payload.errors = meta.errors;
-    if (meta.report !== undefined) payload.report = meta.report;
-    return this.client.mutation(calendarFns.hostRecordCalendarSyncToken, payload);
   }
 
   updateMaintenanceJob(

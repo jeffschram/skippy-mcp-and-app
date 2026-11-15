@@ -9,9 +9,8 @@
   },
   "scripts": {
     "build": "pnpm -r --sort build",
-    "test": "pnpm --filter @skippy/shared build && pnpm --filter @skippy/ai build && pnpm --filter @skippy/gcal-write-mcp build && vitest run convex/ingestionProgress.test.ts convex/calendarOutbox.test.ts convex/occurrenceLifecycle.test.ts convex/itemDetailsContext.test.ts convex/homeInventory.test.ts convex/todayModel.test.ts convex/mcpOwnership.test.ts convex/mcpGateway.test.ts convex/noteConsolidationHelpers.test.ts convex/knowledgeMigrationHelpers.test.ts convex/knowledgeVerification.test.ts convex/attentionModel.test.ts convex/attention.test.ts convex/chatHistoryHelpers.test.ts convex/chatLeaseHelpers.test.ts convex/calendarDedupeHelpers.test.ts scripts/connectors-helpers.test.mjs && pnpm -r --sort test",
-    "connectors:check": "node scripts/setup-connectors.mjs",
-    "typecheck": "pnpm --filter @skippy/shared build && pnpm --filter @skippy/ai build && pnpm --filter @skippy/mcp-server build && pnpm --filter @skippy/gcal-write-mcp build && pnpm -r --sort typecheck && pnpm convex:typecheck",
+    "test": "pnpm --filter @skippy/shared build && pnpm --filter @skippy/ai build && vitest run convex/ingestionRetirement.test.ts convex/ingestionProgress.test.ts convex/calendarOutbox.test.ts convex/occurrenceLifecycle.test.ts convex/itemDetailsContext.test.ts convex/homeInventory.test.ts convex/todayModel.test.ts convex/mcpOwnership.test.ts convex/mcpGateway.test.ts convex/noteConsolidationHelpers.test.ts convex/knowledgeMigrationHelpers.test.ts convex/knowledgeVerification.test.ts convex/attentionModel.test.ts convex/attention.test.ts convex/chatHistoryHelpers.test.ts convex/chatLeaseHelpers.test.ts convex/calendarDedupeHelpers.test.ts && pnpm -r --sort test",
+    "typecheck": "pnpm --filter @skippy/shared build && pnpm --filter @skippy/ai build && pnpm --filter @skippy/mcp-server build && pnpm -r --sort typecheck && pnpm convex:typecheck",
     "convex:typecheck": "tsc -p convex/tsconfig.json --noEmit",
     "mcp:smoke": "pnpm --filter @skippy/mcp-server smoke:remote",
     "prod:check": "pnpm --filter @skippy/mcp-server prod:check",

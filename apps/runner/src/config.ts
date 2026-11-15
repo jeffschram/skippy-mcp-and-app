@@ -161,12 +161,12 @@ export function loadConfig(): RunnerConfig {
     .map((h) => h.trim())
     .filter((h): h is "codex" | "claude" => h === "codex" || h === "claude");
   if (!harnesses.length) throw new Error("SKIPPY_RUNNER_HARNESSES resolved to no valid harnesses");
-  // Comma-separated connector slugs (e.g. "plaid,imessage,google"). Empty by
-  // default: a host must opt in only once the local connector is set up.
+  // Only advertise active local connectors. Older launchd environments may
+  // still list source readers now owned by desktop ChatGPT.
   const connectors = (process.env.SKIPPY_RUNNER_CONNECTORS ?? "")
     .split(",")
     .map((c) => c.trim())
-    .filter(Boolean);
+    .filter((c) => Boolean(c) && !["google", "google_write", "imessage"].includes(c));
   return {
     convexUrl: required("SKIPPY_CONVEX_URL"),
     hostToken: required("SKIPPY_RUNNER_HOST_TOKEN"),

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 vi.mock("./agentWorkbench", () => ({ makeToken: () => "claim", requireHost: async () => ({ _id: "agentHosts:h", brainInstanceId: "brainInstances:b" }) }));
-import { draftCalendarEvent, hostSweepDuplicatePendingActions, claimNextCalendarAction, recordCalendarActionResult } from "./calendar";
+import { hostClaimCalendarSync, hostUpsertCalendarEvents, hostRecordCalendarSyncToken, draftCalendarEvent, hostSweepDuplicatePendingActions, claimNextCalendarAction, recordCalendarActionResult } from "./calendar";
 type Row = Record<string, any>;
 function fixture() {
   const rows: Row[] = [{ _id: "agentHosts:h" }];
@@ -45,5 +45,17 @@ describe("local calendar ownership", () => {
     expect(await run(claimNextCalendarAction, ctx, { hostToken: "host" })).toBeNull();
     expect(ctx.rows).toEqual(before);
     expect(await run(recordCalendarActionResult, ctx, { hostToken: "host", pendingActionId: id, claimToken: "stale", outcome: "created" })).toEqual({ status: "stale_claim" });
+  });
+});
+
+describe("retired calendar importer", () => {
+  it("rejects old reader claims and writes without changing existing records", async () => {
+    const ctx = fixture();
+    const before = JSON.stringify(ctx.rows);
+    for (const fn of [hostClaimCalendarSync, hostUpsertCalendarEvents, hostRecordCalendarSyncToken]) {
+      await expect(run(fn, ctx, { hostToken: "host", calendarId: "primary",
+        claimToken: "old", events: [], syncToken: null })).rejects.toThrow("Legacy calendar ingestion is retired");
+    }
+    expect(JSON.stringify(ctx.rows)).toBe(before);
   });
 });

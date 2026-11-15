@@ -1,3 +1,17 @@
+# Desktop ingestion retirement — November 15, 2026
+
+The owner reports successful desktop ChatGPT ingestion and explicitly requested retirement of the former ingestion code. This decision supersedes the historical retention gates below. Desktop ChatGPT owns the existing schedule; do not create another one.
+
+Removed: local Messages and Google Calendar server packages, connector installation tooling, runner Calendar reader/write executor and their package dependencies. Runner Agenda claims are fenced, including previously saved schedules. Legacy Calendar host writes are rejected and the old HTTP sync route returns Gone. Other runner roles continue.
+
+Retained: MCP ingestion tools and skill/rubric, source claims, receipts, recovery/audit history, calendar records, Home captures, focus, generic connector inventory, shared runner and Finance/Plaid. No source records or credentials are deleted. The native Calendar search remains bounded to its configured horizon; retirement does not establish exhaustive change-feed coverage.
+
+Release requires backend deployment and updating the shared runner without interrupting active work. Host registrations and credential removal are separate from repository deletion; do not describe them as removed without inspecting the host. Historical source metadata remains intact.
+
+The sections below are historical migration evidence, not current operating instructions.
+
+---
+
 # Calendar ownership amendment — November 15, 2026
 
 This amendment supersedes older instructions below to preserve external Calendar writes. Skippy owns the agenda; Google is an inbound-only source. `ingest_calendar_event` imports current Google events using source claim receipts. `propose_calendar_event` is a compatibility name for local creation only. New calendar action claims are disabled; old queued action records remain as audit history. No automatic replay to Google is permitted.

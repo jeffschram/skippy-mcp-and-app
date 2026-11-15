@@ -23,8 +23,6 @@ const createCaptureRef = makeFunctionReference<"mutation">(
 // Structured ingestion, reused by the /ingest endpoint (same mutations the MCP
 // ingest_object / record_ingestion_run / update_source_sync_status tools call).
 const ingestObjectRef = makeFunctionReference<"mutation">("knowledge:ingestObject");
-const upsertCalendarEventsRef = makeFunctionReference<"mutation">("calendar:upsertCalendarEvents");
-const recordCalendarSyncTokenRef = makeFunctionReference<"mutation">("calendar:recordCalendarSyncToken");
 const recordIngestionRunRef = makeFunctionReference<"mutation">("knowledge:recordIngestionRun");
 const updateSourceSyncStatusRef = makeFunctionReference<"mutation">(
   "knowledge:updateSourceSyncStatus",
@@ -308,82 +306,10 @@ export const ingest = httpActionGeneric(async (ctx, request) => {
 });
 
 /* ------------------------------------------------------------------ */
-/* POST /calendar-sync — token-authed mirror push for the scheduled     */
-/* routine that reads Google Calendar. Deliberately separate from       */
-/* /ingest: calendar is a structured feed with stable ids, so it goes   */
-/* straight into the mirror table and never through the rubric or the   */
-/* triage queue, whose fuzzy title matching would collapse a recurring  */
-/* series into one row. Body (JSON):                                    */
-/*   { calendarId, events: [...raw Google events],                      */
-/*     syncToken?: string | null, message?, errors?: string[] }         */
-/* Pass syncToken null when Google answered 410 Gone and the caller     */
-/* fell back to a full resync.                                          */
-/* ------------------------------------------------------------------ */
-export const calendarSync = httpActionGeneric(async (ctx, request) => {
-  const token = parseBearerToken(request.headers.get("authorization"));
-  if (!token) {
-    return json(401, { error: "missing bearer token" });
-  }
-
-  let brainInstanceId: string;
-  try {
-    const auth = (await ctx.runMutation(authenticateMcpTokenRef, { token })) as {
-      brainInstanceId: string;
-    };
-    brainInstanceId = auth.brainInstanceId;
-  } catch {
-    return json(401, { error: "invalid bearer token" });
-  }
-
-  let body: any;
-  try {
-    body = await request.json();
-  } catch {
-    return json(400, { error: "expected a JSON body" });
-  }
-
-  const calendarId = typeof body?.calendarId === "string" ? body.calendarId.trim() : "";
-  if (!calendarId) {
-    return json(400, { error: "calendarId is required" });
-  }
-  if (!Array.isArray(body.events)) {
-    return json(400, { error: "events must be an array" });
-  }
-
-  let result: unknown;
-  const errors: string[] = Array.isArray(body.errors)
-    ? body.errors.filter((e: unknown): e is string => typeof e === "string")
-    : [];
-
-  try {
-    result = await ctx.runMutation(upsertCalendarEventsRef, {
-      brainInstanceId,
-      calendarId,
-      events: body.events,
-    });
-  } catch (error) {
-    return json(500, { error: error instanceof Error ? error.message : "calendar sync failed" });
-  }
-
-  // Token bookkeeping is best-effort: the mirrored events are what matter, and
-  // a missing token only costs a full resync next run.
-  try {
-    await ctx.runMutation(recordCalendarSyncTokenRef, {
-      brainInstanceId,
-      calendarId,
-      syncToken: typeof body.syncToken === "string" ? body.syncToken : null,
-      status: errors.length ? "failed" : "completed",
-      ...(typeof body.message === "string" && body.message.trim()
-        ? { message: body.message.trim() }
-        : {}),
-      ...(errors.length ? { errors } : {}),
-    });
-  } catch {
-    // Ignore bookkeeping errors.
-  }
-
-  return json(200, { calendarId, ...(result as object), errors });
-});
+/* Retired source importer: never accept writes from old clients. */
+export const calendarSync = httpActionGeneric(async () =>
+  json(410, { error: "Legacy calendar sync retired; use ingest_calendar_event through Skippy MCP" }),
+);
 
 const http = httpRouter();
 
