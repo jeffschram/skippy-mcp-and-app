@@ -441,6 +441,8 @@ describe("native inbound calendar ingestion", () => {
     await expect(f.run(ingestCalendarEvent, { ...args, event: { ...event, updated: undefined } })).rejects.toThrow("updated timestamp");
     await expect(f.run(ingestCalendarEvent, { ...args, ingestion: { source, token: "wrong" } })).rejects.toThrow();
     expect(f.rows()).toEqual(before);
+    await expect(f.run(upsertCalendarEvents, { calendarId: "other", events: [{ id: event.id, status: "cancelled" }] })).rejects.toThrow("Provider updated timestamp required");
+    expect(await f.db.get(other.entityId)).toMatchObject({ status: "confirmed" });
   });
   it("rolls back the event when its receipt fails to persist", async () => {
     const f = setup();

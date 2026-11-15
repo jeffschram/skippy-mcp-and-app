@@ -102,8 +102,10 @@ async function upsertCalendarEventsInternal(
 
     const existing = await findByExternalId(db, args.brainInstanceId, sourceSystem, incoming.externalId, args.calendarId);
     const sourceUpdatedAt = typeof (raw as any)?.updated === "string" ? Date.parse((raw as any).updated) : NaN;
-    if (existing?.origin === "skippy" || (existing?.sourceUpdatedAt !== undefined &&
-        (!Number.isFinite(sourceUpdatedAt) || sourceUpdatedAt <= existing.sourceUpdatedAt))) {
+    if (existing?.origin !== "skippy" && existing?.sourceUpdatedAt !== undefined && !Number.isFinite(sourceUpdatedAt)) {
+      throw new Error("Provider updated timestamp required to reconcile a previously versioned calendar event");
+    }
+    if (existing?.origin === "skippy" || (existing?.sourceUpdatedAt !== undefined && sourceUpdatedAt <= existing.sourceUpdatedAt)) {
       skipped += 1;
       continue;
     }
