@@ -427,6 +427,20 @@ describe("native inbound calendar ingestion", () => {
     expect(done.status).toBe("completed");
     expect(done.completionEvidence.receiptReconciliation.satisfied).toBe(true);
   });
+  it("applies fresh undated observations, including reversions and explicit cancellations", async () => {
+    const f = setup();
+    const claim = await f.run(updateSourceSyncStatus, statusArgs(source, "snapshot-run", "claim"));
+    const args = { calendarId: "primary", ingestion: { source, token: claim.token } };
+    const snapshot = { id: event.id, summary: "Lunch", start: event.start, end: event.end };
+    const first = await f.run(ingestCalendarEvent, { ...args, event: snapshot });
+    expect(first).toMatchObject({ status: "created", sourceUpdatedAt: null });
+    expect(await f.run(ingestCalendarEvent, { ...args, event: snapshot })).toMatchObject({ status: "duplicate_existing" });
+    await f.run(ingestCalendarEvent, { ...args, event: { ...event, summary: "Dinner", location: "Cafe" } });
+    expect(await f.run(ingestCalendarEvent, { ...args, event: snapshot })).toMatchObject({ status: "updated", entityId: first.entityId });
+    expect(await f.db.get(first.entityId)).toMatchObject({ title: "Lunch", location: "Cafe" });
+    await f.run(ingestCalendarEvent, { ...args, event: { id: event.id, status: "cancelled" } });
+    expect(await f.db.get(first.entityId)).toMatchObject({ status: "cancelled", title: "Lunch" });
+  });
   it("keeps calendars separate, protects Skippy events and refuses invalid source revisions", async () => {
     const f = setup();
     const claim = await f.run(updateSourceSyncStatus, statusArgs(source, "calendar-run", "claim"));
@@ -438,7 +452,7 @@ describe("native inbound calendar ingestion", () => {
     await f.run(ingestCalendarEvent, { ...args, event: { ...event, updated: "2026-11-15T14:00:00Z" } });
     expect(await f.db.get(first.entityId)).toMatchObject({ title: "Owner edited" });
     const before = structuredClone(f.rows());
-    await expect(f.run(ingestCalendarEvent, { ...args, event: { ...event, updated: undefined } })).rejects.toThrow("updated timestamp");
+    await expect(f.run(ingestCalendarEvent, { ...args, event: { ...event, updated: "invalid" } })).rejects.toThrow("updated timestamp");
     await expect(f.run(ingestCalendarEvent, { ...args, ingestion: { source, token: "wrong" } })).rejects.toThrow();
     expect(f.rows()).toEqual(before);
     await expect(f.run(upsertCalendarEvents, { calendarId: "other", events: [{ id: event.id, status: "cancelled" }] })).rejects.toThrow("Provider updated timestamp required");

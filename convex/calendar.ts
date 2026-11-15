@@ -151,6 +151,26 @@ export const upsertCalendarEvents = internalMutationGeneric({
   handler: async ({ db }, args) => upsertCalendarEventsInternal(db, args),
 });
 
+// Connector projections omit fields. Only an observed field can clear its stored value.
+function calendarSnapshot(raw: any, event: NonNullable<ReturnType<typeof normalizeGoogleEvent>>) {
+  const fields: Record<string, unknown> = {};
+  const inputs = {
+    title: "summary", description: "description", location: "location", status: "status",
+    startAt: "start", endAt: "end", isAllDay: "start", timeZone: "start",
+    recurringEventId: "recurringEventId", originalStartAt: "originalStartTime",
+    attendees: "attendees", htmlLink: "htmlLink", etag: "etag", iCalUID: "iCalUID",
+    conferenceUrl: "hangoutLink",
+  } as const;
+  for (const [key, input] of Object.entries(inputs)) {
+    if (event.status === "cancelled" && key !== "status" && key !== "etag") continue;
+    if (key === "timeZone" && !raw.start?.timeZone) continue;
+    if (input in raw || (key === "conferenceUrl" && "conferenceData" in raw)) {
+      fields[key] = event[key as keyof typeof inputs];
+    }
+  }
+  return fields;
+}
+
 /** Native connector import: writes only Skippy, atomically with its source receipt. */
 export const ingestCalendarEvent = internalMutation({
   args: {
@@ -164,22 +184,39 @@ export const ingestCalendarEvent = internalMutation({
     if (JSON.stringify(raw).length > 16000 || (typeof raw?.description === "string" && raw.description.length > 500)) throw new Error("Send concise event fields; description maximum 500 characters");
     const incoming = normalizeGoogleEvent(raw, args.calendarId);
     const revision = typeof raw?.updated === "string" ? Date.parse(raw.updated) : NaN;
-    if (!incoming || !Number.isFinite(revision)) throw new Error("Exact provider event ID, updated timestamp and event times (unless cancelled) required");
+    if (!incoming) throw new Error("Exact provider event ID and event times (unless cancelled) required");
+    if (raw.updated != null && !Number.isFinite(revision)) throw new Error("Invalid provider updated timestamp");
     if (incoming.status !== "cancelled" && (!raw.end || incoming.endAt <= incoming.startAt)) throw new Error("Complete event start/end required");
     if (incoming.isMaster) throw new Error("Import expanded recurring instances, not series masters");
     const now = Date.now();
-    const objectKey = JSON.stringify([args.calendarId, incoming.externalId, revision, incoming.etag ?? null]);
+    const snapshot = raw.updated == null ? calendarSnapshot(raw, incoming) : null;
+    let objectKey = JSON.stringify([args.calendarId, incoming.externalId, revision, incoming.etag ?? null]);
+    if (snapshot) {
+      // Include explicit clears while keeping private event content out of receipt keys.
+      const payload = JSON.stringify([args.calendarId, incoming.externalId, snapshot], (_, v) => v ?? null);
+      const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(payload));
+      objectKey = "snapshot:" + Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, "0")).join("");
+    }
     const prepared = await prepareReceipt(db, args.brainInstanceId, { ...args.ingestion, objectKey }, "calendar_event", now);
-    if (prepared?.receipt) return { ...prepared.receipt.result, status: "duplicate_existing", receiptReplayed: true };
+    if (!snapshot && prepared?.receipt) return { ...prepared.receipt.result, status: "duplicate_existing", receiptReplayed: true };
     const before = await findByExternalId(db, args.brainInstanceId, GOOGLE_CALENDAR_SOURCE_SYSTEM, incoming.externalId, args.calendarId);
     const preserved = before?.origin === "skippy" || (before?.sourceUpdatedAt !== undefined && revision <= before.sourceUpdatedAt);
-    await upsertCalendarEventsInternal(db, { brainInstanceId: args.brainInstanceId, calendarId: args.calendarId, events: [raw], now });
+    let changed = false;
+    if (snapshot && before) {
+      // A fresh read may legitimately return to an earlier state (A -> B -> A).
+      changed = !preserved && Object.entries(snapshot).some(([key, value]) =>
+        JSON.stringify(before[key]) !== JSON.stringify(value));
+      if (changed) await db.patch(before._id, { ...snapshot, lastSyncedAt: now, updatedAt: now });
+    } else {
+      await upsertCalendarEventsInternal(db, { brainInstanceId: args.brainInstanceId, calendarId: args.calendarId, events: [raw], now });
+    }
     const after = await findByExternalId(db, args.brainInstanceId, GOOGLE_CALENDAR_SOURCE_SYSTEM, incoming.externalId, args.calendarId);
     if (!after) throw new Error("Calendar persistence failed");
     const result = { entityType: "calendar_event", entityId: after._id,
-      status: preserved ? "preserved_existing" : before ? "updated" : "created",
+      status: preserved ? "preserved_existing" : !before ? "created" : snapshot && !changed ? "duplicate_existing" : "updated",
       externalId: incoming.externalId, calendarId: args.calendarId, objectKey,
       sourceUpdatedAt: after.sourceUpdatedAt ?? null, googleWritten: false };
+    if (prepared?.receipt) return { ...result, receiptReplayed: true };
     await saveReceipt(db, args.brainInstanceId, prepared, result, now);
     return result;
   },
