@@ -2886,7 +2886,7 @@ export function createMcpServer(
     {
       title: "Update source sync status",
       description:
-        "Update source status. Durable ingestion: metadata {role: agenda, ingestion: {operation: inspect|inspect_receipt|replay_receipt|claim|heartbeat|finish, source, runId, token?, objectKey?, entityType?, expectedEntityId?, paginationComplete?, persistenceComplete?, counts?: {read,ignored,accepted}}}. Claim freezes bounds; finish requires full coverage. Load agenda-ingestion for receipt and lease rules.",
+        "Update source status. Durable ingestion: metadata {role: agenda, ingestion: {operation: inspect|inspect_receipt|replay_receipt|claim|heartbeat|finish, source, runId, token?, historyId?, objectKey?, entityType?, expectedEntityId?, paginationComplete?, persistenceComplete?, counts?: {read,ignored,accepted}}}. Claim freezes bounds; optional historyId selects an unresolved failed historical window without moving the checkpoint. Finish requires full coverage. Load agenda-ingestion for receipt and lease rules.",
       annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: true },
       inputSchema: z.object({
         statusKey: z.string().optional().describe("Stable status-row key. Defaults to source-sync."),

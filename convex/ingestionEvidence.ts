@@ -63,6 +63,9 @@ export async function inspectProgress(db: any, brain: any, source: string, pagin
   }
   return { source, status, currentWindow: p ? { runId: p.runId, windowStart: p.windowStart, windowEnd: p.windowEnd,
     coveredThrough: p.coveredThrough ?? null, caughtUp: p.caughtUp ?? false,
+    historicalReplayId: p.historicalReplay?.historyId ?? null,
+    resumeWindow: p.historicalReplay ? { status: p.historicalReplay.resume.status,
+      windowStart: p.historicalReplay.resume.progress.windowStart, windowEnd: p.historicalReplay.resume.progress.windowEnd } : null,
     leaseActive: status === "running", requiresReplay,
     replayState: requiresReplay ? "required_until_successful_finish" : status === "completed" ? "completed" : "not_required",
     replayOfRunId: p.replayOfRunId ?? null, currentErrors: expired ? [...(row.errors ?? []), "Lease expired before finish"] : row.errors ?? [],

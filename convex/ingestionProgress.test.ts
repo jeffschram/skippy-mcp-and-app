@@ -18,6 +18,7 @@ function fixture() {
   let seq = 0;
   let failTable = "";
   const db: any = {
+    normalizeId: (table: string, id: string) => id.startsWith(table + ":") ? id : null,
     get: async (id: string) => rows.find(r => r._id === id),
     insert: async (table: string, value: Row) => {
       if (table === failTable) throw new Error("injected persistence failure");
@@ -67,6 +68,76 @@ const object = (source: string, token: string, key = "message-1/action-a") => ({
 });
 
 describe("durable source ingestion", () => {
+  it("repairs an older gap without moving the checkpoint or losing a newer failed window", async () => {
+    const f = setup(), source = "gmail:repair";
+    const initial = await f.run(updateSourceSyncStatus, statusArgs(source, "initial", "claim"));
+    await f.run(updateSourceSyncStatus, statusArgs(source, "initial", "finish", finish(initial.token)));
+    const historyId = await f.db.insert("ingestionWindowHistory", { brainInstanceId: "brain:b", source,
+      key: "legacy-gap", runId: "legacy", windowStart: now - WINDOW_MS, windowEnd: now - 1000,
+      status: "failed", errors: ["unread attachment"], finishedAt: now - 500, evidence: { origin: "legacy_run_report" } });
+    vi.mocked(Date.now).mockReturnValue(now + 1000);
+    const current = await f.run(updateSourceSyncStatus, statusArgs(source, "current", "claim"));
+    await f.run(updateSourceSyncStatus, { ...statusArgs(source, "current", "finish", finish(current.token)), status: "failed", errors: ["blocked"] });
+    const repair = await f.run(updateSourceSyncStatus, statusArgs(source, "repair", "claim", { historyId }));
+    expect([repair.windowStart, repair.windowEnd]).toEqual([now - WINDOW_MS, now - 1000]);
+    expect(repair.coveredThrough).toBe(now);
+    expect((await f.run(updateSourceSyncStatus, statusArgs(source, "repair", "claim", { historyId }))).token).toBe(repair.token);
+    await expect(f.run(updateSourceSyncStatus, statusArgs(source, "repair", "claim", { historyId: "different" }))).rejects.toThrow("different window");
+    expect((await f.run(getProgress, { source })).currentWindow.resumeWindow).toMatchObject({ status: "failed", windowEnd: current.windowEnd });
+    await expect(f.run(updateSourceSyncStatus, statusArgs(source, "competitor", "claim"))).rejects.toThrow("already claimed");
+    const args = object(source, repair.token);
+    const saved = await f.run(ingestObject, args);
+    const bad = await f.run(updateSourceSyncStatus, statusArgs(source, "repair", "finish", {
+      ...finish(repair.token, 1), windowStart: repair.windowStart, windowEnd: repair.windowEnd, paginationComplete: false,
+    }));
+    expect(bad.status).toBe("failed");
+    const retry = await f.run(updateSourceSyncStatus, statusArgs(source, "retry", "claim"));
+    expect(retry.windowEnd).toBe(repair.windowEnd);
+    expect(retry.historicalReplay.historyId).toBe(historyId);
+    await f.run(updateSourceSyncStatus, statusArgs(source, "retry", "replay_receipt", {
+      token: retry.token, objectKey: args.ingestion.objectKey, entityType: "note", expectedEntityId: saved.entityId,
+    }));
+    vi.mocked(Date.now).mockReturnValue(now + 2000);
+    const evidence = { ...finish(retry.token, 1), windowStart: retry.windowStart, windowEnd: retry.windowEnd };
+    const done = await f.run(updateSourceSyncStatus, statusArgs(source, "retry", "finish", evidence));
+    expect(done).toMatchObject({ status: "completed", coveredThrough: now, caughtUp: false, lastSuccessAt: now });
+    expect(await f.run(updateSourceSyncStatus, statusArgs(source, "retry", "finish", evidence))).toEqual(done);
+    const history = await f.run(getProgress, { source });
+    expect(history.history.find((r: any) => r.id === historyId).recoveryState).toBe("recovered");
+    expect((await f.db.get(historyId)).errors).toEqual(["unread attachment"]);
+    const resumed = await f.run(updateSourceSyncStatus, statusArgs(source, "resume", "claim"));
+    expect([resumed.windowStart, resumed.windowEnd]).toEqual([current.windowStart, current.windowEnd]);
+    expect(resumed.historicalReplay).toBeUndefined();
+    expect(resumed.requiresReplay).toBe(true);
+    expect(f.rows().filter(r => r._id.startsWith("knowledge:"))).toHaveLength(1);
+  });
+
+  it("rejects invalid historical selections and resumes expired historical claims", async () => {
+    const f = setup(), source = "gmail:repair";
+    const c = await f.run(updateSourceSyncStatus, statusArgs(source, "initial", "claim"));
+    await f.run(updateSourceSyncStatus, statusArgs(source, "initial", "finish", finish(c.token)));
+    const base = { brainInstanceId: "brain:b", source, key: "gap", runId: "legacy", windowStart: now - 2000,
+      windowEnd: now - 1000, status: "failed", errors: ["gap"], finishedAt: now - 500, evidence: {} };
+    for (const override of [{ brainInstanceId: "brain:other" }, { source: "gmail:other" }, { status: "completed" }, { windowEnd: now + 1 }]) {
+      const historyId = await f.db.insert("ingestionWindowHistory", { ...base, ...override });
+      await expect(f.run(updateSourceSyncStatus, statusArgs(source, "repair", "claim", { historyId }))).rejects.toThrow("Select a failed history window");
+    }
+    await expect(f.run(updateSourceSyncStatus, statusArgs(source, "repair", "claim", { historyId: "knowledge:1" }))).rejects.toThrow("Historical failed-window ID");
+    const historyId = await f.db.insert("ingestionWindowHistory", base);
+    const repair = await f.run(updateSourceSyncStatus, statusArgs(source, "repair", "claim", { historyId }));
+    vi.mocked(Date.now).mockReturnValue(now + LEASE_MS + 1);
+    const retry = await f.run(updateSourceSyncStatus, statusArgs(source, "retry", "claim"));
+    expect(retry.windowEnd).toBe(repair.windowEnd);
+    await expect(f.run(ingestObject, object(source, repair.token))).rejects.toThrow("Stale ingestion lease");
+    await f.run(updateSourceSyncStatus, statusArgs(source, "retry", "finish", {
+      ...finish(retry.token), windowStart: retry.windowStart, windowEnd: retry.windowEnd,
+    }));
+    await expect(f.run(updateSourceSyncStatus, statusArgs(source, "again", "claim", { historyId }))).rejects.toThrow("already has recorded recovery");
+    const next = await f.run(updateSourceSyncStatus, statusArgs(source, "next", "claim"));
+    expect(next.windowStart).toBe(now - OVERLAP_MS);
+    expect(next.historicalReplay).toBeUndefined();
+  });
+
   it("preserves recovered failure history while a later empty window completes", async () => {
     const f = setup(), source = "gmail:fixture";
     const first = await f.run(updateSourceSyncStatus, statusArgs(source, "failed-run", "claim", { protocolVersion: 10 }));
