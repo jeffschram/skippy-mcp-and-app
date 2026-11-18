@@ -130,6 +130,8 @@ const AGENDA_INGESTION_BODY = [
   "",
   "Before a claim, call read-only get_ingestion_progress with the exact source. It returns currentWindow.requiresReplay separately from paginated history. Follow continueCursor while relevant evidence is missing; a partial page is not complete history. Each failed history row retains its original runId, frozen bounds, errors and completion evidence; recoveryState/recovery identify a recorded later successful completion of the exact same window. Legacy report imports preserve unknown attestations as null. Unattributed legacy summaries are retained but never establish a current replay requirement on their own. Never infer recovery solely from a timestamp, another source, another window or absent history.",
   "",
+  "For an explicitly identified unresolved historical gap at or before the current checkpoint, claim with historyId equal to the failed row ID returned by get_ingestion_progress, plus the same source, runId and protocolVersion: 10. The server validates the source, brain, bounds and absence of recorded recovery; do not invent bounds or history IDs. This uses the normal lease and receipt protocol. Read the entire returned frozen window and reconcile all outputs, including prior receipts, before preview and finish. A historical finish preserves the current checkpoint and never declares the source caught up. The next ordinary claim (omit historyId) resumes the saved newer window after successful recovery; failed or expired historical attempts retry the historical window. Original errors remain in history. Historical replay does not grant permission to bypass a rejected read, write or finish.",
+  "",
   "For v10 claims include protocolVersion: 10 inside metadata.ingestion. Replay the mandatory frozen window whenever required. Before successful finish, call get_ingestion_progress with completion {runKey: runId, windowStart, windowEnd, paginationComplete, persistenceComplete, counts: {read, ignored, accepted}, errors: []}. Supply the actual observed pagination and persistence results; empty windows still require exhaustive reads. The preview changes nothing and is not permission to bypass review. Check activeLease, reportedBoundsMatch, checksSatisfied and receiptReconciliation. Then submit those same bounds, flags and counts in metadata.ingestion on update_source_sync_status operation finish, with the claim token, runId and protocolVersion: 10. Include current errors in top-level errors when failing. The finish transaction rechecks lease, bounds, counts and receipts and saves an immutable window outcome. Only a successful finish resolves that window; previews and classification alone do not advance or recover it.",
   "",
   "If safety review rejects a finish, preserve its sanitized reason, close the claim failed and report the rejection. Do not relabel a rejection as a success, suppress old failures, force progress or retry the same rejected completion through another route. History ambiguity is a possible explanation, not a proven cause; the reviewer must assess the newly available evidence.",
@@ -519,7 +521,7 @@ const DEFAULT_SKILLS = [
     schedulerInstructions: AGENDA_INGESTION_SCHEDULER_INSTRUCTIONS,
     visibility: "public" as const,
     // v5: correlate scheduled ingestion reports with the claimed attempt.
-    version: 12,
+    version: 13,
   },
   {
     slug: "finance-sync",

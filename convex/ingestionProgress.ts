@@ -48,7 +48,7 @@ export async function updateProgress(db: any, args: any, now: number) {
   const statusKey = sourceKey(source);
   if (args.statusKey && args.statusKey !== statusKey) throw new Error("Incorrect ingestion statusKey");
   const row = await sourceRow(db, args.brainInstanceId, source);
-  const old = row?.metadata?.progress;
+  let old = row?.metadata?.progress;
   if (operation === "inspect") return { statusKey, status: row?.status === "running" && old?.leaseUntil <= now
     ? "failed" : row?.status ?? "idle", ...progressReport(old, row?.errors ?? []) };
   if (operation === "inspect_receipt") {
@@ -77,19 +77,54 @@ export async function updateProgress(db: any, args: any, now: number) {
     if (args.status !== "running") throw new Error("Claim must be running");
     if (row?.status === "running" && old?.leaseUntil > now) {
       // Repeating a lost claim response is safe; other runs cannot steal it.
-      if (old.runId === runId) return { statusKey, ...progressReport(old), status: "running" };
+      if (old.runId === runId) {
+        if (input.historyId !== undefined && input.historyId !== old.historicalReplay?.historyId) {
+          throw new Error("Claim already targets a different window");
+        }
+        return { statusKey, ...progressReport(old), status: "running" };
+      }
       throw new Error("Source already claimed by another run");
     }
     if (row?.status === "running" && old?.leaseUntil <= now) {
       await saveAttempt(db, args.brainInstanceId, source, old, "failed", ["Lease expired before finish"], old.leaseUntil,
         { origin: "lease_expiry", paginationComplete: false, persistenceComplete: false });
     }
+    // A historical repair is a side trip. Resume the exact prior state only
+    // after its own successful finish; failure/expiry must retry the repair.
+    let priorStatus = row?.status;
+    if (old?.historicalReplay && priorStatus === "completed") {
+      priorStatus = old.historicalReplay.resume.status;
+      old = old.historicalReplay.resume.progress;
+    }
+    let historicalReplay = old?.historicalReplay;
+    let historicalWindow: any = null;
+    if (input.historyId !== undefined) {
+      if (historicalReplay) throw new Error("Finish the active historical replay before selecting another window");
+      if (typeof input.historyId !== "string") throw new Error("Historical failed-window ID required");
+      const historyId = db.normalizeId("ingestionWindowHistory", input.historyId);
+      if (!historyId) throw new Error("Historical failed-window ID required");
+      historicalWindow = await db.get(historyId);
+      if (!historicalWindow || historicalWindow.brainInstanceId !== args.brainInstanceId ||
+          historicalWindow.source !== source || historicalWindow.status !== "failed" ||
+          typeof historicalWindow.finishedAt !== "number" || !historicalWindow.evidence ||
+          !Number.isSafeInteger(historicalWindow.windowStart) || !Number.isSafeInteger(historicalWindow.windowEnd) ||
+          !Number.isSafeInteger(old?.coveredThrough) || historicalWindow.windowStart >= historicalWindow.windowEnd || historicalWindow.windowEnd > old.coveredThrough) {
+        throw new Error("Select a failed history window for this source and brain at or before the checkpoint");
+      }
+      const recovered = await db.query("ingestionWindowHistory").withIndex("by_window_status_time", (q: any) =>
+        q.eq("brainInstanceId", args.brainInstanceId).eq("source", source)
+          .eq("windowStart", historicalWindow.windowStart).eq("windowEnd", historicalWindow.windowEnd)
+          .eq("status", "completed").gt("finishedAt", historicalWindow.finishedAt)).first();
+      if (recovered) throw new Error("Historical window already has recorded recovery");
+      historicalReplay = { historyId: input.historyId, resume: { status: priorStatus, progress: old } };
+    }
     const baseline = old?.baseline ?? now - WINDOW_MS;
-    const replay = old && row.status !== "completed";
-    const windowStart = replay ? old.windowStart : Math.max(baseline, (old?.coveredThrough ?? baseline) - OVERLAP_MS);
-    const windowEnd = replay ? old.windowEnd : Math.min(now, windowStart + WINDOW_MS);
+    const replay = !!historicalWindow || (old && priorStatus !== "completed");
+    const windowStart = historicalWindow?.windowStart ?? (replay ? old.windowStart : Math.max(baseline, (old?.coveredThrough ?? baseline) - OVERLAP_MS));
+    const windowEnd = historicalWindow?.windowEnd ?? (replay ? old.windowEnd : Math.min(now, windowStart + WINDOW_MS));
     progress = { ...progressReport(old), protocolVersion: Math.max(input.protocolVersion ?? 9, old?.protocolVersion ?? 9),
-      requiresReplay: !!replay, replayOfFailedWindow: !!replay, replayOfRunId: replay ? old.runId : null, completionEvidence: null, counts: { read: 0, ignored: 0, accepted: 0 }, caughtUp: false, baseline, windowStart, windowEnd, targetEnd: now, runId,
+      ...(historicalReplay ? { historicalReplay, protocolVersion: Math.max(10, input.protocolVersion ?? 10, old?.protocolVersion ?? 10) } : {}),
+      requiresReplay: !!replay, replayOfFailedWindow: !!replay, replayOfRunId: historicalWindow?.runId ?? (replay ? old.runId : null), completionEvidence: null, counts: { read: 0, ignored: 0, accepted: 0 }, caughtUp: false, baseline, windowStart, windowEnd, targetEnd: now, runId,
       token: makeToken("ingestion"), leaseUntil: now + LEASE_MS, writes: 0, replays: 0 };
   } else {
     if (operation === "finish" && row?.status !== "running" && old?.runId === runId && old?.token === input.token) {
@@ -115,11 +150,13 @@ export async function updateProgress(db: any, args: any, now: number) {
         if (progress.historicalFailure?.windowStart === progress.windowStart && progress.historicalFailure?.windowEnd === progress.windowEnd) {
           progress.historicalFailure = { ...progress.historicalFailure, recoveredAt: now, recoveredByRunId: runId };
         }
-        progress.coveredThrough = progress.windowEnd;
-        progress.lastSuccessAt = now;
+        if (!progress.historicalReplay) {
+          progress.coveredThrough = progress.windowEnd;
+          progress.lastSuccessAt = now;
+        }
       }
       await saveAttempt(db, args.brainInstanceId, source, progress, status, errors, now, evidence);
-      progress.caughtUp = complete && progress.coveredThrough >= progress.targetEnd;
+      progress.caughtUp = complete && !progress.historicalReplay && progress.coveredThrough >= progress.targetEnd;
     } else throw new Error("Unknown ingestion operation");
   }
   delete progress.errors;
